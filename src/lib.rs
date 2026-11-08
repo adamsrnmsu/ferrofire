@@ -5,6 +5,7 @@ pub mod bennu;
 pub mod expr;
 pub mod model;
 pub mod power;
+pub mod pypower;
 pub mod simulink;
 
 /// The waterway lock, used by the simulink adapter when no `--model` / `./model.yaml` is given.

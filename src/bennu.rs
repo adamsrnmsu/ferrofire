@@ -84,8 +84,12 @@ pub fn fmt_value(v: Value) -> String {
 
 /// Datagrams for one publish tick (each `tag:value,...` chunk NUL-terminated, then framed).
 pub fn datagrams(group: &str, snap: &[(String, Value)]) -> Vec<Vec<u8>> {
-    let msg: String = snap.iter().map(|(t, v)| format!("{t}:{},", fmt_value(*v))).collect();
-    chunk_message(&msg, CHUNK).into_iter().map(|c| { let mut b = c.into_bytes(); b.push(0); frame(group, &b) }).collect()
+    datagrams_msg(group, &snap.iter().map(|(t, v)| format!("{t}:{},", fmt_value(*v))).collect::<String>())
+}
+
+/// Same, from an already-built `tag:value,...` message.
+pub fn datagrams_msg(group: &str, msg: &str) -> Vec<Vec<u8>> {
+    chunk_message(msg, CHUNK).into_iter().map(|c| { let mut b = c.into_bytes(); b.push(0); frame(group, &b) }).collect()
 }
 
 // ---- request handling ----------------------------------------------------------------------------------------
@@ -145,8 +149,8 @@ fn reply(req: &[u8], meta: &Meta, sh: &Mutex<Shared>) -> String {
 
 // ---- sockets and threads -------------------------------------------------------------------------------------
 
-static STOP: AtomicBool = AtomicBool::new(false);
-extern "C" fn on_signal(_: libc::c_int) { STOP.store(true, Ordering::SeqCst); }
+pub static STOP: AtomicBool = AtomicBool::new(false);
+pub extern "C" fn on_signal(_: libc::c_int) { STOP.store(true, Ordering::SeqCst); }
 
 /// `udp://[iface;]host:port` -> (iface, destination)
 pub fn parse_udp(ep: &str) -> Result<(Option<String>, SocketAddr), String> {
@@ -156,7 +160,7 @@ pub fn parse_udp(ep: &str) -> Result<(Option<String>, SocketAddr), String> {
     Ok((iface, addr))
 }
 
-fn udp_sender(iface: Option<&str>, dest: SocketAddr) -> Result<UdpSocket, String> {
+pub fn udp_sender(iface: Option<&str>, dest: SocketAddr) -> Result<UdpSocket, String> {
     let s = UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
     if dest.ip().is_multicast() {
         s.set_multicast_ttl_v4(1).map_err(|e| e.to_string())?; // libzmq multicast_hops default

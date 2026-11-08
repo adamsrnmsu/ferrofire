@@ -60,3 +60,12 @@ inside `bennu:arm64` (run in the Lima VM).
 
 MIT, Copyright (c) 2026 Ryan Adams. `NOTICE` carries the PYPOWER (BSD-3, PSERC) notice for ported code. No MATPOWER case
 files are vendored. bennu/pybennu are GPL-3 and are not translated: only wire formats and observed behaviour are matched.
+
+## pybennu-power-solver drop-in
+
+`pybennu-power-solver {start|stop|restart|status} [-c config.ini] [-e env] [-d] [-v]` (or `rustbelt pypower ...`) runs a
+PYPOWER-vocabulary power flow as a bennu provider: same INI, pidfile `/var/run/bennu-<env>.pid`, logs
+`/var/log/bennu-<env>.{out,err}`, 1 s feed with pybennu's +-1 % noise, `READ` -> `ACK=<tag>:<value>`, batch-validated
+`WRITE`. Install it under that name (`deploy/`). Test: `tests/pypower.rs` (container), `tests/pypower-conformance.sh` (VM).
+Known difference from stock: after a WRITE, stock turns every non-slack bus into PQ; rustbelt keeps generator buses PV
+(spec decision 8), so post-write values differ. Initial values match to 1e-10.
