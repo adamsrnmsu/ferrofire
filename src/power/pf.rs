@@ -110,7 +110,9 @@ fn ext2int(case: &Case, off: &[bool]) -> Result<Net, String> {
 }
 
 /// (ref, pv, pq). Gens are all in service here, so "has a gen" is "has any gen".
-fn bustypes(n: &Net) -> Result<(Vec<usize>, Vec<usize>, Vec<usize>), String> {
+type BusSets = (Vec<usize>, Vec<usize>, Vec<usize>);
+
+fn bustypes(n: &Net) -> Result<BusSets, String> {
     let mut has = vec![false; n.bus.len()];
     for &g in &n.gbus {
         has[g] = true;
@@ -212,7 +214,7 @@ pub fn lu_solve(mut a: Vec<f64>, n: usize, mut b: Vec<f64>) -> Result<Vec<f64>, 
         let (p, pv) = (k..n)
             .map(|i| (i, a[i * n + k].abs()))
             .fold((k, -1.0), |m, x| if x.1 > m.1 { x } else { m });
-        if !(pv > 1e-13 * scale) {
+        if pv.is_nan() || pv <= 1e-13 * scale {
             return Err("singular matrix".into());
         }
         if p != k {
@@ -346,8 +348,8 @@ fn pfsoln(n: &mut Net, ybus: &[C], y: &[[C; 4]], v: &[C], ref_: &[usize]) {
     let ib = matvec(ybus, v);
     let ng = n.gen.len();
     let sg: Vec<C> = n.gbus.iter().map(|&b| v[b] * ib[b].conj()).collect();
-    for k in 0..ng {
-        n.gen[k][QG] = sg[k].im * n.base + n.bus[n.gbus[k]][QD];
+    for (k, s) in sg.iter().enumerate() {
+        n.gen[k][QG] = s.im * n.base + n.bus[n.gbus[k]][QD];
     }
     if ng > 1 {
         let mut cnt = vec![0.0; nb];
@@ -366,10 +368,10 @@ fn pfsoln(n: &mut Net, ybus: &[C], y: &[[C; 4]], v: &[C], ref_: &[usize]) {
         }
         let eps = f64::EPSILON;
         let saved: Vec<f64> = (0..ng).map(|k| n.gen[k][QG]).collect();
-        for k in 0..ng {
+        for (k, &sv) in saved.iter().enumerate() {
             let b = n.gbus[k];
             n.gen[k][QG] = if mn[b] == mx[b] {
-                saved[k]
+                sv
             } else {
                 n.gen[k][QMIN]
                     + (tot[b] - mn[b]) / (mx[b] - mn[b] + eps) * (n.gen[k][QMAX] - n.gen[k][QMIN])

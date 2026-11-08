@@ -281,7 +281,7 @@ impl Model {
         if doc.version != 1 {
             return Err(format!("model: unsupported version {}", doc.version));
         }
-        if !(doc.dt > 0.0) || doc.substeps == 0 {
+        if (doc.dt.is_nan() || doc.dt <= 0.0) || doc.substeps == 0 {
             return Err("model: dt must be > 0 and substeps >= 1".into());
         }
 

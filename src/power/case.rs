@@ -240,8 +240,8 @@ pub fn parse_m(src: &str) -> Result<Case, String> {
             return c.err("expected `[`");
         }
         let end = src[c.i..].find(']').ok_or("case: unterminated `[`")? + c.i;
-        Ok(src[c.i..end]
-            .split(|ch| ch == ';' || ch == '\n')
+        src[c.i..end]
+            .split([';', '\n'])
             .filter(|r| !r.trim().is_empty())
             .map(|r| {
                 r.split(|ch: char| ch == ',' || ch.is_whitespace())
@@ -252,7 +252,7 @@ pub fn parse_m(src: &str) -> Result<Case, String> {
                     })
                     .collect::<Result<Vec<_>, _>>()
             })
-            .collect::<Result<_, _>>()?)
+            .collect::<Result<_, _>>()
     };
     let base = Cur {
         s: &src,

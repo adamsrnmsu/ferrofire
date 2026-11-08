@@ -17,13 +17,11 @@ pub fn libstdcxx_hash(data: &[u8]) -> u64 {
     let shift_mix = |v: u64| v ^ (v >> 47);
     let len = data.len();
     let mut hash = 0xc70f_6907u64 ^ (len as u64).wrapping_mul(MUL);
-    let mut chunks = data.chunks_exact(8);
-    for c in &mut chunks {
-        let d = shift_mix(u64::from_le_bytes(c.try_into().unwrap()).wrapping_mul(MUL))
-            .wrapping_mul(MUL);
+    let (chunks, rest) = data.as_chunks::<8>();
+    for c in chunks {
+        let d = shift_mix(u64::from_le_bytes(*c).wrapping_mul(MUL)).wrapping_mul(MUL);
         hash = (hash ^ d).wrapping_mul(MUL);
     }
-    let rest = chunks.remainder();
     if !rest.is_empty() {
         let d = rest.iter().rev().fold(0u64, |a, &b| (a << 8) | b as u64);
         hash = (hash ^ d).wrapping_mul(MUL);

@@ -26,7 +26,7 @@ pub fn parse_ini(src: &str) -> HashMap<String, HashMap<String, String>> {
             out.entry(cur.clone()).or_default();
             continue;
         }
-        if let Some(i) = l.find(|c| c == '=' || c == ':') {
+        if let Some(i) = l.find(['=', ':']) {
             out.entry(cur.clone())
                 .or_default()
                 .insert(l[..i].trim().to_lowercase(), l[i + 1..].trim().to_string());
