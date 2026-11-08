@@ -9,17 +9,18 @@ fn usage() -> ! {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args[0].ends_with("simulinksolver") {
-        return ferrofire::simulink::main(&args[1..]);
+    let (prog, rest) = args.split_first().expect("argv[0]");
+    if prog.ends_with("simulinksolver") {
+        return ferrofire::simulink::main(rest);
     }
-    if args[0].ends_with("pybennu-power-solver") {
-        return ferrofire::pypower::main(&args[1..]);
+    if prog.ends_with("pybennu-power-solver") {
+        return ferrofire::pypower::main(rest);
     }
-    match args.get(1).map(String::as_str) {
-        Some("simulink") => ferrofire::simulink::main(&args[2..]),
-        Some("run") => ferrofire::bennu::main(&args[2..]),
-        Some("pypower") => ferrofire::pypower::main(&args[2..]),
-        Some("check") => check(&args[2..]),
+    match rest.first().map(String::as_str) {
+        Some("simulink") => ferrofire::simulink::main(&rest[1..]),
+        Some("run") => ferrofire::bennu::main(&rest[1..]),
+        Some("pypower") => ferrofire::pypower::main(&rest[1..]),
+        Some("check") => check(&rest[1..]),
         _ => usage(),
     }
 }

@@ -257,3 +257,21 @@ fn daemon_verbs_pidfile_logs_and_feed() {
     let _ = std::fs::remove_file(format!("/var/log/bennu-{env}.out"));
     let _ = std::fs::remove_file(format!("/var/log/bennu-{env}.err"));
 }
+
+#[test]
+fn rng_is_xorshift_and_never_starts_stuck_at_zero() {
+    // seed 2 and seed 3 are the same generator (the low bit is forced on); one xorshift64 step from 3 is 3246809283
+    let (mut a, mut b) = (Rng::from_seed(2), Rng::from_seed(3));
+    let first = a.uniform(0.0, 1.0);
+    assert_eq!(first, b.uniform(0.0, 1.0));
+    assert_eq!(first, (3246809283u64 >> 11) as f64 / (1u64 << 53) as f64);
+    // seed 0 would be an all-zero state forever if the bit were not forced
+    let mut z = Rng::from_seed(0);
+    assert_ne!(z.uniform(0.0, 1.0), z.uniform(0.0, 1.0));
+    // noise: +-1% of a value, +-0.1 around zero
+    let mut r = Rng::from_seed(12345);
+    for _ in 0..200 {
+        assert!((r.noise(100.0) / 100.0 - 1.0).abs() <= 0.01);
+        assert!(r.noise(0.0).abs() <= 0.1);
+    }
+}

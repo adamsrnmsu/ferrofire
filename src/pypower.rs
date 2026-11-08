@@ -73,12 +73,17 @@ pub fn noisy(tag: &str, kind: Kind) -> bool {
 
 pub struct Rng(u64);
 impl Rng {
+    /// xorshift state must never be 0, so the low bit is forced on.
+    pub fn from_seed(seed: u64) -> Rng {
+        Rng(seed | 1)
+    }
     pub fn seeded() -> Rng {
-        Rng(std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or_default()
-            | 1)
+        Rng::from_seed(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or_default(),
+        )
     }
     pub fn uniform(&mut self, lo: f64, hi: f64) -> f64 {
         self.0 ^= self.0 << 13;
@@ -251,12 +256,12 @@ fn daemonize(pidfile: &str, out: &str, err: &str) -> Result<(), String> {
         if libc::fork() > 0 {
             std::process::exit(0); // not _exit: flush, so coverage of the parent's path is recorded
         }
-        libc::chdir(c"/".as_ptr());
         libc::setsid();
-        libc::umask(0);
         if libc::fork() > 0 {
             std::process::exit(0);
         }
+        libc::chdir(c"/".as_ptr());
+        libc::umask(0);
     }
     let pid = std::process::id();
     std::fs::write(pidfile, format!("{pid}\n")).map_err(|e| format!("{pidfile}: {e}"))?;
