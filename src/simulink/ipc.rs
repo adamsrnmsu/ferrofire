@@ -31,7 +31,11 @@ impl Shm {
         if addr as isize == -1 {
             return Err(io::Error::last_os_error());
         }
-        Ok(Shm { id, addr: addr as *mut u8, size })
+        Ok(Shm {
+            id,
+            addr: addr as *mut u8,
+            size,
+        })
     }
 
     /// Zero the segment, then copy `data` at `offset`.
@@ -62,7 +66,14 @@ impl Sem {
     /// Any stale count from a crashed run is drained so the semaphore starts locked.
     pub fn open_locked(name: &str) -> io::Result<Sem> {
         let name = CString::new(name).unwrap();
-        let p = unsafe { libc::sem_open(name.as_ptr(), libc::O_CREAT, 0o644 as libc::c_uint, 0 as libc::c_uint) };
+        let p = unsafe {
+            libc::sem_open(
+                name.as_ptr(),
+                libc::O_CREAT,
+                0o644 as libc::c_uint,
+                0 as libc::c_uint,
+            )
+        };
         if p == libc::SEM_FAILED {
             return Err(io::Error::last_os_error());
         }
@@ -114,7 +125,8 @@ impl Fifo {
         let mut out = vec![];
         loop {
             let mut rec = [0u8; MAX_MSG_LEN];
-            let n = unsafe { libc::read(self.fd, rec.as_mut_ptr() as *mut libc::c_void, MAX_MSG_LEN) };
+            let n =
+                unsafe { libc::read(self.fd, rec.as_mut_ptr() as *mut libc::c_void, MAX_MSG_LEN) };
             if n <= 0 {
                 return out;
             }

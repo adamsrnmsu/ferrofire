@@ -28,14 +28,24 @@ pub fn decode_update(rec: &[u8]) -> Option<(String, f64)> {
     let s = std::str::from_utf8(&rec[..end]).ok()?;
     let mut it = s.split(':');
     let (tag, ty, val) = (it.next()?, it.next()?, it.next()?);
-    if tag.is_empty() { return None; }
-    let v = if ty == "BOOLEAN" { i64::from_str_radix(val.trim(), 2).ok()? as f64 } else { val.trim().parse::<f64>().ok()? };
+    if tag.is_empty() {
+        return None;
+    }
+    let v = if ty == "BOOLEAN" {
+        i64::from_str_radix(val.trim(), 2).ok()? as f64
+    } else {
+        val.trim().parse::<f64>().ok()?
+    };
     Some((tag.to_string(), v))
 }
 
 /// publishPoints.txt: one tag per line (CRLF/blank tolerant).
 pub fn parse_publish_points(text: &str) -> Vec<String> {
-    text.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect()
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect()
 }
 
 /// Content of the count segment: decimal text + NUL (segment is only 4 bytes).
@@ -55,8 +65,14 @@ mod tests {
 
     #[test]
     fn dto_encoding() {
-        assert_eq!(text(&encode_dto("lowergate.open", Value::Binary(true))), "lowergate.open:BOOLEAN:1");
-        assert_eq!(text(&encode_dto("lock.height", Value::Analog(5.5))), "lock.height:DOUBLE:5.500000");
+        assert_eq!(
+            text(&encode_dto("lowergate.open", Value::Binary(true))),
+            "lowergate.open:BOOLEAN:1"
+        );
+        assert_eq!(
+            text(&encode_dto("lock.height", Value::Analog(5.5))),
+            "lock.height:DOUBLE:5.500000"
+        );
         let long = "x".repeat(400);
         let s = encode_dto(&long, Value::Binary(false));
         assert_eq!(s[MAX_MSG_LEN - 1], 0);

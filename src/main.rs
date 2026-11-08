@@ -33,28 +33,52 @@ fn check(args: &[String]) {
     let mut it = args[1..].iter();
     while let Some(a) = it.next() {
         match a.as_str() {
-            "--steps" => steps = it.next().and_then(|s| s.parse().ok()).unwrap_or_else(|| usage()),
+            "--steps" => {
+                steps = it
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or_else(|| usage())
+            }
             "--write" => {
                 let s = it.next().unwrap_or_else(|| usage());
                 let (tv, t) = s.split_once('@').unwrap_or((s, "0"));
                 let (tag, v) = tv.split_once('=').unwrap_or_else(|| usage());
-                let v = match v { "true" => 1.0, "false" => 0.0, _ => v.parse().unwrap_or_else(|_| usage()) };
+                let v = match v {
+                    "true" => 1.0,
+                    "false" => 0.0,
+                    _ => v.parse().unwrap_or_else(|_| usage()),
+                };
                 writes.push((t.parse().unwrap_or_else(|_| usage()), tag.to_string(), v));
             }
             _ => usage(),
         }
     }
-    let yaml = std::fs::read_to_string(path).unwrap_or_else(|e| { eprintln!("{path}: {e}"); std::process::exit(1) });
-    let mut m = Model::load_in(&yaml, std::path::Path::new(path).parent()).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1) });
+    let yaml = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        eprintln!("{path}: {e}");
+        std::process::exit(1)
+    });
+    let mut m = Model::load_in(&yaml, std::path::Path::new(path).parent()).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(1)
+    });
     let dt = m.dt;
     for _ in 0..steps {
-        let due: Vec<_> = writes.iter().filter(|(t, ..)| *t <= m.time + 1e-9).map(|(_, tag, v)| (tag.clone(), Value::Analog(*v))).collect();
+        let due: Vec<_> = writes
+            .iter()
+            .filter(|(t, ..)| *t <= m.time + 1e-9)
+            .map(|(_, tag, v)| (tag.clone(), Value::Analog(*v)))
+            .collect();
         writes.retain(|(t, ..)| *t > m.time + 1e-9);
-        for tag in m.apply_writes(&due) { eprintln!("write to unknown/readonly tag {tag} ignored"); }
+        for tag in m.apply_writes(&due) {
+            eprintln!("write to unknown/readonly tag {tag} ignored");
+        }
         m.step(dt);
     }
     println!("t={:.3}", m.time);
     for (tag, v) in m.snapshot() {
-        match v { Value::Analog(x) => println!("{tag}={x:.6}"), Value::Binary(b) => println!("{tag}={b}") }
+        match v {
+            Value::Analog(x) => println!("{tag}={x:.6}"),
+            Value::Binary(b) => println!("{tag}={b}"),
+        }
     }
 }

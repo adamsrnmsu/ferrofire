@@ -21,16 +21,26 @@ fn die(msg: &str, e: impl std::fmt::Display) -> ! {
 
 /// `--model <file>`, else ./model.yaml, else the embedded waterway model.
 fn load_model(args: &[String]) -> Model {
-    let explicit = args.iter().position(|a| a == "--model").and_then(|i| args.get(i + 1));
+    let explicit = args
+        .iter()
+        .position(|a| a == "--model")
+        .and_then(|i| args.get(i + 1));
     let (src, from) = match explicit {
-        Some(p) => (std::fs::read_to_string(p).unwrap_or_else(|e| die(&format!("model {p}"), e)), p.clone()),
+        Some(p) => (
+            std::fs::read_to_string(p).unwrap_or_else(|e| die(&format!("model {p}"), e)),
+            p.clone(),
+        ),
         None => match std::fs::read_to_string("model.yaml") {
             Ok(s) => (s, "./model.yaml".to_string()),
-            Err(_) => (crate::WATERWAY_YAML.to_string(), "built-in waterway model".to_string()),
+            Err(_) => (
+                crate::WATERWAY_YAML.to_string(),
+                "built-in waterway model".to_string(),
+            ),
         },
     };
     println!("Info: model: {from}");
-    Model::load_in(&src, std::path::Path::new(&from).parent()).unwrap_or_else(|e| die("load model", e))
+    Model::load_in(&src, std::path::Path::new(&from).parent())
+        .unwrap_or_else(|e| die("load model", e))
 }
 
 pub fn main(args: &[String]) {
@@ -52,20 +62,28 @@ pub fn main(args: &[String]) {
     println!("Info: Read {} PublishPoints", points.len());
 
     // init order exactly as modelHooks.c init(): semaphores (locked) -> FIFO -> count shm -> points shm -> publish -> unlock
-    let publish_sem = ipc::Sem::open_locked(PUBLISH_SEM).unwrap_or_else(|e| die("publish semaphore", e));
-    let updates_sem = ipc::Sem::open_locked(UPDATES_SEM).unwrap_or_else(|e| die("updates semaphore", e));
+    let publish_sem =
+        ipc::Sem::open_locked(PUBLISH_SEM).unwrap_or_else(|e| die("publish semaphore", e));
+    let updates_sem =
+        ipc::Sem::open_locked(UPDATES_SEM).unwrap_or_else(|e| die("updates semaphore", e));
     let fifo = ipc::Fifo::create().unwrap_or_else(|e| die("updates FIFO", e));
-    let count_shm = ipc::Shm::create(NUM_PUBLISH_POINTS_SHM_KEY, 4).unwrap_or_else(|e| die("count shm", e));
+    let count_shm =
+        ipc::Shm::create(NUM_PUBLISH_POINTS_SHM_KEY, 4).unwrap_or_else(|e| die("count shm", e));
     count_shm.zero();
     count_shm.write(0, &encode_count(points.len()));
-    let points_shm = ipc::Shm::create(PUBLISH_POINTS_SHM_KEY, points.len() * MAX_MSG_LEN).unwrap_or_else(|e| die("points shm", e));
+    let points_shm = ipc::Shm::create(PUBLISH_POINTS_SHM_KEY, points.len() * MAX_MSG_LEN)
+        .unwrap_or_else(|e| die("points shm", e));
     points_shm.zero();
 
     let publish = |m: &Model| {
         let snap = m.snapshot();
         for (n, tag) in points.iter().enumerate() {
             // a point the model does not publish reads 0 (as the old solver did)
-            let v = snap.iter().find(|(t, _)| t == tag).map(|(_, v)| *v).unwrap_or(Value::Analog(0.0));
+            let v = snap
+                .iter()
+                .find(|(t, _)| t == tag)
+                .map(|(_, v)| *v)
+                .unwrap_or(Value::Analog(0.0));
             points_shm.write(n * MAX_MSG_LEN, &encode_dto(tag, v));
         }
     };
