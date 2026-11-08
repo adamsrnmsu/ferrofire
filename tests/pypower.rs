@@ -160,6 +160,14 @@ fn published_message_has_pybennu_noise() {
     assert!(moved > 500);
 }
 
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
 fn run(bin: &std::path::Path, args: &[&str]) -> String {
     let o = Command::new(bin).args(args).output().unwrap();
     format!(
@@ -187,10 +195,9 @@ fn daemon_verbs_pidfile_logs_and_feed() {
     std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_ferrofire"), &bin).unwrap();
     let rx = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     rx.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-    let (pub_ep, rep_ep) = (
-        format!("udp://*;127.0.0.1:{}", rx.local_addr().unwrap().port()),
-        "tcp://127.0.0.1:35655",
-    );
+    let rep_ep = format!("tcp://127.0.0.1:{}", free_port());
+    let rep_ep = rep_ep.as_str();
+    let pub_ep = format!("udp://*;127.0.0.1:{}", rx.local_addr().unwrap().port());
     let conf = dir.join("config.ini");
     std::fs::write(&conf, format!("[power-solver-service]\nsolver-type = PyPower\ndebug = false\nserver-endpoint = {rep_ep}\npublish-endpoint = {pub_ep}\ncase-file = {}\n", case9().display())).unwrap();
     let (c, env) = (

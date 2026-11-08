@@ -16,11 +16,14 @@ fn main() {
     if prog.ends_with("pybennu-power-solver") {
         return ferrofire::pypower::main(rest);
     }
-    match rest.first().map(String::as_str) {
-        Some("simulink") => ferrofire::simulink::main(&rest[1..]),
-        Some("run") => ferrofire::bennu::main(&rest[1..]),
-        Some("pypower") => ferrofire::pypower::main(&rest[1..]),
-        Some("check") => check(&rest[1..]),
+    let Some((cmd, tail)) = rest.split_first() else {
+        usage()
+    };
+    match cmd.as_str() {
+        "simulink" => ferrofire::simulink::main(tail),
+        "run" => ferrofire::bennu::main(tail),
+        "pypower" => ferrofire::pypower::main(tail),
+        "check" => check(tail),
         _ => usage(),
     }
 }

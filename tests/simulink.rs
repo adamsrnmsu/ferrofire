@@ -10,6 +10,26 @@ use std::time::Duration;
 
 static LOCK: Mutex<()> = Mutex::new(());
 
+/// The kernel objects are global to the machine, so besides the in-process mutex take a file lock: two
+/// `cargo test` runs at once (mutation workers, CI shards) must not share them.
+struct Exclusive(
+    #[allow(dead_code)] std::sync::MutexGuard<'static, ()>,
+    std::fs::File,
+);
+impl Drop for Exclusive {
+    fn drop(&mut self) {
+        use std::os::fd::AsRawFd;
+        unsafe { libc::flock(self.1.as_raw_fd(), libc::LOCK_UN) };
+    }
+}
+fn exclusive() -> Exclusive {
+    use std::os::fd::AsRawFd;
+    let g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let f = std::fs::File::create(std::env::temp_dir().join("ferrofire-ipc.lock")).unwrap();
+    assert_eq!(unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) }, 0);
+    Exclusive(g, f)
+}
+
 fn slot_text(shm: &Shm, n: usize) -> String {
     let s = unsafe { std::slice::from_raw_parts(shm.addr.add(n * MAX_MSG_LEN), MAX_MSG_LEN) };
     String::from_utf8_lossy(&s[..s.iter().position(|&b| b == 0).unwrap()]).into_owned()
@@ -22,7 +42,7 @@ fn attach(key: i32) -> Shm {
 
 #[test]
 fn shm_is_recreated_when_a_stale_segment_has_another_size() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = exclusive();
     let a = Shm::create(20111, 64).unwrap();
     a.write(0, b"stale");
     let b = Shm::create(20111, 4096).unwrap();
@@ -37,14 +57,14 @@ fn shm_is_recreated_when_a_stale_segment_has_another_size() {
 #[test]
 #[should_panic]
 fn shm_write_past_the_segment_is_refused() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = exclusive();
     let a = Shm::create(20112, 8).unwrap();
     a.write(6, b"abc");
 }
 
 #[test]
 fn semaphore_starts_locked_and_counts_posts() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = exclusive();
     let s = Sem::open_locked("ff_test_sem").unwrap();
     s.post();
     s.post();
@@ -58,7 +78,7 @@ fn semaphore_starts_locked_and_counts_posts() {
 
 #[test]
 fn fifo_drains_whole_records() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = exclusive();
     let f = Fifo::create().unwrap();
     assert!(f.drain().is_empty());
     let path = CString::new(UPDATES_FIFO).unwrap();
@@ -126,7 +146,7 @@ fn wait_for(what: &str, mut f: impl FnMut() -> bool) {
 
 #[test]
 fn solver_publishes_points_applies_updates_and_cleans_up() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = exclusive();
     let dir = std::env::temp_dir().join(format!("ff-sim-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     // CRLF and blank lines are tolerated; a point the model does not publish reads 0
@@ -173,7 +193,7 @@ fn solver_publishes_points_applies_updates_and_cleans_up() {
 
 #[test]
 fn solver_without_points_file_uses_the_model_order_and_help_exits() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = exclusive();
     let dir = std::env::temp_dir().join(format!("ff-sim2-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let help = Command::new(env!("CARGO_BIN_EXE_ferrofire"))
@@ -195,7 +215,7 @@ fn solver_without_points_file_uses_the_model_order_and_help_exits() {
 
 #[test]
 fn solver_fails_loudly_on_a_missing_or_broken_model() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = exclusive();
     let bin = env!("CARGO_BIN_EXE_ferrofire");
     let o = Command::new(bin)
         .args(["simulink", "--model", "/nonexistent.yaml"])
@@ -220,7 +240,7 @@ extern "C" fn ignore_signal(_: libc::c_int) {}
 
 #[test]
 fn semaphore_wait_survives_a_signal_and_returns_only_after_a_post() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = exclusive();
     // a handler without SA_RESTART makes sem_wait fail with EINTR
     unsafe {
         let mut sa: libc::sigaction = std::mem::zeroed();

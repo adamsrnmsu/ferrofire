@@ -164,3 +164,30 @@ fn the_install_name_selects_the_simulink_solver() {
     let o = Command::new(&bin).arg("--help").output().unwrap();
     assert!(text(&o.stdout).starts_with("simulinksolver [-tf inf"));
 }
+
+#[test]
+fn a_write_due_exactly_at_the_tolerance_applies_once_in_the_first_step() {
+    // the epsilon is 1e-9 s: a write stamped @0.000000001 is due at t = 0, and is not re-applied afterwards
+    let o = ff(&[
+        "check",
+        MODEL,
+        "--steps",
+        "1",
+        "--write",
+        "lowervalve.open=1@0.000000001",
+    ]);
+    assert!(
+        text(&o.stdout).contains("lowervalve.open=1.000000"),
+        "{}",
+        text(&o.stdout)
+    );
+    let o = ff(&[
+        "check",
+        MODEL,
+        "--steps",
+        "3",
+        "--write",
+        "zz=1@0.000000001",
+    ]);
+    assert_eq!(text(&o.stderr).matches("tag zz ignored").count(), 1);
+}
