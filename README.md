@@ -1,17 +1,32 @@
-# rustbelt
+# ferrofire
 
-Rust process simulator for [sceptre](https://github.com/sandialabs/sceptre-phenix-apps) / phenix ranges, with AC power flow
-(a PYPOWER 5.1.19 port). Models are data: one YAML file. No MATLAB, no PowerWorld.
+**The fire phēnix rises from.**
 
-Status: **phase 1** (engine core, the waterway lock as a model file, AC/DC power flow). The native bennu protocol
-(REP + UDP RADIO) and the `pybennu-power-solver` drop-in are later phases; design in the range repo's `docs/provider-spec.md`.
+ferrofire is the **F**ield-to-**I**nfrastructure **R**untime **E**ngine: a Rust
+simulator for the physical side of [phēnix](https://github.com/sandialabs/sceptre-phenix)
+/ SCEPTRE cyber ranges. It models continuous processes (tanks, pipes, valves, pumps,
+locks) and power systems (AC power flow in the style of PYPOWER) from plain YAML model
+files, and serves them to the range's field devices, with no MATLAB, Simulink or
+PowerWorld required for simple processes.
+
+## The name
+
+- **Ferro** is iron, the metal that rusts. ferrofire is written in Rust.
+- **Fire** is the forge, where raw iron becomes something useful.
+- **phēnix** is named for the phoenix, which rises from fire. ferrofire is the
+  process that a phēnix range rises from: the simulated plant behind the RTUs,
+  SCADA and HMI.
+
+_Formerly rustbelt._
+
+Status: **phase 3** (engine core, waterway lock, AC/DC power flow, native bennu provider, `pybennu-power-solver` drop-in). Design in the range repo's `docs/provider-spec.md`.
 
 ## Use
 
 ```
-rustbelt check models/waterway.yaml --steps 400 --write lowervalve.open=1@2   # offline run, prints the snapshot
-rustbelt run models/waterway.yaml [--server tcp://0.0.0.0:5555] [--publish 'udp://*;239.0.0.1:40000'] [--rate 0.1]
-rustbelt simulink [-tf inf] [--model model.yaml]                                # shm adapter (see CONTRACT.md)
+ferrofire check models/waterway.yaml --steps 400 --write lowervalve.open=1@2   # offline run, prints the snapshot
+ferrofire run models/waterway.yaml [--server tcp://0.0.0.0:5555] [--publish 'udp://*;239.0.0.1:40000'] [--rate 0.1]
+ferrofire simulink [-tf inf] [--model model.yaml]                                # shm adapter (see CONTRACT.md)
 simulinksolver -tf inf                                                          # same adapter, selected by argv[0]
 ```
 
@@ -40,7 +55,7 @@ Deliberate deviations from pybennu: load/shunt writes affect the solve; a bus ke
 written; `deenergize` zeroes buses no reference generator reaches. `models/pump-station.yaml` couples a pump to bus 3:
 
 ```
-rustbelt check models/pump-station.yaml --steps 600 --write pump.run=true@0 --write 'branch-1_2-3.active=false@30'
+ferrofire check models/pump-station.yaml --steps 600 --write pump.run=true@0 --write 'branch-1_2-3.active=false@30'
 ```
 
 `run` is the native bennu provider: ZMQ REP (`QUERY=`/`READ=`/`WRITE=`, `ACK=`/`ERR=`, NUL-terminated) plus UDP
@@ -52,7 +67,7 @@ The zmq crate links libzmq statically from `libzmq3-dev` (jammy 4.3.4), so the b
 
 No cargo needed on the host: `make test` and `make linux` use a Docker `ubuntu:22.04` image (`docker/Dockerfile`).
 `make golden` generates PYPOWER 5.1.19 reference results into `target/golden` (needs `uv`; never committed;
-PYPOWER 5.1.19 needs numpy<2, so Python 3.11 is pinned) and `make test` depends on it. `make linux` writes glibc aarch64 `dist/rustbelt` and `dist/simulinksolver`. It must be glibc: the musl build hangs the
+PYPOWER 5.1.19 needs numpy<2, so Python 3.11 is pinned) and `make test` depends on it. `make linux` writes glibc aarch64 `dist/ferrofire` and `dist/simulinksolver`. It must be glibc: the musl build hangs the
 stock `bennu-simulink-provider` (different `sem_t` layout). `ipc-test.sh` checks the adapter against the stock provider
 inside `bennu:arm64` (run in the Lima VM).
 
@@ -63,9 +78,9 @@ files are vendored. bennu/pybennu are GPL-3 and are not translated: only wire fo
 
 ## pybennu-power-solver drop-in
 
-`pybennu-power-solver {start|stop|restart|status} [-c config.ini] [-e env] [-d] [-v]` (or `rustbelt pypower ...`) runs a
+`pybennu-power-solver {start|stop|restart|status} [-c config.ini] [-e env] [-d] [-v]` (or `ferrofire pypower ...`) runs a
 PYPOWER-vocabulary power flow as a bennu provider: same INI, pidfile `/var/run/bennu-<env>.pid`, logs
 `/var/log/bennu-<env>.{out,err}`, 1 s feed with pybennu's +-1 % noise, `READ` -> `ACK=<tag>:<value>`, batch-validated
 `WRITE`. Install it under that name (`deploy/`). Test: `tests/pypower.rs` (container), `tests/pypower-conformance.sh` (VM).
-Known difference from stock: after a WRITE, stock turns every non-slack bus into PQ; rustbelt keeps generator buses PV
+Known difference from stock: after a WRITE, stock turns every non-slack bus into PQ; ferrofire keeps generator buses PV
 (spec decision 8), so post-write values differ. Initial values match to 1e-10.

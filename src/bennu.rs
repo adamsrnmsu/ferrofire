@@ -176,10 +176,10 @@ pub fn udp_sender(iface: Option<&str>, dest: SocketAddr) -> Result<UdpSocket, St
     Ok(s)
 }
 
-const USAGE: &str = "rustbelt run [model.yaml | --model model.yaml] [--server tcp://0.0.0.0:5555] [--publish 'udp://*;239.0.0.1:40000'] [--rate 0.1]";
+const USAGE: &str = "ferrofire run [model.yaml | --model model.yaml] [--server tcp://0.0.0.0:5555] [--publish 'udp://*;239.0.0.1:40000'] [--rate 0.1]";
 
 pub fn main(args: &[String]) {
-    if let Err(e) = run(args) { eprintln!("rustbelt run: {e}\nusage: {USAGE}"); std::process::exit(1); }
+    if let Err(e) = run(args) { eprintln!("ferrofire run: {e}\nusage: {USAGE}"); std::process::exit(1); }
 }
 
 fn run(args: &[String]) -> Result<(), String> {
@@ -238,7 +238,7 @@ fn run(args: &[String]) -> Result<(), String> {
             while !STOP.load(Ordering::SeqCst) && Instant::now() < t0 + Duration::from_secs_f64(k as f64 * period) { std::thread::sleep(Duration::from_millis(5)); }
         }
     });
-    println!("Info: rustbelt run: {path} dt={dt}s; REP {server}; RADIO {publish} group {} every {period}s", group_for(&publish));
+    println!("Info: ferrofire run: {path} dt={dt}s; REP {server}; RADIO {publish} group {} every {period}s", group_for(&publish));
 
     // engine: drain writes, step, publish snapshot, real-time pace
     let t0 = Instant::now();

@@ -1,9 +1,9 @@
 //! Power-flow tests (spec 6.1 case parsers, 6.2 goldens, 6.4 properties) and the pump-station coupling.
 //! Goldens come from `make golden` (PYPOWER 5.1.19, generated into target/golden, never committed); a missing
 //! golden is a failure, not a skip.
-use rustbelt::model::{Model, Value};
-use rustbelt::power::case::*;
-use rustbelt::power::{pf, Islands, Power};
+use ferrofire::model::{Model, Value};
+use ferrofire::power::case::*;
+use ferrofire::power::{pf, Islands, Power};
 use std::path::PathBuf;
 
 fn gdir() -> PathBuf { PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/golden") }

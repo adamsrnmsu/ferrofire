@@ -31,7 +31,7 @@ Goals
   ASDU types/COTs, reply cadence, the firmware-hash/brash toggle (§6). Divergences are listed (§3.6) and each is a flag or a decision.
 - Hostile-input safe: every parser bounds-checked, no panics on network input, fuzz-tested (§8.4). The stock Modbus listener
   dies to one 3 KB frame (§4.1, `O:`), which is the main safety motive for the rewrite.
-- Ship in the same repo and binary family as the provider (§2), so one `rustbelt` image overlay replaces both.
+- Ship in the same repo and binary family as the provider (§2), so one `ferrofire` image overlay replaces both.
 - First user-visible milestone is **the waterway range**: its two RTUs are Modbus-only fd-servers with `logic:` (§7), so
   phases F0-F2 (≈ 5 days) already put Rust RTUs on the range.
 
@@ -72,7 +72,7 @@ has no plugins: the same tag names select compiled-in modules.
                               (tokio tasks: Modbus, DNP3, IEC 104, event logs)
 ```
 
-- **One binary, multi-call**, like `P:` §2: `rustbelt field-device ...` plus `argv[0]` personalities
+- **One binary, multi-call**, like `P:` §2: `ferrofire field-device ...` plus `argv[0]` personalities
   `bennu-field-deviced`, `bennu-field-device`, `bennu-watcherd`. Cargo features `provider` and `fielddev` (both default) so a
   field-device-only image gets a smaller file. The hash trick in §6 requires the marker string to occur **once in the whole file**.
 - **Static musl is allowed for this binary** (Decision 5): the glibc-only rule in `P:` §2.2 exists because the Simulink adapter
@@ -81,7 +81,7 @@ has no plugins: the same tag names select compiled-in modules.
 - **Threads**: one scan task (stock: one `std::thread`, `FD:FieldDevice.cpp:132-157`), a tokio multi-thread runtime for the
   UDP receiver, REQ client and protocol servers. Shared state is one `Datastore` behind a `Mutex` (stock: per-store shared
   mutexes, `FD:DataStore.hpp`). The runtime starts **after** the daemonizing fork.
-- The engine crate (`rustbelt` lib, `src/expr.rs`, `src/model.rs`) is **not** reused for logic: the `<logic>` dialect differs (§3.4).
+- The engine crate (`ferrofire` lib, `src/expr.rs`, `src/model.rs`) is **not** reused for logic: the `<logic>` dialect differs (§3.4).
 
 ### 2.3 CLI contract (what scripts and brash call)
 
@@ -399,7 +399,7 @@ and a memory-unsafe dependency, which is what this migration is meant to remove.
 
 The field device needs only a REQ client (and, for §4.4, a REP). `zeromq` 0.7 is MIT, pure Rust, tokio-based and states interop with libzmq; whether its REQ socket survives the "lazy pirate" cycle
 (timeout, drop, new socket) and talks to the **stock** `bennu-simulink-provider`'s libzmq REP is **UNVERIFIED** and is F0's first spike (≤ 0.5 day). If it fails, a hand-rolled ZMTP 3.0 NULL-mechanism REQ client
-(greeting, READY with `Socket-Type=REQ`, empty delimiter frame + body) is ~250 lines and testable against both libzmq (stock provider) and `rustbelt`'s own REP. The multicast receive path is plain UDP either way (`P:` Decision 2).
+(greeting, READY with `Socket-Type=REQ`, empty delimiter frame + body) is ~250 lines and testable against both libzmq (stock provider) and `ferrofire`'s own REP. The multicast receive path is plain UDP either way (`P:` Decision 2).
 
 ---
 
@@ -460,7 +460,7 @@ checked in as `*.golden`.
 
 ### 8.3 Differential run in the Lima VM (when free)
 Two containers per protocol, names `rb-fd-stock` (image `bennu:arm64`) and `rb-fd-rust` (same image or `ubuntu:22.04` plus the Rust binary), identical config and probe; compare transcripts byte for byte after normalisation. Then:
-1. **Provider link**: stock `bennu-test-ep-server` (or the `rustbelt` native provider once it lands) feeds both devices; `bennu-probe --c query/read/write` against a *client-mode* stock device reads the Rust server (the smoke test pair).
+1. **Provider link**: stock `bennu-test-ep-server` (or the `ferrofire` native provider once it lands) feeds both devices; `bennu-probe --c query/read/write` against a *client-mode* stock device reads the Rust server (the smoke test pair).
 2. **Output path**: write a coil/holding register via Modbus on each device, capture the `WRITE=` the device sends to a netcat-style REP, compare payload bytes (batching, `%f` formatting).
 3. **Firmware flow** in a container with `watcherd`: upload a valid and an invalid firmware, observe accepted/rejected, port 1337 opens only for the shell hash.
 4. **Waterway end-to-end**: swap the overlay binary for `rtu-1`/`rtu-2` in an `rb-` phenix experiment (name prefix `rb-`; never touch the running experiments); the lock cycles to the same trace as with stock RTUs (`R:tests` golden, `provider/waterway-sim` trace) and the OPC/HMI values match.
@@ -480,7 +480,7 @@ from our outstation (`R:images/bennu-smoke.sh`). 104: byte-equal STARTDT/GI/comm
 
 | # | Phase | Deliverable | Verify | Days |
 |---|---|---|---|---|
-| F0 | Core | workspace feature `fielddev`; `roxmltree` loader + validation; datastore; DISH-compatible UDP receiver; REQ client (zeromq spike first); logic engine (§3.4); `rustbelt field-device --file` foreground | §8.1; `O:` logic corpus equal; the `P:` verified group hash; feed a datagram, read the store; REQ round trip against stock `bennu-test-ep-server` | 2.5 |
+| F0 | Core | workspace feature `fielddev`; `roxmltree` loader + validation; datastore; DISH-compatible UDP receiver; REQ client (zeromq spike first); logic engine (§3.4); `ferrofire field-device --file` foreground | §8.1; `O:` logic corpus equal; the `P:` verified group hash; feed a datagram, read the store; REQ round trip against stock `bennu-test-ep-server` | 2.5 |
 | F1 | Modbus/TCP | MBAP server (FC 1-6, 15, 16), scaling, quirks Q1-Q4, Q9 fix, event log | 24-row differential (§8.3) + fuzz + waterway rtu config loads | 1.5 |
 | F2 | Daemon, watcher, firmware | `bennu-field-deviced` personality (pidfile, daemonize, logs, prefix flags), `bennu-watcherd`, marker + brash toggle | §6.1-5 tests; firmware flow in container; **waterway RTUs on Rust in an `rb-` experiment** (first milestone) | 2 |
 | F3 | DNP3 outstation | link/transport/app, Class 0/1/2/3 READ, events (100/type), IIN, CROB direct/select/operate, AO f32, Q5-Q6, 1 Hz refresh | transcript differential + stock client smoke | 5-6 (decision 2) |
@@ -507,7 +507,7 @@ Total ≈ 15-17 days without F5 (F0-F2 ≈ 6 days for the waterway). Phases F0-F
 
 ## 10. Licensing
 
-- `rustbelt` stays MIT, Copyright (c) 2026 Ryan Adams. `NOTICE` gains: PYPOWER (already), and for any code derived from the Apache-2.0 `opendnp3` (only if Decision 2 option C or a port is taken) the Apache notice;
+- `ferrofire` stays MIT, Copyright (c) 2026 Ryan Adams. `NOTICE` gains: PYPOWER (already), and for any code derived from the Apache-2.0 `opendnp3` (only if Decision 2 option C or a port is taken) the Apache notice;
   `cparse` (MIT, vendored in bennu) is **not** copied: our logic dialect is written from the behaviour table in §3.4.
 - bennu/pybennu GPL-3: nothing translated; wire formats, config keys, CLI flags, error texts quoted only where they are interface facts (log prefixes, exception codes).
 - `lib60870-C` GPL-3 and `lib60870(-sys)` are excluded; `evalexpr` AGPL excluded; Step Function crates not in the default build (§5.2).
@@ -517,7 +517,7 @@ Total ≈ 15-17 days without F5 (F0-F2 ≈ 6 days for the waterway). Phases F0-F
 
 ## 11. Decisions for Ryan (recommendation first)
 
-1. **Placement.** Same repo and the same multi-call `rustbelt` binary (`field-device` subcommand + `argv[0]` personalities, cargo features `provider`/`fielddev`). Alternatives: a second binary in the workspace, or its own repo.
+1. **Placement.** Same repo and the same multi-call `ferrofire` binary (`field-device` subcommand + `argv[0]` personalities, cargo features `provider`/`fielddev`). Alternatives: a second binary in the workspace, or its own repo.
 2. **DNP3 stack.** Recommended: **our own outstation (B)**, written against the §4.2 captures, with opendnp3 as a permitted Apache-2.0 reference, ~5-6 days, differential-tested; fall back to **FFI to opendnp3 (C)** if F3 exceeds 8 days. Not the Step Function crate by default (§5.2);
    optionally add it as a private default-off feature (A) if you decide your range use is "non-commercial, non-production" and you never redistribute the binary — that is your call or your counsel's.
 3. **Modbus.** Hand-rolled MBAP server on tokio (~300 lines, raw control of quirks Q1-Q2), `tokio-modbus` only as a test client. Alternative: `tokio-modbus` server (less code, loses fingerprint fidelity).

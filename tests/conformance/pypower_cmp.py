@@ -1,4 +1,4 @@
-"""Compare rustbelt's pybennu-power-solver drop-in with the STOCK pybennu PyPower provider class (run offline, no sockets:
+"""Compare ferrofire's pybennu-power-solver drop-in with the STOCK pybennu PyPower provider class (run offline, no sockets:
 its Provider base class is stubbed because the image's swig _Endpoint.so is unusable). Usage:
   pypower_cmp.py CASE.py tcp://127.0.0.1:5555 [--write tag:value,...]
 Initial state must match (tag list, order and values); after --write the two are compared and the differences are

@@ -227,7 +227,7 @@ fn serve(cfg: Cfg, power: Power) -> Result<(), String> {
     let (iface, dest) = parse_udp(&cfg.publish)?;
     let sock = udp_sender(iface.as_deref(), dest)?;
     let group = group_for(&cfg.publish);
-    println!("Info: pybennu-power-solver (rustbelt): case {}; REP {}; RADIO {} group {group} every 1s", cfg.case, cfg.server, cfg.publish);
+    println!("Info: pybennu-power-solver (ferrofire): case {}; REP {}; RADIO {} group {group} every 1s", cfg.case, cfg.server, cfg.publish);
     let (mut rng, t0, mut k) = (Rng::seeded(), Instant::now(), 0u64);
     while !STOP.load(Ordering::SeqCst) {
         let msg = pack(&p.lock().unwrap(), &mut rng);

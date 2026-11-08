@@ -1,4 +1,4 @@
-//! rustbelt: process (and, later, power-flow) simulator. `model` is the engine core; `simulink` is the shm
+//! ferrofire: process (and, later, power-flow) simulator. `model` is the engine core; `simulink` is the shm
 //! frontend that stands in for the Simulink-generated solver.
 
 pub mod bennu;

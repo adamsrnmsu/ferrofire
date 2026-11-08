@@ -1,25 +1,25 @@
-//! rustbelt CLI. Also the `simulinksolver` entry point: selected when argv[0] ends in `simulinksolver`.
+//! ferrofire CLI. Also the `simulinksolver` entry point: selected when argv[0] ends in `simulinksolver`.
 //! Subcommands: `simulink [args]`, `check model.yaml [--steps N] [--write tag=value@t]`.
 
-use rustbelt::model::{Model, Value};
+use ferrofire::model::{Model, Value};
 
 fn usage() -> ! {
-    eprintln!("usage: rustbelt run model.yaml [--server tcp://0.0.0.0:5555] [--publish udp://*;239.0.0.1:40000] [--rate 0.1]\n       rustbelt pypower {{start|stop|restart|status}} [-c /etc/sceptre/config.ini] [-e pybennu] [-d] [-v]\n       rustbelt simulink [-tf inf] [--model model.yaml]\n       rustbelt check model.yaml [--steps N] [--write tag=value@t]...");
+    eprintln!("usage: ferrofire run model.yaml [--server tcp://0.0.0.0:5555] [--publish udp://*;239.0.0.1:40000] [--rate 0.1]\n       ferrofire pypower {{start|stop|restart|status}} [-c /etc/sceptre/config.ini] [-e pybennu] [-d] [-v]\n       ferrofire simulink [-tf inf] [--model model.yaml]\n       ferrofire check model.yaml [--steps N] [--write tag=value@t]...");
     std::process::exit(2);
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args[0].ends_with("simulinksolver") {
-        return rustbelt::simulink::main(&args[1..]);
+        return ferrofire::simulink::main(&args[1..]);
     }
     if args[0].ends_with("pybennu-power-solver") {
-        return rustbelt::pypower::main(&args[1..]);
+        return ferrofire::pypower::main(&args[1..]);
     }
     match args.get(1).map(String::as_str) {
-        Some("simulink") => rustbelt::simulink::main(&args[2..]),
-        Some("run") => rustbelt::bennu::main(&args[2..]),
-        Some("pypower") => rustbelt::pypower::main(&args[2..]),
+        Some("simulink") => ferrofire::simulink::main(&args[2..]),
+        Some("run") => ferrofire::bennu::main(&args[2..]),
+        Some("pypower") => ferrofire::pypower::main(&args[2..]),
         Some("check") => check(&args[2..]),
         _ => usage(),
     }

@@ -213,7 +213,7 @@ impl Power {
             Ok(_) => "did not converge".to_string(),
             Err(e) => e,
         };
-        if !self.alert { eprintln!("rustbelt: power flow failed ({why}); keeping the last solution, bus-alert raised"); }
+        if !self.alert { eprintln!("ferrofire: power flow failed ({why}); keeping the last solution, bus-alert raised"); }
         self.alert = true;
         if self.dc_fallback {
             if let Ok(s) = pf::runpf(&eff, &pf::Opts { dc: true, ..o }) {

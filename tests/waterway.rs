@@ -1,5 +1,5 @@
 //! Waterway regression (spec 6.3/6.4): the model file must behave like the original hand-written physics.
-use rustbelt::model::{Model, Value};
+use ferrofire::model::{Model, Value};
 use std::collections::HashMap;
 
 const INPUTS: [&str; 4] = ["lowergate.open", "lowervalve.open", "uppergate.open", "uppervalve.open"];
@@ -29,7 +29,7 @@ fn rtu_logic(s: &HashMap<String, f64>) -> [bool; 4] {
     ]
 }
 
-fn waterway() -> Model { Model::load(rustbelt::WATERWAY_YAML).unwrap() }
+fn waterway() -> Model { Model::load(ferrofire::WATERWAY_YAML).unwrap() }
 
 #[test]
 fn full_transit_with_rtu_logic() {

@@ -1,6 +1,6 @@
 //! Protocol pieces (spec 6.1): group hash, framing, chunking, request handling, and a real REP round trip.
-use rustbelt::bennu::*;
-use rustbelt::model::{Model, Value};
+use ferrofire::bennu::*;
+use ferrofire::model::{Model, Value};
 use std::sync::{Arc, Mutex};
 
 #[test]

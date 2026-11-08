@@ -117,6 +117,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
 
 [[package]]
+name = "ferrofire"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "num-complex",
+ "serde",
+ "serde-saphyr",
+ "serde_json",
+ "zmq",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -258,18 +270,6 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
-
-[[package]]
-name = "rustbelt"
-version = "0.1.0"
-dependencies = [
- "libc",
- "num-complex",
- "serde",
- "serde-saphyr",
- "serde_json",
- "zmq",
-]
 
 [[package]]
 name = "rustversion"

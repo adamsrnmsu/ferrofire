@@ -1,6 +1,6 @@
 # Pump station with power (spec 3.3): a pump on bus 3 of a 3-bus feeder fills a tank that drains through an orifice.
 # Undervoltage or a dead feeder trips the pump. Try:
-#   rustbelt check models/pump-station.yaml --steps 600 --write pump.run=true@0 --write 'branch-1_2-3.active=false@30'
+#   ferrofire check models/pump-station.yaml --steps 600 --write pump.run=true@0 --write 'branch-1_2-3.active=false@30'
 version: 1
 dt: 0.1
 params: {tank.area: 50, valve.cv: 0.3, pump.q_nom: 0.5, pump.head: 30}

@@ -1,13 +1,13 @@
 #!/bin/bash
 # (rtu-1.xml must not contain XML comments: bennu-field-device silently hangs on them.)
-# Native-mode conformance (spec 6.5): rustbelt run vs stock bennu tools inside bennu:arm64. Run in the Lima VM:
-#   limactl shell phenix bash <abs>/tests/conformance.sh        (needs dist/rustbelt from `make linux`)
+# Native-mode conformance (spec 6.5): ferrofire run vs stock bennu tools inside bennu:arm64. Run in the Lima VM:
+#   limactl shell phenix bash <abs>/tests/conformance.sh        (needs dist/ferrofire from `make linux`)
 set -u
 D=$(cd "$(dirname "$0")/.." && pwd)
 docker run --rm --name rb-conf-$$ -v "$D/dist:/sim:ro" -v "$D/tests/conformance:/conf:ro" -v "$D/models:/models:ro" bennu:arm64 bash -c '
-mkdir -p /tmp/w && cd /tmp/w && cp /sim/rustbelt . && cp /conf/rtu-1.xml .
-echo "ldd libzmq: $(ldd ./rustbelt | grep -c zmq) (0 = statically linked)"
-./rustbelt run /models/waterway.yaml >rb.log 2>&1 &
+mkdir -p /tmp/w && cd /tmp/w && cp /sim/ferrofire . && cp /conf/rtu-1.xml .
+echo "ldd libzmq: $(ldd ./ferrofire | grep -c zmq) (0 = statically linked)"
+./ferrofire run /models/waterway.yaml >rb.log 2>&1 &
 sleep 1
 python3 /conf/dish.py >sub.log 2>&1 &
 bennu-field-device --file rtu-1.xml >fd.log 2>&1 &
@@ -22,7 +22,7 @@ echo "write uppervalve.open=1: $(w uppervalve.open 1)"; sleep 4
 echo "uppervalve.open: $(r uppervalve.open)"; echo "lock.height (filling): $(r lock.height)"
 for a in "no.such 1" "lock.height 3"; do set -- $a; echo "write $1: $(timeout 15 bennu-probe --e $E --c write --t $1 --v $2 2>&1 | tail -1)"; done
 echo "== subscriber (head)"; sleep 2; cat sub.log
-echo "== modbus (field device reading rustbelt, raw frames)"
+echo "== modbus (field device reading ferrofire, raw frames)"
 python3 - <<PY
 import socket,struct
 def rd(fc,addr,n):

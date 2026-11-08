@@ -1,9 +1,9 @@
 //! pybennu-power-solver drop-in (spec 5(b), 6.5): request/reply forms, noise rules, and the daemon verbs end to end.
 //! Uses target/golden/case9.py (from `make golden`); the daemon test writes /var/run + /var/log, so run it in the container.
-use rustbelt::bennu::{group_for, unframe};
-use rustbelt::model::Kind;
-use rustbelt::power::{case, Islands, Power};
-use rustbelt::pypower::*;
+use ferrofire::bennu::{group_for, unframe};
+use ferrofire::model::Kind;
+use ferrofire::power::{case, Islands, Power};
+use ferrofire::pypower::*;
 use std::process::Command;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -95,7 +95,7 @@ fn daemon_verbs_pidfile_logs_and_feed() {
     let dir = std::env::temp_dir().join(format!("rb-pyp-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let bin = dir.join("pybennu-power-solver"); // the install name selects this mode
-    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_rustbelt"), &bin).unwrap();
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_ferrofire"), &bin).unwrap();
     let rx = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     rx.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
     let (pub_ep, rep_ep) = (format!("udp://*;127.0.0.1:{}", rx.local_addr().unwrap().port()), "tcp://127.0.0.1:35655");
