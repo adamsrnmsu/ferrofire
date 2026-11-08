@@ -25,54 +25,63 @@ fn main() {
     }
 }
 
-/// Offline run printing the snapshot at t=0 and after N steps; `--write tag=value@t` applies at model time t.
-fn check(args: &[String]) {
+type Write = (f64, String, f64);
+
+/// `tag=value[@t]` (value `true`/`false` allowed) -> (t, tag, value).
+fn parse_write(s: &str) -> Option<Write> {
+    let (tv, t) = s.split_once('@').unwrap_or((s, "0"));
+    let (tag, v) = tv.split_once('=')?;
+    let v = match v {
+        "true" => 1.0,
+        "false" => 0.0,
+        _ => v.parse().ok()?,
+    };
+    Some((t.parse().ok()?, tag.to_string(), v))
+}
+
+/// `model.yaml [--steps N] [--write tag=value@t]...`
+fn parse_check(args: &[String]) -> (&String, usize, Vec<Write>) {
     let path = args.first().unwrap_or_else(|| usage());
-    let mut steps = 100usize;
-    let mut writes: Vec<(f64, String, f64)> = vec![];
+    let (mut steps, mut writes) = (100usize, vec![]);
     let mut it = args[1..].iter();
     while let Some(a) = it.next() {
+        let val = it.next().unwrap_or_else(|| usage());
         match a.as_str() {
-            "--steps" => {
-                steps = it
-                    .next()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or_else(|| usage())
-            }
-            "--write" => {
-                let s = it.next().unwrap_or_else(|| usage());
-                let (tv, t) = s.split_once('@').unwrap_or((s, "0"));
-                let (tag, v) = tv.split_once('=').unwrap_or_else(|| usage());
-                let v = match v {
-                    "true" => 1.0,
-                    "false" => 0.0,
-                    _ => v.parse().unwrap_or_else(|_| usage()),
-                };
-                writes.push((t.parse().unwrap_or_else(|_| usage()), tag.to_string(), v));
-            }
+            "--steps" => steps = val.parse().unwrap_or_else(|_| usage()),
+            "--write" => writes.push(parse_write(val).unwrap_or_else(|| usage())),
             _ => usage(),
         }
     }
-    let yaml = std::fs::read_to_string(path).unwrap_or_else(|e| {
-        eprintln!("{path}: {e}");
-        std::process::exit(1)
-    });
-    let mut m = Model::load_in(&yaml, std::path::Path::new(path).parent()).unwrap_or_else(|e| {
-        eprintln!("{e}");
-        std::process::exit(1)
-    });
-    let dt = m.dt;
+    (path, steps, writes)
+}
+
+fn fail(msg: impl std::fmt::Display) -> ! {
+    eprintln!("{msg}");
+    std::process::exit(1)
+}
+
+/// Apply (and drop) the writes due at or before the model's current time.
+fn apply_due(m: &mut Model, writes: &mut Vec<Write>) {
+    let due: Vec<_> = writes
+        .iter()
+        .filter(|(t, ..)| *t <= m.time + 1e-9)
+        .map(|(_, tag, v)| (tag.clone(), Value::Analog(*v)))
+        .collect();
+    writes.retain(|(t, ..)| *t > m.time + 1e-9);
+    for tag in m.apply_writes(&due) {
+        eprintln!("write to unknown/readonly tag {tag} ignored");
+    }
+}
+
+/// Offline run printing the snapshot at t=0 and after N steps; `--write tag=value@t` applies at model time t.
+fn check(args: &[String]) {
+    let (path, steps, mut writes) = parse_check(args);
+    let yaml = std::fs::read_to_string(path).unwrap_or_else(|e| fail(format!("{path}: {e}")));
+    let mut m =
+        Model::load_in(&yaml, std::path::Path::new(path).parent()).unwrap_or_else(|e| fail(e));
     for _ in 0..steps {
-        let due: Vec<_> = writes
-            .iter()
-            .filter(|(t, ..)| *t <= m.time + 1e-9)
-            .map(|(_, tag, v)| (tag.clone(), Value::Analog(*v)))
-            .collect();
-        writes.retain(|(t, ..)| *t > m.time + 1e-9);
-        for tag in m.apply_writes(&due) {
-            eprintln!("write to unknown/readonly tag {tag} ignored");
-        }
-        m.step(dt);
+        apply_due(&mut m, &mut writes);
+        m.step(m.dt);
     }
     println!("t={:.3}", m.time);
     for (tag, v) in m.snapshot() {

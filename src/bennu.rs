@@ -198,6 +198,42 @@ pub extern "C" fn on_signal(_: libc::c_int) {
     STOP.store(true, Ordering::SeqCst);
 }
 
+/// SIGINT and SIGTERM raise `STOP`; every loop in the process polls it.
+pub fn install_signals() {
+    unsafe {
+        libc::signal(libc::SIGINT, on_signal as *const () as usize);
+        libc::signal(libc::SIGTERM, on_signal as *const () as usize);
+    }
+}
+
+/// Sleep in short slices until `deadline`, returning early on `STOP` so a stop signal is noticed promptly.
+pub fn sleep_until(deadline: Instant, slice: Duration) {
+    while !STOP.load(Ordering::SeqCst) && Instant::now() < deadline {
+        std::thread::sleep(slice);
+    }
+}
+
+/// Bind a REP socket on `endpoint` and answer each request with `handler` until `STOP` (polling, so it is noticed).
+pub fn serve_rep(
+    ctx: &zmq::Context,
+    endpoint: &str,
+    handler: impl Fn(&[u8]) -> Vec<u8> + Send + 'static,
+) -> Result<std::thread::JoinHandle<()>, String> {
+    let rep = ctx.socket(zmq::REP).map_err(|e| e.to_string())?;
+    rep.bind(endpoint)
+        .map_err(|e| format!("bind {endpoint}: {e}"))?;
+    Ok(std::thread::spawn(move || {
+        while !STOP.load(Ordering::SeqCst) {
+            if !matches!(rep.poll(zmq::POLLIN, 100), Ok(n) if n > 0) {
+                continue;
+            }
+            if let Ok(req) = rep.recv_bytes(0) {
+                let _ = rep.send(handler(&req), 0);
+            }
+        }
+    }))
+}
+
 /// `udp://[iface;]host:port` -> (iface, destination)
 pub fn parse_udp(ep: &str) -> Result<(Option<String>, SocketAddr), String> {
     let rest = ep
@@ -215,35 +251,44 @@ pub fn parse_udp(ep: &str) -> Result<(Option<String>, SocketAddr), String> {
     Ok((iface, addr))
 }
 
+/// IP_MULTICAST_IF: send multicast datagrams out of the interface that owns `a`.
+fn set_multicast_if(s: &UdpSocket, a: Ipv4Addr) -> Result<(), String> {
+    use std::os::fd::AsRawFd;
+    let ia = libc::in_addr {
+        s_addr: u32::from(a).to_be(),
+    };
+    let rc = unsafe {
+        libc::setsockopt(
+            s.as_raw_fd(),
+            libc::IPPROTO_IP,
+            libc::IP_MULTICAST_IF,
+            &ia as *const _ as *const libc::c_void,
+            std::mem::size_of::<libc::in_addr>() as u32,
+        )
+    };
+    match rc {
+        0 => Ok(()),
+        _ => Err(format!(
+            "IP_MULTICAST_IF {a}: {}",
+            std::io::Error::last_os_error()
+        )),
+    }
+}
+
+fn multicast_setup(s: &UdpSocket, iface: Option<&str>) -> Result<(), String> {
+    s.set_multicast_ttl_v4(1).map_err(|e| e.to_string())?; // libzmq multicast_hops default
+    s.set_multicast_loop_v4(true).map_err(|e| e.to_string())?; // same-host subscribers work
+    let Some(i) = iface else { return Ok(()) };
+    let a: Ipv4Addr = i
+        .parse()
+        .map_err(|_| format!("interface `{i}`: only IPv4 addresses are supported"))?;
+    set_multicast_if(s, a)
+}
+
 pub fn udp_sender(iface: Option<&str>, dest: SocketAddr) -> Result<UdpSocket, String> {
     let s = UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
     if dest.ip().is_multicast() {
-        s.set_multicast_ttl_v4(1).map_err(|e| e.to_string())?; // libzmq multicast_hops default
-        s.set_multicast_loop_v4(true).map_err(|e| e.to_string())?; // same-host subscribers work
-        if let Some(i) = iface {
-            let a: Ipv4Addr = i
-                .parse()
-                .map_err(|_| format!("interface `{i}`: only IPv4 addresses are supported"))?;
-            use std::os::fd::AsRawFd;
-            let ia = libc::in_addr {
-                s_addr: u32::from(a).to_be(),
-            };
-            let rc = unsafe {
-                libc::setsockopt(
-                    s.as_raw_fd(),
-                    libc::IPPROTO_IP,
-                    libc::IP_MULTICAST_IF,
-                    &ia as *const _ as *const libc::c_void,
-                    std::mem::size_of::<libc::in_addr>() as u32,
-                )
-            };
-            if rc != 0 {
-                return Err(format!(
-                    "IP_MULTICAST_IF {a}: {}",
-                    std::io::Error::last_os_error()
-                ));
-            }
-        }
+        multicast_setup(&s, iface)?;
     }
     Ok(s)
 }
@@ -257,116 +302,152 @@ pub fn main(args: &[String]) {
     }
 }
 
-fn run(args: &[String]) -> Result<(), String> {
-    let (mut path, mut server, mut publish, mut rate) = (
-        None,
-        "tcp://0.0.0.0:5555".to_string(),
-        "udp://*;239.0.0.1:40000".to_string(),
-        None,
-    );
-    let mut it = args.iter();
-    while let Some(a) = it.next() {
-        let mut val = || {
-            it.next()
-                .cloned()
-                .ok_or_else(|| format!("{a} needs a value"))
-        };
-        match a.as_str() {
-            "--model" => path = Some(val()?),
-            "--server" => server = val()?,
-            "--publish" => publish = val()?,
-            "--rate" => rate = Some(val()?.parse::<f64>().map_err(|e| format!("--rate: {e}"))?),
-            p if !p.starts_with('-') && path.is_none() => path = Some(p.to_string()),
-            _ => return Err(format!("unknown argument `{a}`")),
+#[derive(Debug)]
+pub struct RunArgs {
+    pub path: Option<String>,
+    pub server: String,
+    pub publish: String,
+    pub rate: Option<f64>,
+}
+
+const FLAGS: [&str; 4] = ["--model", "--server", "--publish", "--rate"];
+
+impl RunArgs {
+    fn set(&mut self, flag: &str, v: String) -> Result<(), String> {
+        match flag {
+            "--model" => self.path = Some(v),
+            "--server" => self.server = v,
+            "--publish" => self.publish = v,
+            _ => self.rate = Some(v.parse::<f64>().map_err(|e| format!("--rate: {e}"))?),
         }
+        Ok(())
     }
+
+    /// `[model.yaml | --model model.yaml] [--server ep] [--publish ep] [--rate seconds]`
+    pub fn parse(args: &[String]) -> Result<RunArgs, String> {
+        let mut r = RunArgs {
+            path: None,
+            server: "tcp://0.0.0.0:5555".into(),
+            publish: "udp://*;239.0.0.1:40000".into(),
+            rate: None,
+        };
+        let mut it = args.iter();
+        while let Some(a) = it.next() {
+            if FLAGS.contains(&a.as_str()) {
+                let v = it
+                    .next()
+                    .cloned()
+                    .ok_or_else(|| format!("{a} needs a value"))?;
+                r.set(a, v)?;
+            } else if !a.starts_with('-') && r.path.is_none() {
+                r.path = Some(a.clone());
+            } else {
+                return Err(format!("unknown argument `{a}`"));
+            }
+        }
+        Ok(r)
+    }
+}
+
+fn load_model(path: Option<&str>) -> Result<Model, String> {
     let path = path.ok_or("no model given")?;
-    let yaml = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
-    let mut model = Model::load_in(&yaml, std::path::Path::new(&path).parent())?;
-    let dt = model.dt;
+    let yaml = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    Model::load_in(&yaml, std::path::Path::new(path).parent())
+}
+
+/// Publish period: `--rate`, else the model's `publish_rate`, else 0.1 s.
+pub fn publish_period(rate: Option<f64>, model: &Model) -> Result<f64, String> {
     let period = rate.or(model.publish_rate).unwrap_or(0.1);
     if period <= 0.0 {
         return Err("publish rate must be > 0".into());
     }
+    Ok(period)
+}
 
-    let meta = Arc::new(Meta::of(&model));
-    let sh = Arc::new(Mutex::new(Shared {
-        snap: model
-            .snapshot()
-            .into_iter()
-            .map(|(t, v)| (t.to_string(), v))
-            .collect(),
-        queue: vec![],
-    }));
-    unsafe {
-        libc::signal(libc::SIGINT, on_signal as *const () as usize);
-        libc::signal(libc::SIGTERM, on_signal as *const () as usize);
-    }
+fn owned_snapshot(model: &Model) -> Vec<(String, Value)> {
+    model
+        .snapshot()
+        .into_iter()
+        .map(|(t, v)| (t.to_string(), v))
+        .collect()
+}
 
-    // REP server
-    let ctx = zmq::Context::new();
-    let rep = ctx.socket(zmq::REP).map_err(|e| e.to_string())?;
-    rep.bind(&server)
-        .map_err(|e| format!("bind {server}: {e}"))?;
-    let (m2, s2) = (meta.clone(), sh.clone());
-    let rep_t = std::thread::spawn(move || {
-        while !STOP.load(Ordering::SeqCst) {
-            if !matches!(rep.poll(zmq::POLLIN, 100), Ok(n) if n > 0) {
-                continue;
-            }
-            if let Ok(req) = rep.recv_bytes(0) {
-                let _ = rep.send(handle(&req, &m2, &s2), 0);
-            }
-        }
-    });
-
-    // UDP publisher
-    let (iface, dest) = parse_udp(&publish)?;
-    let sock = udp_sender(iface.as_deref(), dest)?;
-    let group = group_for(&publish);
-    let s3 = sh.clone();
-    let pub_t = std::thread::spawn(move || {
+/// UDP publisher thread: one set of datagrams per `period` until `STOP`.
+fn spawn_publisher(
+    sh: Arc<Mutex<Shared>>,
+    sock: UdpSocket,
+    dest: SocketAddr,
+    group: String,
+    period: f64,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
         let t0 = Instant::now();
         let mut k = 0u64;
         while !STOP.load(Ordering::SeqCst) {
-            let snap = s3.lock().unwrap().snap.clone();
+            let snap = sh.lock().unwrap().snap.clone();
             for d in datagrams(&group, &snap) {
                 let _ = sock.send_to(&d, dest);
             }
             k += 1;
-            // sleep in short slices so a stop signal is noticed promptly
-            while !STOP.load(Ordering::SeqCst)
-                && Instant::now() < t0 + Duration::from_secs_f64(k as f64 * period)
-            {
-                std::thread::sleep(Duration::from_millis(5));
-            }
+            sleep_until(
+                t0 + Duration::from_secs_f64(k as f64 * period),
+                Duration::from_millis(5),
+            );
         }
-    });
-    println!("Info: ferrofire run: {path} dt={dt}s; REP {server}; RADIO {publish} group {} every {period}s", group_for(&publish));
+    })
+}
 
-    // engine: drain writes, step, publish snapshot, real-time pace
+/// One engine tick: apply queued writes, publish the snapshot, then advance the model.
+fn engine_tick(model: &mut Model, sh: &Mutex<Shared>) {
+    let writes = std::mem::take(&mut sh.lock().unwrap().queue);
+    for tag in model.apply_writes(&writes) {
+        println!("Warn: write to {tag} rejected");
+    }
+    sh.lock().unwrap().snap = owned_snapshot(model);
+    model.step(model.dt);
+}
+
+/// Engine: tick in real time (one model step per `dt` of wall clock) until `STOP`.
+fn engine(model: &mut Model, sh: &Mutex<Shared>) {
     let t0 = Instant::now();
     let mut k = 0u64;
     while !STOP.load(Ordering::SeqCst) {
-        let writes = std::mem::take(&mut sh.lock().unwrap().queue);
-        if !writes.is_empty() {
-            for tag in model.apply_writes(&writes) {
-                println!("Warn: write to {tag} rejected");
-            }
-        }
-        sh.lock().unwrap().snap = model
-            .snapshot()
-            .into_iter()
-            .map(|(t, v)| (t.to_string(), v))
-            .collect();
-        model.step(dt);
+        engine_tick(model, sh);
         k += 1;
-        if let Some(d) =
-            (t0 + Duration::from_secs_f64(k as f64 * dt)).checked_duration_since(Instant::now())
-        {
+        let due = t0 + Duration::from_secs_f64(k as f64 * model.dt);
+        if let Some(d) = due.checked_duration_since(Instant::now()) {
             std::thread::sleep(d);
         }
     }
+}
+
+fn run(args: &[String]) -> Result<(), String> {
+    let a = RunArgs::parse(args)?;
+    let mut model = load_model(a.path.as_deref())?;
+    let period = publish_period(a.rate, &model)?;
+    let meta = Meta::of(&model);
+    let sh = Arc::new(Mutex::new(Shared {
+        snap: owned_snapshot(&model),
+        queue: vec![],
+    }));
+    install_signals();
+
+    let ctx = zmq::Context::new();
+    let sh2 = sh.clone();
+    let rep_t = serve_rep(&ctx, &a.server, move |req| handle(req, &meta, &sh2))?;
+    let (iface, dest) = parse_udp(&a.publish)?;
+    let sock = udp_sender(iface.as_deref(), dest)?;
+    let group = group_for(&a.publish);
+    let pub_t = spawn_publisher(sh.clone(), sock, dest, group.clone(), period);
+    println!(
+        "Info: ferrofire run: {} dt={}s; REP {}; RADIO {} group {group} every {period}s",
+        a.path.as_deref().unwrap_or(""),
+        model.dt,
+        a.server,
+        a.publish
+    );
+
+    engine(&mut model, &sh);
     let _ = rep_t.join();
     let _ = pub_t.join();
     println!("Info: stopped");

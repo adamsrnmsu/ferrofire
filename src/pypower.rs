@@ -2,7 +2,9 @@
 //! as pybennu's PyPower provider, backed by the native power flow. Behaviour matched from pybennu's documented
 //! interface only; no pybennu code is used.
 
-use crate::bennu::{datagrams_msg, group_for, on_signal, parse_udp, udp_sender, STOP};
+use crate::bennu::{
+    datagrams_msg, group_for, install_signals, parse_udp, serve_rep, sleep_until, udp_sender, STOP,
+};
 use crate::model::Kind;
 use crate::power::{case, Islands, Power};
 use std::collections::HashMap;
@@ -128,49 +130,67 @@ fn reply(req: &[u8], p: &Mutex<Power>, debug: bool) -> String {
     }
     let mut p = p.lock().unwrap();
     match op.to_ascii_lowercase().as_str() {
-        "query" => format!(
-            "ACK={}",
-            (0..p.n_tags())
-                .map(|i| format!("{},", p.tag_name(i)))
-                .collect::<String>()
-        ),
-        "read" => match p.tag_index(payload) {
-            Some(i) => format!(
-                "ACK={}:{}",
-                p.tag_name(i),
-                fmt_py(p.tag_name(i), p.tag_kind(i), p.get(i))
-            ),
-            None => format!("ERR='{payload}'"),
-        },
-        "write" => {
-            // validate the whole batch first, then apply, then one solve (pybennu: unknown tag -> nothing applied)
-            let mut batch = vec![];
-            for pt in payload.split(',').filter(|s| !s.is_empty()) {
-                let Some((tag, val)) = pt.split_once(':') else {
-                    return format!("ERR=Malformed WRITE point '{pt}'");
-                };
-                let Some(i) = p.tag_index(tag) else {
-                    return format!(
-                        "ERR=Provider failed to process write message with exception: '{tag}'"
-                    );
-                };
-                let x = match val {
-                    "true" | "false" if p.tag_kind(i) == Kind::Binary => (val == "true") as u8 as f64,
-                    "true" | "false" => return format!("ERR=Invalid value for tag: {tag}"),
-                    _ => match val.parse::<f64>() { Ok(x) => x, Err(_) => return format!("ERR=Provider failed to process write message with exception: could not convert string to float: '{val}'") },
-                };
-                batch.push((i, x));
-            }
-            for (i, x) in batch {
-                if p.writable(i) {
-                    p.set(i, x);
-                }
-            } // read-only fields: accepted, then overwritten by the solve (as pybennu)
-            p.solve();
-            "ACK=Success processing PyPower write command".into()
-        }
+        "query" => reply_query(&p),
+        "read" => reply_read(&p, payload),
+        "write" => reply_write(&mut p, payload),
         _ => format!("ERR=Unknown command type '{op}'"),
     }
+}
+
+fn reply_query(p: &Power) -> String {
+    format!(
+        "ACK={}",
+        (0..p.n_tags())
+            .map(|i| format!("{},", p.tag_name(i)))
+            .collect::<String>()
+    )
+}
+
+fn reply_read(p: &Power, tag: &str) -> String {
+    match p.tag_index(tag) {
+        Some(i) => format!(
+            "ACK={}:{}",
+            p.tag_name(i),
+            fmt_py(p.tag_name(i), p.tag_kind(i), p.get(i))
+        ),
+        None => format!("ERR='{tag}'"),
+    }
+}
+
+/// One `tag:value` write point -> (tag index, value); the error is the whole reply.
+fn parse_point(p: &Power, pt: &str) -> Result<(usize, f64), String> {
+    let (tag, val) = pt
+        .split_once(':')
+        .ok_or_else(|| format!("ERR=Malformed WRITE point '{pt}'"))?;
+    let i = p.tag_index(tag).ok_or_else(|| {
+        format!("ERR=Provider failed to process write message with exception: '{tag}'")
+    })?;
+    let x = match val {
+        "true" | "false" if p.tag_kind(i) == Kind::Binary => (val == "true") as u8 as f64,
+        "true" | "false" => return Err(format!("ERR=Invalid value for tag: {tag}")),
+        _ => val.parse::<f64>().map_err(|_| format!("ERR=Provider failed to process write message with exception: could not convert string to float: '{val}'"))?,
+    };
+    Ok((i, x))
+}
+
+/// Validate the whole batch first, then apply, then one solve (pybennu: unknown tag -> nothing applied).
+fn reply_write(p: &mut Power, payload: &str) -> String {
+    let batch: Result<Vec<_>, String> = payload
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|pt| parse_point(p, pt))
+        .collect();
+    let batch = match batch {
+        Ok(b) => b,
+        Err(reply) => return reply,
+    };
+    for (i, x) in batch {
+        if p.writable(i) {
+            p.set(i, x);
+        }
+    } // read-only fields: accepted, then overwritten by the solve (as pybennu)
+    p.solve();
+    "ACK=Success processing PyPower write command".into()
 }
 
 // ---- config + daemon -----------------------------------------------------------------------------------------
@@ -182,14 +202,18 @@ struct Cfg {
     debug: bool,
 }
 
-fn load_cfg(path: &str, debug: bool) -> Result<Cfg, String> {
-    let ini = parse_ini(&std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?);
-    let s = ini
-        .get("power-solver-service")
-        .ok_or("no [power-solver-service] section in the configuration file")?;
-    let get = |k: &str| {
-        s.get(k).cloned().ok_or_else(|| format!("The following must be defined in the configuration file: 'server-endpoint', 'publish-endpoint', 'case-file' (missing '{k}')"))
-    };
+/// Absolute form of `f` when it exists, else `f` as given.
+fn canon(f: &str) -> String {
+    std::fs::canonicalize(f)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| f.to_string())
+}
+
+fn required(s: &HashMap<String, String>, k: &str) -> Result<String, String> {
+    s.get(k).cloned().ok_or_else(|| format!("The following must be defined in the configuration file: 'server-endpoint', 'publish-endpoint', 'case-file' (missing '{k}')"))
+}
+
+fn check_solver(s: &HashMap<String, String>) -> Result<(), String> {
     let st = s
         .get("solver-type")
         .ok_or("'solver-type' must be defined in the configuration file")?;
@@ -198,19 +222,20 @@ fn load_cfg(path: &str, debug: bool) -> Result<Cfg, String> {
             "solver-type '{st}' is not supported by this power solver (PyPower only)"
         ));
     }
-    let debug = match s.get("debug") {
-        Some(d) => d.to_lowercase() == "true",
-        None => debug,
-    };
-    let abs = |f: String| {
-        std::fs::canonicalize(&f)
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or(f)
-    };
+    Ok(())
+}
+
+fn load_cfg(path: &str, debug: bool) -> Result<Cfg, String> {
+    let ini = parse_ini(&std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?);
+    let s = ini
+        .get("power-solver-service")
+        .ok_or("no [power-solver-service] section in the configuration file")?;
+    check_solver(s)?;
+    let debug = s.get("debug").map_or(debug, |d| d.to_lowercase() == "true");
     Ok(Cfg {
-        server: get("server-endpoint")?,
-        publish: get("publish-endpoint")?.replace("*;", ""),
-        case: abs(get("case-file")?),
+        server: required(s, "server-endpoint")?,
+        publish: required(s, "publish-endpoint")?.replace("*;", ""),
+        case: canon(&required(s, "case-file")?),
         debug,
     })
 }
@@ -289,106 +314,141 @@ pub fn main(args: &[String]) {
     });
 }
 
-fn cli(args: &[String]) -> Result<(), String> {
-    let (mut op, mut conf, mut env, mut dmn, mut debug) = (
-        None,
-        "/etc/sceptre/config.ini".to_string(),
-        "pybennu".to_string(),
-        false,
-        false,
-    );
-    let mut it = args.iter();
-    let usage = || -> ! {
-        eprintln!("usage: pybennu-power-solver [-c CONFIG_FILE] [-d] [-e ENV] [-v] {{start,stop,restart,status}}");
-        std::process::exit(2)
+struct Cli {
+    op: String,
+    conf: String,
+    env: String,
+    daemon: bool,
+    debug: bool,
+}
+
+fn usage() -> ! {
+    eprintln!("usage: pybennu-power-solver [-c CONFIG_FILE] [-d] [-e ENV] [-v] {{start,stop,restart,status}}");
+    std::process::exit(2)
+}
+
+fn flag_value<'a>(it: &mut impl Iterator<Item = &'a String>) -> String {
+    it.next().cloned().unwrap_or_else(|| usage())
+}
+
+fn parse_cli(args: &[String]) -> Cli {
+    let mut c = Cli {
+        op: String::new(),
+        conf: "/etc/sceptre/config.ini".into(),
+        env: "pybennu".into(),
+        daemon: false,
+        debug: false,
     };
+    let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
-            "-c" | "--config-file" => conf = it.next().cloned().unwrap_or_else(|| usage()),
-            "-e" | "--env" => env = it.next().cloned().unwrap_or_else(|| usage()),
-            "-d" | "--daemonize" => dmn = true,
-            "-v" | "--debug" => debug = true,
-            o @ ("start" | "stop" | "restart" | "status") if op.is_none() => {
-                op = Some(o.to_string())
-            }
+            "-c" | "--config-file" => c.conf = flag_value(&mut it),
+            "-e" | "--env" => c.env = flag_value(&mut it),
+            "-d" | "--daemonize" => c.daemon = true,
+            "-v" | "--debug" => c.debug = true,
+            o @ ("start" | "stop" | "restart" | "status") if c.op.is_empty() => c.op = o.into(),
             _ => usage(),
         }
     }
-    let op = op.unwrap_or_else(|| usage());
-    let (pidfile, out, err) = (
-        format!("/var/run/bennu-{env}.pid"),
-        format!("/var/log/bennu-{env}.out"),
-        format!("/var/log/bennu-{env}.err"),
-    );
-    let running = pid_of(&pidfile).filter(|p| alive(*p));
-    match op.as_str() {
-        "stop" => stop(&pidfile, false),
-        "status" => {
-            println!("Viewing daemon status");
-            match running {
-                Some(p) => println!("Daemon is running as PID {p}"),
-                None => println!("Daemon is not running"),
-            }
-        }
+    if c.op.is_empty() {
+        usage();
+    }
+    c
+}
+
+struct Paths {
+    pid: String,
+    out: String,
+    err: String,
+}
+
+fn cli(args: &[String]) -> Result<(), String> {
+    let c = parse_cli(args);
+    let paths = Paths {
+        pid: format!("/var/run/bennu-{}.pid", c.env),
+        out: format!("/var/log/bennu-{}.out", c.env),
+        err: format!("/var/log/bennu-{}.err", c.env),
+    };
+    let running = pid_of(&paths.pid).filter(|p| alive(*p));
+    match c.op.as_str() {
+        "stop" => stop(&paths.pid, false),
+        "status" => print_status(running),
         "restart" if running.is_none() => {
             println!("Daemon is not already running - cannot restart")
         }
-        _ => {
-            if op == "restart" {
-                println!("Restarting daemon");
-                stop(&pidfile, true);
-            } else if let Some(p) = running {
-                return Err(format!(
-                    "pidfile {pidfile} already exist. Daemon already running (PID {p})?"
-                ));
-            }
-            if !std::path::Path::new(&conf).exists() {
-                return Err(format!(
-                    "The file {conf} does not exist - please provide a valid config file."
-                ));
-            }
-            let conf = std::fs::canonicalize(&conf)
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or(conf);
-            let cfg = load_cfg(&conf, debug)?;
-            // load and solve before forking so errors reach the terminal; threads and sockets come after
-            let c = case::load_file(std::path::Path::new(&cfg.case))?;
-            let power = Power::new(c, Islands::Fail, false, &[], &[])?;
-            let daemon = op == "restart" || dmn;
-            if daemon {
-                daemonize(&pidfile, &out, &err)?;
-            }
-            let r = serve(cfg, power);
-            if daemon {
-                let _ = std::fs::remove_file(&pidfile);
-            }
-            return r;
-        }
+        _ => return start(&c, &paths, running),
     }
     Ok(())
 }
 
-fn serve(cfg: Cfg, power: Power) -> Result<(), String> {
-    unsafe {
-        libc::signal(libc::SIGINT, on_signal as *const () as usize);
-        libc::signal(libc::SIGTERM, on_signal as *const () as usize);
+fn print_status(running: Option<i32>) {
+    println!("Viewing daemon status");
+    match running {
+        Some(p) => println!("Daemon is running as PID {p}"),
+        None => println!("Daemon is not running"),
     }
+}
+
+/// `start`, or `restart` of a running daemon: load and solve before forking so errors reach the terminal.
+fn start(c: &Cli, paths: &Paths, running: Option<i32>) -> Result<(), String> {
+    if c.op == "restart" {
+        println!("Restarting daemon");
+        stop(&paths.pid, true);
+    } else if let Some(p) = running {
+        return Err(format!(
+            "pidfile {} already exist. Daemon already running (PID {p})?",
+            paths.pid
+        ));
+    }
+    let (cfg, power) = load_service(c)?;
+    let daemon = c.op == "restart" || c.daemon;
+    if daemon {
+        daemonize(&paths.pid, &paths.out, &paths.err)?;
+    }
+    let r = serve(cfg, power);
+    if daemon {
+        let _ = std::fs::remove_file(&paths.pid);
+    }
+    r
+}
+
+fn load_service(c: &Cli) -> Result<(Cfg, Power), String> {
+    if !std::path::Path::new(&c.conf).exists() {
+        return Err(format!(
+            "The file {} does not exist - please provide a valid config file.",
+            c.conf
+        ));
+    }
+    let cfg = load_cfg(&canon(&c.conf), c.debug)?;
+    let case = case::load_file(std::path::Path::new(&cfg.case))?;
+    let power = Power::new(case, Islands::Fail, false, &[], &[])?;
+    Ok((cfg, power))
+}
+
+/// Publish a noisy snapshot every second until `STOP`.
+fn publish_loop(
+    p: &Mutex<Power>,
+    sock: &std::net::UdpSocket,
+    dest: std::net::SocketAddr,
+    group: &str,
+) {
+    let (mut rng, t0, mut k) = (Rng::seeded(), Instant::now(), 0u64);
+    while !STOP.load(Ordering::SeqCst) {
+        let msg = pack(&p.lock().unwrap(), &mut rng);
+        for d in datagrams_msg(group, &msg) {
+            let _ = sock.send_to(&d, dest);
+        }
+        k += 1;
+        sleep_until(t0 + Duration::from_secs(k), Duration::from_millis(20));
+    }
+}
+
+fn serve(cfg: Cfg, power: Power) -> Result<(), String> {
+    install_signals();
     let p = Arc::new(Mutex::new(power));
     let ctx = zmq::Context::new();
-    let rep = ctx.socket(zmq::REP).map_err(|e| e.to_string())?;
-    rep.bind(&cfg.server)
-        .map_err(|e| format!("bind {}: {e}", cfg.server))?;
     let (p2, debug) = (p.clone(), cfg.debug);
-    let rep_t = std::thread::spawn(move || {
-        while !STOP.load(Ordering::SeqCst) {
-            if !matches!(rep.poll(zmq::POLLIN, 100), Ok(n) if n > 0) {
-                continue;
-            }
-            if let Ok(req) = rep.recv_bytes(0) {
-                let _ = rep.send(handle(&req, &p2, debug), 0);
-            }
-        }
-    });
+    let rep_t = serve_rep(&ctx, &cfg.server, move |req| handle(req, &p2, debug))?;
     let (iface, dest) = parse_udp(&cfg.publish)?;
     let sock = udp_sender(iface.as_deref(), dest)?;
     let group = group_for(&cfg.publish);
@@ -396,17 +456,7 @@ fn serve(cfg: Cfg, power: Power) -> Result<(), String> {
         "Info: pybennu-power-solver (ferrofire): case {}; REP {}; RADIO {} group {group} every 1s",
         cfg.case, cfg.server, cfg.publish
     );
-    let (mut rng, t0, mut k) = (Rng::seeded(), Instant::now(), 0u64);
-    while !STOP.load(Ordering::SeqCst) {
-        let msg = pack(&p.lock().unwrap(), &mut rng);
-        for d in datagrams_msg(&group, &msg) {
-            let _ = sock.send_to(&d, dest);
-        }
-        k += 1;
-        while !STOP.load(Ordering::SeqCst) && Instant::now() < t0 + Duration::from_secs(k) {
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    }
+    publish_loop(&p, &sock, dest, &group);
     let _ = rep_t.join();
     println!("Info: stopped");
     Ok(())
