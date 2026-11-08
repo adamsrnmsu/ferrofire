@@ -3,7 +3,7 @@
 # usage: limactl shell phenix sudo bash <abs>/ipc-test.sh
 set -u
 D=$(cd "$(dirname "$0")" && pwd)
-docker run --rm --name rb-ipc-$$ --ipc=private -v "$D/dist:/sim:ro" bennu:arm64 bash -c '
+docker run --rm --name ff-ipc-$$ --ipc=private -v "$D/dist:/sim:ro" bennu:arm64 bash -c '
 mkdir -p /tmp/w && cd /tmp/w && cp /sim/simulinksolver .
 bennu-simulink-provider --server-endpoint tcp://127.0.0.1:5555 --publish-endpoint udp://127.0.0.1:5556 >prov.log 2>&1 &
 sleep 1; ./simulinksolver -tf inf >solver.log 2>&1 &

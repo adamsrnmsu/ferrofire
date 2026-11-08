@@ -9,7 +9,7 @@ Citation keys: `B:` = `~/git/sceptre-bennu` (Ryan's working tree at `c9c2cf6` **
 `DMN:` = `B:src/bennu/executables/daemon/`; `A:` = `~/git/sceptre-phenix-apps/src/python/phenix_apps/apps/sceptre`;
 `T:` = `~/git/sceptre-phenix-topologies`; `R:` = `~/git/phenix-waterway-range`; `P:` = `R:docs/provider-spec.md`;
 `O:` = **observed** first-hand on 2026-11-08 by running the stock binaries of image `bennu:arm64` (built 2026-11-07,
-Lima VM `phenix`, containers `rb-fd-*`, all removed afterwards); every `O:` item is reproducible with
+Lima VM `phenix`, containers `ff-fd-*`, all removed afterwards); every `O:` item is reproducible with
 `conformance/stock/run-stock.sh` (§8). `W:` = web source, cited by URL; crates.io data fetched 2026-11-08.
 Anything not checked first-hand is marked **UNVERIFIED**.
 
@@ -453,13 +453,13 @@ a table-driven test, including each `O:` value, the delay state machine, comma/`
 binary contains `START_SHELL_0` once, `sed`/Python variants hash identically, flipping the byte starts the listener under a fake `socat` on `PATH`).
 
 ### 8.2 Golden transcripts from the stock device (already captured)
-`conformance/stock/` holds the probes used for the `O:` facts, runnable from the Mac in one command each (`run-stock.sh modbus|dnp3|104|overflow|logic`; creates container `rb-fd-stock` from `bennu:arm64`, removes it on exit):
+`conformance/stock/` holds the probes used for the `O:` facts, runnable from the Mac in one command each (`run-stock.sh modbus|dnp3|104|overflow|logic`; creates container `ff-fd-stock` from `bennu:arm64`, removes it on exit):
 `probe_modbus.py` (24 requests), `probe_dnp3.py` (integrity/class poll, CROB select/direct, AO f32 direct/select/operate, unknown index, Int16), `probe_104.py` (STARTDT, GI, single command, float setpoint),
 `probe_modbus_overflow.py` (Q9), `logic_corpus.xml`. Each feeds inputs by sending a hand-built RADIO datagram, so no provider is needed. Transcripts are normalised (mask timestamps, transport sequence numbers) and
 checked in as `*.golden`.
 
 ### 8.3 Differential run in the Lima VM (when free)
-Two containers per protocol, names `rb-fd-stock` (image `bennu:arm64`) and `rb-fd-rust` (same image or `ubuntu:22.04` plus the Rust binary), identical config and probe; compare transcripts byte for byte after normalisation. Then:
+Two containers per protocol, names `ff-fd-stock` (image `bennu:arm64`) and `ff-fd-rust` (same image or `ubuntu:22.04` plus the Rust binary), identical config and probe; compare transcripts byte for byte after normalisation. Then:
 1. **Provider link**: stock `bennu-test-ep-server` (or the `ferrofire` native provider once it lands) feeds both devices; `bennu-probe --c query/read/write` against a *client-mode* stock device reads the Rust server (the smoke test pair).
 2. **Output path**: write a coil/holding register via Modbus on each device, capture the `WRITE=` the device sends to a netcat-style REP, compare payload bytes (batching, `%f` formatting).
 3. **Firmware flow** in a container with `watcherd`: upload a valid and an invalid firmware, observe accepted/rejected, port 1337 opens only for the shell hash.

@@ -4,7 +4,7 @@
 #   limactl shell phenix bash <abs>/tests/conformance.sh        (needs dist/ferrofire from `make linux`)
 set -u
 D=$(cd "$(dirname "$0")/.." && pwd)
-docker run --rm --name rb-conf-$$ -v "$D/dist:/sim:ro" -v "$D/tests/conformance:/conf:ro" -v "$D/models:/models:ro" bennu:arm64 bash -c '
+docker run --rm --name ff-conf-$$ -v "$D/dist:/sim:ro" -v "$D/tests/conformance:/conf:ro" -v "$D/models:/models:ro" bennu:arm64 bash -c '
 mkdir -p /tmp/w && cd /tmp/w && cp /sim/ferrofire . && cp /conf/rtu-1.xml .
 echo "ldd libzmq: $(ldd ./ferrofire | grep -c zmq) (0 = statically linked)"
 ./ferrofire run /models/waterway.yaml >rb.log 2>&1 &

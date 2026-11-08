@@ -5,7 +5,7 @@
 set -u
 D=$(cd "$(dirname "$0")/.." && pwd)
 SOAP=${SOAP:-/Users/ryanadams/git/sceptre-phenix-topologies/soap/injects/case300.py}
-docker run --rm --name rb-pyp-$$ -v "$D/dist:/sim:ro" -v "$D/tests/conformance:/conf:ro" -v "$SOAP:/soap-case300.py:ro" bennu:arm64 bash -c '
+docker run --rm --name ff-pyp-$$ -v "$D/dist:/sim:ro" -v "$D/tests/conformance:/conf:ro" -v "$SOAP:/soap-case300.py:ro" bennu:arm64 bash -c '
 set -u
 cp /sim/ferrofire /usr/local/bin/ferrofire && ln -sf /usr/local/bin/ferrofire /usr/local/bin/pybennu-power-solver   # = deploy/scripts/ferrofire-power.sh
 mkdir -p /etc/sceptre; cp /soap-case300.py /etc/sceptre/case300.py

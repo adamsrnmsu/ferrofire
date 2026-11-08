@@ -2,12 +2,8 @@
 
 **The fire phēnix rises from.**
 
-ferrofire is the **F**ield-to-**I**nfrastructure **R**untime **E**ngine: a Rust
-simulator for the physical side of [phēnix](https://github.com/sandialabs/sceptre-phenix)
-/ SCEPTRE cyber ranges. It models continuous processes (tanks, pipes, valves, pumps,
-locks) and power systems (AC power flow in the style of PYPOWER) from plain YAML model
-files, and serves them to the range's field devices, with no MATLAB, Simulink or
-PowerWorld required for simple processes.
+ferrofire is the **F**ield-to-**I**nfrastructure **R**untime **E**ngine: the simulated plant behind a
+[phēnix](https://github.com/sandialabs/sceptre-phenix) / SCEPTRE cyber range.
 
 ## The name
 
@@ -19,68 +15,139 @@ PowerWorld required for simple processes.
 
 _Formerly rustbelt._
 
-Status: **phase 3** (engine core, waterway lock, AC/DC power flow, native bennu provider, `pybennu-power-solver` drop-in). Design in the range repo's `docs/provider-spec.md`.
+## What it is
 
-## Use
+- One Rust binary that simulates a physical process and its power system in real time.
+- Models are plain YAML files. No MATLAB, Simulink or PowerWorld.
+- It serves its values to stock bennu field devices (RTUs), exactly like the providers SCEPTRE ships today.
+- Built for **simple** processes: tanks, pipes, valves, pumps, locks, and steady-state AC power flow.
+
+## What it is not
+
+- Not an electromagnetic-transient or transient-stability simulator.
+- Not a full Simulink replacement for complex models.
+- No optimal power flow (OPF), no generator reactive-power limit loop (yet), no `.mat` case files.
+
+## System diagram
+
+```mermaid
+flowchart LR
+  subgraph model["Model (YAML)"]
+    M["models/*.yaml<br/>inputs, states, bodies,<br/>outputs, power"]
+    C["power case<br/>PYPOWER .py / MATPOWER .m / inline"]
+  end
+  subgraph core["ferrofire engine core"]
+    E["expression parser"]
+    S["states: ode (RK4) / toward"]
+    B["bodies: 1-D movers,<br/>barriers, bounce"]
+    P["AC Newton-Raphson /<br/>DC power flow"]
+  end
+  subgraph fe["Frontends (pick one)"]
+    N["ferrofire run<br/>native bennu provider<br/>ZMQ REP tcp + UDP RADIO"]
+    SL["simulinksolver<br/>Simulink shm adapter"]
+    PY["pybennu-power-solver<br/>PyPower drop-in"]
+  end
+  subgraph range["phēnix / SCEPTRE range"]
+    BP["stock bennu-simulink-provider"]
+    FD["bennu field devices (RTUs)<br/>Modbus / DNP3"]
+    SC["OPC / SCADA / HMI / historian"]
+  end
+  M --> E
+  C --> P
+  E --> S & B & P
+  core --> N & SL & PY
+  SL -- "shm + semaphores" --> BP
+  BP -- "ZMQ" --> FD
+  N -- "ZMQ" --> FD
+  PY -- "ZMQ" --> FD
+  FD -- "Modbus / DNP3" --> SC
+  SC -. "writes: gates, valves, breakers" .-> FD
+```
+
+## Features
+
+| Area | What you get |
+|---|---|
+| Process models | `states` integrated with RK4 (`ode:`) or a rate-limited approach (`toward:`); `min`/`max` clamps |
+| Moving things | `bodies`: 1-D movers with gate `barriers` and end `bounce` (the waterway boat) |
+| Expressions | `+ - * / % ^`, comparisons (1/0), `&& \|\|`, `c ? a : b`, `if()`, `min max abs sqrt exp ln pow clamp sign step floor` |
+| Power | AC Newton-Raphson and DC power flow, ported from PYPOWER 5.1.19 |
+| Power cases | PYPOWER `.py` (literal subset), MATPOWER `.m`, or `inline:` in the model |
+| Coupling | `power.drive`: process values set loads, e.g. pump flow sets a bus load in MW |
+| Islands | `deenergize` (zero the voltage on dead buses) or `fail` (raise `bus-alert`, PyPower behaviour) |
+| Tags | Waterway tags and the full PYPOWER/pybennu tag vocabulary (`bus-N.voltage`, `branch-1_F-T.active`, ...) |
+
+## Frontends
+
+| Frontend | How it starts | Protocol | Replaces |
+|---|---|---|---|
+| Native bennu provider | `ferrofire run model.yaml` | ZMQ REP on tcp + UDP RADIO/DISH multicast | any bennu provider |
+| Simulink adapter | `simulinksolver -tf inf` (or `ferrofire simulink`) | SysV shm + POSIX semaphores to stock `bennu-simulink-provider` | the Simulink solver binary |
+| PyPower drop-in | `pybennu-power-solver start -c config.ini` (or `ferrofire pypower`) | same INI, pidfile, logs and ZMQ as pybennu | `pybennu-power-solver` |
+
+## Quick start
+
+- Requirements: Docker. Cargo is **not** needed on the host.
+- `make test`: builds the `ff-rust:22.04` container and runs every unit and integration test.
+- `make golden`: generates PYPOWER 5.1.19 reference results into `target/golden` (needs `uv`; never committed). `make test` runs it first.
+- `make linux`: builds glibc aarch64 binaries into `dist/ferrofire` and `dist/simulinksolver`.
+- Run a model offline and print a snapshot:
 
 ```
-ferrofire check models/waterway.yaml --steps 400 --write lowervalve.open=1@2   # offline run, prints the snapshot
-ferrofire run models/waterway.yaml [--server tcp://0.0.0.0:5555] [--publish 'udp://*;239.0.0.1:40000'] [--rate 0.1]
-ferrofire simulink [-tf inf] [--model model.yaml]                                # shm adapter (see CONTRACT.md)
-simulinksolver -tf inf                                                          # same adapter, selected by argv[0]
-```
-
-The adapter loads `--model`, else `./model.yaml`, else the embedded `models/waterway.yaml`. Tag order follows
-`publishPoints.txt` if present, else the model's `outputs` order.
-
-## Model format (v1, phase 0)
-
-`version`, `dt`, `substeps`, `params` (constants), `inputs` (RTU-writable, `type: analog|binary`, `bool: true` latches
-nonzero as 1), `states` (`ode: expr` integrated with RK4, or `toward: {target, rate}`; `init`, `min`, `max`),
-`bodies` (1-D mover with `barriers` and `bounce`; exposes `<name>.x`, `<name>.dir`), `outputs` (`expr`, or no expr to
-republish an input/state of that name), optional `publish_order`. Expressions: numbers, `+ - * / % ^`, `! -`,
-comparisons (1/0), `&& ||`, `c ? a : b`, `if(c,a,b)`, `min max abs sqrt exp ln pow clamp sign step floor`;
-tags containing `-` are back-quoted. See `models/waterway.yaml`.
-
-## Power (phase 1)
-
-A model may carry a `power:` block: `case: file.py|file.m` (relative to the model) or `inline:` buses/branches/gens,
-`islands: deenergize|fail` (default `deenergize`), `dc_fallback`, `max_interval`, and `drive:` (process -> power
-couplings, `"load-1_bus-3.mw": "expr"`, evaluated in order before each solve). Every PYPOWER/pybennu tag
-(`bus-N.voltage`, `load-1_bus-N.mw`, `generator-1_bus-N.active`, `branch-1_F-T.active`, `bus-alert.active`, ...) is published and
-readable in expressions with back-quotes; writable ones (RTU writes, `check --write`) edit the case and trigger a
-re-solve on the next step. Solver: Newton-Raphson with dense LU, ported from PYPOWER (ext2int, bustypes, makeYbus,
-makeSbus, dSbus_dV, newtonpf, pfsoln, makeBdc, dcpf); no `ENFORCE_Q_LIMS`, no OPF, no `.mat`.
-Deliberate deviations from pybennu: load/shunt writes affect the solve; a bus keeps its PV/PQ type when `active` is
-written; `deenergize` zeroes buses no reference generator reaches. `models/pump-station.yaml` couples a pump to bus 3:
-
-```
+ferrofire check models/waterway.yaml --steps 400 --write uppervalve.open=1@2
 ferrofire check models/pump-station.yaml --steps 600 --write pump.run=true@0 --write 'branch-1_2-3.active=false@30'
 ```
 
-`run` is the native bennu provider: ZMQ REP (`QUERY=`/`READ=`/`WRITE=`, `ACK=`/`ERR=`, NUL-terminated) plus UDP
-RADIO/DISH datagrams (`[len][group][tag:value,...\0]`, group = libstdc++ hash of the endpoint, chunked at 1400 bytes).
-The zmq crate links libzmq statically from `libzmq3-dev` (jammy 4.3.4), so the binary needs no libzmq on the guest.
-`tests/conformance.sh` (Lima VM) runs it next to stock `bennu-probe` and `bennu-field-device` in `bennu:arm64`.
+- Serve a model to a range: `ferrofire run models/waterway.yaml --server tcp://0.0.0.0:5555 --publish 'udp://*;239.0.0.1:40000'`
 
-## Build / test
+## Model format (short)
 
-No cargo needed on the host: `make test` and `make linux` use a Docker `ubuntu:22.04` image (`docker/Dockerfile`).
-`make golden` generates PYPOWER 5.1.19 reference results into `target/golden` (needs `uv`; never committed;
-PYPOWER 5.1.19 needs numpy<2, so Python 3.11 is pinned) and `make test` depends on it. `make linux` writes glibc aarch64 `dist/ferrofire` and `dist/simulinksolver`. It must be glibc: the musl build hangs the
-stock `bennu-simulink-provider` (different `sem_t` layout). `ipc-test.sh` checks the adapter against the stock provider
-inside `bennu:arm64` (run in the Lima VM).
+```yaml
+version: 1
+dt: 0.05
+inputs:
+  uppervalve.open: {type: analog, bool: true, default: 0}
+states:
+  lock.height:
+    toward: {target: "uppervalve.open ? 15 : 5", rate: 0.5}   # fill to 15 while the upper valve is open
+    init: 5
+outputs:
+  lock.height: {type: analog}
+```
+
+- Full examples: `models/waterway.yaml`, `models/pump-station.yaml`.
+- Full design: `docs/provider-spec.md` in the [range repo](https://github.com/adamsrnmsu) and `docs/field-device-spec.md` here.
+
+## SCEPTRE integration today
+
+- **Simulink branch:** inject ferrofire as `simulinksolver` with `simulator: Simulink`. Works with stock bennu, no app changes.
+- **PyPower branch:** install as `pybennu-power-solver` (`deploy/`). `simulator: PyPower` scenarios run unchanged.
+- **Native type:** a new `simulator:` type in sceptre-phenix-apps is planned (phase 5).
+
+## Testing
+
+- Unit tests: expression parser, model loading, shm contract, wire framing, group hash.
+- Waterway: trace-equality golden (`tests/golden/waterway_trace.csv`) and a full boat transit with the RTU logic.
+- Power: matches PYPOWER 5.1.19 on case9, 14, 30, 57, 118 and 300 (goldens generated at test time).
+- Properties: per-bus power balance, barrier behaviour, write latching, a tank against its closed form.
+- Conformance (in a VM with `bennu:arm64`): `ipc-test.sh`, `tests/conformance.sh`, `tests/pypower-conformance.sh`.
+- Planned: `make check` with formatting, clippy, and [ub-mode](https://github.com/unclebob/ub-mode) quality gates (CRAP < 10, duplication < 0.8, mutation testing).
+
+## Status
+
+- Done: phase 0 (engine, waterway model), 1 (power flow), 2 (native provider), 3 (PyPower drop-in).
+- Next: phase 4 (pump station with power in a live range), phase 5 (upstream sceptre-phenix-apps type).
+- Then: a Rust drop-in for `bennu-field-deviced` (spec in `docs/field-device-spec.md`).
+
+## Known differences from stock
+
+- After a `WRITE`, stock PyPower turns every non-slack bus into PQ; ferrofire keeps generator buses PV.
+- Load and shunt writes change the solve in ferrofire; in stock PyPower they do not.
+- Initial values match stock to 1e-10.
 
 ## Licence
 
-MIT, Copyright (c) 2026 Ryan Adams. `NOTICE` carries the PYPOWER (BSD-3, PSERC) notice for ported code. No MATPOWER case
-files are vendored. bennu/pybennu are GPL-3 and are not translated: only wire formats and observed behaviour are matched.
-
-## pybennu-power-solver drop-in
-
-`pybennu-power-solver {start|stop|restart|status} [-c config.ini] [-e env] [-d] [-v]` (or `ferrofire pypower ...`) runs a
-PYPOWER-vocabulary power flow as a bennu provider: same INI, pidfile `/var/run/bennu-<env>.pid`, logs
-`/var/log/bennu-<env>.{out,err}`, 1 s feed with pybennu's +-1 % noise, `READ` -> `ACK=<tag>:<value>`, batch-validated
-`WRITE`. Install it under that name (`deploy/`). Test: `tests/pypower.rs` (container), `tests/pypower-conformance.sh` (VM).
-Known difference from stock: after a WRITE, stock turns every non-slack bus into PQ; ferrofire keeps generator buses PV
-(spec decision 8), so post-write values differ. Initial values match to 1e-10.
+- MIT, Copyright (c) 2026 Ryan Adams.
+- Ported PYPOWER code (`src/power/pf.rs`, `src/power/case.rs`) keeps PYPOWER's BSD-3 notice (PSERC); see `NOTICE`.
+- No MATPOWER case files are shipped: their licence excludes them.
+- bennu/pybennu are GPL-3. ferrofire matches their wire formats and behaviour only; no bennu code is translated.

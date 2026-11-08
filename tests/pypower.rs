@@ -92,7 +92,7 @@ fn req(ep: &str, m: &str) -> String {
 
 #[test]
 fn daemon_verbs_pidfile_logs_and_feed() {
-    let dir = std::env::temp_dir().join(format!("rb-pyp-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("ff-pyp-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let bin = dir.join("pybennu-power-solver"); // the install name selects this mode
     std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_ferrofire"), &bin).unwrap();

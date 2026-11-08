@@ -6,8 +6,8 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 plat="${PLATFORM:-linux/arm64}"
-docker image inspect rb-rust:22.04 >/dev/null 2>&1 || docker build --platform "$plat" -t rb-rust:22.04 "$here/docker"
-docker run --rm --platform "$plat" -v "$here":/src -w /src -e CARGO_TARGET_DIR=/src/target-linux rb-rust:22.04 bash -c '
+docker image inspect ff-rust:22.04 >/dev/null 2>&1 || docker build --platform "$plat" -t ff-rust:22.04 "$here/docker"
+docker run --rm --platform "$plat" -v "$here":/src -w /src -e CARGO_TARGET_DIR=/src/target-linux ff-rust:22.04 bash -c '
   cargo build --release
   mkdir -p dist && cp target-linux/release/ferrofire dist/ferrofire && cp target-linux/release/ferrofire dist/simulinksolver
   file dist/ferrofire; objdump -T dist/ferrofire | grep -o "GLIBC_[0-9.]*" | sort -uV | tail -1'

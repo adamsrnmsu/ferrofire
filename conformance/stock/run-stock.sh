@@ -1,7 +1,7 @@
 #!/bin/sh
 # Run one probe against the STOCK bennu field device in bennu:arm64 (Lima VM "phenix").
 # Usage (from the Mac):  conformance/stock/run-stock.sh modbus|104|dnp3|overflow|logic
-# Creates and removes its own container rb-fd-stock; touches nothing else. Spec: docs/field-device-spec.md section 8.
+# Creates and removes its own container ff-fd-stock; touches nothing else. Spec: docs/field-device-spec.md section 8.
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
@@ -15,15 +15,15 @@ case "$1" in
   *) echo "usage: $0 modbus|104|dnp3|overflow|logic" >&2; exit 2 ;;
 esac
 L="limactl shell phenix --"
-$L docker rm -f rb-fd-stock >/dev/null 2>&1 || true
-$L docker run -d --name rb-fd-stock bennu:arm64 sleep 120 >/dev/null
-trap '$L docker rm -f rb-fd-stock >/dev/null 2>&1' EXIT
-cat "$cfg" | $L docker exec -i rb-fd-stock sh -c 'cat > /tmp/cfg.xml'
-$L docker exec -d rb-fd-stock sh -c 'LD_LIBRARY_PATH=/usr/local/lib bennu-field-device --f /tmp/cfg.xml > /tmp/fd.out 2>&1'
+$L docker rm -f ff-fd-stock >/dev/null 2>&1 || true
+$L docker run -d --name ff-fd-stock bennu:arm64 sleep 120 >/dev/null
+trap '$L docker rm -f ff-fd-stock >/dev/null 2>&1' EXIT
+cat "$cfg" | $L docker exec -i ff-fd-stock sh -c 'cat > /tmp/cfg.xml'
+$L docker exec -d ff-fd-stock sh -c 'LD_LIBRARY_PATH=/usr/local/lib bennu-field-device --f /tmp/cfg.xml > /tmp/fd.out 2>&1'
 sleep 4
 if [ -n "$probe" ]; then
-  cat "$here/$probe" | $L docker exec -i rb-fd-stock sh -c 'cat > /tmp/probe.py'
-  $L docker exec rb-fd-stock python3 /tmp/probe.py
+  cat "$here/$probe" | $L docker exec -i ff-fd-stock sh -c 'cat > /tmp/probe.py'
+  $L docker exec ff-fd-stock python3 /tmp/probe.py
 else
-  sleep 4; $L docker exec rb-fd-stock grep -E '^LOGIC|ERROR|WARN|Delaying' /tmp/fd.out | head -80
+  sleep 4; $L docker exec ff-fd-stock grep -E '^LOGIC|ERROR|WARN|Delaying' /tmp/fd.out | head -80
 fi
