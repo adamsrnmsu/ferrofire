@@ -4,7 +4,6 @@
 # Creates and removes its own container ff-fd-stock; touches nothing else. Spec: docs/field-device-spec.md section 8.
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
-repo=$(cd "$here/../.." && pwd)
 bennu=${BENNU_DATA:-$HOME/git/sceptre-bennu/data/configs/ep}
 case "$1" in
   modbus)   cfg=$bennu/modbus-server.xml;   probe=probe_modbus.py ;;
