@@ -173,92 +173,109 @@ fn py_key(src: &str, key: &str) -> Option<usize> {
     None
 }
 
+/// `array(` or `[` after the `=`, then the opening `[`: whether the matrix is wrapped in `array(...)`.
+fn open_array(c: &mut Cur) -> Result<bool, String> {
+    let wrapped = c.peek() != Some(b'[');
+    if wrapped {
+        if !c.s[c.i..].starts_with("array(") {
+            return c.err("only literal arrays (`array([...])` or `[...]`) are supported");
+        }
+        c.i += "array(".len();
+    }
+    if !c.eat(b'[') {
+        return c.err("expected `[`");
+    }
+    Ok(wrapped)
+}
+
+/// Rows `[a, b], [c, d]` up to the closing `]`.
+fn read_rows(c: &mut Cur) -> Result<Vec<Vec<f64>>, String> {
+    let mut rows = vec![];
+    while !c.eat(b']') {
+        if !c.eat(b'[') {
+            return c.err("expected `[` starting a row");
+        }
+        let mut row = vec![];
+        while !c.eat(b']') {
+            row.push(c.num()?);
+            c.eat(b',');
+        }
+        rows.push(row);
+        c.eat(b',');
+    }
+    Ok(rows)
+}
+
+fn py_matrix(src: &str, key: &str) -> Result<Vec<Vec<f64>>, String> {
+    let at = py_key(src, key).ok_or(format!("case: no ppc[\"{key}\"] assignment"))?;
+    let mut c = Cur { s: src, i: at };
+    let wrapped = open_array(&mut c)?;
+    let rows = read_rows(&mut c)?;
+    if wrapped && !c.eat(b')') {
+        return c.err("expected `)`");
+    }
+    Ok(rows)
+}
+
 /// Restricted literal parser: `ppc["bus"] = array([[1, 3, 0.5], ...])` or a bare nested list.
 pub fn parse_py(src: &str) -> Result<Case, String> {
     let src = strip_comments(src, '#');
-    let mat = |key: &str| -> Result<Vec<Vec<f64>>, String> {
-        let at = py_key(&src, key).ok_or(format!("case: no ppc[\"{key}\"] assignment"))?;
-        let mut c = Cur { s: &src, i: at };
-        let wrapped = if c.peek() == Some(b'[') {
-            false
-        } else {
-            let st = c.i;
-            if !src[st..].starts_with("array(") {
-                return c.err("only literal arrays (`array([...])` or `[...]`) are supported");
-            }
-            c.i += "array(".len();
-            true
-        };
-        if !c.eat(b'[') {
-            return c.err("expected `[`");
-        }
-        let mut rows = vec![];
-        while !c.eat(b']') {
-            if !c.eat(b'[') {
-                return c.err("expected `[` starting a row");
-            }
-            let mut row = vec![];
-            while !c.eat(b']') {
-                row.push(c.num()?);
-                c.eat(b',');
-            }
-            rows.push(row);
-            c.eat(b',');
-        }
-        if wrapped && !c.eat(b')') {
-            return c.err("expected `)`");
-        }
-        Ok(rows)
-    };
     let at = py_key(&src, "baseMVA").ok_or("case: no ppc[\"baseMVA\"] assignment")?;
     let base = Cur { s: &src, i: at }.num()?;
+    let mat = |key| py_matrix(&src, key);
     Case::from_parts(base, mat("bus")?, mat("gen")?, mat("branch")?)
 }
 
 // ---- MATPOWER .m ---------------------------------------------------------------------------------------------
 
+/// Position just after the `=` of `mpc.key` (not `mpc.keyword`).
+fn m_find(src: &str, key: &str) -> Result<usize, String> {
+    let pat = format!("mpc.{key}");
+    let p = src
+        .match_indices(&pat)
+        .map(|(i, _)| i)
+        .find(|i| !src[i + pat.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_'))
+        .ok_or(format!("case: no mpc.{key}"))?;
+    let eq = src[p..]
+        .find('=')
+        .ok_or(format!("case: mpc.{key} has no `=`"))?;
+    Ok(p + eq + 1)
+}
+
+fn m_row(r: &str, key: &str) -> Result<Vec<f64>, String> {
+    r.split(|ch: char| ch == ',' || ch.is_whitespace())
+        .filter(|t| !t.is_empty())
+        .map(|t| {
+            t.parse::<f64>()
+                .map_err(|_| format!("case: bad number `{t}` in mpc.{key}"))
+        })
+        .collect()
+}
+
+fn m_matrix(src: &str, key: &str) -> Result<Vec<Vec<f64>>, String> {
+    let mut c = Cur {
+        s: src,
+        i: m_find(src, key)?,
+    };
+    if !c.eat(b'[') {
+        return c.err("expected `[`");
+    }
+    let end = src[c.i..].find(']').ok_or("case: unterminated `[`")? + c.i;
+    src[c.i..end]
+        .split([';', '\n'])
+        .filter(|r| !r.trim().is_empty())
+        .map(|r| m_row(r, key))
+        .collect()
+}
+
 pub fn parse_m(src: &str) -> Result<Case, String> {
     let src = strip_comments(src, '%');
-    let find = |key: &str| -> Result<usize, String> {
-        let pat = format!("mpc.{key}");
-        let p = src
-            .match_indices(&pat)
-            .map(|(i, _)| i)
-            .find(|i| !src[i + pat.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_'))
-            .ok_or(format!("case: no mpc.{key}"))?;
-        let eq = src[p..]
-            .find('=')
-            .ok_or(format!("case: mpc.{key} has no `=`"))?;
-        Ok(p + eq + 1)
-    };
-    let mat = |key: &str| -> Result<Vec<Vec<f64>>, String> {
-        let mut c = Cur {
-            s: &src,
-            i: find(key)?,
-        };
-        if !c.eat(b'[') {
-            return c.err("expected `[`");
-        }
-        let end = src[c.i..].find(']').ok_or("case: unterminated `[`")? + c.i;
-        src[c.i..end]
-            .split([';', '\n'])
-            .filter(|r| !r.trim().is_empty())
-            .map(|r| {
-                r.split(|ch: char| ch == ',' || ch.is_whitespace())
-                    .filter(|t| !t.is_empty())
-                    .map(|t| {
-                        t.parse::<f64>()
-                            .map_err(|_| format!("case: bad number `{t}` in mpc.{key}"))
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .collect::<Result<_, _>>()
-    };
     let base = Cur {
         s: &src,
-        i: find("baseMVA")?,
+        i: m_find(&src, "baseMVA")?,
     }
     .num()?;
+    let mat = |key| m_matrix(&src, key);
     Case::from_parts(base, mat("bus")?, mat("gen")?, mat("branch")?)
 }
 
@@ -373,64 +390,84 @@ pub struct Inline {
     gens: Vec<IGen>,
 }
 
+impl IBus {
+    fn type_code(&self) -> Result<f64, String> {
+        match &self.ty {
+            BusType::N(n) => Ok(*n),
+            BusType::S(s) => match s.as_str() {
+                "slack" | "ref" => Ok(REF),
+                "pv" => Ok(PV),
+                "pq" => Ok(PQ),
+                "isolated" | "none" => Ok(NONE),
+                o => Err(format!("inline bus {}: unknown type `{o}`", self.id)),
+            },
+        }
+    }
+
+    fn row(&self) -> Result<BusRow, String> {
+        let b = self;
+        Ok([
+            b.id,
+            b.type_code()?,
+            b.pd,
+            b.qd,
+            b.gs,
+            b.bs,
+            b.area,
+            b.vm,
+            b.va,
+            b.base_kv,
+            b.zone,
+            b.vmax,
+            b.vmin,
+        ])
+    }
+}
+
+impl IGen {
+    fn row(&self, base_mva: f64) -> GenRow {
+        let g = self;
+        let mut r = [0.0; 21];
+        r[..10].copy_from_slice(&[
+            g.bus, g.pg, g.qg, g.qmax, g.qmin, g.vg, base_mva, g.status, g.pmax, g.pmin,
+        ]);
+        r
+    }
+}
+
+impl IBranch {
+    fn row(&self) -> BranchRow {
+        let b = self;
+        let mut r = [0.0; 17];
+        r[..13].copy_from_slice(&[
+            b.from,
+            b.to,
+            b.r,
+            b.x,
+            b.b,
+            b.rate,
+            b.rate,
+            b.rate,
+            b.tap,
+            b.shift,
+            b.status,
+            d_ninf(),
+            d_pinf(),
+        ]);
+        r
+    }
+}
+
 impl Inline {
     pub fn to_case(&self) -> Result<Case, String> {
-        let mut c = Case {
+        Ok(Case {
             base_mva: self.base_mva,
-            ..Default::default()
-        };
-        for b in &self.buses {
-            let ty = match &b.ty {
-                BusType::N(n) => *n,
-                BusType::S(s) => match s.as_str() {
-                    "slack" | "ref" => REF,
-                    "pv" => PV,
-                    "pq" => PQ,
-                    "isolated" | "none" => NONE,
-                    o => return Err(format!("inline bus {}: unknown type `{o}`", b.id)),
-                },
-            };
-            c.bus.push([
-                b.id, ty, b.pd, b.qd, b.gs, b.bs, b.area, b.vm, b.va, b.base_kv, b.zone, b.vmax,
-                b.vmin,
-            ]);
-        }
-        for g in &self.gens {
-            let mut r = [0.0; 21];
-            r[..10].copy_from_slice(&[
-                g.bus,
-                g.pg,
-                g.qg,
-                g.qmax,
-                g.qmin,
-                g.vg,
-                self.base_mva,
-                g.status,
-                g.pmax,
-                g.pmin,
-            ]);
-            c.gen.push(r);
-        }
-        for b in &self.branches {
-            let mut r = [0.0; 17];
-            r[..13].copy_from_slice(&[
-                b.from,
-                b.to,
-                b.r,
-                b.x,
-                b.b,
-                b.rate,
-                b.rate,
-                b.rate,
-                b.tap,
-                b.shift,
-                b.status,
-                d_ninf(),
-                d_pinf(),
-            ]);
-            c.branch.push(r);
-        }
-        Ok(c)
+            bus: (self.buses.iter())
+                .map(IBus::row)
+                .collect::<Result<_, _>>()?,
+            gen: self.gens.iter().map(|g| g.row(self.base_mva)).collect(),
+            branch: self.branches.iter().map(IBranch::row).collect(),
+        })
     }
 }
 
