@@ -255,6 +255,28 @@ fn move_toward(cur: f64, target: f64, max: f64) -> f64 {
     }
 }
 
+/// Where a body going from `x` to `nx` ends up against a closed barrier at `at`.
+fn barrier_limit(at: f64, (x, nx): (f64, f64), dir: f64) -> f64 {
+    if dir > 0.0 && x <= at && nx > at {
+        at
+    } else if dir < 0.0 && x > at && nx <= at {
+        at + EPS
+    } else {
+        nx
+    }
+}
+
+/// Reflect at the ends of `[lo, hi]`: (position, direction).
+fn bounce_at(lo: f64, hi: f64, nx: f64, dir: f64) -> (f64, f64) {
+    if nx >= hi {
+        (hi, -1.0)
+    } else if nx <= lo {
+        (lo, 1.0)
+    } else {
+        (nx, dir)
+    }
+}
+
 #[derive(Default)]
 struct Syms {
     map: HashMap<String, usize>,
@@ -284,6 +306,14 @@ fn parse_doc(yaml: &str) -> Result<Doc, String> {
 /// Compile `src` against the symbol table; `ctx` says where the expression came from.
 fn comp(syms: &Syms, src: &str, ctx: &str) -> Result<Node, String> {
     compile(src, &syms.map).map_err(|e| format!("{ctx}: `{src}` {e}"))
+}
+
+fn initial_values(n: usize, init: &[(usize, f64)]) -> Vec<f64> {
+    let mut v = vec![0.0; n];
+    for &(s, x) in init {
+        v[s] = x;
+    }
+    v
 }
 
 fn bit(b: bool) -> f64 {
@@ -598,18 +628,27 @@ impl Model {
         let mut syms = Syms::default();
         let decl = declare(&doc, &mut syms)?;
         let power = build_power(&doc, dir, &mut syms)?;
+        let mut m = Model::compile(&doc, decl, power, &syms)?;
+        m.eval();
+        m.power_update();
+        m.eval();
+        Ok(m)
+    }
 
-        let mut v = vec![0.0; syms.n];
-        for &(s, x) in &decl.init {
-            v[s] = x;
-        }
-        let (odes, towards, bounds) = compile_states(&doc, &decl.states, &syms, &mut v)?;
-        let bodies = compile_bodies(&doc, &decl.bodies, &syms, &mut v)?;
-        let eval_order = compile_outputs(&doc, &decl.outs, &syms)?;
-        let prt = build_runtime(power, &doc, &syms, &mut v)?;
-        let published = build_published(&doc, &decl.outs, &syms, prt.as_ref())?;
-
-        let mut m = Model {
+    /// Compile every expression against the slot table; the model starts at t = 0 with initial values in place.
+    fn compile(
+        doc: &Doc,
+        decl: Decl,
+        power: Option<(Power, Vec<usize>)>,
+        syms: &Syms,
+    ) -> Result<Model, String> {
+        let mut v = initial_values(syms.n, &decl.init);
+        let (odes, towards, bounds) = compile_states(doc, &decl.states, syms, &mut v)?;
+        let bodies = compile_bodies(doc, &decl.bodies, syms, &mut v)?;
+        let eval_order = compile_outputs(doc, &decl.outs, syms)?;
+        let power = build_runtime(power, doc, syms, &mut v)?;
+        let published = build_published(doc, &decl.outs, syms, power.as_ref())?;
+        Ok(Model {
             dt: doc.dt,
             publish_rate: doc.publish_rate,
             time: 0.0,
@@ -622,12 +661,8 @@ impl Model {
             bodies,
             eval_order,
             published,
-            power: prt,
-        };
-        m.eval();
-        m.power_update();
-        m.eval();
-        Ok(m)
+            power,
+        })
     }
 
     /// Published tags in publish order with their wire type.
@@ -761,28 +796,17 @@ impl Model {
     }
 
     fn body_step(&self, b: &Body, dt: f64) -> (f64, f64) {
-        let (x, mut dir) = (self.v[b.x], self.v[b.dir]);
+        let (x, dir) = (self.v[b.x], self.v[b.dir]);
         let mut nx = x + dir * b.speed.eval(&self.v) * dt;
         for (at, open) in &b.barriers {
-            if open.eval(&self.v) != 0.0 {
-                continue;
-            }
-            if dir > 0.0 && x <= *at && nx > *at {
-                nx = *at;
-            } else if dir < 0.0 && x > *at && nx <= *at {
-                nx = *at + EPS;
+            if open.eval(&self.v) == 0.0 {
+                nx = barrier_limit(*at, (x, nx), dir);
             }
         }
-        if let Some([lo, hi]) = b.bounce {
-            if nx >= hi {
-                nx = hi;
-                dir = -1.0;
-            } else if nx <= lo {
-                nx = lo;
-                dir = 1.0;
-            }
+        match b.bounce {
+            Some([lo, hi]) => bounce_at(lo, hi, nx, dir),
+            None => (nx, dir),
         }
-        (nx, dir)
     }
 
     // ponytail: toward states/bodies are frozen at instant t inside RK stages; fine for dt <= 0.1 s models.

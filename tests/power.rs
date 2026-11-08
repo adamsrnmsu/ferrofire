@@ -469,3 +469,21 @@ fn pump_station_trips_when_the_feeder_opens() {
     );
     assert_eq!(num(m.get("bus-alert.active")), 0.0);
 }
+
+#[test]
+fn inline_bus_types_by_name_and_number() {
+    let inline = |ty: &str| {
+        let y = format!(
+            "version: 1\ndt: 0.1\npower:\n  inline:\n    buses:\n      - {{id: 1, type: {ty}}}\n"
+        );
+        Model::load(&y).err().map(|e| e.to_string())
+    };
+    assert!(inline("bogus")
+        .unwrap()
+        .contains("inline bus 1: unknown type `bogus`"));
+    for ok in ["slack", "ref", "pv", "pq", "isolated", "none", "3"] {
+        // parsing succeeds; the solver then refuses a case with no generator, which is not a type error
+        let e = inline(ok).unwrap_or_default();
+        assert!(!e.contains("unknown type"), "{ok}: {e}");
+    }
+}

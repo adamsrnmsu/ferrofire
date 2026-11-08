@@ -112,3 +112,70 @@ fn rep_round_trip() {
     }
     t.join().unwrap();
 }
+
+#[test]
+fn run_arguments() {
+    let a = |s: &[&str]| RunArgs::parse(&s.iter().map(|x| x.to_string()).collect::<Vec<_>>());
+    let ok = a(&[
+        "m.yaml",
+        "--rate",
+        "0.5",
+        "--server",
+        "tcp://*:1",
+        "--publish",
+        "udp://*;239.0.0.1:2",
+    ])
+    .unwrap();
+    assert_eq!(ok.path.as_deref(), Some("m.yaml"));
+    assert_eq!(
+        (ok.server.as_str(), ok.publish.as_str()),
+        ("tcp://*:1", "udp://*;239.0.0.1:2")
+    );
+    assert_eq!(ok.rate, Some(0.5));
+    let d = a(&["--model", "x.yaml"]).unwrap();
+    assert_eq!(d.path.as_deref(), Some("x.yaml"));
+    assert_eq!((d.server.as_str(), d.rate), ("tcp://0.0.0.0:5555", None));
+    // a second bare word is not a model, and a flag with no value is refused
+    assert!(a(&["--model", "x.yaml", "y.yaml"])
+        .unwrap_err()
+        .contains("unknown argument `y.yaml`"));
+    assert!(a(&["--rate"]).unwrap_err().contains("--rate needs a value"));
+    assert!(a(&["--rate", "fast"]).unwrap_err().starts_with("--rate:"));
+}
+
+#[test]
+fn publish_period_prefers_rate_then_model_then_a_tenth() {
+    let m = Model::load("version: 1\ndt: 0.1\npublish_rate: 0.25\n").unwrap();
+    let plain = Model::load("version: 1\ndt: 0.1\n").unwrap();
+    assert_eq!(publish_period(Some(2.0), &m), Ok(2.0));
+    assert_eq!(publish_period(None, &m), Ok(0.25));
+    assert_eq!(publish_period(None, &plain), Ok(0.1));
+    assert!(publish_period(Some(0.0), &m).is_err());
+    assert!(publish_period(Some(-1.0), &m).is_err());
+}
+
+#[test]
+fn udp_endpoints_and_senders() {
+    let (iface, dest) = parse_udp("udp://10.1.1.2;239.0.0.1:40000").unwrap();
+    assert_eq!(
+        (iface.as_deref(), dest.to_string()),
+        (Some("10.1.1.2"), "239.0.0.1:40000".into())
+    );
+    assert_eq!(parse_udp("udp://*;239.0.0.1:1").unwrap().0, None);
+    assert!(parse_udp("tcp://x:1")
+        .unwrap_err()
+        .contains("must be udp://"));
+    assert!(parse_udp("udp://no-port").is_err());
+    // unicast needs no multicast setup; multicast takes an IPv4 interface or none
+    let uni = parse_udp("udp://127.0.0.1:9").unwrap().1;
+    assert!(udp_sender(Some("not-an-ip"), uni).is_ok());
+    let mc = parse_udp("udp://239.0.0.1:9").unwrap().1;
+    assert!(udp_sender(None, mc).is_ok());
+    assert!(udp_sender(Some("127.0.0.1"), mc).is_ok());
+    assert!(udp_sender(Some("not-an-ip"), mc)
+        .unwrap_err()
+        .contains("only IPv4"));
+    assert!(udp_sender(Some("192.0.2.77"), mc)
+        .unwrap_err()
+        .contains("IP_MULTICAST_IF"));
+}

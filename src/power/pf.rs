@@ -620,9 +620,7 @@ fn drop_unreachable(
     Ok((net, sets))
 }
 
-/// int2ext: copy the solved internal rows back onto a copy of `case`; everything not solved reads zero.
-fn int2ext(case: &Case, net: &Net, off: &[bool], deenergize: bool) -> Case {
-    let mut out = case.clone();
+fn copy_buses(out: &mut Case, net: &Net, off: &[bool], deenergize: bool) {
     for (r, b) in out.bus.iter_mut().enumerate() {
         if off[r] || (deenergize && b[BUS_TYPE] == NONE) {
             b[VM] = 0.0;
@@ -633,6 +631,9 @@ fn int2ext(case: &Case, net: &Net, off: &[bool], deenergize: bool) -> Case {
         out.bus[net.bus_ext[i]][VM] = b[VM];
         out.bus[net.bus_ext[i]][VA] = b[VA];
     }
+}
+
+fn copy_gens(out: &mut Case, net: &Net) {
     for g in out.gen.iter_mut() {
         g[PG] = 0.0;
         g[QG] = 0.0;
@@ -641,6 +642,9 @@ fn int2ext(case: &Case, net: &Net, off: &[bool], deenergize: bool) -> Case {
         out.gen[net.gen_ext[k]][PG] = g[PG];
         out.gen[net.gen_ext[k]][QG] = g[QG];
     }
+}
+
+fn copy_branches(out: &mut Case, net: &Net) {
     for b in out.branch.iter_mut() {
         b[PF] = 0.0;
         b[QF] = 0.0;
@@ -654,6 +658,14 @@ fn int2ext(case: &Case, net: &Net, off: &[bool], deenergize: bool) -> Case {
         r[PT] = b[PT];
         r[QT] = b[QT];
     }
+}
+
+/// int2ext: copy the solved internal rows back onto a copy of `case`; everything not solved reads zero.
+fn int2ext(case: &Case, net: &Net, off: &[bool], deenergize: bool) -> Case {
+    let mut out = case.clone();
+    copy_buses(&mut out, net, off, deenergize);
+    copy_gens(&mut out, net);
+    copy_branches(&mut out, net);
     out
 }
 

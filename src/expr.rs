@@ -129,6 +129,10 @@ fn lex_number(src: &str, start: usize) -> Result<(Tok, usize), ParseError> {
     Ok((Tok::Num(v), end))
 }
 
+fn starts_ident(c: char) -> bool {
+    c.is_ascii_alphabetic() || c == '_' || c == '`'
+}
+
 fn is_ident_byte(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_' || c == b'.'
 }
@@ -178,7 +182,7 @@ fn lex(src: &str) -> Result<Vec<(Tok, usize)>, ParseError> {
         }
         let (tok, next) = if starts_number(b, i) {
             lex_number(src, i)?
-        } else if c.is_ascii_alphabetic() || c == '_' || c == '`' {
+        } else if starts_ident(c) {
             lex_ident(src, i)?
         } else {
             lex_symbol(src, i)?
@@ -353,6 +357,15 @@ pub fn compile(src: &str, syms: &HashMap<String, usize>) -> Result<Node, ParseEr
     Ok(n)
 }
 
+/// Argument values in call order; unused slots stay 0.
+fn eval_args(a: &[Node], v: &[f64]) -> [f64; 3] {
+    let mut xs = [0.0; 3];
+    for (x, n) in xs.iter_mut().zip(a) {
+        *x = n.eval(v);
+    }
+    xs
+}
+
 impl Node {
     pub fn eval(&self, v: &[f64]) -> f64 {
         match self {
@@ -368,13 +381,7 @@ impl Node {
                 }
             }
             Node::Bin(op, l, r) => op(l.eval(v), r.eval(v)),
-            Node::Call(f, a) => {
-                let mut xs = [0.0; 3];
-                for (x, n) in xs.iter_mut().zip(a) {
-                    *x = n.eval(v);
-                }
-                f(&xs)
-            }
+            Node::Call(f, a) => f(&eval_args(a, v)),
         }
     }
 
