@@ -3,7 +3,8 @@
 //! interface only; no pybennu code is used.
 
 use crate::bennu::{
-    datagrams_msg, group_for, install_signals, parse_udp, serve_rep, sleep_until, udp_sender, STOP,
+    datagrams_msg, group_for, install_signals, parse_udp, serve_rep, sleep_until, udp_sender,
+    with_nul, STOP,
 };
 use crate::model::Kind;
 use crate::power::{case, Islands, Power};
@@ -109,9 +110,7 @@ pub fn pack(p: &Power, rng: &mut Rng) -> String {
 // ---- requests ------------------------------------------------------------------------------------------------
 
 pub fn handle(req: &[u8], p: &Mutex<Power>, debug: bool) -> Vec<u8> {
-    let mut r = reply(req, p, debug).into_bytes();
-    r.push(0);
-    r
+    with_nul(reply(req, p, debug))
 }
 
 fn reply(req: &[u8], p: &Mutex<Power>, debug: bool) -> String {
@@ -323,8 +322,9 @@ struct Cli {
 }
 
 fn usage() -> ! {
-    eprintln!("usage: pybennu-power-solver [-c CONFIG_FILE] [-d] [-e ENV] [-v] {{start,stop,restart,status}}");
-    std::process::exit(2)
+    crate::usage_exit(
+        "usage: pybennu-power-solver [-c CONFIG_FILE] [-d] [-e ENV] [-v] {start,stop,restart,status}",
+    )
 }
 
 fn flag_value<'a>(it: &mut impl Iterator<Item = &'a String>) -> String {

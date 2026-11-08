@@ -144,7 +144,12 @@ fn parse_value(s: &str) -> Option<Value> {
 
 /// One request -> one reply, always (a REP socket must answer or it wedges). Both carry a trailing NUL.
 pub fn handle(req: &[u8], meta: &Meta, sh: &Mutex<Shared>) -> Vec<u8> {
-    let mut r = reply(req, meta, sh).into_bytes();
+    with_nul(reply(req, meta, sh))
+}
+
+/// Every reply on the wire, in both providers, ends with a NUL.
+pub fn with_nul(reply: String) -> Vec<u8> {
+    let mut r = reply.into_bytes();
     r.push(0);
     r
 }

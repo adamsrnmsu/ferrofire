@@ -4,8 +4,7 @@
 use ferrofire::model::{Model, Value};
 
 fn usage() -> ! {
-    eprintln!("usage: ferrofire run model.yaml [--server tcp://0.0.0.0:5555] [--publish udp://*;239.0.0.1:40000] [--rate 0.1]\n       ferrofire pypower {{start|stop|restart|status}} [-c /etc/sceptre/config.ini] [-e pybennu] [-d] [-v]\n       ferrofire simulink [-tf inf] [--model model.yaml]\n       ferrofire check model.yaml [--steps N] [--write tag=value@t]...");
-    std::process::exit(2);
+    ferrofire::usage_exit("usage: ferrofire run model.yaml [--server tcp://0.0.0.0:5555] [--publish udp://*;239.0.0.1:40000] [--rate 0.1]\n       ferrofire pypower {start|stop|restart|status} [-c /etc/sceptre/config.ini] [-e pybennu] [-d] [-v]\n       ferrofire simulink [-tf inf] [--model model.yaml]\n       ferrofire check model.yaml [--steps N] [--write tag=value@t]...")
 }
 
 fn main() {
