@@ -84,7 +84,7 @@ in `Power::get`/`set`, `Model::load_in` (one 270-line function), and the lexer, 
 |---|---|
 | CRAP | 0 of 271 functions at or above 10; worst 9.1 |
 | Dryer | No duplicate candidates >= 0.8 |
-| Mutation | see the table below |
+| Mutation (whole tree, fresh run) | 686 killed, 0 survived, 1 uncovered site (687 sites); `mutator` exits 0 |
 
 Highest CRAP now:
 
@@ -97,4 +97,28 @@ Highest CRAP now:
 | `expr::Node::eval` | 9 | 100.0% | 9.0 |
 | `model::order_outputs` | 9 | 100.0% | 9.0 |
 
-MUTATION_AFTER
+## Mutation notes
+
+- Command: `mutator --max-workers 6 src` in the container, whole tree, from a clean checkout (about 40 minutes: each of
+  the 686 mutants reruns the ~25 s suite). `make mutate` runs the same thing with one worker per core.
+- Site count fell from 796 to 687 because the refactor deleted code (two 36-arm matches, duplicated loops, an unused
+  argument, `Rng::seeded`'s fallback literal), not because anything was excluded.
+- The one uncovered site is `pypower.rs:261`, the `fork() > 0` of the second (intermediate) daemon process. That
+  process exits straight after forking, and its coverage counters are not recorded by the instrumentation. The
+  behaviour is exercised by `daemon_verbs_pidfile_logs_and_feed` (start, status, restart, stop all go through it).
+- Survivors found on the way and fixed: `main.rs` sliced `args[1..]` where `args[0..]` behaved the same (equivalent
+  mutant, removed with `split_first`), and the `1e-9 s` write tolerance in `check` had no boundary test (now
+  `a_write_due_exactly_at_the_tolerance_applies_once_in_the_first_step`).
+- The baseline run predates a test-isolation fix. The IPC tests use machine-global names (SysV keys, POSIX semaphore
+  names, `/tmp/updates_fifo`) and the daemon test used a fixed port, so mutation workers running the suite in
+  parallel could fail for the wrong reason and count as kills. Tests now take a file lock and use free ports; the
+  after numbers come from a run with that fixed. Treat the baseline's 0 survivors as an upper bound on its quality.
+
+## Rerunning
+
+```
+make check     # fmt, clippy, tests, crap, dry (about 2 minutes after the image is built)
+make mutate    # mutation testing; exit 3 means a mutant survived
+```
+
+`.metrics/` (crap.edn, dry.edn, mutate/) is generated and git-ignored.
