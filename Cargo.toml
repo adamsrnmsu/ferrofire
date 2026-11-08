@@ -7,9 +7,17 @@ description = "Simple process (and, later, power-flow) simulator for sceptre/phe
 
 [dependencies]
 libc = "0.2"
+num-complex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde-saphyr = "2"
 
 [profile.release]
 opt-level = 2
 strip = true
+
+[dev-dependencies]
+serde_json = "1"
+
+# the golden power-flow tests solve 300-bus cases with a dense LU; keep them quick in debug builds
+[profile.dev]
+opt-level = 2

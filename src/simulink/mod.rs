@@ -30,7 +30,7 @@ fn load_model(args: &[String]) -> Model {
         },
     };
     println!("Info: model: {from}");
-    Model::load(&src).unwrap_or_else(|e| die("load model", e))
+    Model::load_in(&src, std::path::Path::new(&from).parent()).unwrap_or_else(|e| die("load model", e))
 }
 
 pub fn main(args: &[String]) {

@@ -1,0 +1,26 @@
+# Pump station with power (spec 3.3): a pump on bus 3 of a 3-bus feeder fills a tank that drains through an orifice.
+# Undervoltage or a dead feeder trips the pump. Try:
+#   rustbelt check models/pump-station.yaml --steps 600 --write pump.run=true@0 --write 'branch-1_2-3.active=false@30'
+version: 1
+dt: 0.1
+params: {tank.area: 50, valve.cv: 0.3, pump.q_nom: 0.5, pump.head: 30}
+inputs:
+  pump.run:   {type: binary, default: false}
+  valve.open: {type: analog, default: 0.5}          # 0..1
+states:
+  tank.level: {ode: "(pump.flow - valve.flow) / tank.area", init: 2.0, min: 0, max: 10}
+outputs:
+  pump.flow:  {type: analog, expr: "pump.run && !`bus-alert`.active && `bus-3`.voltage > 0.9 ? pump.q_nom : 0"}   # m3/s; undervoltage trips the motor
+  valve.flow: {type: analog, expr: "valve.open * valve.cv * sqrt(max(tank.level, 0))"}                                 # orifice
+  tank.level: {type: analog}
+power:
+  tags: pypower
+  islands: deenergize
+  drive:
+    "load-1_bus-3.mw":   "1000 * 9.81 * pump.flow * pump.head / (0.8 * 1e6)"   # hydraulic power / 80% efficiency, MW
+    "load-1_bus-3.mvar": "`load-1_bus-3`.mw * 0.62"                             # pf 0.85
+  inline:
+    baseMVA: 100
+    buses:    [{id: 1, type: slack, vm: 1.0, base_kv: 13.8}, {id: 2, type: pq, base_kv: 13.8}, {id: 3, type: pq, pd: 0.4, qd: 0.2, base_kv: 13.8}]
+    branches: [{from: 1, to: 2, r: 0.01, x: 0.05, rate: 10}, {from: 2, to: 3, r: 0.02, x: 0.08, rate: 10}]
+    gens:     [{bus: 1, pg: 0, qg: 0, vg: 1.0, qmax: 50, qmin: -50, pmax: 50, pmin: 0}]

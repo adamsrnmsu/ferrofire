@@ -1,14 +1,17 @@
-//! Engine core: YAML model -> stepper. No IO, no clock (spec section 2). Phase 0: inputs, params, states
-//! (`ode` via RK4, `toward`), 1-D bodies, outputs. `power:` arrives in phase 1.
+//! Engine core: YAML model -> stepper. No clock (spec section 2); the only IO is reading a `power.case` file at load.
+//! Inputs, params, states (`ode` via RK4, `toward`), 1-D bodies, outputs, and an optional `power:` block (AC power
+//! flow re-solved when an input or a `drive` coupling changes).
 //!
 //! Every named quantity lives in one `Vec<f64>` of slots; expressions are compiled against it.
 //! Outputs with an `expr` own a slot; an output without one republishes the input/state/body field of that name.
 
 use crate::expr::{compile, Node};
+use crate::power::{case, Islands, Power};
 use serde::de::{MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
 use std::fmt;
+use std::path::Path;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Value { Analog(f64), Binary(bool) }
@@ -85,6 +88,20 @@ struct OutDef { #[serde(rename = "type")] ty: Kind, expr: Option<Src> }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct PowerDef {
+    case: Option<String>,
+    tags: Option<String>,
+    resolve: Option<String>,
+    max_interval: Option<f64>,
+    #[serde(default)] dc_fallback: bool,
+    islands: Option<String>,
+    #[allow(dead_code)] noise: Option<f64>, // pypower-compat mode only (phase 3)
+    #[serde(default)] drive: Ordered<Src>,
+    inline: Option<case::Inline>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Doc {
     version: u32,
     dt: f64,
@@ -95,6 +112,7 @@ struct Doc {
     #[serde(default)] states: Ordered<StateDef>,
     #[serde(default)] bodies: Ordered<BodyDef>,
     #[serde(default)] outputs: Ordered<OutDef>,
+    power: Option<PowerDef>,
     publish_order: Option<Vec<String>>,
 }
 fn one() -> usize { 1 }
@@ -105,6 +123,12 @@ struct Input { slot: usize, is_bool: bool }
 struct Ode { slot: usize, f: Node }
 struct TowardState { slot: usize, target: Node, rate: Node }
 struct Bound { slot: usize, min: f64, max: f64 }
+/// Power block at run time: `slots[i]` is the value slot of power tag `i`.
+struct PowerRt { pw: Power, slots: Vec<usize>, drive: Vec<(usize, Node)>, max_interval: f64, last_solve: f64, dirty: bool }
+impl PowerRt {
+    fn sync(&self, v: &mut [f64]) { for (i, &s) in self.slots.iter().enumerate() { v[s] = self.pw.get(i); } }
+}
+
 struct Body { x: usize, dir: usize, speed: Node, barriers: Vec<(f64, Node)>, bounce: Option<[f64; 2]> }
 
 pub struct Model {
@@ -120,6 +144,7 @@ pub struct Model {
     bodies: Vec<Body>,
     eval_order: Vec<(usize, Node)>, // output slots with their expression, dependency order
     published: Vec<(String, Kind, usize)>,
+    power: Option<PowerRt>,
 }
 
 /// Standoff when a body moving down is held at a closed barrier (keeps it in the zone it came from).
@@ -141,7 +166,10 @@ impl Syms {
 }
 
 impl Model {
-    pub fn load(yaml: &str) -> Result<Model, String> {
+    pub fn load(yaml: &str) -> Result<Model, String> { Model::load_in(yaml, None) }
+
+    /// `dir`: where a relative `power.case` path is resolved (the model file's directory).
+    pub fn load_in(yaml: &str, dir: Option<&Path>) -> Result<Model, String> {
         let doc: Doc = serde_saphyr::from_str(yaml).map_err(|e| format!("model: {e}"))?;
         if doc.version != 1 { return Err(format!("model: unsupported version {}", doc.version)); }
         if !(doc.dt > 0.0) || doc.substeps == 0 { return Err("model: dt must be > 0 and substeps >= 1".into()); }
@@ -165,6 +193,33 @@ impl Model {
         let out_slots: Vec<Option<usize>> = doc.outputs.0.iter()
             .map(|(n, o)| if o.expr.is_some() { syms.add(n, "output").map(Some) } else { Ok(None) })
             .collect::<Result<_, _>>()?;
+
+        // power: build the case + tag vocabulary; every power tag gets a slot so expressions can read it
+        let mut pw = None;
+        let mut pslots = vec![];
+        if let Some(pd) = &doc.power {
+            if pd.tags.as_deref().is_some_and(|t| t != "pypower") { return Err("power.tags: only `pypower` is supported".into()); }
+            if pd.resolve.as_deref().is_some_and(|t| t != "on_change") { return Err("power.resolve: only `on_change` is supported".into()); }
+            let islands = match pd.islands.as_deref() {
+                None | Some("deenergize") => Islands::Deenergize,
+                Some("fail") => Islands::Fail,
+                Some(o) => return Err(format!("power.islands: `{o}` (expected fail | deenergize)")),
+            };
+            let cs = match (&pd.case, &pd.inline) {
+                (Some(f), None) => case::load_file(&dir.map(|d| d.join(f)).unwrap_or_else(|| f.into()))?,
+                (None, Some(i)) => i.to_case().map_err(|e| format!("power.inline: {e}"))?,
+                _ => return Err("power: exactly one of `case` or `inline` is required".into()),
+            };
+            let (mut loads, mut shunts) = (vec![], vec![]);
+            for (k, _) in &pd.drive.0 {
+                let dev = k.rsplit_once('.').map(|x| x.0).unwrap_or(k);
+                let num = |p: &str| dev.strip_prefix(p).and_then(|n| n.parse::<i64>().ok());
+                if let Some(n) = num("load-1_bus-") { loads.push(n); } else if let Some(n) = num("shunt-1_bus-") { shunts.push(n); }
+            }
+            let p = Power::new(cs, islands, pd.dc_fallback, &loads, &shunts).map_err(|e| format!("power: {e}"))?;
+            for i in 0..p.n_tags() { pslots.push(syms.add(p.tag_name(i), "power tag")?); }
+            pw = Some(p);
+        }
 
         let mut v = vec![0.0; syms.n];
         for (s, x) in init { v[s] = x; }
@@ -202,6 +257,20 @@ impl Model {
         }
         let eval_order = order_outputs(exprs, &syms)?;
 
+        // power drive: `target = expr`, evaluated in declaration order
+        let mut prt = None;
+        if let (Some(p), Some(pd)) = (pw, &doc.power) {
+            let mut drive = vec![];
+            for (k, e) in &pd.drive.0 {
+                let ti = p.tag_index(k).ok_or(format!("power.drive: `{k}` is not a power tag"))?;
+                if !p.writable(ti) { return Err(format!("power.drive: `{k}` is read-only")); }
+                drive.push((ti, c(&e.text(), &format!("power.drive {k}"))?));
+            }
+            let rt = PowerRt { pw: p, slots: pslots, drive, max_interval: pd.max_interval.unwrap_or(1.0), last_solve: 0.0, dirty: true };
+            rt.sync(&mut v);
+            prt = Some(rt);
+        }
+
         let mut published = vec![];
         for ((n, o), slot) in doc.outputs.0.iter().zip(&out_slots) {
             let s = match slot {
@@ -210,11 +279,16 @@ impl Model {
             };
             published.push((n.clone(), o.ty, s));
         }
+        if let Some(p) = &prt {
+            for (i, &s) in p.slots.iter().enumerate() { published.push((p.pw.tag_name(i).to_string(), p.pw.tag_kind(i), s)); }
+        }
         if let Some(order) = &doc.publish_order {
             published = order.iter().map(|t| published.iter().find(|p| &p.0 == t).cloned().ok_or(format!("publish_order: unknown output `{t}`"))).collect::<Result<_, _>>()?;
         }
 
-        let mut m = Model { dt: doc.dt, publish_rate: doc.publish_rate, time: 0.0, substeps: doc.substeps, v, inputs, odes, towards, bounds, bodies, eval_order, published };
+        let mut m = Model { dt: doc.dt, publish_rate: doc.publish_rate, time: 0.0, substeps: doc.substeps, v, inputs, odes, towards, bounds, bodies, eval_order, published, power: prt };
+        m.eval();
+        m.power_update();
         m.eval();
         Ok(m)
     }
@@ -237,7 +311,16 @@ impl Model {
                     let x = match *val { Value::Analog(x) => x, Value::Binary(b) => b as u8 as f64 };
                     self.v[i.slot] = if i.is_bool { (x != 0.0) as u8 as f64 } else { x };
                 }
-                None => rejected.push(tag.clone()),
+                None => {
+                    let x = match *val { Value::Analog(x) => x, Value::Binary(b) => b as u8 as f64 };
+                    match self.power.as_mut() {
+                        Some(p) => match p.pw.tag_index(tag).filter(|&i| p.pw.writable(i)) {
+                            Some(i) => { p.pw.set(i, x); p.dirty = true; p.sync(&mut self.v); }
+                            None => rejected.push(tag.clone()),
+                        },
+                        None => rejected.push(tag.clone()),
+                    }
+                }
             }
         }
         self.eval();
@@ -253,8 +336,29 @@ impl Model {
         self.published.iter().map(|(n, k, s)| (n.as_str(), self.wire(*k, self.v[*s]))).collect()
     }
 
+    /// ponytail: drive targets are compared and re-set every step (exact compare, 1e-9 abs), so an expression that
+    /// changes continuously re-solves every step; add a drive tolerance if a big case is driven by a ramp.
+    fn power_update(&mut self) {
+        let Some(p) = self.power.as_mut() else { return };
+        for (ti, f) in &p.drive {
+            let x = f.eval(&self.v);
+            if (p.pw.get(*ti) - x).abs() > 1e-9 {
+                p.pw.set(*ti, x);
+                p.dirty = true;
+                p.sync(&mut self.v); // later drive entries may read this one (`load-1_bus-3`.mw)
+            }
+        }
+        if p.dirty || self.time - p.last_solve >= p.max_interval - 1e-9 {
+            p.pw.solve();
+            p.dirty = false;
+            p.last_solve = self.time;
+            p.sync(&mut self.v);
+        }
+    }
+
     pub fn step(&mut self, dt: f64) {
         self.eval();
+        self.power_update();
         // toward states and bodies read the instant-t values; compute first, commit after the ODE advance
         let tw: Vec<f64> = self.towards.iter().map(|t| {
             let cur = self.v[t.slot];

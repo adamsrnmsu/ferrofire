@@ -40,7 +40,7 @@ fn check(args: &[String]) {
         }
     }
     let yaml = std::fs::read_to_string(path).unwrap_or_else(|e| { eprintln!("{path}: {e}"); std::process::exit(1) });
-    let mut m = Model::load(&yaml).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1) });
+    let mut m = Model::load_in(&yaml, std::path::Path::new(path).parent()).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1) });
     let dt = m.dt;
     for _ in 0..steps {
         let due: Vec<_> = writes.iter().filter(|(t, ..)| *t <= m.time + 1e-9).map(|(_, tag, v)| (tag.clone(), Value::Analog(*v))).collect();

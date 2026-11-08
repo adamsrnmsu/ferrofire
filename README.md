@@ -1,9 +1,9 @@
 # rustbelt
 
 Rust process simulator for [sceptre](https://github.com/sandialabs/sceptre-phenix-apps) / phenix ranges, with AC power flow
-(a PYPOWER port) to follow. Models are data: one YAML file. No MATLAB, no PowerWorld.
+(a PYPOWER 5.1.19 port). Models are data: one YAML file. No MATLAB, no PowerWorld.
 
-Status: **phase 0** (engine core + the waterway lock as a model file). Power flow, the native bennu protocol
+Status: **phase 1** (engine core, the waterway lock as a model file, AC/DC power flow). The native bennu protocol
 (REP + UDP RADIO) and the `pybennu-power-solver` drop-in are later phases; design in the range repo's `docs/provider-spec.md`.
 
 ## Use
@@ -26,10 +26,27 @@ republish an input/state of that name), optional `publish_order`. Expressions: n
 comparisons (1/0), `&& ||`, `c ? a : b`, `if(c,a,b)`, `min max abs sqrt exp ln pow clamp sign step floor`;
 tags containing `-` are back-quoted. See `models/waterway.yaml`.
 
+## Power (phase 1)
+
+A model may carry a `power:` block: `case: file.py|file.m` (relative to the model) or `inline:` buses/branches/gens,
+`islands: deenergize|fail` (default `deenergize`), `dc_fallback`, `max_interval`, and `drive:` (process -> power
+couplings, `"load-1_bus-3.mw": "expr"`, evaluated in order before each solve). Every PYPOWER/pybennu tag
+(`bus-N.voltage`, `load-1_bus-N.mw`, `generator-1_bus-N.active`, `branch-1_F-T.active`, `bus-alert.active`, ...) is published and
+readable in expressions with back-quotes; writable ones (RTU writes, `check --write`) edit the case and trigger a
+re-solve on the next step. Solver: Newton-Raphson with dense LU, ported from PYPOWER (ext2int, bustypes, makeYbus,
+makeSbus, dSbus_dV, newtonpf, pfsoln, makeBdc, dcpf); no `ENFORCE_Q_LIMS`, no OPF, no `.mat`.
+Deliberate deviations from pybennu: load/shunt writes affect the solve; a bus keeps its PV/PQ type when `active` is
+written; `deenergize` zeroes buses no reference generator reaches. `models/pump-station.yaml` couples a pump to bus 3:
+
+```
+rustbelt check models/pump-station.yaml --steps 600 --write pump.run=true@0 --write 'branch-1_2-3.active=false@30'
+```
+
 ## Build / test
 
 No cargo needed on the host: `make test` and `make linux` use a Docker `ubuntu:22.04` image (`docker/Dockerfile`).
-`make linux` writes glibc aarch64 `dist/rustbelt` and `dist/simulinksolver`. It must be glibc: the musl build hangs the
+`make golden` generates PYPOWER 5.1.19 reference results into `target/golden` (needs `uv`; never committed;
+PYPOWER 5.1.19 needs numpy<2, so Python 3.11 is pinned) and `make test` depends on it. `make linux` writes glibc aarch64 `dist/rustbelt` and `dist/simulinksolver`. It must be glibc: the musl build hangs the
 stock `bennu-simulink-provider` (different `sem_t` layout). `ipc-test.sh` checks the adapter against the stock provider
 inside `bennu:arm64` (run in the Lima VM).
 
