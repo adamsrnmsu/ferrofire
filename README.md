@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.jpg" alt="ferrofire: a phoenix of fire rising from an anvil" width="420">
+</p>
+
 # ferrofire
 
 **The fire phēnix rises from.**
