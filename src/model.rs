@@ -270,6 +270,323 @@ impl Syms {
     }
 }
 
+fn parse_doc(yaml: &str) -> Result<Doc, String> {
+    let doc: Doc = serde_saphyr::from_str(yaml).map_err(|e| format!("model: {e}"))?;
+    if doc.version != 1 {
+        return Err(format!("model: unsupported version {}", doc.version));
+    }
+    if (doc.dt.is_nan() || doc.dt <= 0.0) || doc.substeps == 0 {
+        return Err("model: dt must be > 0 and substeps >= 1".into());
+    }
+    Ok(doc)
+}
+
+/// Compile `src` against the symbol table; `ctx` says where the expression came from.
+fn comp(syms: &Syms, src: &str, ctx: &str) -> Result<Node, String> {
+    compile(src, &syms.map).map_err(|e| format!("{ctx}: `{src}` {e}"))
+}
+
+fn bit(b: bool) -> f64 {
+    b as u8 as f64
+}
+
+/// Slots handed out for the declarations, in the order params, inputs, states, body fields, expression outputs.
+struct Decl {
+    init: Vec<(usize, f64)>,
+    inputs: HashMap<String, Input>,
+    states: Vec<usize>,
+    bodies: Vec<(usize, usize)>,
+    outs: Vec<Option<usize>>,
+}
+
+fn declare(doc: &Doc, syms: &mut Syms) -> Result<Decl, String> {
+    let mut init = vec![];
+    for (n, val) in &doc.params.0 {
+        init.push((syms.add(n, "param")?, *val));
+    }
+    let inputs = declare_inputs(doc, syms, &mut init)?;
+    let states = (doc.states.0.iter())
+        .map(|(n, _)| syms.add(n, "state"))
+        .collect::<Result<_, _>>()?;
+    let bodies = declare_bodies(doc, syms)?;
+    let outs = declare_outputs(doc, syms)?;
+    Ok(Decl {
+        init,
+        inputs,
+        states,
+        bodies,
+        outs,
+    })
+}
+
+fn declare_inputs(
+    doc: &Doc,
+    syms: &mut Syms,
+    init: &mut Vec<(usize, f64)>,
+) -> Result<HashMap<String, Input>, String> {
+    let mut inputs = HashMap::new();
+    for (n, d) in &doc.inputs.0 {
+        let slot = syms.add(n, "input")?;
+        let is_bool = d.is_bool || d.ty == Kind::Binary;
+        let dv = match d.default {
+            Some(Default_::B(b)) => bit(b),
+            Some(Default_::N(x)) => x,
+            None => 0.0,
+        };
+        init.push((slot, if is_bool { bit(dv != 0.0) } else { dv }));
+        inputs.insert(n.clone(), Input { slot, is_bool });
+    }
+    Ok(inputs)
+}
+
+fn declare_bodies(doc: &Doc, syms: &mut Syms) -> Result<Vec<(usize, usize)>, String> {
+    let mut slots = vec![];
+    for (n, _) in &doc.bodies.0 {
+        slots.push((
+            syms.add(&format!("{n}.x"), "body field")?,
+            syms.add(&format!("{n}.dir"), "body field")?,
+        ));
+    }
+    Ok(slots)
+}
+
+/// Only outputs with an `expr` own a slot; the rest republish the input/state/param of that name.
+fn declare_outputs(doc: &Doc, syms: &mut Syms) -> Result<Vec<Option<usize>>, String> {
+    doc.outputs
+        .0
+        .iter()
+        .map(|(n, o)| o.expr.as_ref().map(|_| syms.add(n, "output")).transpose())
+        .collect()
+}
+
+fn check_power_options(pd: &PowerDef) -> Result<(), String> {
+    if pd.tags.as_deref().is_some_and(|t| t != "pypower") {
+        return Err("power.tags: only `pypower` is supported".into());
+    }
+    if pd.resolve.as_deref().is_some_and(|t| t != "on_change") {
+        return Err("power.resolve: only `on_change` is supported".into());
+    }
+    Ok(())
+}
+
+fn power_islands(pd: &PowerDef) -> Result<Islands, String> {
+    match pd.islands.as_deref() {
+        None | Some("deenergize") => Ok(Islands::Deenergize),
+        Some("fail") => Ok(Islands::Fail),
+        Some(o) => Err(format!("power.islands: `{o}` (expected fail | deenergize)")),
+    }
+}
+
+fn power_case(pd: &PowerDef, dir: Option<&Path>) -> Result<case::Case, String> {
+    match (&pd.case, &pd.inline) {
+        (Some(f), None) => case::load_file(&dir.map(|d| d.join(f)).unwrap_or_else(|| f.into())),
+        (None, Some(i)) => i.to_case().map_err(|e| format!("power.inline: {e}")),
+        _ => Err("power: exactly one of `case` or `inline` is required".into()),
+    }
+}
+
+/// Bus numbers of the `load-1_bus-N` / `shunt-1_bus-N` devices named by `power.drive` targets.
+fn drive_devices(pd: &PowerDef) -> (Vec<i64>, Vec<i64>) {
+    let (mut loads, mut shunts) = (vec![], vec![]);
+    for (k, _) in &pd.drive.0 {
+        let dev = k.rsplit_once('.').map_or(k.as_str(), |x| x.0);
+        let num = |p: &str| dev.strip_prefix(p).and_then(|n| n.parse::<i64>().ok());
+        if let Some(n) = num("load-1_bus-") {
+            loads.push(n);
+        } else if let Some(n) = num("shunt-1_bus-") {
+            shunts.push(n);
+        }
+    }
+    (loads, shunts)
+}
+
+/// The case and tag vocabulary; every power tag gets a slot so expressions can read it.
+fn build_power(
+    doc: &Doc,
+    dir: Option<&Path>,
+    syms: &mut Syms,
+) -> Result<Option<(Power, Vec<usize>)>, String> {
+    let Some(pd) = &doc.power else {
+        return Ok(None);
+    };
+    check_power_options(pd)?;
+    let islands = power_islands(pd)?;
+    let cs = power_case(pd, dir)?;
+    let (loads, shunts) = drive_devices(pd);
+    let p = Power::new(cs, islands, pd.dc_fallback, &loads, &shunts)
+        .map_err(|e| format!("power: {e}"))?;
+    let slots = (0..p.n_tags())
+        .map(|i| syms.add(p.tag_name(i), "power tag"))
+        .collect::<Result<_, _>>()?;
+    Ok(Some((p, slots)))
+}
+
+/// A state advances either by an ODE or by moving toward a target.
+enum Dynamics {
+    Ode(Ode),
+    Toward(TowardState),
+}
+
+fn compile_state(
+    (n, d): &(String, StateDef),
+    slot: usize,
+    syms: &Syms,
+    v: &mut [f64],
+) -> Result<Dynamics, String> {
+    v[slot] = comp(syms, &d.init.text(), &format!("state {n} init"))?.eval(v); // may use params
+    match (&d.ode, &d.toward) {
+        (Some(f), None) => Ok(Dynamics::Ode(Ode {
+            slot,
+            f: comp(syms, &f.text(), &format!("state {n} ode"))?,
+        })),
+        (None, Some(t)) => Ok(Dynamics::Toward(TowardState {
+            slot,
+            target: comp(syms, &t.target.text(), &format!("state {n} toward.target"))?,
+            rate: comp(syms, &t.rate.text(), &format!("state {n} toward.rate"))?,
+        })),
+        _ => Err(format!(
+            "state {n}: exactly one of `ode` or `toward` is required"
+        )),
+    }
+}
+
+fn state_bound(d: &StateDef, slot: usize) -> Option<Bound> {
+    (d.min.is_some() || d.max.is_some()).then(|| Bound {
+        slot,
+        min: d.min.unwrap_or(f64::NEG_INFINITY),
+        max: d.max.unwrap_or(f64::INFINITY),
+    })
+}
+
+type StateParts = (Vec<Ode>, Vec<TowardState>, Vec<Bound>);
+
+fn compile_states(
+    doc: &Doc,
+    slots: &[usize],
+    syms: &Syms,
+    v: &mut [f64],
+) -> Result<StateParts, String> {
+    let (mut odes, mut towards, mut bounds) = (vec![], vec![], vec![]);
+    for (st, &slot) in doc.states.0.iter().zip(slots) {
+        match compile_state(st, slot, syms, v)? {
+            Dynamics::Ode(o) => odes.push(o),
+            Dynamics::Toward(t) => towards.push(t),
+        }
+        bounds.extend(state_bound(&st.1, slot));
+    }
+    Ok((odes, towards, bounds))
+}
+
+fn compile_bodies(
+    doc: &Doc,
+    slots: &[(usize, usize)],
+    syms: &Syms,
+    v: &mut [f64],
+) -> Result<Vec<Body>, String> {
+    let mut bodies = vec![];
+    for ((n, d), &(x, dir)) in doc.bodies.0.iter().zip(slots) {
+        v[x] = d.init.x;
+        v[dir] = d.init.dir;
+        let barriers = (d.barriers.iter())
+            .map(|b| Ok((b.at, comp(syms, &b.open, &format!("body {n} barrier"))?)))
+            .collect::<Result<_, String>>()?;
+        bodies.push(Body {
+            x,
+            dir,
+            speed: comp(syms, &d.speed.text(), &format!("body {n} speed"))?,
+            barriers,
+            bounce: d.bounce,
+        });
+    }
+    Ok(bodies)
+}
+
+/// Expression outputs, compiled and put in dependency order.
+fn compile_outputs(
+    doc: &Doc,
+    slots: &[Option<usize>],
+    syms: &Syms,
+) -> Result<Vec<(usize, Node)>, String> {
+    let mut exprs: Vec<(usize, Node)> = vec![];
+    for ((n, o), slot) in doc.outputs.0.iter().zip(slots) {
+        if let (Some(e), Some(s)) = (&o.expr, slot) {
+            exprs.push((*s, comp(syms, &e.text(), &format!("output {n}"))?));
+        }
+    }
+    order_outputs(exprs, syms)
+}
+
+/// Power at run time: `target = expr` drive entries, evaluated in declaration order.
+fn build_runtime(
+    power: Option<(Power, Vec<usize>)>,
+    doc: &Doc,
+    syms: &Syms,
+    v: &mut [f64],
+) -> Result<Option<PowerRt>, String> {
+    let (Some((pw, slots)), Some(pd)) = (power, &doc.power) else {
+        return Ok(None);
+    };
+    let mut drive = vec![];
+    for (k, e) in &pd.drive.0 {
+        let ti = (pw.tag_index(k)).ok_or(format!("power.drive: `{k}` is not a power tag"))?;
+        if !pw.writable(ti) {
+            return Err(format!("power.drive: `{k}` is read-only"));
+        }
+        drive.push((ti, comp(syms, &e.text(), &format!("power.drive {k}"))?));
+    }
+    let rt = PowerRt {
+        pw,
+        slots,
+        drive,
+        max_interval: pd.max_interval.unwrap_or(1.0),
+        last_solve: 0.0,
+        dirty: true,
+    };
+    rt.sync(v);
+    Ok(Some(rt))
+}
+
+/// Everything a client can read: outputs (declaration order), then power tags, optionally reordered.
+fn build_published(
+    doc: &Doc,
+    out_slots: &[Option<usize>],
+    syms: &Syms,
+    power: Option<&PowerRt>,
+) -> Result<Vec<(String, Kind, usize)>, String> {
+    let mut published = vec![];
+    for ((n, o), slot) in doc.outputs.0.iter().zip(out_slots) {
+        let s = match slot {
+            Some(s) => *s,
+            None => *syms.map.get(n).ok_or(format!(
+                "output {n}: no expr and no input/state/param of that name"
+            ))?,
+        };
+        published.push((n.clone(), o.ty, s));
+    }
+    if let Some(p) = power {
+        for (i, &s) in p.slots.iter().enumerate() {
+            published.push((p.pw.tag_name(i).to_string(), p.pw.tag_kind(i), s));
+        }
+    }
+    match &doc.publish_order {
+        Some(order) => reorder(published, order),
+        None => Ok(published),
+    }
+}
+
+fn reorder(
+    published: Vec<(String, Kind, usize)>,
+    order: &[String],
+) -> Result<Vec<(String, Kind, usize)>, String> {
+    order
+        .iter()
+        .map(|t| {
+            (published.iter().find(|p| &p.0 == t).cloned())
+                .ok_or(format!("publish_order: unknown output `{t}`"))
+        })
+        .collect()
+}
+
 impl Model {
     pub fn load(yaml: &str) -> Result<Model, String> {
         Model::load_in(yaml, None)
@@ -277,228 +594,20 @@ impl Model {
 
     /// `dir`: where a relative `power.case` path is resolved (the model file's directory).
     pub fn load_in(yaml: &str, dir: Option<&Path>) -> Result<Model, String> {
-        let doc: Doc = serde_saphyr::from_str(yaml).map_err(|e| format!("model: {e}"))?;
-        if doc.version != 1 {
-            return Err(format!("model: unsupported version {}", doc.version));
-        }
-        if (doc.dt.is_nan() || doc.dt <= 0.0) || doc.substeps == 0 {
-            return Err("model: dt must be > 0 and substeps >= 1".into());
-        }
-
-        // slots: params, inputs, states, body fields, then expression outputs
+        let doc = parse_doc(yaml)?;
         let mut syms = Syms::default();
-        let mut init: Vec<(usize, f64)> = vec![];
-        for (n, val) in &doc.params.0 {
-            let s = syms.add(n, "param")?;
-            init.push((s, *val));
-        }
-        let mut inputs = HashMap::new();
-        for (n, d) in &doc.inputs.0 {
-            let slot = syms.add(n, "input")?;
-            let dv = match d.default {
-                Some(Default_::B(b)) => b as u8 as f64,
-                Some(Default_::N(x)) => x,
-                None => 0.0,
-            };
-            init.push((
-                slot,
-                if d.is_bool || d.ty == Kind::Binary {
-                    (dv != 0.0) as u8 as f64
-                } else {
-                    dv
-                },
-            ));
-            inputs.insert(
-                n.clone(),
-                Input {
-                    slot,
-                    is_bool: d.is_bool || d.ty == Kind::Binary,
-                },
-            );
-        }
-        let state_slots: Vec<usize> = doc
-            .states
-            .0
-            .iter()
-            .map(|(n, _)| syms.add(n, "state"))
-            .collect::<Result<_, _>>()?;
-        let mut body_slots = vec![];
-        for (n, _) in &doc.bodies.0 {
-            body_slots.push((
-                syms.add(&format!("{n}.x"), "body field")?,
-                syms.add(&format!("{n}.dir"), "body field")?,
-            ));
-        }
-        let out_slots: Vec<Option<usize>> = doc
-            .outputs
-            .0
-            .iter()
-            .map(|(n, o)| {
-                if o.expr.is_some() {
-                    syms.add(n, "output").map(Some)
-                } else {
-                    Ok(None)
-                }
-            })
-            .collect::<Result<_, _>>()?;
-
-        // power: build the case + tag vocabulary; every power tag gets a slot so expressions can read it
-        let mut pw = None;
-        let mut pslots = vec![];
-        if let Some(pd) = &doc.power {
-            if pd.tags.as_deref().is_some_and(|t| t != "pypower") {
-                return Err("power.tags: only `pypower` is supported".into());
-            }
-            if pd.resolve.as_deref().is_some_and(|t| t != "on_change") {
-                return Err("power.resolve: only `on_change` is supported".into());
-            }
-            let islands = match pd.islands.as_deref() {
-                None | Some("deenergize") => Islands::Deenergize,
-                Some("fail") => Islands::Fail,
-                Some(o) => {
-                    return Err(format!("power.islands: `{o}` (expected fail | deenergize)"))
-                }
-            };
-            let cs = match (&pd.case, &pd.inline) {
-                (Some(f), None) => {
-                    case::load_file(&dir.map(|d| d.join(f)).unwrap_or_else(|| f.into()))?
-                }
-                (None, Some(i)) => i.to_case().map_err(|e| format!("power.inline: {e}"))?,
-                _ => return Err("power: exactly one of `case` or `inline` is required".into()),
-            };
-            let (mut loads, mut shunts) = (vec![], vec![]);
-            for (k, _) in &pd.drive.0 {
-                let dev = k.rsplit_once('.').map(|x| x.0).unwrap_or(k);
-                let num = |p: &str| dev.strip_prefix(p).and_then(|n| n.parse::<i64>().ok());
-                if let Some(n) = num("load-1_bus-") {
-                    loads.push(n);
-                } else if let Some(n) = num("shunt-1_bus-") {
-                    shunts.push(n);
-                }
-            }
-            let p = Power::new(cs, islands, pd.dc_fallback, &loads, &shunts)
-                .map_err(|e| format!("power: {e}"))?;
-            for i in 0..p.n_tags() {
-                pslots.push(syms.add(p.tag_name(i), "power tag")?);
-            }
-            pw = Some(p);
-        }
+        let decl = declare(&doc, &mut syms)?;
+        let power = build_power(&doc, dir, &mut syms)?;
 
         let mut v = vec![0.0; syms.n];
-        for (s, x) in init {
+        for &(s, x) in &decl.init {
             v[s] = x;
         }
-        let c = |src: &str, ctx: &str| {
-            compile(src, &syms.map).map_err(|e| format!("{ctx}: `{src}` {e}"))
-        };
-
-        let (mut odes, mut towards, mut bounds) = (vec![], vec![], vec![]);
-        for ((n, d), &slot) in doc.states.0.iter().zip(&state_slots) {
-            v[slot] = c(&d.init.text(), &format!("state {n} init"))?.eval(&v); // may use params
-            match (&d.ode, &d.toward) {
-                (Some(f), None) => odes.push(Ode {
-                    slot,
-                    f: c(&f.text(), &format!("state {n} ode"))?,
-                }),
-                (None, Some(t)) => towards.push(TowardState {
-                    slot,
-                    target: c(&t.target.text(), &format!("state {n} toward.target"))?,
-                    rate: c(&t.rate.text(), &format!("state {n} toward.rate"))?,
-                }),
-                _ => {
-                    return Err(format!(
-                        "state {n}: exactly one of `ode` or `toward` is required"
-                    ))
-                }
-            }
-            if d.min.is_some() || d.max.is_some() {
-                bounds.push(Bound {
-                    slot,
-                    min: d.min.unwrap_or(f64::NEG_INFINITY),
-                    max: d.max.unwrap_or(f64::INFINITY),
-                });
-            }
-        }
-
-        let mut bodies = vec![];
-        for ((n, d), &(x, dir)) in doc.bodies.0.iter().zip(&body_slots) {
-            v[x] = d.init.x;
-            v[dir] = d.init.dir;
-            let barriers = d
-                .barriers
-                .iter()
-                .map(|b| Ok((b.at, c(&b.open, &format!("body {n} barrier"))?)))
-                .collect::<Result<_, String>>()?;
-            bodies.push(Body {
-                x,
-                dir,
-                speed: c(&d.speed.text(), &format!("body {n} speed"))?,
-                barriers,
-                bounce: d.bounce,
-            });
-        }
-
-        // outputs: compile, then order by dependency among expression outputs
-        let mut exprs: Vec<(usize, Node)> = vec![];
-        for ((n, o), slot) in doc.outputs.0.iter().zip(&out_slots) {
-            if let (Some(e), Some(s)) = (&o.expr, slot) {
-                exprs.push((*s, c(&e.text(), &format!("output {n}"))?));
-            }
-        }
-        let eval_order = order_outputs(exprs, &syms)?;
-
-        // power drive: `target = expr`, evaluated in declaration order
-        let mut prt = None;
-        if let (Some(p), Some(pd)) = (pw, &doc.power) {
-            let mut drive = vec![];
-            for (k, e) in &pd.drive.0 {
-                let ti = p
-                    .tag_index(k)
-                    .ok_or(format!("power.drive: `{k}` is not a power tag"))?;
-                if !p.writable(ti) {
-                    return Err(format!("power.drive: `{k}` is read-only"));
-                }
-                drive.push((ti, c(&e.text(), &format!("power.drive {k}"))?));
-            }
-            let rt = PowerRt {
-                pw: p,
-                slots: pslots,
-                drive,
-                max_interval: pd.max_interval.unwrap_or(1.0),
-                last_solve: 0.0,
-                dirty: true,
-            };
-            rt.sync(&mut v);
-            prt = Some(rt);
-        }
-
-        let mut published = vec![];
-        for ((n, o), slot) in doc.outputs.0.iter().zip(&out_slots) {
-            let s = match slot {
-                Some(s) => *s,
-                None => *syms.map.get(n).ok_or(format!(
-                    "output {n}: no expr and no input/state/param of that name"
-                ))?,
-            };
-            published.push((n.clone(), o.ty, s));
-        }
-        if let Some(p) = &prt {
-            for (i, &s) in p.slots.iter().enumerate() {
-                published.push((p.pw.tag_name(i).to_string(), p.pw.tag_kind(i), s));
-            }
-        }
-        if let Some(order) = &doc.publish_order {
-            published = order
-                .iter()
-                .map(|t| {
-                    published
-                        .iter()
-                        .find(|p| &p.0 == t)
-                        .cloned()
-                        .ok_or(format!("publish_order: unknown output `{t}`"))
-                })
-                .collect::<Result<_, _>>()?;
-        }
+        let (odes, towards, bounds) = compile_states(&doc, &decl.states, &syms, &mut v)?;
+        let bodies = compile_bodies(&doc, &decl.bodies, &syms, &mut v)?;
+        let eval_order = compile_outputs(&doc, &decl.outs, &syms)?;
+        let prt = build_runtime(power, &doc, &syms, &mut v)?;
+        let published = build_published(&doc, &decl.outs, &syms, prt.as_ref())?;
 
         let mut m = Model {
             dt: doc.dt,
@@ -506,7 +615,7 @@ impl Model {
             time: 0.0,
             substeps: doc.substeps,
             v,
-            inputs,
+            inputs: decl.inputs,
             odes,
             towards,
             bounds,
@@ -540,39 +649,34 @@ impl Model {
         }
     }
 
+    /// Latch one write: a model input, else a writable power tag. False when the tag is neither.
+    fn apply_write(&mut self, tag: &str, val: Value) -> bool {
+        let x = match val {
+            Value::Analog(x) => x,
+            Value::Binary(b) => bit(b),
+        };
+        if let Some(i) = self.inputs.get(tag) {
+            self.v[i.slot] = if i.is_bool { bit(x != 0.0) } else { x };
+            return true;
+        }
+        let Some(p) = self.power.as_mut() else {
+            return false;
+        };
+        let Some(i) = p.pw.tag_index(tag).filter(|&i| p.pw.writable(i)) else {
+            return false;
+        };
+        p.pw.set(i, x);
+        p.dirty = true;
+        p.sync(&mut self.v);
+        true
+    }
+
     /// Latch writes into inputs. Returns the tags that are not inputs (they are ignored). Boolean inputs latch 0/1.
     pub fn apply_writes(&mut self, writes: &[(String, Value)]) -> Vec<String> {
         let mut rejected = vec![];
         for (tag, val) in writes {
-            match self.inputs.get(tag) {
-                Some(i) => {
-                    let x = match *val {
-                        Value::Analog(x) => x,
-                        Value::Binary(b) => b as u8 as f64,
-                    };
-                    self.v[i.slot] = if i.is_bool {
-                        (x != 0.0) as u8 as f64
-                    } else {
-                        x
-                    };
-                }
-                None => {
-                    let x = match *val {
-                        Value::Analog(x) => x,
-                        Value::Binary(b) => b as u8 as f64,
-                    };
-                    match self.power.as_mut() {
-                        Some(p) => match p.pw.tag_index(tag).filter(|&i| p.pw.writable(i)) {
-                            Some(i) => {
-                                p.pw.set(i, x);
-                                p.dirty = true;
-                                p.sync(&mut self.v);
-                            }
-                            None => rejected.push(tag.clone()),
-                        },
-                        None => rejected.push(tag.clone()),
-                    }
-                }
+            if !self.apply_write(tag, *val) {
+                rejected.push(tag.clone());
             }
         }
         self.eval();
