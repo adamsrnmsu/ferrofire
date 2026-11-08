@@ -487,3 +487,36 @@ fn inline_bus_types_by_name_and_number() {
         assert!(!e.contains("unknown type"), "{ok}: {e}");
     }
 }
+
+// ---- malformed cases -----------------------------------------------------------------------------------------
+
+#[test]
+fn short_rows_name_the_array_and_the_row() {
+    let e = parse_py("ppc[\"baseMVA\"] = 100\nppc[\"bus\"] = [[1, 3, 0]]\nppc[\"gen\"] = []\nppc[\"branch\"] = []\n").unwrap_err();
+    assert!(e.contains("bus row 1: 3 columns, need at least 10"), "{e}");
+}
+
+#[test]
+fn solver_refuses_gens_and_branches_on_unknown_buses() {
+    let ok = parse_m(M3).unwrap();
+    let mut gen = ok.clone();
+    gen.gen[0][GEN_BUS] = 77.0;
+    let e = pf::runpf(&gen, &pf::Opts::default()).err().unwrap();
+    assert_eq!(e, "gen row 1 sits on unknown bus 77");
+    let mut br = ok;
+    br.branch[1][T_BUS] = 88.0;
+    let e = pf::runpf(&br, &pf::Opts::default()).err().unwrap();
+    assert_eq!(e, "branch row 2 touches unknown bus 88");
+}
+
+#[test]
+fn a_case_without_a_reference_bus_promotes_its_first_pv_bus() {
+    let mut c = parse_m(M3).unwrap();
+    c.bus[0][BUS_TYPE] = PV; // the only generator sits on bus 1, which was the reference
+    let s = pf::runpf(&c, &pf::Opts::default()).unwrap();
+    assert!(s.success);
+    assert!((s.case.bus[0][VM] - c.gen[0][VG]).abs() < 1e-9); // promoted bus holds the gen set point
+    c.bus[0][BUS_TYPE] = PQ; // and with no PV bus either there is nothing to promote
+    let e = pf::runpf(&c, &pf::Opts::default()).err().unwrap();
+    assert!(e.contains("no reference or PV bus"));
+}

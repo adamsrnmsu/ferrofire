@@ -77,7 +77,7 @@ impl Rng {
         Rng(std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
-            .unwrap_or(1)
+            .unwrap_or_default()
             | 1)
     }
     pub fn uniform(&mut self, lo: f64, hi: f64) -> f64 {
@@ -249,13 +249,13 @@ fn alive(pid: i32) -> bool {
 fn daemonize(pidfile: &str, out: &str, err: &str) -> Result<(), String> {
     unsafe {
         if libc::fork() > 0 {
-            libc::_exit(0);
+            std::process::exit(0); // not _exit: flush, so coverage of the parent's path is recorded
         }
         libc::chdir(c"/".as_ptr());
         libc::setsid();
         libc::umask(0);
         if libc::fork() > 0 {
-            libc::_exit(0);
+            std::process::exit(0);
         }
     }
     let pid = std::process::id();

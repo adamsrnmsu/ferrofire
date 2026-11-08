@@ -200,6 +200,7 @@ fn daemon_verbs_pidfile_logs_and_feed() {
     let pidfile = format!("/var/run/bennu-{env}.pid");
 
     assert!(run(&bin, &["status", "-e", &env]).contains("Daemon is not running"));
+    assert!(run(&bin, &["stop", "-e", &env]).contains("does not exist. Daemon not running?"));
     assert!(run(&bin, &["restart", "-c", c, "-e", &env, "-d"]).contains("cannot restart"));
     let bad = dir.join("bad.ini");
     std::fs::write(&bad, "[power-solver-service]\nsolver-type = PowerWorld\n").unwrap();

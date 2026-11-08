@@ -135,7 +135,12 @@ outputs:
 - Power: matches PYPOWER 5.1.19 on case9, 14, 30, 57, 118 and 300 (goldens generated at test time).
 - Properties: per-bus power balance, barrier behaviour, write latching, a tank against its closed form.
 - Conformance (in a VM with `bennu:arm64`): `ipc-test.sh`, `tests/conformance.sh`, `tests/pypower-conformance.sh`.
-- Planned: `make check` with formatting, clippy, and [ub-mode](https://github.com/unclebob/ub-mode) quality gates (CRAP < 10, duplication < 0.8, mutation testing).
+- Binaries: `tests/cli.rs` drives `ferrofire run` (REP, UDP, SIGTERM) and `check`; `tests/simulink.rs` drives `simulinksolver` against real SysV shm, POSIX semaphores and the updates FIFO.
+- `make check` runs the [ub-mode](https://github.com/unclebob/ub-mode) gates, all in the container: `cargo fmt --check`, `clippy -D warnings`, the tests, then
+  - `make crap` ([crapper](https://github.com/unclebob/crapper)): every function CRAP < 10 (`--threshold 9.99`);
+  - `make dry` ([dryer](https://github.com/unclebob/dryer)): no duplicate candidate scoring 0.8 or more.
+- `make mutate` ([mutator](https://github.com/unclebob/mutator)): mutation testing, slow (each mutant reruns the suite), so it is not part of `make check`. Exit 3 means a mutant survived.
+- Numbers before and after the quality pass: [docs/quality.md](docs/quality.md). CI runs `make check` on every push.
 
 ## Status
 

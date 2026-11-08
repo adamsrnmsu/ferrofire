@@ -901,6 +901,10 @@ mod tests {
         assert!(e("version: 2\ndt: 0.1\n").contains("version"));
         assert!(e("version: 1\ndt: 0.1\noutputs:\n  a: {type: analog}\n").contains("no expr"));
         assert!(e("version: 1\ndt: 0.1\nbogus: 1\n").contains("model:"));
+        assert!(e(
+            "version: 1\ndt: 0.1\noutputs:\n  a: {type: analog, expr: 1}\npublish_order: [a, zz]\n"
+        )
+        .contains("publish_order: unknown output `zz`"));
     }
 
     #[test]

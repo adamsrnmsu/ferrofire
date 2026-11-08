@@ -215,3 +215,38 @@ fn solver_fails_loudly_on_a_missing_or_broken_model() {
     let out = String::from_utf8_lossy(&o.stdout);
     assert!(out.contains("Info: model: ./model.yaml") && out.contains("Fatal: load model"));
 }
+
+extern "C" fn ignore_signal(_: libc::c_int) {}
+
+#[test]
+fn semaphore_wait_survives_a_signal_and_returns_only_after_a_post() {
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // a handler without SA_RESTART makes sem_wait fail with EINTR
+    unsafe {
+        let mut sa: libc::sigaction = std::mem::zeroed();
+        sa.sa_sigaction = ignore_signal as *const () as usize;
+        libc::sigaction(libc::SIGUSR1, &sa, std::ptr::null_mut());
+    }
+    // Sem is a raw handle (not Send): the waiter opens its own handle on the same named semaphore
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let d2 = done.clone();
+    let t = std::thread::spawn(move || {
+        Sem::open_locked("ff_test_eintr").unwrap().wait();
+        d2.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let s = Sem::open_locked("ff_test_eintr").unwrap();
+    unsafe {
+        let th = std::os::unix::thread::JoinHandleExt::as_pthread_t(&t);
+        libc::pthread_kill(th, libc::SIGUSR1);
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(
+        !done.load(std::sync::atomic::Ordering::SeqCst),
+        "wait returned on EINTR"
+    );
+    s.post();
+    t.join().unwrap();
+    assert!(done.load(std::sync::atomic::Ordering::SeqCst));
+    s.destroy();
+}

@@ -153,3 +153,14 @@ fn check_rejects_bad_invocations() {
     assert_eq!(o.status.code(), Some(1));
     assert!(text(&o.stderr).contains("unsupported version"));
 }
+
+#[test]
+fn the_install_name_selects_the_simulink_solver() {
+    let dir = std::env::temp_dir().join(format!("ff-name-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let bin = dir.join("simulinksolver");
+    let _ = std::fs::remove_file(&bin);
+    std::os::unix::fs::symlink(BIN, &bin).unwrap();
+    let o = Command::new(&bin).arg("--help").output().unwrap();
+    assert!(text(&o.stdout).starts_with("simulinksolver [-tf inf"));
+}
