@@ -1,0 +1,43 @@
+import socket, struct, time, sys
+def mb(uid, fc, data, tid=1):
+    pdu = bytes([fc]) + data
+    f = struct.pack(">HHHB", tid, 0, len(pdu)+1, uid) + pdu
+    s = socket.create_connection(("127.0.0.1", 5502), timeout=3)
+    s.sendall(f)
+    try: r = s.recv(512)
+    except Exception as e: r = b"ERR:"+str(e).encode()
+    s.close()
+    return r.hex()
+def rd(uid, fc, a, n): return mb(uid, fc, struct.pack(">HH", a, n))
+# feed inputs via RADIO framing
+grp = b"54386972605942b"
+body = b"load-1_bus-1.mw:250.5,generator-1_bus-1.active:true,load-1_bus-1.active:false,bus-1.gen_mw:12.5,"+b"\0"
+u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+u.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
+u.sendto(bytes([len(grp)]) + grp + body, ("239.0.0.1", 40000))
+time.sleep(1.5)
+print("FC4 30000 x1      ", rd(1, 4, 30000, 1))
+print("FC4 30000 x2 (gap)", rd(1, 4, 30000, 2))
+print("FC4 29999 x1      ", rd(1, 4, 29999, 1))
+print("FC2 10000 x2      ", rd(1, 2, 10000, 2))
+print("FC2 10000 x3 (gap)", rd(1, 2, 10000, 3))
+print("FC1 coil 0 x2     ", rd(1, 1, 0, 2))
+print("FC1 coil 5 (none) ", rd(1, 1, 5, 1))
+print("FC3 40000 x1      ", rd(1, 3, 40000, 1))
+print("FC3 40001 (none)  ", rd(1, 3, 40001, 1))
+print("FC4 uid=7         ", rd(7, 4, 30000, 1))
+print("FC4 uid=0         ", rd(0, 4, 30000, 1))
+print("FC4 uid=255       ", rd(255, 4, 30000, 1))
+print("FC5 coil0 ON      ", mb(1, 5, struct.pack(">HH", 0, 0xFF00)))
+print("FC5 coil9 (none)  ", mb(1, 5, struct.pack(">HH", 9, 0xFF00)))
+print("FC5 coil0 val 1234", mb(1, 5, struct.pack(">HH", 0, 1234)))
+print("FC6 40000=32768   ", mb(1, 6, struct.pack(">HH", 40000, 32768)))
+print("FC16 40000 x1     ", mb(1, 16, struct.pack(">HHB", 40000, 1, 2)+struct.pack(">H", 65535)))
+print("FC15 coils 0..1   ", mb(1, 15, struct.pack(">HHB", 0, 2, 1)+bytes([3])))
+print("FC23 unsupported  ", mb(1, 23, b"\0"*9))
+print("FC8 diag          ", mb(1, 8, b"\0\0\0\0"))
+print("FC43 devid        ", mb(1, 43, b"\x0e\x01\x00"))
+print("FC4 x0 qty        ", rd(1, 4, 30000, 0))
+print("FC4 x126 qty      ", rd(1, 4, 30000, 126))
+print("FC3 after write   ", rd(1, 3, 40000, 1))
+print("FC1 after FC5     ", rd(1, 1, 0, 2))

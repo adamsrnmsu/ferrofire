@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SCEPTRE><field-device><name>t</name><cycle-time>200</cycle-time>
+<tags>
+<internal-tag><name>a1</name><value>0.0</value></internal-tag>
+<internal-tag><name>a2</name><value>0.0</value></internal-tag>
+<internal-tag><name>a3</name><value>0.0</value></internal-tag>
+<internal-tag><name>a4</name><value>0.0</value></internal-tag>
+<internal-tag><name>a5</name><value>0.0</value></internal-tag>
+<internal-tag><name>a6</name><value>0.0</value></internal-tag>
+<internal-tag><name>a7</name><value>0.0</value></internal-tag>
+<internal-tag><name>a8</name><value>0.0</value></internal-tag>
+<internal-tag><name>b1</name><status>false</status></internal-tag>
+<internal-tag><name>b2</name><status>false</status></internal-tag>
+<internal-tag><name>b3</name><status>false</status></internal-tag>
+<internal-tag><name>c</name><value>0.0</value></internal-tag>
+<internal-tag><name>d</name><value>0.0</value></internal-tag>
+</tags>
+<logic><![CDATA[
+a1 = 0.5 && 1
+a2 = 7 % 3
+a3 = 5 / 2
+a4 = 2 ** 3 ** 2
+a5 = -2 ** 2
+a6 = !0.5
+a7 = 1 / 0
+a8 = sqrt(16) + pow(2,10)
+b1 = 5 > 3
+b2 = a1 == False
+b3 = 0.4 || 0
+c = c + 1
+d = c * 2,delay:3
+]]></logic>
+</field-device></SCEPTRE>
