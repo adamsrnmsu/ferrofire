@@ -4,7 +4,7 @@
 use rustbelt::model::{Model, Value};
 
 fn usage() -> ! {
-    eprintln!("usage: rustbelt simulink [-tf inf] [--model model.yaml]\n       rustbelt check model.yaml [--steps N] [--write tag=value@t]...");
+    eprintln!("usage: rustbelt run model.yaml [--server tcp://0.0.0.0:5555] [--publish udp://*;239.0.0.1:40000] [--rate 0.1]\n       rustbelt simulink [-tf inf] [--model model.yaml]\n       rustbelt check model.yaml [--steps N] [--write tag=value@t]...");
     std::process::exit(2);
 }
 
@@ -15,6 +15,7 @@ fn main() {
     }
     match args.get(1).map(String::as_str) {
         Some("simulink") => rustbelt::simulink::main(&args[2..]),
+        Some("run") => rustbelt::bennu::main(&args[2..]),
         Some("check") => check(&args[2..]),
         _ => usage(),
     }

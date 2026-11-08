@@ -327,6 +327,11 @@ impl Model {
         rejected
     }
 
+    /// True when a write to `tag` would be accepted (a model input, or a writable power tag).
+    pub fn writable(&self, tag: &str) -> bool {
+        self.inputs.contains_key(tag) || self.power.as_ref().is_some_and(|p| p.pw.tag_index(tag).is_some_and(|i| p.pw.writable(i)))
+    }
+
     pub fn get(&self, tag: &str) -> Option<Value> {
         self.published.iter().find(|p| p.0 == tag).map(|(_, k, s)| self.wire(*k, self.v[*s]))
     }

@@ -10,6 +10,7 @@ Status: **phase 1** (engine core, the waterway lock as a model file, AC/DC power
 
 ```
 rustbelt check models/waterway.yaml --steps 400 --write lowervalve.open=1@2   # offline run, prints the snapshot
+rustbelt run models/waterway.yaml [--server tcp://0.0.0.0:5555] [--publish 'udp://*;239.0.0.1:40000'] [--rate 0.1]
 rustbelt simulink [-tf inf] [--model model.yaml]                                # shm adapter (see CONTRACT.md)
 simulinksolver -tf inf                                                          # same adapter, selected by argv[0]
 ```
@@ -41,6 +42,11 @@ written; `deenergize` zeroes buses no reference generator reaches. `models/pump-
 ```
 rustbelt check models/pump-station.yaml --steps 600 --write pump.run=true@0 --write 'branch-1_2-3.active=false@30'
 ```
+
+`run` is the native bennu provider: ZMQ REP (`QUERY=`/`READ=`/`WRITE=`, `ACK=`/`ERR=`, NUL-terminated) plus UDP
+RADIO/DISH datagrams (`[len][group][tag:value,...\0]`, group = libstdc++ hash of the endpoint, chunked at 1400 bytes).
+The zmq crate links libzmq statically from `libzmq3-dev` (jammy 4.3.4), so the binary needs no libzmq on the guest.
+`tests/conformance.sh` (Lima VM) runs it next to stock `bennu-probe` and `bennu-field-device` in `bennu:arm64`.
 
 ## Build / test
 

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SCEPTRE>
+    <field-device>
+        <name>rtu-1</name>
+        <cycle-time>200</cycle-time>
+        <tags>
+            <external-tag><name>lock_h</name><io>I0</io><type>analog</type></external-tag>
+            <external-tag><name>lgate</name><io>I1</io><type>analog</type></external-tag>
+            <external-tag><name>uvalve</name><io>O0</io><type>analog</type></external-tag>
+        </tags>
+        <comms>
+            <modbus-server>
+                <endpoint>tcp://127.0.0.1:5502</endpoint>
+                <event-logging>rtu-1-modbus-server.log</event-logging>
+                <input-register><address>30000</address><max-value>1000</max-value><min-value>0</min-value><tag>lock_h</tag></input-register>
+                <input-register><address>30001</address><max-value>1</max-value><min-value>0</min-value><tag>lgate</tag></input-register>
+                <holding-register><address>40000</address><max-value>1</max-value><min-value>0</min-value><tag>uvalve</tag></holding-register>
+            </modbus-server>
+        </comms>
+        <input>
+            <endpoint>udp://*;239.0.0.1:40000</endpoint>
+            <analog><id>I0</id><name>lock.height</name></analog>
+            <analog><id>I1</id><name>lowergate.open</name></analog>
+        </input>
+        <output>
+            <endpoint>tcp://127.0.0.1:5555</endpoint>
+            <analog><id>O0</id><name>uppervalve.open</name></analog>
+        </output>
+    </field-device>
+</SCEPTRE>
