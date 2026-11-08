@@ -7,68 +7,58 @@
 
 use std::collections::HashMap;
 
+/// A binary operator, looked up once at parse time.
+pub type BinFn = fn(f64, f64) -> f64;
+/// A function of up to three arguments (unused slots are 0).
+pub type Func = fn(&[f64; 3]) -> f64;
+
 #[derive(Clone, Debug)]
 pub enum Node {
     Num(f64),
     Var(usize),
     Neg(Box<Node>),
     Not(Box<Node>),
-    Bin(Op, Box<Node>, Box<Node>),
+    Bin(BinFn, Box<Node>, Box<Node>),
     Tern(Box<Node>, Box<Node>, Box<Node>),
     Call(Func, Vec<Node>),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Op {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Rem,
-    Pow,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-    Eq,
-    Ne,
-    And,
-    Or,
+fn b(x: bool) -> f64 {
+    x as u8 as f64
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Func {
-    Min,
-    Max,
-    Abs,
-    Sqrt,
-    Exp,
-    Ln,
-    Pow,
-    Clamp,
-    Sign,
-    Step,
-    Floor,
-}
+/// Functions by name: (name, arity, implementation).
+const FUNCS: [(&str, usize, Func); 11] = [
+    ("min", 2, |a| a[0].min(a[1])),
+    ("max", 2, |a| a[0].max(a[1])),
+    ("abs", 1, |a| a[0].abs()),
+    ("sqrt", 1, |a| a[0].sqrt()),
+    ("exp", 1, |a| a[0].exp()),
+    ("ln", 1, |a| a[0].ln()),
+    ("pow", 2, |a| a[0].powf(a[1])),
+    ("clamp", 3, |a| a[0].max(a[1]).min(a[2])), // clamp(x, lo, hi)
+    ("sign", 1, |a| b(a[0] > 0.0) - b(a[0] < 0.0)),
+    ("step", 1, |a| b(a[0] >= 0.0)),
+    ("floor", 1, |a| a[0].floor()),
+];
 
-impl Func {
-    fn lookup(name: &str) -> Option<(Func, usize)> {
-        Some(match name {
-            "min" => (Func::Min, 2),
-            "max" => (Func::Max, 2),
-            "abs" => (Func::Abs, 1),
-            "sqrt" => (Func::Sqrt, 1),
-            "exp" => (Func::Exp, 1),
-            "ln" => (Func::Ln, 1),
-            "pow" => (Func::Pow, 2),
-            "clamp" => (Func::Clamp, 3),
-            "sign" => (Func::Sign, 1),
-            "step" => (Func::Step, 1),
-            "floor" => (Func::Floor, 1),
-            _ => return None,
-        })
-    }
-}
+/// Binary operators: (symbol, precedence, right-associative, implementation).
+const BINDINGS: [(&str, u8, bool, BinFn); 14] = [
+    ("||", 2, false, |x, y| b(x != 0.0 || y != 0.0)),
+    ("&&", 3, false, |x, y| b(x != 0.0 && y != 0.0)),
+    ("==", 4, false, |x, y| b(x == y)),
+    ("!=", 4, false, |x, y| b(x != y)),
+    ("<", 5, false, |x, y| b(x < y)),
+    ("<=", 5, false, |x, y| b(x <= y)),
+    (">", 5, false, |x, y| b(x > y)),
+    (">=", 5, false, |x, y| b(x >= y)),
+    ("+", 6, false, |x, y| x + y),
+    ("-", 6, false, |x, y| x - y),
+    ("*", 7, false, |x, y| x * y),
+    ("/", 7, false, |x, y| x / y),
+    ("%", 7, false, |x, y| x % y),
+    ("^", 9, true, f64::powf),
+];
 
 #[derive(Debug)]
 pub struct ParseError {
@@ -78,6 +68,13 @@ pub struct ParseError {
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "at column {}: {}", self.pos + 1, self.msg)
+    }
+}
+
+fn err_at(pos: usize, msg: impl Into<String>) -> ParseError {
+    ParseError {
+        pos,
+        msg: msg.into(),
     }
 }
 
@@ -94,6 +91,82 @@ const SYMS: [&str; 20] = [
     ")", ",",
 ];
 
+/// First index at or after `i` whose byte fails `keep`.
+fn skip(b: &[u8], mut i: usize, keep: impl Fn(u8) -> bool) -> usize {
+    while i < b.len() && keep(b[i]) {
+        i += 1;
+    }
+    i
+}
+
+/// End of an optional exponent (`e`, `E`, optional sign, digits) starting at `i`; `i` itself when there is none.
+fn exponent_end(b: &[u8], i: usize) -> usize {
+    if !matches!(b.get(i), Some(b'e' | b'E')) {
+        return i;
+    }
+    let mut j = i + 1;
+    if matches!(b.get(j), Some(b'+' | b'-')) {
+        j += 1;
+    }
+    let k = skip(b, j, |c| c.is_ascii_digit());
+    if k > j {
+        k
+    } else {
+        i
+    }
+}
+
+fn starts_number(b: &[u8], i: usize) -> bool {
+    b[i].is_ascii_digit() || (b[i] == b'.' && b.get(i + 1).is_some_and(|d| d.is_ascii_digit()))
+}
+
+fn lex_number(src: &str, start: usize) -> Result<(Tok, usize), ParseError> {
+    let b = src.as_bytes();
+    let end = exponent_end(b, skip(b, start, |c| c.is_ascii_digit() || c == b'.'));
+    let v = src[start..end]
+        .parse::<f64>()
+        .map_err(|_| err_at(start, format!("bad number `{}`", &src[start..end])))?;
+    Ok((Tok::Num(v), end))
+}
+
+fn is_ident_byte(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_' || c == b'.'
+}
+
+/// Identifier: runs of [A-Za-z0-9_.] and back-quoted segments (tags containing `-`).
+fn lex_ident(src: &str, start: usize) -> Result<(Tok, usize), ParseError> {
+    let b = src.as_bytes();
+    let (mut name, mut i) = (String::new(), start);
+    while i < b.len() {
+        if b[i] == b'`' {
+            let end = src[i + 1..]
+                .find('`')
+                .ok_or_else(|| err_at(i, "unterminated back-quote"))?;
+            name.push_str(&src[i + 1..i + 1 + end]);
+            i += end + 2;
+        } else if is_ident_byte(b[i]) {
+            name.push(b[i] as char);
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    Ok((Tok::Ident(name), i))
+}
+
+fn lex_symbol(src: &str, i: usize) -> Result<(Tok, usize), ParseError> {
+    let s = SYMS
+        .iter()
+        .find(|s| src[i..].starts_with(**s))
+        .ok_or_else(|| {
+            err_at(
+                i,
+                format!("unexpected `{}`", src[i..].chars().next().unwrap()),
+            )
+        })?;
+    Ok((Tok::Sym(s), i + s.len()))
+}
+
 fn lex(src: &str) -> Result<Vec<(Tok, usize)>, ParseError> {
     let b = src.as_bytes();
     let (mut i, mut out) = (0, vec![]);
@@ -103,60 +176,15 @@ fn lex(src: &str) -> Result<Vec<(Tok, usize)>, ParseError> {
             i += 1;
             continue;
         }
-        let start = i;
-        if c.is_ascii_digit() || (c == '.' && b.get(i + 1).is_some_and(|d| d.is_ascii_digit())) {
-            while i < b.len() && (b[i].is_ascii_digit() || b[i] == b'.') {
-                i += 1;
-            }
-            if i < b.len() && (b[i] == b'e' || b[i] == b'E') {
-                let mut j = i + 1;
-                if j < b.len() && (b[j] == b'+' || b[j] == b'-') {
-                    j += 1;
-                }
-                if j < b.len() && b[j].is_ascii_digit() {
-                    while j < b.len() && b[j].is_ascii_digit() {
-                        j += 1;
-                    }
-                    i = j;
-                }
-            }
-            let v = src[start..i].parse::<f64>().map_err(|_| ParseError {
-                pos: start,
-                msg: format!("bad number `{}`", &src[start..i]),
-            })?;
-            out.push((Tok::Num(v), start));
+        let (tok, next) = if starts_number(b, i) {
+            lex_number(src, i)?
         } else if c.is_ascii_alphabetic() || c == '_' || c == '`' {
-            // identifier: runs of [A-Za-z0-9_.] and back-quoted segments (tags containing `-`)
-            let mut name = String::new();
-            loop {
-                if i < b.len() && b[i] == b'`' {
-                    let end = src[i + 1..].find('`').ok_or(ParseError {
-                        pos: i,
-                        msg: "unterminated back-quote".into(),
-                    })?;
-                    name.push_str(&src[i + 1..i + 1 + end]);
-                    i += end + 2;
-                } else if i < b.len()
-                    && (b[i].is_ascii_alphanumeric() || b[i] == b'_' || b[i] == b'.')
-                {
-                    name.push(b[i] as char);
-                    i += 1;
-                } else {
-                    break;
-                }
-            }
-            out.push((Tok::Ident(name), start));
+            lex_ident(src, i)?
         } else {
-            let s = SYMS
-                .iter()
-                .find(|s| src[i..].starts_with(**s))
-                .ok_or(ParseError {
-                    pos: i,
-                    msg: format!("unexpected `{c}`"),
-                })?;
-            i += s.len();
-            out.push((Tok::Sym(s), start));
-        }
+            lex_symbol(src, i)?
+        };
+        out.push((tok, i));
+        i = next;
     }
     out.push((Tok::End, src.len()));
     Ok(out)
@@ -168,25 +196,12 @@ struct P<'a> {
     syms: &'a HashMap<String, usize>,
 }
 
-fn binding(s: &str) -> Option<(u8, bool, Op)> {
-    // (precedence, right-assoc, op)
-    Some(match s {
-        "||" => (2, false, Op::Or),
-        "&&" => (3, false, Op::And),
-        "==" => (4, false, Op::Eq),
-        "!=" => (4, false, Op::Ne),
-        "<" => (5, false, Op::Lt),
-        "<=" => (5, false, Op::Le),
-        ">" => (5, false, Op::Gt),
-        ">=" => (5, false, Op::Ge),
-        "+" => (6, false, Op::Add),
-        "-" => (6, false, Op::Sub),
-        "*" => (7, false, Op::Mul),
-        "/" => (7, false, Op::Div),
-        "%" => (7, false, Op::Rem),
-        "^" => (9, true, Op::Pow),
-        _ => return None,
-    })
+/// (precedence, right-assoc, op) of a binary operator symbol.
+fn binding(s: &str) -> Option<(u8, bool, BinFn)> {
+    BINDINGS
+        .iter()
+        .find(|b| b.0 == s)
+        .map(|&(_, prec, right, f)| (prec, right, f))
 }
 
 impl P<'_> {
@@ -197,10 +212,7 @@ impl P<'_> {
         self.t[self.i].1
     }
     fn err<T>(&self, msg: impl Into<String>) -> Result<T, ParseError> {
-        Err(ParseError {
-            pos: self.pos(),
-            msg: msg.into(),
-        })
+        Err(err_at(self.pos(), msg))
     }
     fn eat(&mut self, s: &str) -> bool {
         if matches!(self.peek(), Tok::Sym(x) if *x == s) {
@@ -271,54 +283,59 @@ impl P<'_> {
             }
             Tok::Ident(name) => {
                 self.i += 1;
-                if *self.peek() == Tok::Sym("(") {
-                    self.i += 1;
-                    let mut args = vec![];
-                    if !self.eat(")") {
-                        loop {
-                            args.push(self.ternary()?);
-                            if self.eat(")") {
-                                break;
-                            }
-                            self.expect(",")?;
-                        }
-                    }
-                    if name == "if" {
-                        if args.len() != 3 {
-                            return Err(ParseError {
-                                pos,
-                                msg: "if() takes 3 arguments".into(),
-                            });
-                        }
-                        let mut it = args.into_iter();
-                        return Ok(Node::Tern(
-                            it.next().unwrap().into(),
-                            it.next().unwrap().into(),
-                            it.next().unwrap().into(),
-                        ));
-                    }
-                    let (f, n) = Func::lookup(&name).ok_or(ParseError {
-                        pos,
-                        msg: format!("unknown function `{name}`"),
-                    })?;
-                    if args.len() != n {
-                        return Err(ParseError {
-                            pos,
-                            msg: format!("{name}() takes {n} argument(s), got {}", args.len()),
-                        });
-                    }
-                    return Ok(Node::Call(f, args));
-                }
-                match self.syms.get(&name) {
-                    Some(&slot) => Ok(Node::Var(slot)),
-                    None => Err(ParseError {
-                        pos,
-                        msg: format!("unknown identifier `{name}`"),
-                    }),
-                }
+                self.ident(&name, pos)
             }
             _ => self.err("expected a value"),
         }
+    }
+
+    /// A name: a call when `(` follows, else a variable.
+    fn ident(&mut self, name: &str, pos: usize) -> Result<Node, ParseError> {
+        if *self.peek() == Tok::Sym("(") {
+            self.i += 1;
+            return self.call(name, pos);
+        }
+        match self.syms.get(name) {
+            Some(&slot) => Ok(Node::Var(slot)),
+            None => Err(err_at(pos, format!("unknown identifier `{name}`"))),
+        }
+    }
+
+    /// Comma-separated arguments up to the closing `)`.
+    fn args(&mut self) -> Result<Vec<Node>, ParseError> {
+        let mut args = vec![];
+        if self.eat(")") {
+            return Ok(args);
+        }
+        loop {
+            args.push(self.ternary()?);
+            if self.eat(")") {
+                return Ok(args);
+            }
+            self.expect(",")?;
+        }
+    }
+
+    fn call(&mut self, name: &str, pos: usize) -> Result<Node, ParseError> {
+        let args = self.args()?;
+        if name == "if" {
+            let [c, x, y]: [Node; 3] = args
+                .try_into()
+                .map_err(|_| err_at(pos, "if() takes 3 arguments"))?;
+            return Ok(Node::Tern(c.into(), x.into(), y.into()));
+        }
+        let &(_, n, f) = FUNCS
+            .iter()
+            .find(|f| f.0 == name)
+            .ok_or_else(|| err_at(pos, format!("unknown function `{name}`")))?;
+        if args.len() != n {
+            let got = args.len();
+            return Err(err_at(
+                pos,
+                format!("{name}() takes {n} argument(s), got {got}"),
+            ));
+        }
+        Ok(Node::Call(f, args))
     }
 }
 
@@ -336,10 +353,6 @@ pub fn compile(src: &str, syms: &HashMap<String, usize>) -> Result<Node, ParseEr
     Ok(n)
 }
 
-fn b(x: bool) -> f64 {
-    x as u8 as f64
-}
-
 impl Node {
     pub fn eval(&self, v: &[f64]) -> f64 {
         match self {
@@ -354,48 +367,13 @@ impl Node {
                     y.eval(v)
                 }
             }
-            Node::Bin(op, l, r) => {
-                let (x, y) = (l.eval(v), r.eval(v));
-                match op {
-                    Op::Add => x + y,
-                    Op::Sub => x - y,
-                    Op::Mul => x * y,
-                    Op::Div => x / y,
-                    Op::Rem => x % y,
-                    Op::Pow => x.powf(y),
-                    Op::Lt => b(x < y),
-                    Op::Le => b(x <= y),
-                    Op::Gt => b(x > y),
-                    Op::Ge => b(x >= y),
-                    Op::Eq => b(x == y),
-                    Op::Ne => b(x != y),
-                    Op::And => b(x != 0.0 && y != 0.0),
-                    Op::Or => b(x != 0.0 || y != 0.0),
-                }
-            }
+            Node::Bin(op, l, r) => op(l.eval(v), r.eval(v)),
             Node::Call(f, a) => {
-                let x = a[0].eval(v);
-                match f {
-                    Func::Abs => x.abs(),
-                    Func::Sqrt => x.sqrt(),
-                    Func::Exp => x.exp(),
-                    Func::Ln => x.ln(),
-                    Func::Sign => {
-                        if x > 0.0 {
-                            1.0
-                        } else if x < 0.0 {
-                            -1.0
-                        } else {
-                            0.0
-                        }
-                    }
-                    Func::Step => b(x >= 0.0),
-                    Func::Floor => x.floor(),
-                    Func::Min => x.min(a[1].eval(v)),
-                    Func::Max => x.max(a[1].eval(v)),
-                    Func::Pow => x.powf(a[1].eval(v)),
-                    Func::Clamp => x.max(a[1].eval(v)).min(a[2].eval(v)), // clamp(x, lo, hi)
+                let mut xs = [0.0; 3];
+                for (x, n) in xs.iter_mut().zip(a) {
+                    *x = n.eval(v);
                 }
+                f(&xs)
             }
         }
     }
@@ -481,5 +459,46 @@ mod tests {
             .contains("2 argument"));
         assert!(compile("1 $ 2", &syms).unwrap_err().msg.contains('$'));
         assert!(compile("1 2", &syms).is_err());
+    }
+
+    #[test]
+    fn syntax_errors_name_the_problem() {
+        let syms: HashMap<String, usize> = HashMap::new();
+        let msg = |s: &str| compile(s, &syms).unwrap_err().msg;
+        assert!(msg("if(1,2)").contains("if() takes 3"));
+        assert!(msg("frob(1)").contains("unknown function `frob`"));
+        assert!(msg("`abc").contains("unterminated back-quote"));
+        assert!(msg("1.2.3").contains("bad number `1.2.3`"));
+        assert!(msg("min(1 2)").contains("expected `,`"));
+        assert!(msg("2e").contains("unexpected trailing input")); // `e` without digits is not an exponent
+        assert!(msg("").contains("expected a value"));
+    }
+
+    #[test]
+    fn number_forms_and_edge_functions() {
+        assert_eq!(ev("2.5e+1"), 25.0);
+        assert_eq!(ev("2E2 + .5"), 200.5);
+        assert_eq!(ev("5e-1"), 0.5);
+        assert_eq!(
+            ev("sign(0) + sign(3) * 10 + step(-1) + abs(-2) + exp(0)"),
+            13.0
+        );
+        assert_eq!(ev("0 ? 1 : 2"), 2.0);
+        assert_eq!(ev("if(0, 1, 2)"), 2.0);
+        assert_eq!(ev("7 / 2 - 7 % 4 + 2 ^ 0.5 * 0"), 0.5);
+        assert_eq!(ev("1 == 1 && 1 != 2 && 2 >= 2 && 3 > 2 && 1 < 2"), 1.0);
+        assert_eq!(ev("0 || 0"), 0.0);
+        assert_eq!(ev("clamp(-5, 0, 2) + clamp(9, 0, 2)"), 2.0);
+        assert_eq!(ev("min(4, 2) + pow(2, 2) + floor(-0.5)"), 5.0);
+    }
+
+    #[test]
+    fn vars_lists_every_slot_read() {
+        let syms: HashMap<String, usize> = [("a".to_string(), 0), ("b".to_string(), 1)].into();
+        let n = compile("a + max(b, 1) > 0 ? !a : -b", &syms).unwrap();
+        let mut out = vec![];
+        n.vars(&mut out);
+        out.sort();
+        assert_eq!(out, vec![0, 0, 1, 1]);
     }
 }
