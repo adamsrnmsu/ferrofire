@@ -1,0 +1,15 @@
+[package]
+name = "rustbelt"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Simple process (and, later, power-flow) simulator for sceptre/phenix ranges"
+
+[dependencies]
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde-saphyr = "2"
+
+[profile.release]
+opt-level = 2
+strip = true

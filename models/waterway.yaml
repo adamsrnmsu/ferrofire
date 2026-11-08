@@ -1,0 +1,40 @@
+# Waterway lock model: reproduces the original hand-written physics.rs (deleted once trace-equality passed).
+# Geometry (m): lower approach [0,100], lock (100,200], upper approach (200,300]; lower gate x=100, upper gate x=200.
+# boat.dir +1 = heading upstream (lower -> upper). All tags analog on the wire: bennu field devices declare every
+# waterway point analog and a true/false on one aborts them (CONTRACT.md).
+version: 1
+dt: 0.05
+params: {lowerpool: 5.0, upperpool: 15.0, fill_rate: 0.5}
+inputs:                      # RTU-written; boolean in meaning (any nonzero write latches 1)
+  lowergate.open:  {type: analog, bool: true, default: 0}
+  lowervalve.open: {type: analog, bool: true, default: 0}
+  uppergate.open:  {type: analog, bool: true, default: 0}
+  uppervalve.open: {type: analog, bool: true, default: 0}
+states:
+  lock.height:               # moves only while exactly one valve is open (both open = no net flow)
+    toward:
+      target: "lowervalve.open != uppervalve.open ? (lowervalve.open ? lowerpool : upperpool) : lock.height"
+      rate: fill_rate
+    init: lowerpool
+bodies:
+  boat:                      # a closed gate holds the boat in the zone it came from
+    speed: 5.0
+    init: {x: 0, dir: 1}
+    barriers: [{at: 100, open: lowergate.open}, {at: 200, open: uppergate.open}]
+    bounce: [0, 300]
+outputs:                     # order = injects/publishPoints.txt
+  lowerwater.height:     {type: analog, expr: lowerpool}
+  lock.height:           {type: analog}
+  upperwater.height:     {type: analog, expr: upperpool}
+  lowergate.open:        {type: analog}
+  lowervalve.open:       {type: analog}
+  uppergate.open:        {type: analog}
+  uppervalve.open:       {type: analog}
+  boat.direction:        {type: analog, expr: boat.dir}
+  lowersensor.direction: {type: analog, expr: "boat.x <= 100 ? boat.dir : 0"}
+  locksensor.direction:  {type: analog, expr: "boat.x > 100 && boat.x <= 200 ? boat.dir : 0"}
+  uppersensor.direction: {type: analog, expr: "boat.x > 200 ? boat.dir : 0"}
+  boat.location:         {type: analog, expr: boat.x}
+  lowersensor.active:    {type: analog, expr: "boat.x <= 100"}
+  locksensor.active:     {type: analog, expr: "boat.x > 100 && boat.x <= 200"}
+  uppersensor.active:    {type: analog, expr: "boat.x > 200"}
