@@ -1,0 +1,17 @@
+[package]
+name = "ffbench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Standalone benchmark harness: not part of ferrofire's build or its gates.
+[workspace]
+
+[dependencies]
+libc = "0.2"
+nng = "1"
+serde_json = "1"
+zmq = "0.10"
+
+[profile.release]
+opt-level = 3

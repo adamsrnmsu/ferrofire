@@ -2,3 +2,4 @@ target/
 target-linux/
 dist/
 .metrics/
+bench/models/
