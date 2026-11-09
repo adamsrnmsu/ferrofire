@@ -134,6 +134,20 @@ def table(agg, metrics, sd=True):
     return out
 
 
+def runs_table(runs):
+    """Per-run READ p50 (µs) and READ/s, reps 1-3 side by side: shows modes that mean ± sd hides."""
+    out = "| Hz | N | zmq p50 r1 / r2 / r3 | nng p50 r1 / r2 / r3 | zmq READ/s r1 / r2 / r3 | nng READ/s r1 / r2 / r3 |\n|---|---|---|---|---|---|\n"
+    for hz in HZ.values():
+        for n in sorted({r["n"] for r in runs}):
+            c = []
+            for k, f in (("read_p50_us", num), ("read_per_s", lambda x: f"{x:,.0f}")):
+                for t in TR:
+                    rs = sorted((r for r in runs if (r["transport"], r["hz"], r["n"]) == (t, hz, n)), key=lambda r: r["rep"])
+                    c.append(" / ".join(f(r[k]) for r in rs))
+            out += f"| {hz} | {n} | {c[0]} | {c[1]} | {c[2]} | {c[3]} |\n"
+    return out
+
+
 def lat(op):
     return [(f"{op}_{q}_us", f"{q}") for q in ("p50", "p95", "p99", "max")]
 
@@ -157,7 +171,7 @@ TABLES = {
 
 # ---- charts ----------------------------------------------------------------------------------------------------
 
-def charts(agg):
+def charts(agg, runs):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -198,6 +212,20 @@ def charts(agg):
             finish(ax, f"{name}, publish at {hz} Hz", "round-trip latency (µs, log)")
     fig.suptitle("Request/reply latency vs tag count (one client, closed loop; shaded = min-max over 3 runs)", fontsize=11)
     legend(fig, axs[0][0]); fig.tight_layout(rect=(0, 0.04, 1, 0.97)); fig.savefig(IMG / "latency.png", dpi=130); plt.close(fig)
+
+    # 1b. per-run READ p50: nng is bimodal, so show every run instead of mean ± sd
+    fig, axs = plt.subplots(1, 2, figsize=(11, 4.6), sharey=True)
+    for ax, hz in zip(axs, (10, 100)):
+        for i, tr in enumerate(TR):
+            rs = [r for r in runs if r["transport"] == tr and r["hz"] == hz]
+            ax.scatter([ns.index(r["n"]) + (i - 0.5) * 0.18 + (r["rep"] - 2) * 0.03 for r in rs], [r["read_p50_us"] for r in rs],
+                       color=COLOR[tr], label=tr, s=36, alpha=0.85)
+        ax.set_xticks(range(len(ns)), [str(n) for n in ns])
+        ax.set_xlabel("published tags (N)")
+        ax.set_title(f"READ p50 per run, publish at {hz} Hz (3 runs per dot column)", fontsize=10)
+        ax.grid(True, alpha=0.25)
+    axs[0].set_ylabel("READ median latency (µs)")
+    fig.tight_layout(rect=(0, 0.08, 1, 1)); legend(fig, axs[0]); fig.savefig(IMG / "latency_runs.png", dpi=130); plt.close(fig)
 
     # 2. wire traffic
     fig, axs = plt.subplots(1, 2, figsize=(11, 4.6))
@@ -246,10 +274,11 @@ if __name__ == "__main__":
     runs = load()
     agg = aggregate(runs)
     write_csv(runs, agg)
-    charts(agg)
+    charts(agg, runs)
     tpl = (ROOT / "bench/report.md.in")
     if tpl.exists():
-        md = re.sub(r"\{\{table:(\w+)(:nosd)?\}\}", lambda m: table(agg, TABLES[m[1]], sd=not m[2]), tpl.read_text())
+        md = tpl.read_text().replace("{{table:read_runs}}", runs_table(runs))
+        md = re.sub(r"\{\{table:(\w+)(:nosd)?\}\}", lambda m: table(agg, TABLES[m[1]], sd=not m[2]), md)
         md = md.replace("{{runs}}", str(len(runs)))
         (ROOT / "docs/bench/transport-comparison.md").write_text(md)
     print(f"{len(runs)} runs, {len(agg)} cells")
