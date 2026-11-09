@@ -107,6 +107,48 @@ fn run_over_nng_serves_queries_writes_and_publishes() {
     );
 }
 
+/// A model with `n` published tags (same shape as bench/gen_model.py): n-1 analog outputs plus `sim.t`.
+fn wide_model(n: usize, extra: &str) -> String {
+    let mut y = format!("{extra}version: 1\ndt: 0.01\nstates:\n  sim.t: {{ode: \"1\", init: 0}}\noutputs:\n  sim.t: {{type: analog}}\n");
+    for k in 0..n - 1 {
+        y += &format!("  bench.t{k:04}: {{type: analog, expr: \"sim.t * 0.1 + {k} * 0.37\"}}\n");
+    }
+    y
+}
+
+/// ww-a8n: a cycle of 800 tags (~25 kB) is ONE message, so a PUB0 send queue of 16 can never overflow within a cycle.
+#[test]
+fn nng_sends_each_publish_cycle_as_one_message_at_800_tags() {
+    let dir = std::env::temp_dir().join(format!("ff-nng800-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let model = dir.join("m800.yaml");
+    std::fs::write(&model, wide_model(800, "")).unwrap();
+    let (server, publish) = eps();
+    let child = spawn(&[
+        "run",
+        model.to_str().unwrap(),
+        "--transport",
+        "nng",
+        "--server",
+        &server,
+        "--publish",
+        &publish,
+        "--rate",
+        "0.02",
+    ]);
+    let feed = sub(&publish);
+    let cycles: Vec<String> = (0..30).map(|_| update(&feed)).collect();
+    for m in &cycles {
+        assert!(
+            m.starts_with("sim.t:") && m.ends_with(",\0"),
+            "{}",
+            &m[..40]
+        );
+        assert_eq!(m.matches(',').count(), 800); // the whole cycle, not a 1400-byte slice of it
+    }
+    terminate(child);
+}
+
 #[test]
 fn pybennu_power_solver_takes_the_transport_from_config_ini() {
     let dir = std::env::temp_dir().join(format!("ff-nngp-{}", std::process::id()));
@@ -124,7 +166,7 @@ fn pybennu_power_solver_takes_the_transport_from_config_ini() {
         .unwrap();
     assert_eq!(req(&server, "QUERY=").matches(',').count(), 208);
     assert_eq!(req(&server, "READ=bus-1.slack"), "ACK=bus-1.slack:true");
-    // 208 noisy tags do not fit one message: every message is whole `tag:value,` points, NUL-terminated
+    // 208 noisy tags are one message per cycle: whole `tag:value,` points, NUL-terminated
     let feed = sub(&publish);
     let (first, second) = (update(&feed), update(&feed));
     assert!(
@@ -138,7 +180,7 @@ fn pybennu_power_solver_takes_the_transport_from_config_ini() {
             .split_terminator(',')
             .all(|p| p.contains(':')));
     }
-    assert!(first.len() <= 1401);
+    assert_eq!(first.matches(',').count(), 208); // not split at the 1400-byte UDP chunk size
     let (ok, out) = terminate(child);
     assert!(ok && out.contains("transport nng"), "{out}");
 }
@@ -185,4 +227,49 @@ fn the_flag_overrides_the_model_key() {
     std::thread::sleep(Duration::from_millis(500));
     let (_, out) = terminate(o);
     assert!(out.contains("transport zmq"), "{out}");
+}
+
+/// The send buffer comes from the model key (`nng_sendbuf:`) or `--nng-sendbuf`; out of range stops at startup.
+#[test]
+fn nng_sendbuf_is_configured_by_the_model_key_and_the_flag_and_bounded() {
+    let dir = std::env::temp_dir().join(format!("ff-nngsb-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let run = |key: &str, flag: &[&str]| {
+        let model = dir.join("m.yaml");
+        std::fs::write(&model, wide_model(10, key)).unwrap();
+        Command::new(BIN)
+            .args(["run", model.to_str().unwrap(), "--transport", "nng"])
+            .args(["--server", &eps().0, "--publish", &eps().1])
+            .args(flag)
+            .output()
+            .unwrap()
+    };
+    for (key, flag) in [
+        ("nng_sendbuf: 0\n", &[][..]),
+        ("nng_sendbuf: 8193\n", &[]),
+        ("", &["--nng-sendbuf", "0"]),
+    ] {
+        let o = run(key, flag);
+        assert_eq!(o.status.code(), Some(1), "{key}{flag:?}");
+        assert!(String::from_utf8_lossy(&o.stderr).contains("nng_sendbuf"));
+    }
+    // the flag beats the model key: a bad key is ignored when the flag is good
+    let (server, publish) = eps();
+    let model = dir.join("ok.yaml");
+    std::fs::write(&model, wide_model(10, "nng_sendbuf: 0\n")).unwrap();
+    let child = spawn(&[
+        "run",
+        model.to_str().unwrap(),
+        "--transport",
+        "nng",
+        "--nng-sendbuf",
+        "64",
+        "--server",
+        &server,
+        "--publish",
+        &publish,
+    ]);
+    assert!(update(&sub(&publish)).starts_with("sim.t:"));
+    let (_, out) = terminate(child);
+    assert!(out.contains("sendbuf 64"), "{out}");
 }

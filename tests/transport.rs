@@ -1,5 +1,5 @@
 //! Transport selection (provider-spec 11): flag > model/config > zmq, and a transport the binary lacks is a startup error.
-use ferrofire::transport::{pick, select, COMPILED};
+use ferrofire::transport::{pick, select, sendbuf, COMPILED, DEFAULT_SENDBUF, MAX_SENDBUF};
 use std::process::Command;
 
 const BIN: &str = env!("CARGO_BIN_EXE_ferrofire");
@@ -43,7 +43,7 @@ fn unknown_and_missing_transports_are_named_errors() {
 fn compiled_lists_exactly_the_enabled_features() {
     assert_eq!(COMPILED.contains(&"zmq"), cfg!(feature = "zmq"));
     assert_eq!(COMPILED.contains(&"nng"), cfg!(feature = "nng"));
-    assert!(select(Some("bogus"), None).is_err());
+    assert!(select(Some("bogus"), None, None).is_err());
 }
 
 fn run_stderr(extra: &[&str]) -> (Option<i32>, String) {
@@ -94,6 +94,22 @@ fn pybennu_power_solver_validates_the_flag_and_the_config_key() {
     };
     assert!(start(&conf("transport = bogus\n"), &[]).contains("unknown transport `bogus`"));
     assert!(start(&conf(""), &["--transport", "bogus"]).contains("unknown transport `bogus`"));
+    assert!(start(&conf("nng-sendbuf = 0\n"), &[]).contains("nng_sendbuf 0 out of range"));
+    assert!(start(&conf("nng-sendbuf = lots\n"), &[]).contains("nng-sendbuf:"));
     // the flag wins over the file, so a bad file value is ignored when the flag is bad too (flag is reported)
     assert!(start(&conf("transport = nng\n"), &["--transport", "bogus"]).contains("`bogus`"));
+}
+
+#[test]
+fn the_nng_send_buffer_is_bounded() {
+    assert_eq!((DEFAULT_SENDBUF, MAX_SENDBUF), (128, 8192));
+    assert_eq!(sendbuf(None), Ok(128));
+    assert_eq!(sendbuf(Some(1)), Ok(1));
+    assert_eq!(sendbuf(Some(8192)), Ok(8192));
+    for bad in [0, 8193] {
+        let e = sendbuf(Some(bad)).unwrap_err();
+        assert!(e.contains("nng_sendbuf") && e.contains("1..=8192"), "{e}");
+    }
+    // a bad value is refused by select too, whatever transport is picked
+    assert!(select(Some("zmq"), None, Some(0)).is_err());
 }

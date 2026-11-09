@@ -1,12 +1,15 @@
-//! NNG REP0 for requests, PUB0 for updates (one message per chunk, no group framing: SUB0 filters by prefix).
+//! NNG REP0 for requests, PUB0 for updates: one message per publish cycle (TCP segments it; no group framing, SUB0 filters by prefix).
+//! PUB0 drops, never blocks, when a subscriber pipe's send queue is full, so that queue (`nng_sendbuf`) is sized above the burst.
 use super::{Handler, Publisher, Transport};
-use crate::bennu::{chunks_nul, STOP};
-use nng::options::{Options, RecvTimeout};
+use crate::bennu::STOP;
+use nng::options::{Options, RecvTimeout, SendBufferSize};
 use nng::{Protocol, Socket};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-pub struct Nng;
+pub struct Nng {
+    pub sendbuf: i32,
+}
 
 fn listening(p: Protocol, endpoint: &str) -> Result<Socket, String> {
     let s = Socket::new(p).map_err(|e| e.to_string())?;
@@ -20,6 +23,7 @@ fn listening(p: Protocol, endpoint: &str) -> Result<Socket, String> {
 struct Pub {
     sock: Socket,
     endpoint: String,
+    sendbuf: i32,
 }
 
 impl Transport for Nng {
@@ -47,20 +51,27 @@ impl Transport for Nng {
     }
 
     fn publisher(&self, endpoint: &str) -> Result<Box<dyn Publisher>, String> {
+        let sock = Socket::new(Protocol::Pub0).map_err(|e| e.to_string())?;
+        sock.set_opt::<SendBufferSize>(self.sendbuf)
+            .map_err(|e| e.to_string())?;
+        sock.listen(endpoint)
+            .map_err(|e| format!("bind {endpoint}: {e}"))?;
         Ok(Box::new(Pub {
-            sock: listening(Protocol::Pub0, endpoint)?,
+            sock,
             endpoint: endpoint.into(),
+            sendbuf: self.sendbuf,
         }))
     }
 }
 
 impl Publisher for Pub {
     fn publish(&self, msg: &str) {
-        for c in chunks_nul(msg) {
-            let _ = self.sock.send(c.as_slice());
-        }
+        let mut b = Vec::with_capacity(msg.len() + 1);
+        b.extend_from_slice(msg.as_bytes());
+        b.push(0);
+        let _ = self.sock.send(b.as_slice());
     }
     fn describe(&self) -> String {
-        format!("PUB {}", self.endpoint)
+        format!("PUB {} (sendbuf {})", self.endpoint, self.sendbuf)
     }
 }

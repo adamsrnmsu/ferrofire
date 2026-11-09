@@ -91,8 +91,9 @@ flowchart LR
 
 ## Transports
 
-Requests (`QUERY=`, `READ=tag`, `WRITE=tag:value`, answered `ACK=...` / `ERR=...`) and updates (`tag:value,...` in whole-point
-chunks, NUL-terminated) are the same bytes on both transports. Pick one per run; the choice is `--transport` on `run` and
+Requests (`QUERY=`, `READ=tag`, `WRITE=tag:value`, answered `ACK=...` / `ERR=...`) and updates (`tag:value,...`, NUL-terminated)
+carry the same points on both transports; zmq/UDP splits a cycle into whole-point datagrams of at most 1400 bytes, nng/TCP sends
+the whole cycle as one message. Pick one per run; the choice is `--transport` on `run` and
 `pypower`, else `transport:` in the model YAML, else `transport =` in `config.ini`, else `zmq`.
 
 | | `zmq` (default) | `nng` |
@@ -102,6 +103,12 @@ chunks, NUL-terminated) are the same bytes on both transports. Pick one per run;
 | Default endpoints | `tcp://0.0.0.0:5555`, `udp://*;239.0.0.1:40000` | `tcp://0.0.0.0:5555`, `tcp://0.0.0.0:5556` |
 | Talks to stock bennu field devices and bennu-probe | yes | no (NNG clients only) |
 | Cargo feature / image | `zmq`, `bennu-ferrofire-arm64` | `nng`, `bennu-ferrofire-nng-arm64` |
+
+nng PUB0 never blocks and never retransmits at the application layer: when a subscriber's send queue is full it drops the
+message. One message per cycle keeps a cycle from overflowing it (the old 1400-byte chunking made 800 tags 17 messages against
+nng's default queue of 16, ww-a8n). The queue is `nng_sendbuf` messages per subscriber, default 128, range 1..=8192: set
+`nng_sendbuf:` in the model YAML, `--nng-sendbuf N` on `run` (beats the model), or `nng-sendbuf = N` in `config.ini`. It only
+matters for slow subscribers, which lose whole cycles once that many are queued; zmq/UDP ignores it.
 
 Both features are on by default. `cargo build --no-default-features --features nng` links no libzmq; `--features zmq` links no
 NNG. Asking for a transport the binary was built without stops at startup, naming the cargo feature. `make variants` builds,

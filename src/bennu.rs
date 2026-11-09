@@ -287,7 +287,7 @@ pub fn udp_sender(iface: Option<&str>, dest: SocketAddr) -> Result<UdpSocket, St
     Ok(s)
 }
 
-const USAGE: &str = "ferrofire run [model.yaml | --model model.yaml] [--server tcp://0.0.0.0:5555] [--publish 'udp://*;239.0.0.1:40000'] [--rate 0.1] [--transport zmq|nng]";
+const USAGE: &str = "ferrofire run [model.yaml | --model model.yaml] [--server tcp://0.0.0.0:5555] [--publish 'udp://*;239.0.0.1:40000'] [--rate 0.1] [--transport zmq|nng] [--nng-sendbuf 128]";
 
 pub fn main(args: &[String]) {
     if let Err(e) = run(args) {
@@ -305,9 +305,18 @@ pub struct RunArgs {
     pub rate: Option<f64>,
     /// None: the model's `transport:`, else zmq.
     pub transport: Option<String>,
+    /// None: the model's `nng_sendbuf:`, else the default.
+    pub nng_sendbuf: Option<usize>,
 }
 
-const FLAGS: [&str; 5] = ["--model", "--server", "--publish", "--rate", "--transport"];
+const FLAGS: [&str; 6] = [
+    "--model",
+    "--server",
+    "--publish",
+    "--rate",
+    "--transport",
+    "--nng-sendbuf",
+];
 
 impl RunArgs {
     fn set(&mut self, flag: &str, v: String) -> Result<(), String> {
@@ -316,12 +325,15 @@ impl RunArgs {
             "--server" => self.server = v,
             "--publish" => self.publish = Some(v),
             "--transport" => self.transport = Some(v),
+            "--nng-sendbuf" => {
+                self.nng_sendbuf = Some(v.parse().map_err(|e| format!("--nng-sendbuf: {e}"))?)
+            }
             _ => self.rate = Some(v.parse::<f64>().map_err(|e| format!("--rate: {e}"))?),
         }
         Ok(())
     }
 
-    /// `[model.yaml | --model model.yaml] [--server ep] [--publish ep] [--rate seconds] [--transport nng|zmq]`
+    /// `[model.yaml | --model model.yaml] [--server ep] [--publish ep] [--rate seconds] [--transport nng|zmq] [--nng-sendbuf n]`
     pub fn parse(args: &[String]) -> Result<RunArgs, String> {
         let mut r = RunArgs {
             path: None,
@@ -329,6 +341,7 @@ impl RunArgs {
             publish: None,
             rate: None,
             transport: None,
+            nng_sendbuf: None,
         };
         let mut it = args.iter();
         while let Some(a) = it.next() {
@@ -426,7 +439,11 @@ fn run(args: &[String]) -> Result<(), String> {
     }));
     install_signals();
 
-    let t = transport::select(a.transport.as_deref(), model.transport.as_deref())?;
+    let t = transport::select(
+        a.transport.as_deref(),
+        model.transport.as_deref(),
+        a.nng_sendbuf.or(model.nng_sendbuf),
+    )?;
     let sh2 = sh.clone();
     let rep_t = t.serve(&a.server, Box::new(move |req| handle(req, &meta, &sh2)))?;
     let publish = a.publish.as_deref().unwrap_or(t.default_publish());

@@ -167,6 +167,8 @@ struct Doc {
     publish_rate: Option<f64>,
     /// `zmq` or `nng`; the `--transport` flag overrides it.
     transport: Option<String>,
+    /// nng PUB0 send queue per subscriber, in messages; the `--nng-sendbuf` flag overrides it.
+    nng_sendbuf: Option<usize>,
     #[serde(default)]
     params: Ordered<f64>,
     #[serde(default)]
@@ -233,6 +235,7 @@ pub struct Model {
     pub dt: f64,
     pub publish_rate: Option<f64>,
     pub transport: Option<String>,
+    pub nng_sendbuf: Option<usize>,
     pub time: f64,
     substeps: usize,
     v: Vec<f64>,
@@ -655,6 +658,7 @@ impl Model {
             dt: doc.dt,
             publish_rate: doc.publish_rate,
             transport: doc.transport.clone(),
+            nng_sendbuf: doc.nng_sendbuf,
             time: 0.0,
             substeps: doc.substeps,
             v,

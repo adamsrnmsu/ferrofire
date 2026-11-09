@@ -140,6 +140,11 @@ fn run_arguments() {
     assert_eq!((d.publish, d.transport), (None, None)); // the transport picks the publish default
     let t = a(&["x.yaml", "--transport", "nng"]).unwrap();
     assert_eq!(t.transport.as_deref(), Some("nng"));
+    assert_eq!(d.nng_sendbuf, None);
+    assert_eq!(a(&["--nng-sendbuf", "64"]).unwrap().nng_sendbuf, Some(64));
+    assert!(a(&["--nng-sendbuf", "-1"])
+        .unwrap_err()
+        .starts_with("--nng-sendbuf:"));
     // a second bare word is not a model, and a flag with no value is refused
     assert!(a(&["--model", "x.yaml", "y.yaml"])
         .unwrap_err()

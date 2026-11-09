@@ -203,6 +203,7 @@ struct Cfg {
     case: String,
     debug: bool,
     transport: Option<String>,
+    nng_sendbuf: Option<usize>,
 }
 
 /// Absolute form of `f` when it exists, else `f` as given.
@@ -241,6 +242,10 @@ fn load_cfg(path: &str, debug: bool) -> Result<Cfg, String> {
         case: canon(&required(s, "case-file")?),
         debug,
         transport: s.get("transport").cloned(),
+        nng_sendbuf: s
+            .get("nng-sendbuf")
+            .map(|v| v.parse().map_err(|e| format!("nng-sendbuf: {e}")))
+            .transpose()?,
     })
 }
 
@@ -457,7 +462,7 @@ fn publish_loop(p: &Mutex<Power>, out: &dyn Publisher) {
 fn serve(cfg: Cfg, power: Power) -> Result<(), String> {
     install_signals();
     let p = Arc::new(Mutex::new(power));
-    let t = transport::select(cfg.transport.as_deref(), None)?;
+    let t = transport::select(cfg.transport.as_deref(), None, cfg.nng_sendbuf)?;
     let (p2, debug) = (p.clone(), cfg.debug);
     let rep_t = t.serve(&cfg.server, Box::new(move |req| handle(req, &p2, debug)))?;
     let out = t.publisher(&cfg.publish)?;
