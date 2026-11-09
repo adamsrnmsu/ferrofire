@@ -24,3 +24,5 @@ jobs:
         run: make golden
       - name: Quality gates (fmt, clippy, tests, CRAP, dryer)
         run: make check
+      - name: Single-transport builds (zmq only, nng only)
+        run: make variants
