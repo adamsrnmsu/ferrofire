@@ -47,7 +47,7 @@ flowchart LR
     P["AC Newton-Raphson /<br/>DC power flow"]
   end
   subgraph fe["Frontends (pick one)"]
-    N["ferrofire run<br/>native bennu provider<br/>ZMQ REP tcp + UDP RADIO"]
+    N["ferrofire run<br/>native bennu provider<br/>transport: zmq (REP + UDP RADIO)<br/>or nng (REP0 + PUB0)"]
     SL["simulinksolver<br/>Simulink shm adapter"]
     PY["pybennu-power-solver<br/>PyPower drop-in"]
   end
@@ -62,8 +62,8 @@ flowchart LR
   core --> N & SL & PY
   SL -- "shm + semaphores" --> BP
   BP -- "ZMQ" --> FD
-  N -- "ZMQ" --> FD
-  PY -- "ZMQ" --> FD
+  N -- "ZMQ (default) or NNG" --> FD
+  PY -- "ZMQ (default) or NNG" --> FD
   FD -- "Modbus / DNP3" --> SC
   SC -. "writes: gates, valves, breakers" .-> FD
 ```
@@ -85,9 +85,27 @@ flowchart LR
 
 | Frontend | How it starts | Protocol | Replaces |
 |---|---|---|---|
-| Native bennu provider | `ferrofire run model.yaml` | ZMQ REP on tcp + UDP RADIO/DISH multicast | any bennu provider |
+| Native bennu provider | `ferrofire run model.yaml [--transport nng\|zmq]` | zmq: REP on tcp + UDP RADIO/DISH multicast; nng: REP0 + PUB0 on tcp | any bennu provider |
 | Simulink adapter | `simulinksolver -tf inf` (or `ferrofire simulink`) | SysV shm + POSIX semaphores to stock `bennu-simulink-provider` | the Simulink solver binary |
-| PyPower drop-in | `pybennu-power-solver start -c config.ini` (or `ferrofire pypower`) | same INI, pidfile, logs and ZMQ as pybennu | `pybennu-power-solver` |
+| PyPower drop-in | `pybennu-power-solver start -c config.ini [--transport nng\|zmq]` (or `ferrofire pypower`) | same INI, pidfile, logs and ZMQ as pybennu (`transport = nng` in the INI switches it) | `pybennu-power-solver` |
+
+## Transports
+
+Requests (`QUERY=`, `READ=tag`, `WRITE=tag:value`, answered `ACK=...` / `ERR=...`) and updates (`tag:value,...` in whole-point
+chunks, NUL-terminated) are the same bytes on both transports. Pick one per run; the choice is `--transport` on `run` and
+`pypower`, else `transport:` in the model YAML, else `transport =` in `config.ini`, else `zmq`.
+
+| | `zmq` (default) | `nng` |
+|---|---|---|
+| Requests | libzmq REP | NNG REP0 |
+| Updates | UDP RADIO/DISH framing (multicast ok) | NNG PUB0 (subscribers connect; no multicast) |
+| Default endpoints | `tcp://0.0.0.0:5555`, `udp://*;239.0.0.1:40000` | `tcp://0.0.0.0:5555`, `tcp://0.0.0.0:5556` |
+| Talks to stock bennu field devices and bennu-probe | yes | no (NNG clients only) |
+| Cargo feature / image | `zmq`, `bennu-ferrofire-arm64` | `nng`, `bennu-ferrofire-nng-arm64` |
+
+Both features are on by default. `cargo build --no-default-features --features nng` links no libzmq; `--features zmq` links no
+NNG. Asking for a transport the binary was built without stops at startup, naming the cargo feature. `make variants` builds,
+lints and tests both single-transport binaries.
 
 ## Quick start
 
