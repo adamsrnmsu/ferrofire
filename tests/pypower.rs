@@ -1,5 +1,6 @@
 //! pybennu-power-solver drop-in (spec 5(b), 6.5): request/reply forms, noise rules, and the daemon verbs end to end.
 //! Uses target/golden/case9.py (from `make golden`); the daemon test writes /var/run + /var/log, so run it in the container.
+#![cfg(feature = "zmq")] // drives the zmq transport; tests/nng.rs is the nng counterpart
 use ferrofire::bennu::{group_for, unframe};
 use ferrofire::model::Kind;
 use ferrofire::power::{case, Islands, Power};

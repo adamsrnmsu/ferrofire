@@ -27,6 +27,7 @@ fn framing_and_chunking() {
         chunk_message("aaaa,bbbb,cccc,", 11),
         vec!["aaaa,bbbb,", "cccc,"]
     );
+    assert_eq!(chunks_nul("a:1,b:2,"), vec![b"a:1,b:2,\0".to_vec()]); // the bytes both transports send
     assert_eq!(chunk_message("longlonglong,", 4), vec!["longlonglong,"]); // over-long single part alone
     let snap: Vec<_> = (0..400)
         .map(|i| (format!("bus-{i}.voltage"), Value::Analog(1.0123456789)))
@@ -87,6 +88,7 @@ fn requests() {
     assert_eq!(sh.lock().unwrap().queue.len(), 2);
 }
 
+#[cfg(feature = "zmq")]
 #[test]
 fn rep_round_trip() {
     let (meta, sh) = setup();
@@ -128,13 +130,16 @@ fn run_arguments() {
     .unwrap();
     assert_eq!(ok.path.as_deref(), Some("m.yaml"));
     assert_eq!(
-        (ok.server.as_str(), ok.publish.as_str()),
-        ("tcp://*:1", "udp://*;239.0.0.1:2")
+        (ok.server.as_str(), ok.publish.as_deref()),
+        ("tcp://*:1", Some("udp://*;239.0.0.1:2"))
     );
     assert_eq!(ok.rate, Some(0.5));
     let d = a(&["--model", "x.yaml"]).unwrap();
     assert_eq!(d.path.as_deref(), Some("x.yaml"));
     assert_eq!((d.server.as_str(), d.rate), ("tcp://0.0.0.0:5555", None));
+    assert_eq!((d.publish, d.transport), (None, None)); // the transport picks the publish default
+    let t = a(&["x.yaml", "--transport", "nng"]).unwrap();
+    assert_eq!(t.transport.as_deref(), Some("nng"));
     // a second bare word is not a model, and a flag with no value is refused
     assert!(a(&["--model", "x.yaml", "y.yaml"])
         .unwrap_err()

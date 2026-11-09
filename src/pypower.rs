@@ -2,12 +2,10 @@
 //! as pybennu's PyPower provider, backed by the native power flow. Behaviour matched from pybennu's documented
 //! interface only; no pybennu code is used.
 
-use crate::bennu::{
-    datagrams_msg, group_for, install_signals, parse_udp, serve_rep, sleep_until, udp_sender,
-    with_nul, STOP,
-};
+use crate::bennu::{install_signals, sleep_until, with_nul, STOP};
 use crate::model::Kind;
 use crate::power::{case, Islands, Power};
+use crate::transport::{self, Publisher};
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -204,6 +202,7 @@ struct Cfg {
     publish: String,
     case: String,
     debug: bool,
+    transport: Option<String>,
 }
 
 /// Absolute form of `f` when it exists, else `f` as given.
@@ -241,6 +240,7 @@ fn load_cfg(path: &str, debug: bool) -> Result<Cfg, String> {
         publish: required(s, "publish-endpoint")?.replace("*;", ""),
         case: canon(&required(s, "case-file")?),
         debug,
+        transport: s.get("transport").cloned(),
     })
 }
 
@@ -324,16 +324,29 @@ struct Cli {
     env: String,
     daemon: bool,
     debug: bool,
+    transport: Option<String>,
 }
 
 fn usage() -> ! {
     crate::usage_exit(
-        "usage: pybennu-power-solver [-c CONFIG_FILE] [-d] [-e ENV] [-v] {start,stop,restart,status}",
+        "usage: pybennu-power-solver [-c CONFIG_FILE] [-d] [-e ENV] [-v] [--transport {zmq,nng}] {start,stop,restart,status}",
     )
 }
 
 fn flag_value<'a>(it: &mut impl Iterator<Item = &'a String>) -> String {
     it.next().cloned().unwrap_or_else(|| usage())
+}
+
+const VALUE_FLAGS: [&str; 5] = ["-c", "--config-file", "-e", "--env", "--transport"];
+
+impl Cli {
+    fn set(&mut self, flag: &str, v: String) {
+        match flag {
+            "-c" | "--config-file" => self.conf = v,
+            "-e" | "--env" => self.env = v,
+            _ => self.transport = Some(v),
+        }
+    }
 }
 
 fn parse_cli(args: &[String]) -> Cli {
@@ -343,12 +356,12 @@ fn parse_cli(args: &[String]) -> Cli {
         env: "pybennu".into(),
         daemon: false,
         debug: false,
+        transport: None,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
-            "-c" | "--config-file" => c.conf = flag_value(&mut it),
-            "-e" | "--env" => c.env = flag_value(&mut it),
+            f if VALUE_FLAGS.contains(&f) => c.set(f, flag_value(&mut it)),
             "-d" | "--daemonize" => c.daemon = true,
             "-v" | "--debug" => c.debug = true,
             o @ ("start" | "stop" | "restart" | "status") if c.op.is_empty() => c.op = o.into(),
@@ -424,25 +437,18 @@ fn load_service(c: &Cli) -> Result<(Cfg, Power), String> {
             c.conf
         ));
     }
-    let cfg = load_cfg(&canon(&c.conf), c.debug)?;
+    let mut cfg = load_cfg(&canon(&c.conf), c.debug)?;
+    cfg.transport = c.transport.clone().or(cfg.transport); // the flag beats config.ini
     let case = case::load_file(std::path::Path::new(&cfg.case))?;
     let power = Power::new(case, Islands::Fail, false, &[], &[])?;
     Ok((cfg, power))
 }
 
 /// Publish a noisy snapshot every second until `STOP`.
-fn publish_loop(
-    p: &Mutex<Power>,
-    sock: &std::net::UdpSocket,
-    dest: std::net::SocketAddr,
-    group: &str,
-) {
+fn publish_loop(p: &Mutex<Power>, out: &dyn Publisher) {
     let (mut rng, t0, mut k) = (Rng::seeded(), Instant::now(), 0u64);
     while !STOP.load(Ordering::SeqCst) {
-        let msg = pack(&p.lock().unwrap(), &mut rng);
-        for d in datagrams_msg(group, &msg) {
-            let _ = sock.send_to(&d, dest);
-        }
+        out.publish(&pack(&p.lock().unwrap(), &mut rng));
         k += 1;
         sleep_until(t0 + Duration::from_secs(k), Duration::from_millis(20));
     }
@@ -451,17 +457,18 @@ fn publish_loop(
 fn serve(cfg: Cfg, power: Power) -> Result<(), String> {
     install_signals();
     let p = Arc::new(Mutex::new(power));
-    let ctx = zmq::Context::new();
+    let t = transport::select(cfg.transport.as_deref(), None)?;
     let (p2, debug) = (p.clone(), cfg.debug);
-    let rep_t = serve_rep(&ctx, &cfg.server, move |req| handle(req, &p2, debug))?;
-    let (iface, dest) = parse_udp(&cfg.publish)?;
-    let sock = udp_sender(iface.as_deref(), dest)?;
-    let group = group_for(&cfg.publish);
+    let rep_t = t.serve(&cfg.server, Box::new(move |req| handle(req, &p2, debug)))?;
+    let out = t.publisher(&cfg.publish)?;
     println!(
-        "Info: pybennu-power-solver (ferrofire): case {}; REP {}; RADIO {} group {group} every 1s",
-        cfg.case, cfg.server, cfg.publish
+        "Info: pybennu-power-solver (ferrofire): case {}; transport {}; REP {}; {} every 1s",
+        cfg.case,
+        t.name(),
+        cfg.server,
+        out.describe()
     );
-    publish_loop(&p, &sock, dest, &group);
+    publish_loop(&p, out.as_ref());
     let _ = rep_t.join();
     println!("Info: stopped");
     Ok(())

@@ -1,4 +1,5 @@
 //! The `ferrofire` binary as an operator runs it: `run` (REP + UDP RADIO until SIGTERM) and `check` (offline trace).
+#![cfg(feature = "zmq")] // drives the zmq transport; tests/nng.rs is the nng counterpart
 use ferrofire::bennu::{group_for, unframe};
 use std::io::Read;
 use std::process::{Child, Command, Output, Stdio};

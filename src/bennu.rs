@@ -3,6 +3,7 @@
 //! Pure pieces (hash, framing, chunking, request handling) are plain functions so tests need no sockets.
 
 use crate::model::{Model, Value};
+use crate::transport::{self, Publisher};
 use std::collections::HashSet;
 use std::net::{Ipv4Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -90,26 +91,35 @@ pub fn fmt_value(v: Value) -> String {
     }
 }
 
-/// Datagrams for one publish tick (each `tag:value,...` chunk NUL-terminated, then framed).
-pub fn datagrams(group: &str, snap: &[(String, Value)]) -> Vec<Vec<u8>> {
-    datagrams_msg(
-        group,
-        &snap
-            .iter()
-            .map(|(t, v)| format!("{t}:{},", fmt_value(*v)))
-            .collect::<String>(),
-    )
+/// One publish tick as a `tag:value,...` message.
+pub fn snapshot_msg(snap: &[(String, Value)]) -> String {
+    snap.iter()
+        .map(|(t, v)| format!("{t}:{},", fmt_value(*v)))
+        .collect()
 }
 
-/// Same, from an already-built `tag:value,...` message.
-pub fn datagrams_msg(group: &str, msg: &str) -> Vec<Vec<u8>> {
+/// Datagrams for one publish tick (each `tag:value,...` chunk NUL-terminated, then framed).
+pub fn datagrams(group: &str, snap: &[(String, Value)]) -> Vec<Vec<u8>> {
+    datagrams_msg(group, &snapshot_msg(snap))
+}
+
+/// The wire chunks of a `tag:value,...` message, each NUL-terminated (both transports send these bytes).
+pub fn chunks_nul(msg: &str) -> Vec<Vec<u8>> {
     chunk_message(msg, CHUNK)
         .into_iter()
         .map(|c| {
             let mut b = c.into_bytes();
             b.push(0);
-            frame(group, &b)
+            b
         })
+        .collect()
+}
+
+/// Same as `datagrams`, from an already-built message.
+pub fn datagrams_msg(group: &str, msg: &str) -> Vec<Vec<u8>> {
+    chunks_nul(msg)
+        .into_iter()
+        .map(|b| frame(group, &b))
         .collect()
 }
 
@@ -218,27 +228,6 @@ pub fn sleep_until(deadline: Instant, slice: Duration) {
     }
 }
 
-/// Bind a REP socket on `endpoint` and answer each request with `handler` until `STOP` (polling, so it is noticed).
-pub fn serve_rep(
-    ctx: &zmq::Context,
-    endpoint: &str,
-    handler: impl Fn(&[u8]) -> Vec<u8> + Send + 'static,
-) -> Result<std::thread::JoinHandle<()>, String> {
-    let rep = ctx.socket(zmq::REP).map_err(|e| e.to_string())?;
-    rep.bind(endpoint)
-        .map_err(|e| format!("bind {endpoint}: {e}"))?;
-    Ok(std::thread::spawn(move || {
-        while !STOP.load(Ordering::SeqCst) {
-            if !matches!(rep.poll(zmq::POLLIN, 100), Ok(n) if n > 0) {
-                continue;
-            }
-            if let Ok(req) = rep.recv_bytes(0) {
-                let _ = rep.send(handler(&req), 0);
-            }
-        }
-    }))
-}
-
 /// `udp://[iface;]host:port` -> (iface, destination)
 pub fn parse_udp(ep: &str) -> Result<(Option<String>, SocketAddr), String> {
     let rest = ep
@@ -298,7 +287,7 @@ pub fn udp_sender(iface: Option<&str>, dest: SocketAddr) -> Result<UdpSocket, St
     Ok(s)
 }
 
-const USAGE: &str = "ferrofire run [model.yaml | --model model.yaml] [--server tcp://0.0.0.0:5555] [--publish 'udp://*;239.0.0.1:40000'] [--rate 0.1]";
+const USAGE: &str = "ferrofire run [model.yaml | --model model.yaml] [--server tcp://0.0.0.0:5555] [--publish 'udp://*;239.0.0.1:40000'] [--rate 0.1] [--transport zmq|nng]";
 
 pub fn main(args: &[String]) {
     if let Err(e) = run(args) {
@@ -311,30 +300,35 @@ pub fn main(args: &[String]) {
 pub struct RunArgs {
     pub path: Option<String>,
     pub server: String,
-    pub publish: String,
+    /// None: the chosen transport's default endpoint.
+    pub publish: Option<String>,
     pub rate: Option<f64>,
+    /// None: the model's `transport:`, else zmq.
+    pub transport: Option<String>,
 }
 
-const FLAGS: [&str; 4] = ["--model", "--server", "--publish", "--rate"];
+const FLAGS: [&str; 5] = ["--model", "--server", "--publish", "--rate", "--transport"];
 
 impl RunArgs {
     fn set(&mut self, flag: &str, v: String) -> Result<(), String> {
         match flag {
             "--model" => self.path = Some(v),
             "--server" => self.server = v,
-            "--publish" => self.publish = v,
+            "--publish" => self.publish = Some(v),
+            "--transport" => self.transport = Some(v),
             _ => self.rate = Some(v.parse::<f64>().map_err(|e| format!("--rate: {e}"))?),
         }
         Ok(())
     }
 
-    /// `[model.yaml | --model model.yaml] [--server ep] [--publish ep] [--rate seconds]`
+    /// `[model.yaml | --model model.yaml] [--server ep] [--publish ep] [--rate seconds] [--transport nng|zmq]`
     pub fn parse(args: &[String]) -> Result<RunArgs, String> {
         let mut r = RunArgs {
             path: None,
             server: "tcp://0.0.0.0:5555".into(),
-            publish: "udp://*;239.0.0.1:40000".into(),
+            publish: None,
             rate: None,
+            transport: None,
         };
         let mut it = args.iter();
         while let Some(a) = it.next() {
@@ -377,22 +371,17 @@ fn owned_snapshot(model: &Model) -> Vec<(String, Value)> {
         .collect()
 }
 
-/// UDP publisher thread: one set of datagrams per `period` until `STOP`.
+/// Publisher thread: one message per `period` until `STOP`.
 fn spawn_publisher(
     sh: Arc<Mutex<Shared>>,
-    sock: UdpSocket,
-    dest: SocketAddr,
-    group: String,
+    out: Box<dyn Publisher>,
     period: f64,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let t0 = Instant::now();
         let mut k = 0u64;
         while !STOP.load(Ordering::SeqCst) {
-            let snap = sh.lock().unwrap().snap.clone();
-            for d in datagrams(&group, &snap) {
-                let _ = sock.send_to(&d, dest);
-            }
+            out.publish(&snapshot_msg(&sh.lock().unwrap().snap));
             k += 1;
             sleep_until(
                 t0 + Duration::from_secs_f64(k as f64 * period),
@@ -437,20 +426,20 @@ fn run(args: &[String]) -> Result<(), String> {
     }));
     install_signals();
 
-    let ctx = zmq::Context::new();
+    let t = transport::select(a.transport.as_deref(), model.transport.as_deref())?;
     let sh2 = sh.clone();
-    let rep_t = serve_rep(&ctx, &a.server, move |req| handle(req, &meta, &sh2))?;
-    let (iface, dest) = parse_udp(&a.publish)?;
-    let sock = udp_sender(iface.as_deref(), dest)?;
-    let group = group_for(&a.publish);
-    let pub_t = spawn_publisher(sh.clone(), sock, dest, group.clone(), period);
+    let rep_t = t.serve(&a.server, Box::new(move |req| handle(req, &meta, &sh2)))?;
+    let publish = a.publish.as_deref().unwrap_or(t.default_publish());
+    let out = t.publisher(publish)?;
     println!(
-        "Info: ferrofire run: {} dt={}s; REP {}; RADIO {} group {group} every {period}s",
+        "Info: ferrofire run: {} dt={}s; transport {}; REP {}; {} every {period}s",
         a.path.as_deref().unwrap_or(""),
         model.dt,
+        t.name(),
         a.server,
-        a.publish
+        out.describe()
     );
+    let pub_t = spawn_publisher(sh.clone(), out, period);
 
     engine(&mut model, &sh);
     let _ = rep_t.join();

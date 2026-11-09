@@ -165,6 +165,8 @@ struct Doc {
     substeps: usize,
     #[allow(dead_code)]
     publish_rate: Option<f64>,
+    /// `zmq` or `nng`; the `--transport` flag overrides it.
+    transport: Option<String>,
     #[serde(default)]
     params: Ordered<f64>,
     #[serde(default)]
@@ -230,6 +232,7 @@ struct Body {
 pub struct Model {
     pub dt: f64,
     pub publish_rate: Option<f64>,
+    pub transport: Option<String>,
     pub time: f64,
     substeps: usize,
     v: Vec<f64>,
@@ -651,6 +654,7 @@ impl Model {
         Ok(Model {
             dt: doc.dt,
             publish_rate: doc.publish_rate,
+            transport: doc.transport.clone(),
             time: 0.0,
             substeps: doc.substeps,
             v,
