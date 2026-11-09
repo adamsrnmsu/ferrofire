@@ -1,0 +1,253 @@
+{
+  "host": "ffb-prov",
+  "n": 10,
+  "period_s": 0.01,
+  "phases": {
+    "publish": {
+      "end_ns": 1794206739979573878,
+      "start_ns": 1794206709979563294
+    },
+    "query": {
+      "end_ns": 1794206759980381429,
+      "start_ns": 1794206749980341757
+    },
+    "read": {
+      "end_ns": 1794206749979652174,
+      "start_ns": 1794206739979574003
+    },
+    "write": {
+      "end_ns": 1794206769983013128,
+      "start_ns": 1794206759980999679
+    }
+  },
+  "publish": {
+    "during_query": {
+      "age_above_floor": {
+        "max_us": 13892.864,
+        "mean_us": 5844.840343656343,
+        "min_us": 0.0,
+        "n": 1001,
+        "p50_us": 4907.008,
+        "p95_us": 12175.872,
+        "p99_us": 13155.328,
+        "stdev_us": 3795.9796465709055
+      },
+      "chunks_per_cycle": 1.0,
+      "complete_cycles": 1001,
+      "cycle_spread": {
+        "max_us": 0.0,
+        "mean_us": 0.0,
+        "min_us": 0.0,
+        "n": 1001,
+        "p50_us": 0.0,
+        "p95_us": 0.0,
+        "p99_us": 0.0,
+        "stdev_us": 0.0
+      },
+      "cycles": 1001,
+      "cycles_per_s": 100.09960288485544,
+      "expected_cycles": 1000.0,
+      "interarrival": {
+        "max_us": 14872.292,
+        "mean_us": 9996.566963,
+        "min_us": 5106.792,
+        "n": 1000,
+        "p50_us": 11552.125,
+        "p95_us": 13568.708,
+        "p99_us": 14516.125,
+        "stdev_us": 3001.1144861635744
+      },
+      "loss_pct": 0.0,
+      "payload_bytes_per_s": 22348.611338589097,
+      "seconds": 10.000039672,
+      "tags_per_s": 1000.9960288485544
+    },
+    "during_read": {
+      "age_above_floor": {
+        "max_us": 14509.568,
+        "mean_us": 5913.380096,
+        "min_us": 38.4,
+        "n": 1000,
+        "p50_us": 5015.808,
+        "p95_us": 12072.192,
+        "p99_us": 13148.928,
+        "stdev_us": 3818.983327247774
+      },
+      "chunks_per_cycle": 1.0,
+      "complete_cycles": 1000,
+      "cycle_spread": {
+        "max_us": 0.0,
+        "mean_us": 0.0,
+        "min_us": 0.0,
+        "n": 1000,
+        "p50_us": 0.0,
+        "p95_us": 0.0,
+        "p99_us": 0.0,
+        "stdev_us": 0.0
+      },
+      "cycles": 1000,
+      "cycles_per_s": 99.99921829611066,
+      "expected_cycles": 1000.0,
+      "interarrival": {
+        "max_us": 14907.125,
+        "mean_us": 10005.300304304303,
+        "min_us": 5104.375,
+        "n": 999,
+        "p50_us": 11471.333,
+        "p95_us": 13771.833,
+        "p99_us": 14528.459,
+        "stdev_us": 3018.3900201296515
+      },
+      "loss_pct": 0.0,
+      "payload_bytes_per_s": 22312.32558231969,
+      "seconds": 10.000078171,
+      "tags_per_s": 999.9921829611066
+    },
+    "during_write": {
+      "age_above_floor": {
+        "max_us": 14668.032,
+        "mean_us": 6157.734822822823,
+        "min_us": 64.512,
+        "n": 999,
+        "p50_us": 5054.72,
+        "p95_us": 12701.184,
+        "p99_us": 13699.84,
+        "stdev_us": 3772.21715062319
+      },
+      "chunks_per_cycle": 1.0,
+      "complete_cycles": 999,
+      "cycle_spread": {
+        "max_us": 0.0,
+        "mean_us": 0.0,
+        "min_us": 0.0,
+        "n": 999,
+        "p50_us": 0.0,
+        "p95_us": 0.0,
+        "p99_us": 0.0,
+        "stdev_us": 0.0
+      },
+      "cycles": 999,
+      "cycles_per_s": 99.87988969359763,
+      "expected_cycles": 1000.0,
+      "interarrival": {
+        "max_us": 14957.708,
+        "mean_us": 10001.007881763528,
+        "min_us": 5100.292,
+        "n": 998,
+        "p50_us": 11578.0,
+        "p95_us": 13866.083,
+        "p99_us": 14613.209,
+        "stdev_us": 3066.8349345699658
+      },
+      "loss_pct": 0.10000000000000009,
+      "payload_bytes_per_s": 22480.773610885393,
+      "seconds": 10.002013449,
+      "tags_per_s": 998.7988969359764
+    },
+    "idle": {
+      "age_above_floor": {
+        "max_us": 14846.208,
+        "mean_us": 6735.961088,
+        "min_us": 57.088,
+        "n": 3000,
+        "p50_us": 5731.072,
+        "p95_us": 12786.432,
+        "p99_us": 13768.96,
+        "stdev_us": 3646.7243721931013
+      },
+      "chunks_per_cycle": 1.0,
+      "complete_cycles": 3000,
+      "cycle_spread": {
+        "max_us": 0.0,
+        "mean_us": 0.0,
+        "min_us": 0.0,
+        "n": 3000,
+        "p50_us": 0.0,
+        "p95_us": 0.0,
+        "p99_us": 0.0,
+        "stdev_us": 0.0
+      },
+      "cycles": 3000,
+      "cycles_per_s": 99.99996472001244,
+      "expected_cycles": 3000.0,
+      "interarrival": {
+        "max_us": 14990.208,
+        "mean_us": 10000.073830276759,
+        "min_us": 5089.667,
+        "n": 2999,
+        "p50_us": 10132.209,
+        "p95_us": 14583.042,
+        "p99_us": 14868.458,
+        "stdev_us": 3421.6531297647384
+      },
+      "loss_pct": 0.0,
+      "payload_bytes_per_s": 22600.525359867985,
+      "seconds": 30.000010584,
+      "tags_per_s": 999.9996472001244
+    },
+    "malformed": 0,
+    "total_chunks": 6331
+  },
+  "query": {
+    "errors": 0,
+    "max_us": 1614.0,
+    "mean_us": 110.0515061478119,
+    "min_us": 52.542,
+    "n": 90764,
+    "p50_us": 109.5,
+    "p95_us": 143.5,
+    "p99_us": 163.667,
+    "rate_per_s": 9076.363992248771,
+    "reply_bytes": 111,
+    "stdev_us": 21.667624980185874
+  },
+  "read": {
+    "errors": 0,
+    "max_us": 659.208,
+    "mean_us": 109.85084716113994,
+    "min_us": 48.541,
+    "n": 90952,
+    "p50_us": 109.083,
+    "p95_us": 142.584,
+    "p99_us": 162.791,
+    "rate_per_s": 9095.128902467857,
+    "stdev_us": 20.470369595922744
+  },
+  "transport": "zmq",
+  "write": {
+    "errors": 0,
+    "readback_rtt": {
+      "max_us": 981.833,
+      "mean_us": 108.88427876457236,
+      "min_us": 51.25,
+      "n": 90754,
+      "p50_us": 108.042,
+      "p95_us": 142.125,
+      "p99_us": 162.334,
+      "rate_per_s": 9073.573082335095,
+      "stdev_us": 21.116582220725167
+    },
+    "write_rtt": {
+      "max_us": 222.375,
+      "mean_us": 110.324699,
+      "min_us": 61.25,
+      "n": 1000,
+      "p50_us": 110.042,
+      "p95_us": 140.833,
+      "p99_us": 159.875,
+      "rate_per_s": 99.97986956316079,
+      "stdev_us": 18.531628019480767
+    },
+    "write_to_visible": {
+      "max_us": 14566.667,
+      "mean_us": 10001.248587,
+      "min_us": 5814.334,
+      "n": 1000,
+      "p50_us": 9994.417,
+      "p95_us": 13763.458,
+      "p99_us": 14026.959,
+      "rate_per_s": 99.97986956316079,
+      "stdev_us": 1974.4162811436963
+    }
+  }
+}

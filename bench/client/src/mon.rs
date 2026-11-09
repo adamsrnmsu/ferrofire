@@ -59,9 +59,10 @@ pub fn run(args: &[String]) {
             let mut sa: libc::sockaddr_ll = std::mem::zeroed();
             let mut sl = std::mem::size_of::<libc::sockaddr_ll>() as u32;
             let n = libc::recvfrom(fd, buf.as_mut_ptr() as *mut _, buf.len(), 0, &mut sa as *mut _ as *mut libc::sockaddr, &mut sl);
-            // The provider only sends multicast: an incoming PACKET_MULTICAST frame is the kernel's own IP_MULTICAST_LOOP
-            // copy of a datagram it just sent (seen as 2x frames in a first run), so counting it would double zmq's wire cost.
-            let dup = sa.sll_pkttype == libc::PACKET_LOOPBACK || sa.sll_pkttype == libc::PACKET_MULTICAST;
+            // The provider only sends multicast, so an IPv4 multicast frame that is not outgoing is the kernel's own
+            // IP_MULTICAST_LOOP copy of a datagram it just sent (a first run counted every datagram twice). Count it once, on transmit.
+            let mcast_dst = n > 30 && buf[12..14] == [8, 0] && buf[30] >= 224;
+            let dup = sa.sll_pkttype == libc::PACKET_LOOPBACK || (mcast_dst && sa.sll_pkttype != libc::PACKET_OUTGOING);
             if n > 0 && !dup {
                 let c = classify(&buf[..n as usize]);
                 b[c] += n as u64;
