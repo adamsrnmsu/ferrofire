@@ -122,3 +122,15 @@ make mutate    # mutation testing; exit 3 means a mutant survived
 ```
 
 `.metrics/` (crap.edn, dry.edn, mutate/) is generated and git-ignored.
+
+## After the transport work (zmq and nng, ww-1df.17)
+
+| Gate | Result |
+|---|---|
+| `make check` | exit 0 (fmt, clippy -D warnings, tests, CRAP, dryer) |
+| CRAP | 0 of 290 functions at or above 10; worst 9.0 (`bennu::reply`, `model::build_published`, `expr::Node::eval`, ...) |
+| Dryer | No duplicate candidates >= 0.8 |
+| Mutation (whole tree, `make mutate`) | 690 killed, 0 survived, 1 uncovered site (691 sites); exit 0. The uncovered site is the daemon fork in `pypower.rs`, as before |
+| `make variants` | clippy + tests for `--features zmq` and `--features nng` pass; the nng-only binary links no libzmq |
+
+`pypower::parse_cli` was split (`Cli::set`, `VALUE_FLAGS`) when the `--transport` flag pushed it to CRAP 10.1.
