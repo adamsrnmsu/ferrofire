@@ -349,6 +349,32 @@ What the numbers do not say, and why the choice is not just about speed:
 - **Multicast vs unicast fan-out.** zmq's publish cost on the wire is independent of the number of subscribers (one multicast stream); nng PUB over TCP sends a copy per subscriber. This benchmark used a single subscriber, so it understates nng's cost with many.
 - Single client, closed loop, one provider thread answering requests: these are latency and CPU-per-request numbers, not a multi-client capacity test.
 
+## After the NNG fix (ww-a8n)
+
+*Everything above was measured on the code before the fix, and its raw data is unchanged in `raw/`. This section is 24 new runs in
+`docs/bench/results/raw-after-nng-fix/` (N = 100 as a control and 800; 10 and 100 Hz; 3 reps; both transports) on the fixed provider.*
+
+The 800-tag loss was not network loss and TCP retransmission never applied: NNG's PUB0 is best-effort at the application layer and drops a message when
+a subscriber pipe's send queue (`NNG_OPT_SENDBUF`, default 16) is full. ferrofire cut every publish cycle into ~1400-byte chunks (a UDP/MTU habit), so 800 tags
+were 17 messages sent back to back against a queue of 16. The fix: on nng a cycle is **one message** (TCP segments it; no chunking), and the queue is
+configurable (`nng_sendbuf`, default 128, 1..=8192; see the README). The zmq/UDP path is unchanged, so the zmq rows are a control: they should not move.
+"messages/cycle" is what the subscriber received per cycle (zmq: datagrams of at most 1400 bytes; nng: before = chunks, after = 1). Loss is shown as mean (max over reps).
+
+| transport | Hz | N | reps | loss % before | loss % after | messages/cycle before | messages/cycle after | pkts/cycle before | pkts/cycle after | B/cycle before | B/cycle after |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| zmq | 10 | 100 | 3 / 3 | 0.000 (max 0.000) | 0.000 (max 0.000) | 2.99 | 2.98 | 2.99 | 2.98 | 3,136 | 3,137 |
+| zmq | 10 | 800 | 3 / 3 | 0.000 (max 0.000) | 0.000 (max 0.000) | 17.2 | 17.2 | 17.2 | 17.2 | 24,230 | 24,225 |
+| zmq | 100 | 100 | 3 / 3 | 0.000 (max 0.000) | 0.000 (max 0.000) | 2.99 | 2.99 | 2.99 | 2.99 | 3,137 | 3,137 |
+| zmq | 100 | 800 | 3 / 3 | 0.000 (max 0.000) | 0.000 (max 0.000) | 17.3 | 17.3 | 17.3 | 17.3 | 24,293 | 24,304 |
+| nng | 10 | 100 | 3 / 3 | 0.111 (max 0.333) | 0.000 (max 0.000) | 2.99 | 1.00 | 5.24 | 4.47 | 3,337 | 3,264 |
+| nng | 10 | 800 | 3 / 3 | 16.4 (max 22.0) | 0.000 (max 0.000) | 17.1 | 1.00 | 25.4 | 18.5 | 24,824 | 24,430 |
+| nng | 100 | 100 | 3 / 3 | 0.000 (max 0.000) | 0.011 (max 0.033) | 2.99 | 1.00 | 5.03 | 4.46 | 3,320 | 3,264 |
+| nng | 100 | 800 | 3 / 3 | 5.26 (max 6.70) | 0.000 (max 0.000) | 17.2 | 1.00 | 25.5 | 18.7 | 25,048 | 24,532 |
+
+
+Result: at 800 tags nng went from 5-22% loss to 0 in all 6 runs, with exactly 1 message per cycle, about 27% fewer packets per cycle (fewer TCP segments than 17 small sends) and about 2% fewer bytes. The zmq control did not move.
+The one non-zero "after" cell is nng, 100 tags, 100 Hz, rep 3: 2,999 cycles received, all 2,999 complete, against 3,000 expected, i.e. a window-edge cycle (the same ±1 cycle resolution noted under Method), not a dropped message.
+
 ## Caveats
 
 - Docker bridge inside a VM on one host: not a real network. No loss, jitter, MTU or multicast-snooping effects; absolute latencies include the VM's network stack and virtualised scheduling. Relative differences are the useful part.
@@ -357,7 +383,7 @@ What the numbers do not say, and why the choice is not just about speed:
 - Request-phase wire counts have about 1% boundary error (monitor samples every ~250 ms and phase edges are interpolated); the publish-only counts are exact to the packet at the 30 s scale.
 - 3 repetitions: standard deviations are from n=3, so they are crude, and for nng latency they hide two modes (use the per-run table). Maxima are dominated by outliers.
 - Age above floor is relative, not an absolute one-way latency (the provider sends no timestamps and sleeps in 5 ms slices).
-- The `ferrofire` source was not changed; the nng loss and the REP CPU difference are properties of the current provider code, not necessarily of NNG itself.
+- The sections above measured the provider before the ww-a8n fix; the nng loss and the REP CPU difference are properties of that code, not necessarily of NNG itself. The "After the NNG fix" section re-measures N = 100 and 800 on the fixed code.
 - The first full pass counted multicast frames twice (found by comparing packets per cycle with chunks per cycle); the zmq runs were repeated with the fix, and the nng runs from before the fix are kept (TCP is not affected).
   Two earlier smoke runs were discarded.
 

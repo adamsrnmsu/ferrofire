@@ -18,6 +18,7 @@ Smaller or different matrices (finished runs are skipped, so an interrupted run 
 ```
 NS=10,800 PERIODS=0.1 REPS=1 PUB_SECS=5 REQ_SECS=2 python3 bench/run.py     # smoke test, ~5 min
 TRANSPORTS=nng NS=800 python3 bench/run.py                                   # one transport, one size
+RAWDIR=docs/bench/results/raw-after-nng-fix NS=100,800 python3 bench/run.py   # the ww-a8n after-fix runs (separate raw dir; report.py adds the before/after table)
 uv run --with matplotlib python bench/report.py                              # what make bench-report does
 ```
 

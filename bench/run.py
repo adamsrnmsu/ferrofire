@@ -4,11 +4,11 @@
 Per run: provider container (ferrofire run, PID 1) and a monitor sharing its network+PID namespaces (packet counters,
 provider CPU/RSS) on a dedicated bridge network; the measuring client in a third container on the same bridge.
 Raw output: docs/bench/results/raw/<transport>_n<N>_p<period>_r<rep>.{client.json,mon.csv,prov.log}. Finished runs are skipped.
-Env: NS, PERIODS, REPS, PUB_SECS, REQ_SECS, TRANSPORTS."""
+Env: NS, PERIODS, REPS, PUB_SECS, REQ_SECS, TRANSPORTS, RAWDIR."""
 import os, subprocess, sys, time, pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-RAW = ROOT / "docs/bench/results/raw"
+RAW = ROOT / os.environ.get("RAWDIR", "docs/bench/results/raw")  # RAWDIR=docs/bench/results/raw-after-nng-fix for the post-fix runs
 ENV = lambda k, d: os.environ.get(k, d).split(",")
 NS, PERIODS, TRANSPORTS = ENV("NS", "10,50,100,800"), ENV("PERIODS", "0.1,0.01"), ENV("TRANSPORTS", "zmq,nng")
 REPS, PUB, REQ = int(ENV("REPS", "3")[0]), ENV("PUB_SECS", "30")[0], ENV("REQ_SECS", "10")[0]

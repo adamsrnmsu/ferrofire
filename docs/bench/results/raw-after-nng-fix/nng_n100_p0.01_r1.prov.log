@@ -1,0 +1,1 @@
+Info: ferrofire run: /src/bench/models/m100.yaml dt=0.01s; transport nng; REP tcp://0.0.0.0:5555; PUB tcp://0.0.0.0:5556 (sendbuf 128) every 0.01s

@@ -71,13 +71,13 @@ def run_metrics(cj, mon):
     return m
 
 
-def load():
+def load(raw="raw"):
     runs = []
-    for f in sorted(glob.glob(str(RES / "raw/*.client.json"))):
+    for f in sorted(glob.glob(str(RES / raw / "*.client.json"))):
         name = pathlib.Path(f).name.removesuffix(".client.json")
         tr, n, p, rep = re.fullmatch(r"(\w+)_n(\d+)_p([\d.]+)_r(\d+)", name).groups()
         cj = json.load(open(f))
-        mon = [{k: float(v) for k, v in r.items()} for r in csv.DictReader(open(f"{RES}/raw/{name}.mon.csv"))]
+        mon = [{k: float(v) for k, v in r.items()} for r in csv.DictReader(open(f"{RES}/{raw}/{name}.mon.csv"))]
         runs.append(dict(transport=tr, n=int(n), hz=HZ[p], rep=int(rep), **run_metrics(cj, mon)))
     return runs
 
@@ -167,6 +167,27 @@ TABLES = {
     "cpu": [("cpu_publish_pct", "publish-only %"), ("cpu_read_pct", "READ %"), ("cpu_query_pct", "QUERY %"), ("cpu_write_pct", "WRITE %")],
     "rss": [("rss_mb_mean", "RSS MB mean"), ("rss_mb_max", "RSS MB max")],
 }
+
+
+AFTER = "raw-after-nng-fix"
+
+
+def after_fix(before, after):
+    """ww-a8n: before/after the nng one-message-per-cycle fix, per cell. `before` = the main raw runs, `after` = RAWDIR=raw-after-nng-fix."""
+    cols = [("pub_loss_pct", "loss %"), ("pub_chunks_per_cycle", "messages/cycle"), ("net_pub_pkts_cycle", "pkts/cycle"), ("net_pub_B_cycle", "B/cycle")]
+    out = "| transport | Hz | N | reps | " + " | ".join(f"{lab} before | {lab} after" for _, lab in cols) + " |\n|" + "---|" * (4 + 2 * len(cols)) + "\n"
+    for tr in TR:
+        for hz in HZ.values():
+            for n in sorted({r["n"] for r in after}):
+                b = [r for r in before if (r["transport"], r["hz"], r["n"]) == (tr, hz, n)]
+                a = [r for r in after if (r["transport"], r["hz"], r["n"]) == (tr, hz, n)]
+                if not (a and b):
+                    continue
+                cells = []
+                for k, _ in cols:
+                    cells += [f"{num(st.mean(r[k] for r in rs))} (max {num(max(r[k] for r in rs))})" if k == "pub_loss_pct" else num(st.mean(r[k] for r in rs)) for rs in (b, a)]
+                out += f"| {tr} | {hz} | {n} | {len(b)} / {len(a)} | " + " | ".join(cells) + " |\n"
+    return out
 
 
 # ---- charts ----------------------------------------------------------------------------------------------------
@@ -279,6 +300,8 @@ if __name__ == "__main__":
     if tpl.exists():
         md = tpl.read_text().replace("{{table:read_runs}}", runs_table(runs))
         md = re.sub(r"\{\{table:(\w+)(:nosd)?\}\}", lambda m: table(agg, TABLES[m[1]], sd=not m[2]), md)
+        after = load(AFTER) if (RES / AFTER).exists() else []
+        md = md.replace("{{after_fix}}", after_fix(runs, after) if after else "(not run yet)").replace("{{after_runs}}", str(len(after)))
         md = md.replace("{{runs}}", str(len(runs)))
         (ROOT / "docs/bench/transport-comparison.md").write_text(md)
     print(f"{len(runs)} runs, {len(agg)} cells")
