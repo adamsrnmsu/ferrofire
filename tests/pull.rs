@@ -428,6 +428,10 @@ fn bridge_exits_1_naming_unknown_tags() {
     let server = format!("tcp://127.0.0.1:{}", free_port());
     let tr = if cfg!(feature = "zmq") { "zmq" } else { "nng" };
     let prov = provider(tr, &server);
+    let publish = match tr {
+        "nng" => format!("tcp://127.0.0.1:{}", free_port()),
+        _ => "udp://127.0.0.1:41997".into(),
+    };
     let o = Command::new(BIN)
         .args([
             "pull-bridge",
@@ -436,7 +440,7 @@ fn bridge_exits_1_naming_unknown_tags() {
             "--server",
             &server,
             "--publish",
-            "udp://127.0.0.1:41997",
+            &publish,
             "--tags",
             "lock.height,no.such,also.bad",
         ])
