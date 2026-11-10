@@ -21,6 +21,14 @@ pub enum Reject {
     Stale,
 }
 
+/// How current a tag's held value is.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum Quality {
+    Good,
+    /// Not refreshed for `stale_after` publish periods: the last value is held, not live.
+    Stale,
+}
+
 pub struct Receiver {
     group: String,
     known: HashSet<String>,
@@ -30,6 +38,9 @@ pub struct Receiver {
     seen: VecDeque<u64>,
     /// Newest `_ff.cyc` applied per tag: an older cycle's value never overwrites it.
     cyc: HashMap<String, u64>,
+    /// Newest `_ff.cyc` seen in any datagram: a tag's age is how far it is behind this.
+    head: u64,
+    stale_after: u64,
 }
 
 impl Receiver {
@@ -40,7 +51,26 @@ impl Receiver {
             newest: None,
             seen: VecDeque::new(),
             cyc: HashMap::new(),
+            head: 0,
+            stale_after: 3,
         }
+    }
+
+    /// Missed publish periods after which a held value turns `Stale` (default 3).
+    pub fn set_stale_after(&mut self, periods: u64) {
+        self.stale_after = periods;
+    }
+
+    /// `(quality, age in publish periods)` of a tag; `None` until a value with a `_ff.cyc` has been applied.
+    /// Time passing with no datagram at all does not advance the age: a caller that needs that watches for silence itself.
+    pub fn quality(&self, tag: &str) -> Option<(Quality, u64)> {
+        let age = self.head - self.cyc.get(tag)?;
+        let q = if age >= self.stale_after {
+            Quality::Stale
+        } else {
+            Quality::Good
+        };
+        Some((q, age))
     }
 
     /// The `(tag, value)` pairs this datagram contributes: only subscribed tags, `true`/`false` as 1/0, bad pairs skipped.
@@ -81,6 +111,7 @@ impl Receiver {
         mut out: Vec<(String, f64)>,
     ) -> Result<Vec<(String, f64)>, Reject> {
         let Some(cyc) = cyc else { return Ok(out) };
+        self.head = self.head.max(cyc);
         let before = out.len();
         out.retain(|(tag, _)| self.cyc.get(tag).is_none_or(|&c| cyc >= c));
         self.cyc
@@ -111,6 +142,7 @@ impl Receiver {
             if seq <= s && t > lt {
                 self.seen.clear();
                 self.cyc.clear();
+                self.head = 0;
                 self.newest = None;
             }
         }

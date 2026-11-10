@@ -115,6 +115,7 @@ Receiver (`ferrofire::datagram::Receiver`; the rules for the bench client and th
 | no `_ff.*` tags (stock provider) | nothing to order by, accepted |
 
 The receiver keeps its last values, so after any of these it simply shows the previous state until the next good cycle.
+Last-value hold is made visible: `Receiver::quality(tag)` returns `(Good | Stale, age)`, where age is how many publish periods (`_ff.cyc`, the newest seen in any datagram minus the cycle the tag was last applied in) the held value is behind. A tag is `Stale` at `stale_after` missed periods (default 3, `set_stale_after`). The value is still held, never dropped; it maps to OPC UA `Uncertain_LastUsableValue` / a DNP3 quality flag later. Age counts cycles, so total silence (no datagram at all) does not advance it: the caller watches for that.
 
 What stock bennu does (`Client.cpp`, `Subscriber.cpp`): the **request** client uses a 5 s timeout and 3 tries (lazy pirate: close and
 recreate the socket after the last), so while the provider is down an RTU's writes stall up to ~15 s; reads from the multicast stream

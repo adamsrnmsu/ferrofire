@@ -495,3 +495,27 @@ fn the_pull_bridge_names_a_misspelt_tag_with_a_suggestion() {
         "{e}"
     );
 }
+
+#[test]
+fn a_tag_goes_stale_after_missed_periods_and_recovers() {
+    use ferrofire::datagram::Quality;
+    let g = group_for("udp://239.0.0.1:40000");
+    let mut r = Receiver::new(&g, ["a", "b"]);
+    assert_eq!(r.quality("a"), None);
+    r.accept(&chunk(&g, 0, 1, "a:1,b:1,")).unwrap();
+    assert_eq!(r.quality("a"), Some((Quality::Good, 0)));
+    // b keeps its last value while a runs on: 2 missed periods is still good, 3 is stale (default)
+    r.accept(&chunk(&g, 1, 2, "a:2,")).unwrap();
+    r.accept(&chunk(&g, 2, 3, "a:3,")).unwrap();
+    assert_eq!(r.quality("b"), Some((Quality::Good, 2)));
+    r.accept(&chunk(&g, 3, 4, "a:4,")).unwrap();
+    assert_eq!(r.quality("b"), Some((Quality::Stale, 3)));
+    assert_eq!(r.quality("a"), Some((Quality::Good, 0)));
+    r.set_stale_after(5);
+    assert_eq!(r.quality("b"), Some((Quality::Good, 3)));
+    r.accept(&chunk(&g, 4, 4, "b:9,")).unwrap();
+    assert_eq!(r.quality("b"), Some((Quality::Good, 0)));
+    // a datagram of subscribed-nothing still advances the cycle
+    r.accept(&chunk(&g, 5, 9, "zz:1,")).unwrap();
+    assert_eq!(r.quality("b"), Some((Quality::Stale, 5)));
+}

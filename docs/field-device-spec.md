@@ -565,7 +565,7 @@ Wire and receiver rules: [datagram-v1.md](datagram-v1.md) "Failure behaviour". S
   invisible to a stock device. An `ERR=` reply is logged and the loop continues.
 - **Rust field device** (shorter, because nothing needs 5 s on a LAN): reply timeout 1 s, 2 tries, then drop the REQ socket and create a new one with
   linger 0 (or `ZMQ_REQ_RELAXED` + `ZMQ_REQ_CORRELATE`), backoff 100 ms doubling to 1 s while the provider is unreachable; a lost reply must never leave the
-  socket in the send state. Mark inputs stale after 3 missed publish periods (3 x `publish_rate`), not on the first lost datagram.
+  socket in the send state. Mark inputs stale after 3 missed publish periods (3 x `publish_rate`), not on the first lost datagram. `Receiver::quality(tag)` implements this (default 3, configurable) and reports the age in periods.
 - **Datagram receive**: drop garbage, truncated, other-group and duplicate datagrams (an exact repeat of a recent `_ff.seq`), accept chunks of a cycle in any order,
   never let an older `_ff.cyc` overwrite a newer value of the same tag, skip unknown tags and unparsable points, keep the
   last values (reference implementation `ferrofire::datagram::Receiver`, tests in `tests/robust.rs`). Loss is not healed within one period: a cycle of D datagrams is complete with probability (1-p)^D and a tag's staleness p99 is
