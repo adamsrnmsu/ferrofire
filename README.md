@@ -132,6 +132,7 @@ Numbers: [docs/bench/transport-comparison.md](docs/bench/transport-comparison.md
 
 ## Quick start
 
+- The compiler is pinned in `rust-toolchain.toml` (exact version, with `rust-version` in `Cargo.toml` and `docker/Dockerfile` kept in step; `tests/toolchain.rs` checks it). To bump: change all three, then `docker build -t ff-rust:22.04 docker`.
 - Requirements: Docker. Cargo is **not** needed on the host.
 - `make test`: builds the `ff-rust:22.04` container and runs every unit and integration test.
 - `make golden`: generates PYPOWER 5.1.19 reference results into `target/golden` (needs `uv`; never committed). `make test` runs it first.
