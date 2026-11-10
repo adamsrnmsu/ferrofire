@@ -75,6 +75,13 @@ fn requests() {
     );
     assert_eq!(h("read=lock.height\0"), "ACK=5\0");
     assert!(h("READ=nope\0").starts_with("ERR="));
+    // batched: one ACK in the update format, request order; an unknown tag fails the whole batch
+    assert_eq!(
+        h("READ=lock.height,lowervalve.open\0"),
+        "ACK=lock.height:5,lowervalve.open:0,\0"
+    );
+    assert_eq!(h("READ=lock.height,\0"), "ACK=lock.height:5,\0");
+    assert_eq!(h("READ=lock.height,nope\0"), "ERR=Tag 'nope' not found\0");
     assert!(h("READ\0").starts_with("ERR="));
     assert!(h("BOGUS=x\0").starts_with("ERR=Unknown command type"));
     assert_eq!(

@@ -1,5 +1,5 @@
 //! libzmq REP for requests; updates leave as UDP datagrams in libzmq's RADIO framing (what a DISH expects).
-use super::{Handler, Publisher, Transport};
+use super::{Handler, Publisher, Requester, Transport};
 use crate::bennu::{datagrams_msg, group_for, parse_udp, udp_sender, STOP};
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::atomic::Ordering;
@@ -52,6 +52,15 @@ impl Transport for Zmq {
         }))
     }
 
+    fn requester(&self, endpoint: &str, timeout_ms: i32) -> Result<Box<dyn Requester>, String> {
+        Ok(Box::new(Req {
+            ctx: self.ctx.clone(),
+            endpoint: endpoint.into(),
+            timeout_ms,
+            sock: Req::connect(&self.ctx, endpoint, timeout_ms)?,
+        }))
+    }
+
     fn publisher(&self, endpoint: &str) -> Result<Box<dyn Publisher>, String> {
         let (iface, dest) = parse_udp(endpoint)?;
         Ok(Box::new(Radio {
@@ -60,6 +69,39 @@ impl Transport for Zmq {
             endpoint: endpoint.into(),
             group: group_for(endpoint),
         }))
+    }
+}
+
+/// A zmq REQ that timed out is wedged (it must not send twice), so a failed call drops it and connects a fresh one.
+struct Req {
+    ctx: zmq::Context,
+    endpoint: String,
+    timeout_ms: i32,
+    sock: zmq::Socket,
+}
+
+impl Req {
+    fn connect(ctx: &zmq::Context, endpoint: &str, timeout_ms: i32) -> Result<zmq::Socket, String> {
+        let s = ctx.socket(zmq::REQ).map_err(|e| e.to_string())?;
+        s.set_rcvtimeo(timeout_ms).map_err(|e| e.to_string())?;
+        s.set_linger(0).map_err(|e| e.to_string())?;
+        s.connect(endpoint)
+            .map_err(|e| format!("connect {endpoint}: {e}"))?;
+        Ok(s)
+    }
+}
+
+impl Requester for Req {
+    fn call(&mut self, req: &[u8]) -> Result<Vec<u8>, String> {
+        let r = self
+            .sock
+            .send(req, 0)
+            .and_then(|_| self.sock.recv_bytes(0))
+            .map_err(|e| e.to_string());
+        if r.is_err() {
+            self.sock = Req::connect(&self.ctx, &self.endpoint, self.timeout_ms)?;
+        }
+        r
     }
 }
 

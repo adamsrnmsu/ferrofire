@@ -18,6 +18,11 @@ pub trait Publisher: Send {
     fn describe(&self) -> String;
 }
 
+/// Client side of the request/reply half: one request, one reply, or an error after `timeout_ms`.
+pub trait Requester {
+    fn call(&mut self, req: &[u8]) -> Result<Vec<u8>, String>;
+}
+
 pub trait Transport {
     fn name(&self) -> &'static str;
     /// Publish endpoint used when `--publish` is not given.
@@ -29,6 +34,8 @@ pub trait Transport {
         handler: Handler,
     ) -> Result<std::thread::JoinHandle<()>, String>;
     fn publisher(&self, endpoint: &str) -> Result<Box<dyn Publisher>, String>;
+    /// Connect a REQ client to `endpoint` (the provider's REP); calls give up after `timeout_ms`.
+    fn requester(&self, endpoint: &str, timeout_ms: i32) -> Result<Box<dyn Requester>, String>;
 }
 
 /// Transports this binary was built with (cargo features of the same names).

@@ -4,7 +4,7 @@
 use ferrofire::model::{Model, Value};
 
 fn usage() -> ! {
-    ferrofire::usage_exit("usage: ferrofire run model.yaml [--server tcp://0.0.0.0:5555] [--publish udp://*;239.0.0.1:40000] [--rate 0.1]\n       ferrofire pypower {start|stop|restart|status} [-c /etc/sceptre/config.ini] [-e pybennu] [-d] [-v]\n       ferrofire simulink [-tf inf] [--model model.yaml]\n       ferrofire check model.yaml [--steps N] [--write tag=value@t]...")
+    ferrofire::usage_exit("usage: ferrofire run model.yaml [--server tcp://0.0.0.0:5555] [--publish udp://*;239.0.0.1:40000] [--rate 0.1]\n       ferrofire pull-bridge --publish ENDPOINT (--tags-from config.xml | --tags a,b,c) [--server tcp://127.0.0.1:5555] [--transport zmq|nng] [--rate ms]\n       ferrofire pypower {start|stop|restart|status} [-c /etc/sceptre/config.ini] [-e pybennu] [-d] [-v]\n       ferrofire simulink [-tf inf] [--model model.yaml]\n       ferrofire check model.yaml [--steps N] [--write tag=value@t]...")
 }
 
 fn main() {
@@ -22,6 +22,7 @@ fn main() {
     match cmd.as_str() {
         "simulink" => ferrofire::simulink::main(tail),
         "run" => ferrofire::bennu::main(tail),
+        "pull-bridge" => ferrofire::pull::main(tail),
         "pypower" => ferrofire::pypower::main(tail),
         "check" => check(tail),
         _ => usage(),

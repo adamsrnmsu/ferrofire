@@ -164,6 +164,27 @@ pub fn with_nul(reply: String) -> Vec<u8> {
     r
 }
 
+/// `READ=tag` -> `ACK=value`; `READ=a,b,...` -> `ACK=a:va,b:vb,` (the update format, request order), the first unknown tag is an ERR.
+/// ponytail: one linear scan of the snapshot per requested tag; index it if batches of thousands are ever asked for.
+fn read(payload: &str, sh: &Mutex<Shared>) -> String {
+    let sh = sh.lock().unwrap();
+    let find = |t: &str| sh.snap.iter().find(|(n, _)| n == t).map(|(_, v)| *v);
+    if !payload.contains(',') {
+        return match find(payload) {
+            Some(v) => format!("ACK={}", fmt_value(v)),
+            None => format!("ERR=Tag '{payload}' not found"),
+        };
+    }
+    let mut out = String::from("ACK=");
+    for t in payload.split(',').filter(|t| !t.is_empty()) {
+        match find(t) {
+            Some(v) => out.push_str(&format!("{t}:{},", fmt_value(v))),
+            None => return format!("ERR=Tag '{t}' not found"),
+        }
+    }
+    out
+}
+
 fn reply(req: &[u8], meta: &Meta, sh: &Mutex<Shared>) -> String {
     let Ok(req) = std::str::from_utf8(req) else {
         return "ERR=request is not UTF-8".into();
@@ -180,10 +201,7 @@ fn reply(req: &[u8], meta: &Meta, sh: &Mutex<Shared>) -> String {
                 .map(|t| format!("{t},"))
                 .collect::<String>()
         ),
-        "read" => match sh.lock().unwrap().snap.iter().find(|(t, _)| t == payload) {
-            Some((_, v)) => format!("ACK={}", fmt_value(*v)),
-            None => format!("ERR=Tag '{payload}' not found"),
-        },
+        "read" => read(payload, sh),
         "write" => {
             let mut batch = vec![];
             for point in payload.split(',').filter(|p| !p.is_empty()) {
@@ -290,8 +308,13 @@ pub fn udp_sender(iface: Option<&str>, dest: SocketAddr) -> Result<UdpSocket, St
 const USAGE: &str = "ferrofire run [model.yaml | --model model.yaml] [--server tcp://0.0.0.0:5555] [--publish 'udp://*;239.0.0.1:40000'] [--rate 0.1] [--transport zmq|nng] [--nng-sendbuf 128]";
 
 pub fn main(args: &[String]) {
-    if let Err(e) = run(args) {
-        eprintln!("ferrofire run: {e}\nusage: {USAGE}");
+    exit_on_err("run", USAGE, run(args));
+}
+
+/// A subcommand's failure: `ferrofire <cmd>: <error>` and its usage on stderr, exit 1.
+pub fn exit_on_err(cmd: &str, usage: &str, res: Result<(), String>) {
+    if let Err(e) = res {
+        eprintln!("ferrofire {cmd}: {e}\nusage: {usage}");
         std::process::exit(1);
     }
 }
