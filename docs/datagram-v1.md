@@ -76,10 +76,22 @@ named tags (a tag may be in several). Two endpoints with the same group would sh
 ## Refresh and loss model
 
 Every cycle carries the **full state**, repeated at the publish period (default 100 ms). There is no retransmission, no ack and no
-per-subscriber state: a datagram that is dropped is healed by the next cycle, within one period, and a subscriber that starts late
-has everything after at most one period. This is the same model as OPC UA Part 14 (PubSub, UADP) and IEC 61850 GOOSE (periodic
-repeat of the full dataset): the receiver is stateless apart from "last value", and a lost update costs at most one period of staleness,
-not an error. The cost is bandwidth, bounded and constant: tags x period.
+per-subscriber state, and a subscriber that starts late has everything after at most one period. This is the same model as OPC UA Part 14
+(PubSub, UADP) and IEC 61850 GOOSE (periodic repeat of the full dataset): the receiver is stateless apart from "last value". The cost is
+bandwidth, bounded and constant: tags x period.
+
+Loss is **not** healed within one period. A cycle of D datagrams is complete only if all D arrive: with independent loss p that is
+(1-p)^D (measured, [bench B and C](bench/datagram-v1-bench.md#b-and-c-datagram-loss-by-_ffseq-cycle-loss-and-staleness-under-tc-netem):
+100 tags, D=3, 96.2 % at 1 % loss and 85.3 % at 5 %; 800 tags, D=18, 80.7 % and 36.9 %). A tag whose datagram was lost keeps its last
+value until its next one arrives, so the staleness of one tag is a few periods, not one: p99 about 2-3 periods at 1 % loss and 3-9 periods
+at 5 % (p50 stays at one period). Reading one tag is better than waiting for the whole state; per-RTU slices (`publish_slices`) shrink D
+and help the same way. Receivers apply values per tag, newest cycle wins, and tolerate chunks of one cycle arriving out of order
+(see the receiver rules below). A device should mark its inputs stale after 3 missed publish periods, not on the first lost datagram.
+
+Multicast flooding: with IGMP snooping off, a switch delivers every group to every port (the live range's bystander NICs each received the
+full stream, [bench section G3](bench/datagram-v1-bench.md#g3-ovs-multicast-snooping-off-and-on)). Enable it on the range switch (OVS:
+`mcast_snooping_enable=true`) together with an IGMP querier, or an aging time longer than the run when there is none (joins are otherwise
+not refreshed and the entries age out).
 
 ## Failure behaviour
 
@@ -97,8 +109,9 @@ Receiver (`ferrofire::datagram::Receiver`; the rules for the bench client and th
 | body without the final NUL, or whose last point lacks its comma | truncated, dropped whole (a cut number would parse as a wrong value) |
 | tag not subscribed | the point is skipped |
 | point with no `:`, empty name or a value that is not a finite number / `true` / `false` | the point is skipped, the others of the datagram count |
-| `_ff.seq` not above the newest seen **and** `_ff.t` not newer | duplicate or out of order, dropped |
-| `_ff.seq` lower but `_ff.t` newer | the provider restarted (counter back at 0): accepted, newest reset |
+| `_ff.seq` already seen (the last 256 are remembered) or 256 or more behind the newest | duplicate, dropped. A lower seq that is new is a chunk that overtook its neighbour: accepted |
+| tag value from an older `_ff.cyc` than the newest applied for that tag | that value is dropped (all of them: the datagram is stale); newer or equal cycles apply, so values are per tag, newest cycle wins |
+| `_ff.seq` not above the newest seen but `_ff.t` newer | the provider restarted (counter back at 0): everything remembered is forgotten, the datagram accepted |
 | no `_ff.*` tags (stock provider) | nothing to order by, accepted |
 
 The receiver keeps its last values, so after any of these it simply shows the previous state until the next good cycle.

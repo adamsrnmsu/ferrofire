@@ -566,8 +566,10 @@ Wire and receiver rules: [datagram-v1.md](datagram-v1.md) "Failure behaviour". S
 - **Rust field device** (shorter, because nothing needs 5 s on a LAN): reply timeout 1 s, 2 tries, then drop the REQ socket and create a new one with
   linger 0 (or `ZMQ_REQ_RELAXED` + `ZMQ_REQ_CORRELATE`), backoff 100 ms doubling to 1 s while the provider is unreachable; a lost reply must never leave the
   socket in the send state. Mark inputs stale after 3 missed publish periods (3 x `publish_rate`), not on the first lost datagram.
-- **Datagram receive**: drop garbage, truncated, other-group, duplicate and out-of-order datagrams, skip unknown tags and unparsable points, keep the
-  last values (reference implementation `ferrofire::datagram::Receiver`, tests in `tests/robust.rs`).
+- **Datagram receive**: drop garbage, truncated, other-group and duplicate datagrams (an exact repeat of a recent `_ff.seq`), accept chunks of a cycle in any order,
+  never let an older `_ff.cyc` overwrite a newer value of the same tag, skip unknown tags and unparsable points, keep the
+  last values (reference implementation `ferrofire::datagram::Receiver`, tests in `tests/robust.rs`). Loss is not healed within one period: a cycle of D datagrams is complete with probability (1-p)^D and a tag's staleness p99 is
+  about 2-3 periods at 1 % loss and 3-9 at 5 % (bench B and C); enable IGMP snooping with a querier on the range switch.
 - **Provider side** (done in ferrofire): every request gets one reply; a misspelt tag in a `WRITE` or `READ` is an `ERR` naming it, with a "did you
   mean" suggestion and a warning at most every 10 s; a failed UDP send is counted and never blocks the engine; startup validation names the file, key or
   tag (model YAML, expressions, `publish_order`, per-RTU publish slices, pull-bridge tags).
