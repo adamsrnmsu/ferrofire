@@ -428,6 +428,8 @@ Reproduce: `MODE=pull python3 bench/run.py; MODE=push TRANSPORTS=nng python3 ben
 
 *Real VMs, not the bench container: provider VM `waterway-provider` and RTU VMs `rtu-1` (10 tags) / `rtu-2` (8 tags) of the `waterway-arm64` experiment (aarch64 Linux guests, stock `bennu-field-device`, 10 Hz publish). Scripts in `bench/live/`. One 30 s capture per cell, not repeated, so treat the numbers as single samples.*
 
+> **Evidence status (2026-11-09):** the captures behind these numbers were written to `/root` on the range VMs and were never committed; the VMs are gone. Everything in this subsection is a single uncommitted sample to be re-measured (bead ww-2s0), not a reproducible result. `bench/live/cap.sh` now also writes its summary to `/root/ff/live-out/`, and `bench/live/collect.sh <host>...` copies those into `docs/bench/results/live/` for the next run.
+
 Setup: the stock provider (`bennu-simulink-provider` + `simulinksolver`) cannot answer a batched `READ`, so it was replaced by `ferrofire run waterway.yaml` on the same endpoints (`tcp://172.16.1.2:5555`; publish `udp://*;239.0.0.1:40000` for push, `udp://127.0.0.1:40000` (nobody listening, no traffic) for pull). On each RTU the daemon and watcher were stopped, `config.xml` copied with only `<input><endpoint>` changed to `udp://127.0.0.1:40000`, `ferrofire pull-bridge --tags-from <copy> --publish udp://127.0.0.1:40000` started, and the stock `bennu-field-device --file <copy>` started. Traffic is a `tcpdump` on the provider's and RTUs' mgmt NIC (172.16.1.0/16) for `udp 40000 or tcp 5555`, frame bytes.
 
 What worked, exactly:

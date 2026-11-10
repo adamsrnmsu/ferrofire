@@ -125,8 +125,12 @@ ferrofire pull-bridge --server tcp://provider:5555 --transport zmq --rate 100 \
 
 `--tags-from` takes the names of the `<analog>`/`<binary>` points in the config's `<input>` (or give `--tags a,b,c`); `--rate` is
 in ms; `--publish` must be the same string as the field device's `<input><endpoint>` (point the device at the loopback endpoint; a stock bennu field device accepts a plain unicast `udp://127.0.0.1:40000`, checked live on the waterway range).
-A request that times out is retried once; if that fails too nothing is published (the field device keeps its last values, as
-when a push provider goes quiet) and one line is logged per outage. Writes are untouched: the device still `WRITE`s to the provider.
+At startup the bridge asks the provider for its tag list (`QUERY`) and exits 1 naming any tag the provider does not have (an
+unknown tag would otherwise fail every batch, so nothing would ever be published); tags repeated in the list or config are asked for once.
+More than 200 tags are split over several `READ`s, published together as one update. A request that times out is retried once; if
+that fails too (or the provider answers `ERR`) nothing is published (the field device keeps its last values, as when a push
+provider goes quiet) and the failure is logged with the provider's text, then repeated every 10 s while it lasts. Ticks missed
+while a slow request was pending are skipped, not replayed back to back. Writes are untouched: the device still `WRITE`s to the provider.
 Numbers: [docs/bench/transport-comparison.md](docs/bench/transport-comparison.md#pull-bridge-prototype-ww-otj11).
 
 Both features are on by default. `cargo build --no-default-features --features nng` links no libzmq; `--features zmq` links no
