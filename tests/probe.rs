@@ -618,3 +618,211 @@ fn recorded_csv_replays_into_check() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ---- probe diff: RTU Modbus values against the provider (ww-otj.28) ----
+
+use ferrofire::diff::*;
+use std::io::Read;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
+#[test]
+fn modbus_frames_and_scaling() {
+    assert_eq!(request(1, 3, 0x0102), [0, 0, 0, 0, 0, 6, 1, 3, 1, 2, 0, 1]);
+    // FC3 reply: one register 0x4020
+    assert_eq!(parse_reply(3, &[3, 2, 0x40, 0x20]), Ok(16416));
+    assert_eq!(parse_reply(1, &[1, 1, 1]), Ok(1));
+    assert_eq!(parse_reply(1, &[1, 1, 0]), Ok(0));
+    assert!(parse_reply(3, &[0x83, 2])
+        .unwrap_err()
+        .contains("exception 2"));
+    assert!(parse_reply(3, &[4, 2, 0, 0])
+        .unwrap_err()
+        .contains("unexpected"));
+    assert!(parse_reply(3, &[3]).unwrap_err().contains("short"));
+    // spec 4.1: 250.5 over [0,1000] is 0x4020
+    assert!((unscale(16416, 0.0, 1000.0) - 250.5).abs() < 0.01);
+    assert_eq!(unscale(0, -10.0, 10.0), -10.0);
+    assert_eq!(unscale(65535, -10.0, 10.0), 10.0);
+}
+
+#[test]
+fn tolerance_is_a_fraction_of_the_span() {
+    assert!(!differs(250.5, 251.0, 0.0, 1000.0, 0.01));
+    assert!(differs(250.5, 261.0, 0.0, 1000.0, 0.01));
+    assert!(!differs(0.0, 0.0, 0.0, 1.0, 0.01));
+    assert!(differs(1.0, 0.0, 0.0, 1.0, 0.01));
+    assert!(differs(1.0, 0.0, 0.0, 1.0, 0.0));
+}
+
+#[test]
+fn findings_print_as_text_and_json() {
+    let m = Finding {
+        rtu: "r\"1".into(),
+        tag: "a".into(),
+        what: Ok((1.0, 0.5)),
+    };
+    assert_eq!(
+        m.text(12.5),
+        "t=12.500 rtu=r\"1 tag=a modbus=1 provider=0.5 delta=0.5"
+    );
+    assert_eq!(
+        m.json(12.5),
+        r#"{"t":12.500,"rtu":"r\"1","tag":"a","modbus":1,"provider":0.5,"delta":0.5}"#
+    );
+    let e = Finding {
+        rtu: "r".into(),
+        tag: "*".into(),
+        what: Err("down".into()),
+    };
+    assert_eq!(e.text(1.0), "t=1.000 rtu=r tag=* error=down");
+    assert_eq!(
+        e.json(1.0),
+        r#"{"t":1.000,"rtu":"r","tag":"*","error":"down"}"#
+    );
+}
+
+#[test]
+fn map_parses_and_rejects_bad_kinds() {
+    let m = parse_map(
+        "r1:\n  endpoint: 127.0.0.1:1502\n  points:\n    - {tag: a, kind: coil, address: 3}\n    - {tag: b, kind: holding-register, address: 4, min: 0, max: 10}\n",
+    )
+    .unwrap();
+    assert_eq!(m["r1"].unit, 0);
+    assert_eq!(m["r1"].points.len(), 2);
+    assert_eq!(m["r1"].points[1].span(), (0.0, 10.0));
+    assert_eq!(m["r1"].points[0].span(), (0.0, 1.0));
+    assert_eq!(m["r1"].points[1].kind.fc(), 3);
+    assert!(
+        parse_map("r1:\n  endpoint: x\n  points:\n    - {tag: a, kind: nope, address: 1}\n")
+            .is_err()
+    );
+}
+
+/// A Modbus/TCP server: `table(fc, addr)` is the register (None: exception 2). `limit` closes a connection after that many
+/// requests. Returns the port and the number of connections accepted so far.
+fn rtu(table: fn(u8, u16) -> Option<u16>, limit: usize) -> (u16, Arc<AtomicUsize>) {
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    let accepts = Arc::new(AtomicUsize::new(0));
+    let n = accepts.clone();
+    std::thread::spawn(move || {
+        for mut c in l.incoming().flatten() {
+            n.fetch_add(1, Ordering::SeqCst);
+            std::thread::spawn(move || {
+                let mut b = [0u8; 12];
+                for _ in 0..limit {
+                    if c.read_exact(&mut b).is_err() {
+                        return;
+                    }
+                    let (fc, addr) = (b[7], u16::from_be_bytes([b[8], b[9]]));
+                    let pdu: Vec<u8> = match (table(fc, addr), fc) {
+                        (None, _) => vec![fc | 0x80, 2],
+                        (Some(v), 1 | 2) => vec![fc, 1, v as u8],
+                        (Some(v), _) => vec![fc, 2, (v >> 8) as u8, v as u8],
+                    };
+                    let mut r = vec![b[0], b[1], 0, 0, 0, pdu.len() as u8 + 1, b[6]];
+                    r.extend(pdu);
+                    let _ = c.write_all(&r);
+                }
+            });
+        }
+    });
+    (port, accepts)
+}
+
+fn regmap(port: u16) -> String {
+    let p = |k: &str, a: u16| {
+        format!("    - {{tag: lowervalve.open, kind: {k}, address: {a}, min: 0, max: 1}}\n")
+    };
+    let points = [
+        "coil",
+        "holding-register",
+        "discrete-input",
+        "input-register",
+    ]
+    .iter()
+    .enumerate()
+    .map(|(i, k)| p(k, i as u16))
+    .collect::<String>();
+    script(
+        &format!("map{port}.yaml"),
+        &format!("rtu-1:\n  endpoint: 127.0.0.1:{port}\n  points:\n{points}"),
+    )
+}
+
+#[test]
+fn diff_keeps_one_connection_and_reports_only_mismatches() {
+    let (_srv, ep) = server("udp://*;127.0.0.1:9");
+    let (port, accepts) = rtu(|_, _| Some(0), usize::MAX);
+    let map = regmap(port);
+    let (ok, out, err) = probe(
+        &ep,
+        &["diff", "--map", &map, "--cycles", "5", "--every", "0.05"],
+        "",
+    );
+    assert!(ok && out.is_empty(), "{out}{err}");
+    assert_eq!(
+        accepts.load(Ordering::SeqCst),
+        1,
+        "one connection for 20 reads"
+    );
+
+    // an RTU that lies about its holding register (the provider says closed, the RTU says open)
+    let (port, _) = rtu(|fc, _| Some(if fc == 3 { 65535 } else { 0 }), usize::MAX);
+    let map = regmap(port);
+    let (ok, out, _) = probe(&ep, &["diff", "--map", &map], "");
+    assert!(!ok);
+    assert_eq!(out.lines().count(), 1, "{out}");
+    assert!(
+        out.contains("rtu=rtu-1 tag=lowervalve.open modbus=1 provider=0 delta=1"),
+        "{out}"
+    );
+    let (_, out, _) = probe(&ep, &["--json", "diff", "--map", &map], "");
+    assert!(
+        out.contains("\"modbus\":1,\"provider\":0,\"delta\":1}"),
+        "{out}"
+    );
+    // a tolerance as wide as the span forgives it
+    let (ok, out, _) = probe(&ep, &["diff", "--map", &map, "--tolerance", "1"], "");
+    assert!(ok && out.is_empty(), "{out}");
+}
+
+#[test]
+fn diff_reports_rtu_errors_and_reconnects() {
+    let (_srv, ep) = server("udp://*;127.0.0.1:9");
+    // exception 2 from the RTU
+    let (port, _) = rtu(|_, _| None, usize::MAX);
+    let (ok, out, _) = probe(&ep, &["diff", "--map", &regmap(port)], "");
+    assert!(
+        !ok && out.contains("rtu=rtu-1 tag=lowervalve.open error=") && out.contains("exception 2"),
+        "{out}"
+    );
+    // nothing listening
+    let dead = free_port();
+    let (ok, out, _) = probe(&ep, &["diff", "--map", &regmap(dead)], "");
+    assert!(
+        !ok && out.contains("rtu=rtu-1 tag=lowervalve.open error="),
+        "{out}"
+    );
+    // the RTU drops the connection after each request: the next read reconnects, the one in between is reported
+    let (port, accepts) = rtu(|_, _| Some(0), 1);
+    let one = script(
+        "one.yaml",
+        &format!("rtu-1:\n  endpoint: 127.0.0.1:{port}\n  points:\n    - {{tag: lowervalve.open, kind: coil, address: 0}}\n"),
+    );
+    let (ok, out, _) = probe(
+        &ep,
+        &["diff", "--map", &one, "--cycles", "3", "--every", "0.05"],
+        "",
+    );
+    assert!(
+        !ok && out.lines().count() == 1 && out.contains("error="),
+        "{out}"
+    );
+    assert_eq!(accepts.load(Ordering::SeqCst), 2);
+    // an unknown tag is the provider's error, with its hint
+    let bad = script("bad.yaml", "r:\n  endpoint: 127.0.0.1:1\n  points:\n    - {tag: lowervalve.opn, kind: coil, address: 0}\n");
+    let (ok, _, err) = probe(&ep, &["diff", "--map", &bad], "");
+    assert!(!ok && err.contains("did you mean"), "{err}");
+}

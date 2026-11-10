@@ -169,8 +169,28 @@ ferrofire probe read lock.height,lowergate.open
 ferrofire probe write lowervalve.open=1 --confirm
 ferrofire probe watch --listen 'udp://*;239.0.0.1:40000' [--tags a,b] [--stale-after 3]
 ferrofire probe record --out run.csv [--tags a,b*] [--duration 60] [--listen ...] [--stale-after 3]
+ferrofire probe diff --map rtus.yaml [--tolerance 0.01] [--cycles 1] [--every 1]
 ferrofire probe play inject.yaml [--confirm] [--dry-run] [--keep-going] [--model m.yaml]
 ```
+
+`diff` polls each RTU over Modbus/TCP and compares it with the provider's `READ`, to catch a tampered RTU, a man in the middle or a wrong
+register map. The map is YAML, one entry per RTU, with the keys of bennu's `<modbus-server>` config:
+
+```yaml
+rtu-1:
+  endpoint: 10.0.0.5:502
+  unit: 0
+  points:
+    - {tag: lowerwater.height, kind: holding-register, address: 1, min: 0, max: 1000}   # scaled over [min,max] as the field device does
+    - {tag: lowervalve.open, kind: coil, address: 0}
+```
+
+Each RTU gets one TCP connection, opened on its first read and reused for every read of every cycle (stock bennu opens and closes one per
+read and leaks fds, ww-1p6); a failed read closes it and the next one reconnects. A point differs when the two values are more than
+`--tolerance` (a fraction of `max - min`, default 0.01; coils span 1) apart. Only differences are printed, as `t=<unix> rtu=.. tag=.. modbus=..
+provider=.. delta=..` (or `--json`), and an RTU that cannot be read prints `error=..` for its first failing point that cycle. `--cycles N`
+runs N comparisons `--every` seconds apart (default 1; `0` runs until SIGINT/SIGTERM, the blue-team monitor). It exits 1 if anything was
+printed. Register maps read from `config.xml` or sceptre's `reg_addrs` are not loaded yet; write the YAML.
 
 `play` runs a script of timed writes (exercise injects): a YAML list of steps, each `at` seconds after the start (default 0, never
 earlier than the step before) with a `write: tag=val[,tag=val]` (globs as in `write`) and an optional `wait_for: "tag >= 3"` (`>= <= == != > <`,

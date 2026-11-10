@@ -15,7 +15,7 @@ use std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const USAGE: &str = "ferrofire probe [--server tcp://127.0.0.1:5555] [--json] (query | read a,b | write a=1,b=2 [--confirm] [--dry-run] [--model m.yaml] | play script.yaml [--confirm] [--dry-run] [--keep-going] [--model m.yaml] | record --out run.csv [--tags a,b] [--duration s] | watch [--listen udp://*;239.0.0.1:40000] [--tags a,b])";
+const USAGE: &str = "ferrofire probe [--server tcp://127.0.0.1:5555] [--json] (query | read a,b | write a=1,b=2 [--confirm] [--dry-run] [--model m.yaml] | play script.yaml [--confirm] [--dry-run] [--keep-going] [--model m.yaml] | record --out run.csv [--tags a,b] [--duration s] | diff --map rtus.yaml [--tolerance 0.01] [--cycles 1] [--every s] | watch [--listen udp://*;239.0.0.1:40000] [--tags a,b])";
 
 #[derive(Debug, clap::Parser)]
 #[command(name = "ferrofire probe")]
@@ -73,6 +73,8 @@ enum Sub {
         #[arg(long, value_name = "FILE")]
         model: Option<String>,
     },
+    /// Compare each RTU's Modbus values with the provider's (tamper/MITM detection); exits 1 on any mismatch
+    Diff(crate::diff::DiffArgs),
     /// Tag names from the last query (for shell completion)
     #[command(hide = true)]
     CachedTags,
@@ -141,7 +143,7 @@ impl Row {
     }
 }
 
-fn json_str(s: &str) -> String {
+pub(crate) fn json_str(s: &str) -> String {
     let mut out = String::from("\"");
     for c in s.chars() {
         match c {
@@ -500,7 +502,7 @@ fn record(endpoint: &str, mut r: Recorder, out: &str, duration: Option<f64>) -> 
     err.map_or(Ok(()), Err)
 }
 
-fn ask(req: &mut dyn Requester, r: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn ask(req: &mut dyn Requester, r: &[u8]) -> Result<Vec<u8>, String> {
     req.call(r).or_else(|_| req.call(r))
 }
 
@@ -510,6 +512,7 @@ fn run(cli: ProbeCli) -> Result<(), String> {
     match cli.cmd {
         Sub::Query => query(req, json),
         Sub::CachedTags => cached_tags(),
+        Sub::Diff(a) => crate::diff::run(req, a, cli.timeout_ms, json),
         Sub::Read { tags } => read(req, tags, json),
         Sub::Write {
             points,
