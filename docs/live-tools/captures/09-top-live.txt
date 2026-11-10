@@ -1,0 +1,175 @@
+# waterway-provider, 2026-11-10T20:41:19Z
+$ #!/bin/bash
+# top-live.sh : run ON waterway-provider. `ferrofire top` in two tmux panes (attached to the local provider, and on the multicast stream), captured as
+# text screens while the boat moves, while the provider is SIGSTOPped for 5 s (the tags go STALE on the viewer's clock), and after SIGCONT; plus --once dumps.
+cd /root/ff; S="--server tcp://172.16.1.2:5555"; PID=$(pgrep -x ferrofire | head -1)
+tmux kill-server 2>/dev/null; tmux new-session -d -s top -x 100 -y 30 "./ferrofire top --name run --stale-after 2 2>/tmp/top.err; echo exited \$? >>/tmp/top.err; sleep 30"
+tmux new-session -d -s strm -x 100 -y 30 "./ferrofire top --stream 'udp://172.16.1.2;239.0.0.1:40000' $S --stale-after 2 2>/tmp/strm.err; sleep 30"
+shot() { echo; echo "=== $1  ($(date -u +%T))"; echo "--- ferrofire top --name run"; tmux capture-pane -p -t top:0.0 | sed -e 's/[[:space:]]*$//' | sed '/^$/d' | $F; echo "--- ferrofire top --stream"; tmux capture-pane -p -t strm:0.0 | sed -e 's/[[:space:]]*$//' | sed '/^$/d' | $F; }
+F=cat; sleep 2; ./ferrofire probe $S write lowervalve.opn=1 --confirm >/dev/null 2>&1; sleep 3; shot "boat moving, a rejected WRITE in the log pane of the first view"
+F="grep -E ^(/run|stream|tag|boat.location|lock.height|uppergate|uppervalve|locksensor.active|log|│.*[a-z])"
+sleep 2; shot "2 s later: boat.location and ages have moved"
+kill -STOP $PID; echo; echo "##### provider SIGSTOP at $(date -u +%T.%N | cut -c1-12)"
+sleep 1; shot "stopped +1 s"
+sleep 3; shot "stopped +4 s: no update for more than 2 s"
+kill -CONT $PID; echo; echo "##### provider SIGCONT at $(date -u +%T.%N | cut -c1-12)"
+sleep 1.5; shot "resumed +1.5 s"
+tmux send-keys -t top:0.0 q; tmux send-keys -t strm:0.0 q; sleep 1; cat /tmp/top.err; tmux kill-server
+echo; echo "=== --once dumps (stale-after 2): text, then json"
+./ferrofire top --name run --once --filter 'boat.*'; sleep 2; ./ferrofire top --name run --once --filter 'boat.location'
+timeout 5 ./ferrofire top --name run --once --json --filter 'lock.*'
+echo "--- provider stopped 3 s: --stream --once with no QUERY needed (--tags); the control-socket view cannot ask a stopped process"
+kill -STOP $PID; sleep 3; timeout 10 ./ferrofire top --stream 'udp://172.16.1.2;239.0.0.1:40000' --tags lock.height --once 2>&1 | head; echo "exit ${PIPESTATUS[0]}"; kill -CONT $PID
+
+=== boat moving, a rejected WRITE in the log pane of the first view  (20:41:22)
+--- ferrofire top --name run
+/run/ferrofire/run-526.sock: 15 tags, 0 stale, sort Name, filter ``
+tag                                                  value          age      state  trend
+boat.direction                                       -1             0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+boat.location                                        250.25         0.1s     good   █▇▇▇▆▆▅▅▄▄▃▃▂▂▂▁
+lock.height                                          15             0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+locksensor.active                                    0              0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+locksensor.direction                                 0              0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+lowergate.open                                       0              0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+lowersensor.active                                   0              0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+lowersensor.direction                                0              0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+lowervalve.open                                      0              0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+lowerwater.height                                    5              0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppergate.open                                       1              0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppersensor.active                                   1              0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppersensor.direction                                -1             0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppervalve.open                                      0              0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+upperwater.height                                    15             0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+┌log (>= info)─────────────────────────────────────────────────────────────────────────────────────┐
+│tailing at level debug (the process logs at info: `ferrofire log level debug --for 10m` to see │
+│ferrofire run (pid 526): logging to stderr, level info                                            │
+│Warn: rejected WRITE: Tag 'lowervalve.opn' is unknown or read-only (did you mean `lowervalve.open`│
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+q quit  / filter  s sort  p pause  l log level
+--- ferrofire top --stream
+stream udp://172.16.1.2;239.0.0.1:40000: 15 tags, 0 stale, sort Name, filter ``
+tag                                                  value          age      state  trend
+boat.direction                                       -1             0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+boat.location                                        250.75         0.2s     good   ██▇▇▆▆▅▅▄▄▃▃▂▂▁▁
+lock.height                                          15             0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+locksensor.active                                    0              0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+locksensor.direction                                 0              0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+lowergate.open                                       0              0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+lowersensor.active                                   0              0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+lowersensor.direction                                0              0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+lowervalve.open                                      0              0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+lowerwater.height                                    5              0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppergate.open                                       1              0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppersensor.active                                   1              0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppersensor.direction                                -1             0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppervalve.open                                      0              0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+upperwater.height                                    15             0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+┌log (>= info)─────────────────────────────────────────────────────────────────────────────────────┐
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+q quit  / filter  s sort  p pause  l log level
+
+=== 2 s later: boat.location and ages have moved  (20:41:24)
+--- ferrofire top --name run
+/run/ferrofire/run-526.sock: 15 tags, 0 stale, sort Name, filter ``
+tag                                                  value          age      state  trend
+boat.location                                        240.25         0.2s     good   █▇▇▇▆▆▅▅▄▄▃▃▂▂▂▁
+lock.height                                          15             0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+locksensor.active                                    0              0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppergate.open                                       1              0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppervalve.open                                      0              0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+│tailing at level debug (the process logs at info: `ferrofire log level debug --for 10m` to see │
+│ferrofire run (pid 526): logging to stderr, level info                                            │
+│Warn: rejected WRITE: Tag 'lowervalve.opn' is unknown or read-only (did you mean `lowervalve.open`│
+--- ferrofire top --stream
+stream udp://172.16.1.2;239.0.0.1:40000: 15 tags, 0 stale, sort Name, filter ``
+tag                                                  value          age      state  trend
+boat.location                                        240.25         0.2s     good   ██▇▇▆▆▅▅▄▄▃▃▂▂▁▁
+lock.height                                          15             0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+locksensor.active                                    0              0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppergate.open                                       1              0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppervalve.open                                      0              0.2s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+
+##### provider SIGSTOP at 20:41:24.383
+
+=== stopped +1 s  (20:41:25)
+--- ferrofire top --name run
+/run/ferrofire/run-526.sock: 15 tags, 0 stale, sort Name, filter ``
+tag                                                  value          age      state  trend
+boat.location                                        239.25         1.1s     good   ██▇▇▆▆▅▅▄▄▃▃▂▂▁▁
+lock.height                                          15             1.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+locksensor.active                                    0              1.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppergate.open                                       1              1.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppervalve.open                                      0              1.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+│tailing at level debug (the process logs at info: `ferrofire log level debug --for 10m` to see │
+│ferrofire run (pid 526): logging to stderr, level info                                            │
+│Warn: rejected WRITE: Tag 'lowervalve.opn' is unknown or read-only (did you mean `lowervalve.open`│
+--- ferrofire top --stream
+stream udp://172.16.1.2;239.0.0.1:40000: 15 tags, 0 stale, sort Name, filter ``
+tag                                                  value          age      state  trend
+boat.location                                        238.75         1.1s     good   ██▇▇▆▆▅▅▄▄▃▃▂▂▁▁
+lock.height                                          15             1.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+locksensor.active                                    0              1.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppergate.open                                       1              1.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppervalve.open                                      0              1.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+
+=== stopped +4 s: no update for more than 2 s  (20:41:28)
+--- ferrofire top --name run
+/run/ferrofire/run-526.sock: 15 tags, 15 stale, sort Name, filter ``
+tag                                                  value          age      state  trend
+boat.location                                        239.25         4.4s     STALE  ██▇▇▆▆▅▅▄▄▃▃▂▂▁▁
+lock.height                                          15             4.4s     STALE  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+locksensor.active                                    0              4.4s     STALE  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppergate.open                                       1              4.4s     STALE  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppervalve.open                                      0              4.4s     STALE  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+│tailing at level debug (the process logs at info: `ferrofire log level debug --for 10m` to see │
+│ferrofire run (pid 526): logging to stderr, level info                                            │
+│Warn: rejected WRITE: Tag 'lowervalve.opn' is unknown or read-only (did you mean `lowervalve.open`│
+--- ferrofire top --stream
+stream udp://172.16.1.2;239.0.0.1:40000: 15 tags, 15 stale, sort Name, filter ``
+tag                                                  value          age      state  trend
+boat.location                                        238.75         4.3s     STALE  ██▇▇▆▆▅▅▄▄▃▃▂▂▁▁
+lock.height                                          15             4.3s     STALE  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+locksensor.active                                    0              4.3s     STALE  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppergate.open                                       1              4.3s     STALE  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppervalve.open                                      0              4.3s     STALE  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+
+##### provider SIGCONT at 20:41:28.709
+
+=== resumed +1.5 s  (20:41:30)
+--- ferrofire top --name run
+/run/ferrofire/run-526.sock: 15 tags, 0 stale, sort Name, filter ``
+tag                                                  value          age      state  trend
+boat.location                                        209.75         0.1s     good   ███▇▇▇▇▆▆▆▂▂▂▁▁▁
+lock.height                                          15             0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+locksensor.active                                    0              0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppergate.open                                       1              0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppervalve.open                                      0              0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+│tailing at level debug (the process logs at info: `ferrofire log level debug --for 10m` to see │
+│ferrofire run (pid 526): logging to stderr, level info                                            │
+│Warn: rejected WRITE: Tag 'lowervalve.opn' is unknown or read-only (did you mean `lowervalve.open`│
+--- ferrofire top --stream
+stream udp://172.16.1.2;239.0.0.1:40000: 15 tags, 0 stale, sort Name, filter ``
+tag                                                  value          age      state  trend
+boat.location                                        209.75         0.1s     good   ███▇▇▇▇▆▆▆▆▂▂▁▁▁
+lock.height                                          15             0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+locksensor.active                                    0              0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppergate.open                                       1              0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+uppervalve.open                                      0              0.1s     good   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+exited 0
+
+=== --once dumps (stale-after 2): text, then json
+boat.direction=-1 age=0.0s ok
+boat.location=202.25 age=0.0s ok
+boat.location=190.75 age=0.0s ok
+{"tag":"lock.height","value":14.224999999999989,"age":0.007,"stale":false}
+--- provider stopped 3 s: --stream --once with no QUERY needed (--tags); the control-socket view cannot ask a stopped process
+exit 124

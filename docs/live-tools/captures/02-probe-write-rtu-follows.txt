@@ -1,0 +1,31 @@
+# waterway-provider, 2026-11-10T20:21:41Z
+$ cd /root/ff; F="./ferrofire probe --server tcp://172.16.1.2:5555"
+echo "-- rtu-1 Modbus input registers 30002 (lowergate.open) 30003 (lowervalve.open), raw 16-bit (65535 = 1000), polled every 50 ms; probe write at ~0.5 s"
+python3 mbq.py 10.1.1.101 watch 30002 2 4 &
+sleep 0.5; $F write lowervalve.open=1,lowergate.open=0 --confirm; echo "(write exit $?)"
+for i in 1 2 3 4 5 6; do sleep 0.1; $F read lowervalve.open; done
+wait
+echo "-- the stock RTU logic recomputes lowergate/lowervalve every cycle from its sensors, so it overwrites a manual write within ~1 s (see lowervalve.open above and in the registers)"
+echo "-- refused writes"; $F write lowervalve.open=5 --confirm 2>&1 | head -2; $F write lowervalve.opn=1 --confirm 2>&1 | head -2
+echo "-- dry run"; $F write uppergate.open=1 --dry-run
+-- rtu-1 Modbus input registers 30002 (lowergate.open) 30003 (lowervalve.open), raw 16-bit (65535 = 1000), polled every 50 ms; probe write at ~0.5 s
++    2 ms  30002:65 30003:0
+audit: write t=1794342099575 by=root@pid601 server=tcp://172.16.1.2:5555 points=lowervalve.open=1,lowergate.open=0 result=ACK
+(write exit 0)
++  577 ms  30002:0 30003:65
+lowervalve.open=1
+lowervalve.open=1
+lowervalve.open=1
++  993 ms  30002:65 30003:65
+lowervalve.open=1
+lowervalve.open=1
+lowervalve.open=1
++ 1515 ms  30002:65 30003:0
+-- the stock RTU logic recomputes lowergate/lowervalve every cycle from its sensors, so it overwrites a manual write within ~1 s (see lowervalve.open above and in the registers)
+-- refused writes
+audit: write t=1794342103167 by=root@pid614 server=tcp://172.16.1.2:5555 points=lowervalve.open=5 result=provider said `ERR=Tag 'lowervalve.open' is binary: value 5 is not true/false/0/1`
+ferrofire probe: provider said `ERR=Tag 'lowervalve.open' is binary: value 5 is not true/false/0/1`
+audit: write t=1794342103201 by=root@pid616 server=tcp://172.16.1.2:5555 points=lowervalve.opn=1 result=provider said `ERR=Tag 'lowervalve.opn' is unknown or read-only (did you mean `lowervalve.open`?)`
+ferrofire probe: provider said `ERR=Tag 'lowervalve.opn' is unknown or read-only (did you mean `lowervalve.open`?)`
+-- dry run
+dry run, would send WRITE=uppergate.open:1,

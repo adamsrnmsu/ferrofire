@@ -1,0 +1,33 @@
+# waterway-provider, 2026-11-10T20:21:53Z
+$ cd /root/ff; F="./ferrofire probe --server tcp://172.16.1.2:5555"
+cat > inject.yaml <<EOS
+- {at: 0, write: "uppergate.open=1"}
+- {at: 2, write: "uppervalve.open=1,uppergate.open=0"}
+- {at: 4, write: "uppervalve.open=0,uppergate.open=1"}
+EOS
+cat inject.yaml; echo "-- dry run"; $F play inject.yaml --dry-run; echo "exit $?"
+echo "-- play; rtu-2 Modbus 30002 (uppergate.open) 30003 (uppervalve.open) polled every 50 ms meanwhile"
+python3 mbq.py 10.1.1.102 watch 30002 2 7 | sed "s/^/rtu-2 /" &
+sleep 0.5; date +%s%3N | sed "s/^/play started at unix ms /"; $F play inject.yaml --confirm; echo "exit $?"; wait
+echo "-- audit t offsets from the first line: 0 ms, 2012 ms, 4023 ms (script at: 0, 2, 4 s)"
+- {at: 0, write: "uppergate.open=1"}
+- {at: 2, write: "uppervalve.open=1,uppergate.open=0"}
+- {at: 4, write: "uppervalve.open=0,uppergate.open=1"}
+-- dry run
+dry run, at 0s would send WRITE=uppergate.open:1,
+dry run, at 2s would send WRITE=uppervalve.open:1,uppergate.open:0,
+dry run, at 4s would send WRITE=uppervalve.open:0,uppergate.open:1,
+exit 0
+-- play; rtu-2 Modbus 30002 (uppergate.open) 30003 (uppervalve.open) polled every 50 ms meanwhile
+play started at unix ms 1794342111111
+audit: write t=1794342111148 by=root@pid631 server=tcp://172.16.1.2:5555 points=uppergate.open=1 result=ACK
+audit: write t=1794342113160 by=root@pid631 server=tcp://172.16.1.2:5555 points=uppervalve.open=1,uppergate.open=0 result=ACK
+audit: write t=1794342115171 by=root@pid631 server=tcp://172.16.1.2:5555 points=uppervalve.open=0,uppergate.open=1 result=ACK
+exit 0
+rtu-2 +    2 ms  30002:0 30003:65
+rtu-2 +  583 ms  30002:65 30003:65
+rtu-2 + 1587 ms  30002:0 30003:65
+rtu-2 + 4685 ms  30002:65 30003:0
+rtu-2 + 5051 ms  30002:0 30003:0
+rtu-2 + 5575 ms  30002:0 30003:65
+-- audit t offsets from the first line: 0 ms, 2012 ms, 4023 ms (script at: 0, 2, 4 s)

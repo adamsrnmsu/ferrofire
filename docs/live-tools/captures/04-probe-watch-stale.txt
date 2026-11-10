@@ -1,0 +1,43 @@
+# waterway-provider, 2026-11-10T20:22:45Z
+$ cd /root/ff; F="./ferrofire probe --server tcp://172.16.1.2:5555"
+PID=$(pgrep -x ferrofire | head -1); echo "provider pid $PID"
+echo "-- watch on the provider NIC for 16 s; SIGSTOP the provider at ~4 s for 5 s, then SIGCONT. Every output line stamped with unix seconds."
+( sleep 4; date +%s.%N | cut -c1-14 | sed "s/$/ [SIGSTOP]/"; kill -STOP $PID; sleep 5; date +%s.%N | cut -c1-14 | sed "s/$/ [SIGCONT]/"; kill -CONT $PID ) > marks.txt &
+timeout 16 $F watch --listen "udp://*;239.0.0.1:40000" --tags lock.height,boat.location,lowervalve.open,locksensor.active 2>&1 | while IFS= read -r l; do echo "$(date +%s.%N | cut -c1-14) $l"; done > watch.out
+wait; cat marks.txt watch.out | sort -n > watch.all
+echo "-- first lines:"; head -6 watch.all
+echo "-- around the stop:"; grep -B2 -A3 SIGSTOP watch.all; echo "..."; grep -B2 -A4 SIGCONT watch.all
+echo "-- longest silence between two printed lines (s):"; grep -v "\[" watch.all | awk "{if(p)g=\$1-p; if(g>m){m=g;at=\$1} p=\$1} END{print m, \"ending at\", at}"
+echo "-- stale lines printed:"; grep -c STALE watch.all; echo "-- total lines:"; wc -l < watch.out
+$F read lock.height
+provider pid 526
+-- watch on the provider NIC for 16 s; SIGSTOP the provider at ~4 s for 5 s, then SIGCONT. Every output line stamped with unix seconds.
+-- first lines:
+1794342162.676 lock.height=15 age=0 ok gaps=0
+1794342162.705 boat.location=235 age=0 ok gaps=0
+1794342162.731 lowervalve.open=0 age=0 ok gaps=0
+1794342162.757 locksensor.active=0 age=0 ok gaps=0
+1794342162.782 boat.location=234.5 age=0 ok gaps=0
+1794342162.874 boat.location=234 age=0 ok gaps=0
+-- around the stop:
+1794342166.374 boat.location=216.5 age=0 ok gaps=0
+1794342166.475 boat.location=216 age=0 ok gaps=0
+1794342166.570 [SIGSTOP]
+1794342166.599 boat.location=215.5 age=0 ok gaps=0
+1794342171.610 [SIGCONT]
+1794342171.670 boat.location=215 age=0 ok gaps=0
+...
+1794342166.570 [SIGSTOP]
+1794342166.599 boat.location=215.5 age=0 ok gaps=0
+1794342171.610 [SIGCONT]
+1794342171.670 boat.location=215 age=0 ok gaps=0
+1794342171.695 boat.location=214.5 age=0 ok gaps=0
+1794342171.722 boat.location=214 age=0 ok gaps=0
+1794342171.746 boat.location=213.5 age=0 ok gaps=0
+-- longest silence between two printed lines (s):
+5.071 ending at 1794342171.670
+-- stale lines printed:
+0
+-- total lines:
+223
+lock.height=11.949999999999957

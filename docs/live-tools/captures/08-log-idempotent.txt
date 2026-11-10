@@ -1,0 +1,65 @@
+# waterway-provider, 2026-11-10T20:36:59Z
+$ cd /root/ff; L="./ferrofire log --name run"; P="./ferrofire probe --server tcp://172.16.1.2:5555"; rm -f /tmp/ff-live.log* /tmp/ff-live2.log
+bad() { sleep 10.5; $P write $1.opn=1 --confirm >/dev/null 2>&1; sleep 0.3; }   # the provider rate-limits the rejected-WRITE warning to one per 10 s
+echo "--- status"; $L status
+echo "--- on x3 to the same file"; for i in 1 2 3; do $L on --file /tmp/ff-live.log --level info; echo "exit $?"; done
+bad lowervalve
+echo "--- one file, one line for the one rejected WRITE (no duplicates from three on commands)"; ls -la /tmp/ff-live.log*; cat /tmp/ff-live.log; ls /run/ferrofire/
+echo "--- on --file OTHER switches (closes the old file)"; $L on --file /tmp/ff-live2.log; bad lowergate; echo "old file lines:"; wc -l < /tmp/ff-live.log; echo "new file:"; cat /tmp/ff-live2.log
+echo "--- on with the first file again: it appends, nothing truncated"; $L on --file /tmp/ff-live.log; bad uppergate; echo "first file:"; cat /tmp/ff-live.log; echo "second file lines (unchanged):"; wc -l < /tmp/ff-live2.log
+echo "--- level debug for 10 s (reverts by itself)"; $L level debug --for 10s; $L status; sleep 11; $L status
+echo "--- tail for 14 s while a bad write happens"; ( sleep 11; $P write uppervalve.opn=1 --confirm >/dev/null 2>&1 ) & timeout 14 $L tail --level info; wait
+echo "--- off x2"; $L off; $L off; echo "exit $?"; $L status; ls /tmp/ff-live*
+echo "--- level"; $L level warn; $L status; $L level info
+--- status
+ferrofire run (pid 526): logging to stderr, level info
+--- on x3 to the same file
+logging to /tmp/ff-live.log
+ferrofire run (pid 526): logging to /tmp/ff-live.log, level info
+exit 0
+already logging to /tmp/ff-live.log
+ferrofire run (pid 526): logging to /tmp/ff-live.log, level info
+exit 0
+already logging to /tmp/ff-live.log
+ferrofire run (pid 526): logging to /tmp/ff-live.log, level info
+exit 0
+--- one file, one line for the one rejected WRITE (no duplicates from three on commands)
+-rw-r--r-- 1 root root 116 Nov 10 20:37 /tmp/ff-live.log
+1794343027.332 Warn: rejected WRITE: Tag 'lowervalve.opn' is unknown or read-only (did you mean `lowervalve.open`?)
+run-526.sock
+--- on --file OTHER switches (closes the old file)
+logging to /tmp/ff-live2.log
+ferrofire run (pid 526): logging to /tmp/ff-live2.log, level info
+old file lines:
+1
+new file:
+1794343038.262 Warn: rejected WRITE: Tag 'lowergate.opn' is unknown or read-only (did you mean `lowergate.open`?)
+--- on with the first file again: it appends, nothing truncated
+logging to /tmp/ff-live.log
+ferrofire run (pid 526): logging to /tmp/ff-live.log, level info
+first file:
+1794343027.332 Warn: rejected WRITE: Tag 'lowervalve.opn' is unknown or read-only (did you mean `lowervalve.open`?)
+1794343049.170 Warn: rejected WRITE: Tag 'uppergate.opn' is unknown or read-only (did you mean `uppergate.open`?)
+second file lines (unchanged):
+1
+--- level debug for 10 s (reverts by itself)
+ferrofire run (pid 526): logging to /tmp/ff-live.log, level debug, reverts to info in 10s
+ferrofire run (pid 526): logging to /tmp/ff-live.log, level debug, reverts to info in 9s
+ferrofire run (pid 526): logging to /tmp/ff-live.log, level info
+--- tail for 14 s while a bad write happens
+tailing at level info
+ferrofire run (pid 526): logging to /tmp/ff-live.log, level info
+Warn: rejected WRITE: Tag 'uppervalve.opn' is unknown or read-only (did you mean `uppervalve.open`?)
+--- off x2
+stopped logging to /tmp/ff-live.log
+ferrofire run (pid 526): logging to stderr, level info
+already off
+ferrofire run (pid 526): logging to stderr, level info
+exit 0
+ferrofire run (pid 526): logging to stderr, level info
+/tmp/ff-live.log
+/tmp/ff-live2.log
+--- level
+ferrofire run (pid 526): logging to stderr, level warn
+ferrofire run (pid 526): logging to stderr, level warn
+ferrofire run (pid 526): logging to stderr, level info

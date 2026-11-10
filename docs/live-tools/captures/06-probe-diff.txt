@@ -1,0 +1,27 @@
+# waterway-provider, 2026-11-10T20:27:17Z
+$ cd /root/ff; F="./ferrofire probe --server tcp://172.16.1.2:5555"
+echo "-- normal: 20 cycles, 1 s apart, both RTUs (18 input registers + 4 holding registers), tolerance 1% of span"
+$F diff --map rtus.yaml --cycles 20 --every 1; echo "exit $?"
+echo "-- tamper: the stock device applies a Modbus FC6 write on its 1 s scan and its logic overwrites the output register ~50 ms later, so"
+echo "-- the register holds the forged value only briefly: write 40001 (lowervalve.open) = 65535 on rtu-1 every 0.25 s for 6 s while diff polls every 50 ms"
+( for i in $(seq 1 24); do python3 mbq.py 10.1.1.101 write 40001 65535 >/dev/null; sleep 0.25; done ) &
+$F diff --map rtus.yaml --cycles 120 --every 0.05; echo "exit $?"; wait
+echo "-- after: back to clean"; $F diff --map rtus.yaml --cycles 3 --every 1; echo "exit $?"
+-- normal: 20 cycles, 1 s apart, both RTUs (18 input registers + 4 holding registers), tolerance 1% of span
+exit 0
+-- tamper: the stock device applies a Modbus FC6 write on its 1 s scan and its logic overwrites the output register ~50 ms later, so
+-- the register holds the forged value only briefly: write 40001 (lowervalve.open) = 65535 on rtu-1 every 0.25 s for 6 s while diff polls every 50 ms
+t=1794342456.711 rtu=rtu-1 tag=lowervalve.open modbus=1000 provider=0 delta=1000
+t=1794342456.711 rtu=rtu-1 tag=lowervalve.open modbus=1000 provider=0 delta=1000
+t=1794342458.192 rtu=rtu-1 tag=lowervalve.open modbus=1000 provider=0 delta=1000
+t=1794342458.192 rtu=rtu-1 tag=lowervalve.open modbus=1000 provider=0 delta=1000
+t=1794342460.186 rtu=rtu-1 tag=lowervalve.open modbus=1000 provider=0 delta=1000
+t=1794342460.186 rtu=rtu-1 tag=lowervalve.open modbus=1000 provider=0 delta=1000
+t=1794342461.725 rtu=rtu-1 tag=lowervalve.open modbus=1000 provider=0 delta=1000
+t=1794342461.725 rtu=rtu-1 tag=lowervalve.open modbus=1000 provider=0 delta=1000
+t=1794342463.242 rtu=rtu-1 tag=lowervalve.open modbus=1000 provider=0 delta=1000
+ferrofire probe: 9 mismatch(es) between the RTUs and the provider
+usage: ferrofire probe [--server tcp://127.0.0.1:5555] [--json] (query | read a,b | write a=1,b=2 [--confirm] [--dry-run] [--model m.yaml] | play script.yaml [--confirm] [--dry-run] [--keep-going] [--model m.yaml] | record --out run.csv [--tags a,b] [--duration s] | diff --map rtus.yaml [--tolerance 0.01] [--cycles 1] [--every s] | watch [--listen udp://*;239.0.0.1:40000] [--tags a,b])
+exit 1
+-- after: back to clean
+exit 0

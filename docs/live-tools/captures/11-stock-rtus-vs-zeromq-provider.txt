@@ -1,0 +1,26 @@
+# rtu-1, 2026-11-10T20:42:18Z
+$ echo "== stock bennu-probe (libzmq REQ) on rtu-1 against the ferrofire provider (zeromq crate REP)"; ps -eo pid,etime,cmd | grep -E "[b]ennu-field-deviced --c"; bennu-probe --e tcp://172.16.1.2:5555 --c read --t lock.height; bennu-probe --e tcp://172.16.1.2:5555 --c write --t uppergate.open --v 1; bennu-probe --e tcp://172.16.1.2:5555 --c read --t uppergate.open; bennu-probe --e tcp://172.16.1.2:5555 --c read --t no.such.tag 2>&1 | head -3; echo "== field-device logs (stock client side)"; tail -4 /etc/sceptre/log/default-bennu-field-deviced-stderr.log | cut -c1-150; wc -l /etc/sceptre/log/default-bennu-field-deviced-std*.log
+== stock bennu-probe (libzmq REQ) on rtu-1 against the ferrofire provider (zeromq crate REP)
+    828       06:44 /usr/bin/bennu-field-deviced --c start --env default --file /etc/sceptre/config.xml
+I: Client connect (tcp://172.16.1.2:5555): Connecting to provider
+I: ACK
+Reply:
+	5
+I: Client connect (tcp://172.16.1.2:5555): Connecting to provider
+I: ACK
+Reply:
+	
+I: Client connect (tcp://172.16.1.2:5555): Connecting to provider
+I: ACK
+Reply:
+	0
+I: Client connect (tcp://172.16.1.2:5555): Connecting to provider
+I: ERR -- Tag 'no.such.tag' not found
+== field-device logs (stock client side)
+A new incoming connection started.
+Modbus RTU receive message failed with error: End of file
+A new incoming connection started.
+Modbus RTU receive message failed with error: End of file
+     8 /etc/sceptre/log/default-bennu-field-deviced-stderr.log
+  1393 /etc/sceptre/log/default-bennu-field-deviced-stdout.log
+  1401 total

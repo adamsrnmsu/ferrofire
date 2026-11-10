@@ -1,0 +1,31 @@
+# register map of the two stock bennu RTUs of the waterway range (from their /etc/sceptre/config.xml), Modbus/TCP on the management NIC
+rtu-1:
+  endpoint: 10.1.1.101:502
+  unit: 1
+  points:
+    - {tag: lowerwater.height, kind: input-register, address: 30000, min: 0, max: 1000}
+    - {tag: lock.height, kind: input-register, address: 30001, min: 0, max: 1000}
+    - {tag: lowergate.open, kind: input-register, address: 30002, min: 0, max: 1000}
+    - {tag: lowervalve.open, kind: input-register, address: 30003, min: 0, max: 1000}
+    - {tag: lowersensor.active, kind: input-register, address: 30004, min: 0, max: 1000}
+    - {tag: lowersensor.direction, kind: input-register, address: 30005, min: 0, max: 1000}
+    - {tag: locksensor.active, kind: input-register, address: 30006, min: 0, max: 1000}
+    - {tag: locksensor.direction, kind: input-register, address: 30007, min: 0, max: 1000}
+    - {tag: boat.location, kind: input-register, address: 30008, min: 0, max: 1000}
+    - {tag: boat.direction, kind: input-register, address: 30009, min: 0, max: 1000}
+    - {tag: lowergate.open, kind: holding-register, address: 40000, min: 0, max: 1000}
+    - {tag: lowervalve.open, kind: holding-register, address: 40001, min: 0, max: 1000}
+rtu-2:
+  endpoint: 10.1.1.102:502
+  unit: 1
+  points:
+    - {tag: upperwater.height, kind: input-register, address: 30000, min: 0, max: 1000}
+    - {tag: lock.height, kind: input-register, address: 30001, min: 0, max: 1000}
+    - {tag: uppergate.open, kind: input-register, address: 30002, min: 0, max: 1000}
+    - {tag: uppervalve.open, kind: input-register, address: 30003, min: 0, max: 1000}
+    - {tag: uppersensor.active, kind: input-register, address: 30004, min: 0, max: 1000}
+    - {tag: uppersensor.direction, kind: input-register, address: 30005, min: 0, max: 1000}
+    - {tag: locksensor.active, kind: input-register, address: 30006, min: 0, max: 1000}
+    - {tag: locksensor.direction, kind: input-register, address: 30007, min: 0, max: 1000}
+    - {tag: uppergate.open, kind: holding-register, address: 40000, min: 0, max: 1000}
+    - {tag: uppervalve.open, kind: holding-register, address: 40001, min: 0, max: 1000}

@@ -1,0 +1,32 @@
+# waterway-provider, 2026-11-10T20:20:07Z
+$ cd /root/ff; F="./ferrofire probe --server tcp://172.16.1.2:5555"; $F query; echo; $F read lock.height,boat.location,lowervalve.open; echo; $F read "*.open"; echo; $F --json read lock.height; echo "-- typo:"; $F read lock.hieght; echo "exit $?"
+lowerwater.height
+lock.height
+upperwater.height
+lowergate.open
+lowervalve.open
+uppergate.open
+uppervalve.open
+boat.direction
+lowersensor.direction
+locksensor.direction
+uppersensor.direction
+boat.location
+lowersensor.active
+locksensor.active
+uppersensor.active
+
+lock.height=14.350000000000133
+boat.location=197.75
+lowervalve.open=0
+
+lowergate.open=0
+lowervalve.open=0
+uppergate.open=0
+uppervalve.open=1
+
+{"tag":"lock.height","value":14.375000000000133}
+-- typo:
+ferrofire probe: provider said `ERR=Tag 'lock.hieght' not found (did you mean `lock.height`?)`
+usage: ferrofire probe [--server tcp://127.0.0.1:5555] [--json] (query | read a,b | write a=1,b=2 [--confirm] [--dry-run] [--model m.yaml] | play script.yaml [--confirm] [--dry-run] [--keep-going] [--model m.yaml] | record --out run.csv [--tags a,b] [--duration s] | diff --map rtus.yaml [--tolerance 0.01] [--cycles 1] [--every s] | watch [--listen udp://*;239.0.0.1:40000] [--tags a,b])
+exit 1

@@ -1,0 +1,74 @@
+# 2026-11-10T20:34:27Z  bridge: the OVS bridge 'phenix' inside the minimega container (every VM NIC of the range is a port of it)
+$ ovs-vsctl list-br; ovs-vsctl get Bridge phenix mcast_snooping_enable other_config
+phenix
+false
+{}
+
+=== A. snooping off (default)
+--- scada-server (no libzmq on it); its default multicast route is the management NIC: doctor tells you
+$ ferrofire doctor --server tcp://172.16.1.2:5555
+ok    provider: REP answers QUERY: 15 tags
+ok    group: id 54386972605942b for udp://*;239.0.0.1:40000
+FAIL  datagrams: none in 4s
+      fix: the provider's --publish must be the same endpoint string as --listen (the group id hashes it); check the multicast route, the host firewall for UDP, and an IGMP querier on the switch
+exit 1
+--- scada-server, listening on its range NIC
+$ ferrofire doctor --listen 'udp://172.16.2.71;239.0.0.1:40000'
+ok    provider: REP answers QUERY: 15 tags
+ok    group: id 54386972605942b for udp://172.16.2.71;239.0.0.1:40000
+ok    datagrams: 41 in 4s
+ok    seq gaps: none
+ok    bystanders: no other groups on this port
+WARN  clock skew: 1025 ms against the provider's _ff.t
+      fix: sync both clocks (chrony or PTP); recorded and logged times will not line up until then
+ok    stale tags: none
+exit 0
+--- rtu-1: the stock device holds UDP port 40000 without SO_REUSEADDR, so the doctor cannot share the host with it
+$ ferrofire doctor --listen 'udp://172.16.1.101;239.0.0.1:40000'
+ok    provider: REP answers QUERY: 15 tags
+ok    group: id 54386972605942b for udp://172.16.1.101;239.0.0.1:40000
+FAIL  multicast join: 239.0.0.1:40000: Address already in use (os error 98)
+      fix: use udp://[iface;]group:port with a multicast group (224.0.0.0/4) and an IPv4 interface address of this host
+exit 1
+--- a member process on scada-server joins 239.0.0.1 now (stands in for a stock device that joined earlier)
+$ python3 (IP_ADD_MEMBERSHIP 239.0.0.1 on eth1) ; ip maddr show dev eth1
+	inet  239.0.0.1
+
+=== B. snooping on, flood-unregistered disabled, aging 7200 s (no IGMP querier on this range); the member joined before, the doctor joins as a second socket
+$ ovs-vsctl set Bridge phenix mcast_snooping_enable=true other_config:mcast-snooping-aging-time=7200 other_config:mcast-snooping-disable-flood-unregistered=true
+$ ferrofire doctor --listen 'udp://172.16.2.71;239.0.0.1:40000'
+ok    provider: REP answers QUERY: 15 tags
+ok    group: id 54386972605942b for udp://172.16.2.71;239.0.0.1:40000
+FAIL  datagrams: none in 4s
+      fix: the provider's --publish must be the same endpoint string as --listen (the group id hashes it); check the multicast route, the host firewall for UDP, and an IGMP querier on the switch
+exit 1
+--- rtu-1 (its stock device joined before snooping was on): Modbus input register 30008 (boat.location) twice, 3 s apart; the boat moves 5 m/s
+30008:12844(195.99)
+30008:12844(195.99)
+
+=== C. snooping still on; the member re-joins (new IGMP report), rtu-1's field device is restarted
+0
+	inet  239.0.0.1
+$ ovs-appctl mdb/show phenix   (port numbers are the bridge ports of the joined NICs)
+ port  VLAN  GROUP                Age
+ 1120   101  239.0.0.1           4
+$ ferrofire doctor --listen 'udp://172.16.2.71;239.0.0.1:40000'
+ok    provider: REP answers QUERY: 15 tags
+ok    group: id 54386972605942b for udp://172.16.2.71;239.0.0.1:40000
+ok    datagrams: 41 in 4s
+ok    seq gaps: none
+ok    bystanders: no other groups on this port
+WARN  clock skew: 1025 ms against the provider's _ff.t
+      fix: sync both clocks (chrony or PTP); recorded and logged times will not line up until then
+ok    stale tags: none
+exit 0
+$ restart-rtu.sh on rtu-1
+    828 root           00:11 /usr/bin/bennu-field-deviced --c start --env default --file /etc/sceptre/config.xml
+--- rtu-1 Modbus input register 30008 again
+30008:2965(45.24)
+30008:1949(29.74)
+
+=== D. restored: snooping off
+$ ovs-vsctl get Bridge phenix mcast_snooping_enable other_config
+false
+{}

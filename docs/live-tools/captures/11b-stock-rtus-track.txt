@@ -1,0 +1,21 @@
+# waterway-provider, 2026-11-10T20:42:22Z
+$ cd /root/ff; P="./ferrofire probe --server tcp://172.16.1.2:5555"; echo "== provider (ferrofire, zeromq REP) vs the two stock RTUs over Modbus (input registers, value = reg/65.535), 12 samples, 5 s apart"; echo "t  prov boat.location | rtu-1 30008 | prov lock.height | rtu-1 30001 | rtu-2 30001"; for i in $(seq 1 12); do b=$($P read boat.location | cut -d= -f2); l=$($P read lock.height | cut -d= -f2); r1=$(python3 mbq.py 10.1.1.101 read 30008 1); r1l=$(python3 mbq.py 10.1.1.101 read 30001 1); r2=$(python3 mbq.py 10.1.1.102 read 30001 1); echo "$((i*5-5))s  $b | $r1 | $l | $r1l | $r2"; sleep 5; done; echo "== writes by the stock RTU logic arrive over REQ/REP: the provider ACKs them; its inputs follow the boat sensors (RTU-written):"; $P read lowergate.open,lowervalve.open,uppergate.open,uppervalve.open
+== provider (ferrofire, zeromq REP) vs the two stock RTUs over Modbus (input registers, value = reg/65.535), 12 samples, 5 s apart
+t  prov boat.location | rtu-1 30008 | prov lock.height | rtu-1 30001 | rtu-2 30001
+0s  35.75 | 30008:2359(36.00) | 5 | 30001:327(4.99) | 30001:327(4.99)
+5s  62.25 | 30008:4095(62.49) | 5 | 30001:327(4.99) | 30001:327(4.99)
+10s  88.5 | 30008:5832(88.99) | 5 | 30001:327(4.99) | 30001:327(4.99)
+15s  114.75 | 30008:7536(114.99) | 6.050000000000015 | 30001:399(6.09) | 30001:399(6.09)
+20s  141 | 30008:9273(141.50) | 8.675000000000052 | 30001:570(8.70) | 30001:573(8.74)
+25s  167.5 | 30008:11009(167.99) | 11.32500000000009 | 30001:743(11.34) | 30001:747(11.40)
+30s  194 | 30008:12746(194.49) | 13.975000000000128 | 30001:917(13.99) | 30001:920(14.04)
+35s  213.25 | 30008:13991(213.49) | 15 | 30001:983(15.00) | 30001:983(15.00)
+40s  239.75 | 30008:15728(239.99) | 15 | 30001:983(15.00) | 30001:983(15.00)
+45s  266.25 | 30008:17465(266.50) | 15 | 30001:983(15.00) | 30001:983(15.00)
+50s  292.75 | 30008:19201(292.99) | 15 | 30001:983(15.00) | 30001:983(15.00)
+55s  280.75 | 30008:18382(280.49) | 15 | 30001:983(15.00) | 30001:983(15.00)
+== writes by the stock RTU logic arrive over REQ/REP: the provider ACKs them; its inputs follow the boat sensors (RTU-written):
+lowergate.open=0
+lowervalve.open=0
+uppergate.open=1
+uppervalve.open=0
