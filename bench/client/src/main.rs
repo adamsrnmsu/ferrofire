@@ -37,6 +37,10 @@ impl Req {
                 let ctx = zmq::Context::new();
                 let s = ctx.socket(zmq::REQ).unwrap();
                 s.set_rcvtimeo(3000).unwrap();
+                s.set_linger(0).unwrap();
+                // a lost reply must not wedge the socket: the next send is allowed and stale replies are dropped
+                s.set_req_relaxed(true).unwrap();
+                s.set_req_correlate(true).unwrap();
                 s.connect(&url).unwrap();
                 std::mem::forget(ctx);
                 Req::Zmq(s)
@@ -84,11 +88,30 @@ struct SubLog {
     cycles: Vec<Cycle>,
     chunks: u64,
     malformed: u64,
+    last_seq: Option<u64>,
+}
+
+/// The `_ff.seq` value of a chunk (None from a stock provider).
+fn seq_of(body: &[u8]) -> Option<u64> {
+    let s = std::str::from_utf8(body).ok()?;
+    let (_, rest) = s.rsplit_once("_ff.seq:")?;
+    rest.split(',').next()?.parse().ok()
 }
 
 /// Fold one NUL-terminated `tag:value,...` chunk (received at `t`) into the log.
 fn ingest(log: &mut SubLog, body: &[u8], t: u64) {
-    let body = body.strip_suffix(&[0]).unwrap_or(body);
+    // datagram v1 receiver rules: a body without its NUL is truncated; a repeated or older `_ff.seq` is a duplicate
+    let Some(body) = body.strip_suffix(&[0]) else {
+        log.malformed += 1;
+        return;
+    };
+    if let Some(seq) = seq_of(body) {
+        if log.last_seq.is_some_and(|l| seq <= l) {
+            log.malformed += 1;
+            return;
+        }
+        log.last_seq = Some(seq);
+    }
     log.chunks += 1;
     if body.starts_with(b"sim.t:") {
         let end = body.iter().position(|&b| b == b',').unwrap_or(body.len());

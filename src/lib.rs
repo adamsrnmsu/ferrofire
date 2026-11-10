@@ -2,7 +2,9 @@
 //! frontend that stands in for the Simulink-generated solver.
 
 pub mod bennu;
+pub mod datagram;
 pub mod expr;
+pub mod hint;
 pub mod model;
 pub mod power;
 pub mod pull;

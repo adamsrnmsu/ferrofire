@@ -6,7 +6,7 @@ IN := docker run --rm --platform $(PLATFORM) -v $(CURDIR):/src -w /src -e CARGO_
 CRAP_MAX := 9.99
 DRY_MIN := 0.8
 
-.PHONY: help bench bench-report image fmt fmt-check lint test golden linux crap dry mutate check clean
+.PHONY: help wireshark bench bench-report image fmt fmt-check lint test golden linux crap dry mutate check clean
 help:    # list targets
 	@grep -E '^[a-z-]+:.*#' $(MAKEFILE_LIST) | sed -E 's/^([a-z-]+):[^#]*#/\1\t/'
 image:   # build the ff-rust container if missing (rebuild: docker build -t ff-rust:22.04 docker)
@@ -21,6 +21,8 @@ golden:  # PYPOWER 5.1.19 reference results -> target/golden (needs uv; generate
 	uv run --python 3.11 --with PYPOWER==5.1.19 --with 'numpy<2' --with 'scipy<1.14' python -I -W ignore tests/golden/gen_pypower.py target/golden
 test: golden image   # unit + integration tests in the container (no cargo needed on the host)
 	$(IN) cargo test
+wireshark:   # decode the datagram v1 test vector with tshark and the Lua dissector (host tool, not in check)
+	tools/wireshark/test.sh
 linux:   # glibc aarch64 binaries -> dist/ferrofire, dist/simulinksolver
 	./build-linux.sh
 crap: golden image   # crapper: CRAP score per function, fails above $(CRAP_MAX); writes .metrics/crap.edn

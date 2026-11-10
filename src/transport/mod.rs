@@ -13,6 +13,10 @@ pub trait Publisher: Send {
     fn publish(&self, msg: &str);
     /// What the startup banner says about the publish side.
     fn describe(&self) -> String;
+    /// Datagrams that could not be sent so far (a publisher that cannot fail reports none).
+    fn dropped(&self) -> u64 {
+        0
+    }
 }
 
 /// Client side of the request/reply half: one request, one reply, or an error after `timeout_ms`.

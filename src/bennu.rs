@@ -2,6 +2,7 @@
 //! Wire formats are matched from the bennu protocol documentation only; no bennu code is used.
 //! Pure pieces (hash, framing, chunking, request handling) are plain functions so tests need no sockets.
 
+use crate::hint::{did_you_mean, lock, show, RateLimit};
 use crate::model::SliceSpec;
 use crate::model::{Model, Value};
 use crate::transport::{self, Publisher};
@@ -141,13 +142,23 @@ pub struct Shared {
 pub struct Meta {
     pub tags: Vec<String>,
     pub writable: HashSet<String>,
+    /// Limits the runtime "bad request" warnings to one per `WARN_EVERY`.
+    pub warn: RateLimit,
 }
+
+/// Largest request the provider looks at; a bigger one is answered `ERR`, not parsed.
+pub const MAX_REQUEST: usize = 64 * 1024;
+const WARN_EVERY: Duration = Duration::from_secs(10);
 
 impl Meta {
     pub fn of(m: &Model) -> Meta {
         let tags: Vec<String> = m.tags().map(|(t, _)| t.to_string()).collect();
         let writable = tags.iter().filter(|t| m.writable(t)).cloned().collect();
-        Meta { tags, writable }
+        Meta {
+            tags,
+            writable,
+            warn: RateLimit::new(WARN_EVERY),
+        }
     }
 }
 
@@ -155,12 +166,22 @@ fn parse_value(s: &str) -> Option<Value> {
     match s {
         "true" => Some(Value::Binary(true)),
         "false" => Some(Value::Binary(false)),
-        _ => s.parse().ok().map(Value::Analog),
+        _ => s
+            .parse()
+            .ok()
+            .filter(|v: &f64| v.is_finite())
+            .map(Value::Analog),
     }
 }
 
 /// One request -> one reply, always (a REP socket must answer or it wedges). Both carry a trailing NUL.
 pub fn handle(req: &[u8], meta: &Meta, sh: &Mutex<Shared>) -> Vec<u8> {
+    if req.len() > MAX_REQUEST {
+        let n = req.len();
+        return with_nul(format!(
+            "ERR=request too large ({n} bytes, limit {MAX_REQUEST})"
+        ));
+    }
     with_nul(reply(req, meta, sh))
 }
 
@@ -174,19 +195,23 @@ pub fn with_nul(reply: String) -> Vec<u8> {
 /// `READ=tag` -> `ACK=value`; `READ=a,b,...` -> `ACK=a:va,b:vb,` (the update format, request order), the first unknown tag is an ERR.
 /// ponytail: one linear scan of the snapshot per requested tag; index it if batches of thousands are ever asked for.
 fn read(payload: &str, sh: &Mutex<Shared>) -> String {
-    let sh = sh.lock().unwrap();
+    let sh = lock(sh);
     let find = |t: &str| sh.snap.iter().find(|(n, _)| n == t).map(|(_, v)| *v);
+    let missing = |t: &str| {
+        let hint = did_you_mean(t, sh.snap.iter().map(|(n, _)| n.as_str()));
+        format!("ERR=Tag '{}' not found{hint}", show(t))
+    };
     if !payload.contains(',') {
         return match find(payload) {
             Some(v) => format!("ACK={}", fmt_value(v)),
-            None => format!("ERR=Tag '{payload}' not found"),
+            None => missing(payload),
         };
     }
     let mut out = String::from("ACK=");
     for t in payload.split(',').filter(|t| !t.is_empty()) {
         match find(t) {
             Some(v) => out.push_str(&format!("{t}:{},", fmt_value(v))),
-            None => return format!("ERR=Tag '{t}' not found"),
+            None => return missing(t),
         }
     }
     out
@@ -198,7 +223,7 @@ fn reply(req: &[u8], meta: &Meta, sh: &Mutex<Shared>) -> String {
     };
     let req = req.trim_end_matches('\0');
     let Some((op, payload)) = req.split_once('=') else {
-        return format!("ERR=Malformed request '{req}'");
+        return format!("ERR=Malformed request '{}'", show(req));
     };
     match op.to_ascii_lowercase().as_str() {
         "query" => format!(
@@ -213,22 +238,32 @@ fn reply(req: &[u8], meta: &Meta, sh: &Mutex<Shared>) -> String {
             let mut batch = vec![];
             for point in payload.split(',').filter(|p| !p.is_empty()) {
                 let Some((tag, val)) = point.split_once(':') else {
-                    return format!("ERR=Malformed point '{point}'");
+                    return format!("ERR=Malformed point '{}'", show(point));
                 };
                 if !meta.writable.contains(tag) {
-                    return format!("ERR=Tag '{tag}' is unknown or read-only");
+                    return refuse(meta, tag);
                 }
                 let Some(v) = parse_value(val) else {
-                    return format!("ERR=Bad value '{val}' for '{tag}'");
+                    return format!("ERR=Bad value '{}' for '{tag}'", show(val));
                 };
                 batch.push((tag.to_string(), v));
             }
             // all-or-nothing: the field device's retry logic isolates a bad point
-            sh.lock().unwrap().queue.extend(batch);
+            lock(sh).queue.extend(batch);
             "ACK=".into()
         }
-        _ => format!("ERR=Unknown command type '{op}'"),
+        _ => format!("ERR=Unknown command type '{}'", show(op)),
     }
+}
+
+/// The ERR for a WRITE to a tag that is unknown or read-only, with a suggestion; the warning is rate limited.
+fn refuse(meta: &Meta, tag: &str) -> String {
+    let hint = did_you_mean(tag, meta.writable.iter().map(String::as_str));
+    let msg = format!("Tag '{}' is unknown or read-only{hint}", show(tag));
+    if meta.warn.allow(Instant::now()) {
+        eprintln!("Warn: rejected WRITE: {msg}");
+    }
+    format!("ERR={msg}")
 }
 
 // ---- sockets and threads -------------------------------------------------------------------------------------
@@ -433,11 +468,11 @@ pub fn plan(publish: Option<&str>, slices: Vec<Slice>, known: &[String]) -> Resu
     }
     let known: HashSet<&String> = known.iter().collect();
     for s in slices {
-        let bad: Vec<&str> = s
+        let bad: Vec<String> = s
             .tags
             .iter()
             .filter(|t| !known.contains(t))
-            .map(String::as_str)
+            .map(|t| format!("{t}{}", did_you_mean(t, known.iter().map(|k| k.as_str()))))
             .collect();
         if !bad.is_empty() || s.tags.is_empty() {
             return Err(format!(
@@ -492,7 +527,7 @@ pub fn publish_all(targets: &[Target], snap: &[(String, Value)]) {
 fn load_model(path: Option<&str>) -> Result<Model, String> {
     let path = path.ok_or("no model given")?;
     let yaml = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
-    Model::load_in(&yaml, std::path::Path::new(path).parent())
+    Model::load_in(&yaml, std::path::Path::new(path).parent()).map_err(|e| format!("{path}: {e}"))
 }
 
 /// Publish period: `--rate`, else the model's `publish_rate`, else 0.1 s.
@@ -515,12 +550,12 @@ fn owned_snapshot(model: &Model) -> Vec<(String, Value)> {
 /// One engine tick: apply queued writes, store the snapshot for the REP side, then advance the model.
 /// Returns the snapshot taken before the step.
 fn engine_tick(model: &mut Model, sh: &Mutex<Shared>) -> Vec<(String, Value)> {
-    let writes = std::mem::take(&mut sh.lock().unwrap().queue);
+    let writes = std::mem::take(&mut lock(sh).queue);
     for tag in model.apply_writes(&writes) {
         println!("Warn: write to {tag} rejected");
     }
     let snap = owned_snapshot(model);
-    sh.lock().unwrap().snap = snap.clone();
+    lock(sh).snap = snap.clone();
     model.step(model.dt);
     snap
 }

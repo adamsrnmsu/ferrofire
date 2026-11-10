@@ -3,6 +3,7 @@
 //! Writes are untouched: the field device still WRITEs to the provider itself.
 
 use crate::bennu::{exit_on_err, install_signals, sleep_until, STOP};
+use crate::hint::did_you_mean;
 use crate::transport::{self, Publisher, Requester};
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
@@ -132,10 +133,10 @@ pub fn validate(req: &mut dyn Requester, tags: &[String]) -> Result<(), String> 
             Ok(reply) => {
                 let known: HashSet<String> =
                     update_msg(&reply)?.split(',').map(String::from).collect();
-                let bad: Vec<&str> = tags
+                let bad: Vec<String> = tags
                     .iter()
                     .filter(|t| !known.contains(*t))
-                    .map(String::as_str)
+                    .map(|t| format!("{t}{}", did_you_mean(t, known.iter().map(String::as_str))))
                     .collect();
                 return match bad.is_empty() {
                     true => Ok(()),

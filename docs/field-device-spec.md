@@ -554,3 +554,20 @@ Prototype: `READ=a,b,...` (one `ACK=a:v,b:v,`) plus `ferrofire pull-bridge` per 
 Reading for the decision: pull is the right path where multicast is unavailable: it removes the N-copies fan-out and the PUB0 queue-drop failure mode (loss is 0 and visible as a timeout, not silent), and needs no bennu change.
 Where zmq multicast works it is as cheap or cheaper at the provider. Keep push as the default for zmq/multicast ranges and use pull-bridge for ranges without multicast, and keep push as an optional change notification only if sub-scan-period latency matters.
 Live check on waterway-arm64 (2026-11-09, zmq, details in the "Live check" subsection of the bench report): a stock `bennu-field-device` subscribes to a plain loopback unicast endpoint `udp://127.0.0.1:40000` fed by the bridge (no multicast group needed; `--publish` must equal the device's `<input><endpoint>` string, the RADIO group is a hash of it); Modbus registers track the process (boat transit, lock height); a Modbus write reaches the provider through the unchanged WRITE path. The stock bennu-simulink-provider cannot serve batched READ, so pull needs ferrofire as the provider. Provider-link bytes with 2 RTUs: push 3.6 KB/s (one multicast stream), pull 11.7 KB/s at 100 ms scan, 1.2 KB/s at 1000 ms (the devices' `cycle-time`); provider CPU 1.0-1.4% push vs 2.1% / 0.6% pull. Pull pays off at a scan rate matched to the device cycle or where there is no multicast, not at 10 Hz on multicast. (NNG was dropped on 2026-11-09, so it is not verified live.) These live numbers are single samples whose captures were not committed; re-measurement is tracked in ww-2s0. ww-otj.10 stays open.
+
+## 14. Failure behaviour: what to expect from stock bennu and what the Rust field device does (ww-otj.20)
+
+Wire and receiver rules: [datagram-v1.md](datagram-v1.md) "Failure behaviour". Summary for the implementer:
+
+- **Stock `Client.cpp`** (request side of `bennu-field-deviced`): lazy pirate with a **5 s** reply timeout and **3** tries, then it closes the socket and
+  opens a new one. While the provider is down an RTU's write (and any `READ`) stalls up to ~15 s, then is abandoned; the multicast stream just stops
+  and the RTU keeps serving its last values. **`InputModule`** ignores point names it did not subscribe to, which is why the `_ff.*` pseudo-tags are
+  invisible to a stock device. An `ERR=` reply is logged and the loop continues.
+- **Rust field device** (shorter, because nothing needs 5 s on a LAN): reply timeout 1 s, 2 tries, then drop the REQ socket and create a new one with
+  linger 0 (or `ZMQ_REQ_RELAXED` + `ZMQ_REQ_CORRELATE`), backoff 100 ms doubling to 1 s while the provider is unreachable; a lost reply must never leave the
+  socket in the send state. Mark inputs stale after 3 missed publish periods (3 x `publish_rate`), not on the first lost datagram.
+- **Datagram receive**: drop garbage, truncated, other-group, duplicate and out-of-order datagrams, skip unknown tags and unparsable points, keep the
+  last values (reference implementation `ferrofire::datagram::Receiver`, tests in `tests/robust.rs`).
+- **Provider side** (done in ferrofire): every request gets one reply; a misspelt tag in a `WRITE` or `READ` is an `ERR` naming it, with a "did you
+  mean" suggestion and a warning at most every 10 s; a failed UDP send is counted and never blocks the engine; startup validation names the file, key or
+  tag (model YAML, expressions, `publish_order`, per-RTU publish slices, pull-bridge tags).

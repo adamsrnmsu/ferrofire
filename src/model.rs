@@ -6,6 +6,7 @@
 //! Outputs with an `expr` own a slot; an output without one republishes the input/state/body field of that name.
 
 use crate::expr::{compile, Node};
+use crate::hint::did_you_mean;
 use crate::power::{case, Islands, Power};
 use serde::de::{MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
@@ -307,7 +308,10 @@ impl Syms {
 }
 
 fn parse_doc(yaml: &str) -> Result<Doc, String> {
-    let doc: Doc = serde_saphyr::from_str(yaml).map_err(|e| format!("model: {e}"))?;
+    let doc: Doc = serde_saphyr::from_str(yaml).map_err(|e| {
+        let e = e.to_string();
+        format!("model: {e}{}", unknown_field_hint(&e))
+    })?;
     if doc.version != 1 {
         return Err(format!("model: unsupported version {}", doc.version));
     }
@@ -315,6 +319,20 @@ fn parse_doc(yaml: &str) -> Result<Doc, String> {
         return Err("model: dt must be > 0 and substeps >= 1".into());
     }
     Ok(doc)
+}
+
+/// serde's `unknown field `x`, expected one of a, b, c` -> the "did you mean" for `x`.
+fn unknown_field_hint(e: &str) -> String {
+    let Some((name, rest)) = e
+        .split_once("unknown field `")
+        .and_then(|(_, r)| r.split_once('`'))
+    else {
+        return String::new();
+    };
+    let list = rest
+        .split_once("expected one of ")
+        .map_or("", |(_, l)| l.lines().next().unwrap_or(""));
+    did_you_mean(name, list.split(", "))
 }
 
 /// Compile `src` against the symbol table; `ctx` says where the expression came from.
@@ -625,8 +643,10 @@ fn reorder(
     order
         .iter()
         .map(|t| {
-            (published.iter().find(|p| &p.0 == t).cloned())
-                .ok_or(format!("publish_order: unknown output `{t}`"))
+            (published.iter().find(|p| &p.0 == t).cloned()).ok_or_else(|| {
+                let hint = did_you_mean(t, published.iter().map(|p| p.0.as_str()));
+                format!("publish_order: unknown output `{t}`{hint}")
+            })
         })
         .collect()
 }

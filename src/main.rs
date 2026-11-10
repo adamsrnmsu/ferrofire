@@ -81,8 +81,8 @@ fn apply_due(m: &mut Model, writes: &mut Vec<Write>) {
 fn check(args: &[String]) {
     let (path, steps, mut writes) = parse_check(args);
     let yaml = std::fs::read_to_string(path).unwrap_or_else(|e| fail(format!("{path}: {e}")));
-    let mut m =
-        Model::load_in(&yaml, std::path::Path::new(path).parent()).unwrap_or_else(|e| fail(e));
+    let mut m = Model::load_in(&yaml, std::path::Path::new(path).parent())
+        .unwrap_or_else(|e| fail(format!("{path}: {e}")));
     for _ in 0..steps {
         apply_due(&mut m, &mut writes);
         m.step(m.dt);

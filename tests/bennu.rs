@@ -397,3 +397,33 @@ fn slice_specs_parse_from_the_command_line_and_resolve_against_the_model_dir() {
     let m = Model::load("version: 1\ndt: 0.1\npublish_slices:\n  - endpoint: udp://h:1\n    tags: [a]\n    tags_from: x.xml\n").unwrap();
     assert_eq!(m.publish_slices[0].tags, vec!["a"]);
 }
+
+/// The test vector in docs/datagram-v1.md is what the code produces, and the reference receiver reads it.
+#[test]
+fn the_spec_test_vector_matches_the_code() {
+    let doc = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/datagram-v1.md"))
+        .unwrap();
+    let ep = "udp://239.0.0.1:40000";
+    let g = group_for(ep);
+    let d = datagrams_msg(
+        &g,
+        "sim.t:0.1,lock.height:5,lowervalve.open:0,",
+        7,
+        3,
+        1234567890,
+    );
+    assert_eq!(d.len(), 1);
+    let hex: String = d[0].iter().map(|b| format!("{b:02x}")).collect();
+    for want in [
+        format!("{:#x}", libstdcxx_hash(ep.as_bytes())),
+        g.clone(),
+        hex,
+    ] {
+        assert!(doc.contains(&want), "docs/datagram-v1.md lacks {want}");
+    }
+    let mut r = ferrofire::datagram::Receiver::new(&g, ["lock.height"]);
+    assert_eq!(
+        r.accept(&d[0]).unwrap(),
+        vec![("lock.height".to_string(), 5.0)]
+    );
+}

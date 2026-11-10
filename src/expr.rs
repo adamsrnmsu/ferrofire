@@ -5,6 +5,7 @@
 //! unary `- !`, `< <= > >= == !=` (1/0), `&& ||`, `c ? a : b`, `if(c,a,b)`,
 //! functions `min max abs sqrt exp ln pow clamp sign step floor`.
 
+use crate::hint::did_you_mean;
 use std::collections::HashMap;
 
 /// A binary operator, looked up once at parse time.
@@ -301,7 +302,10 @@ impl P<'_> {
         }
         match self.syms.get(name) {
             Some(&slot) => Ok(Node::Var(slot)),
-            None => Err(err_at(pos, format!("unknown identifier `{name}`"))),
+            None => {
+                let hint = did_you_mean(name, self.syms.keys().map(String::as_str));
+                Err(err_at(pos, format!("unknown identifier `{name}`{hint}")))
+            }
         }
     }
 

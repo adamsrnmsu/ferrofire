@@ -38,7 +38,7 @@ fn load_model(args: &[String]) -> Model {
     let (src, from) = model_source(args);
     println!("Info: model: {from}");
     Model::load_in(&src, std::path::Path::new(&from).parent())
-        .unwrap_or_else(|e| die("load model", e))
+        .unwrap_or_else(|e| die("load model", format!("{from}: {e}")))
 }
 
 /// publishPoints.txt, else the model's own publish order.
