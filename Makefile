@@ -10,7 +10,7 @@ DRY_MIN := 0.8
 # ponytail: pid lock; a kill -9 of make leaves a stale file that src-free ignores because the pid is gone.
 MUTATE_LOCK := .mutate.lock
 
-.PHONY: src-free help wireshark bench bench-report bench-dg bench-dg-report image fmt fmt-check lint test golden linux crap dry mutate check clean
+.PHONY: testpeers conformance conformance-selftest src-free help wireshark bench bench-report bench-dg bench-dg-report image fmt fmt-check lint test golden linux crap dry mutate check clean
 help:    # list targets
 	@grep -E '^[a-z-]+:.*#' $(MAKEFILE_LIST) | sed -E 's/^([a-z-]+):[^#]*#/\1\t/'
 src-free:   # fail fast while make mutate is rewriting src/
@@ -47,5 +47,19 @@ bench-dg: image   # datagram v1 matrix (age, netem loss, per-RTU fan-out, restar
 bench-dg-report:   # docs/bench/datagram-v1-bench.md from the datagram v1 raw results
 	python3 bench/dg_report.py
 check: fmt-check lint test crap dry   # every gate except mutate
+# The stock oracle image bennu:arm64 lives in the Lima VM's docker (not Docker Desktop's), so the conformance targets use that daemon.
+# Override with TP_DOCKER_HOST=unix:///var/run/docker.sock (any daemon that has the DUT image).
+TP_DOCKER_HOST ?= unix://$(HOME)/.lima/phenix/sock/docker.sock
+testpeers: export DOCKER_HOST := $(TP_DOCKER_HOST)
+testpeers:   # build the ferrofire-testpeers image (opendnp3, libiec61850, tshark, Zeek+ICSNPP, nmap); PLATFORM=linux/amd64 also works
+	docker build --platform $(PLATFORM) -t ferrofire-testpeers docker/testpeers
+conformance: export DOCKER_HOST := $(TP_DOCKER_HOST)
+conformance:   # acceptance harness for one protocol vs the stock oracle: make conformance PROTO=dnp3 (see conformance/README.md)
+	@test -n "$(PROTO)" || { echo "usage: make conformance PROTO=dnp3"; exit 2; }
+	conformance/run.sh $(PROTO)
+conformance-selftest: export DOCKER_HOST := $(TP_DOCKER_HOST)
+conformance-selftest:   # prove the harness fails on a damaged and on an empty capture (negative control)
+	SELFTEST=1 conformance/run.sh dnp3
+
 clean:   # remove build output and metrics
 	rm -rf target target-linux dist .metrics
