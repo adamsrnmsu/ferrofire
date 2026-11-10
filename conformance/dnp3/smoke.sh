@@ -15,7 +15,6 @@ docker cp "$BENNU_DATA" ff-smoke:/data/configs/ep
 case $who in
   rust)  docker cp "${FF_BIN:-$root/target-linux/debug/ferrofire}" ff-smoke:/usr/local/bin/ferrofire
          docker cp "$here/smoke-rust.sh" ff-smoke:/tmp/smoke.sh ;;
-  stock) sed -n '1,/^sleep 3; grep "load-power/p' "$HOME/git/phenix-waterway-range/images/bennu-smoke.sh" >/tmp/ff-smoke-stock.sh
-         docker cp /tmp/ff-smoke-stock.sh ff-smoke:/tmp/smoke.sh ;;
+  stock) docker cp "$HOME/git/phenix-waterway-range/images/bennu-smoke.sh" ff-smoke:/tmp/smoke.sh ;;
 esac
 docker exec ff-smoke sh /tmp/smoke.sh

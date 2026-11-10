@@ -383,4 +383,101 @@ mod tests {
             assert_eq!(fmt_g(x), want, "{x}");
         }
     }
+
+    fn tags() -> Tags {
+        let mut t = Tags::default();
+        t.add_internal("bi", Kind::Binary).unwrap();
+        t.add_internal("an", Kind::Analog).unwrap();
+        t
+    }
+
+    fn parse(inner: &str, opts: &Opts) -> Result<Outstation, ConfigError> {
+        let xml =
+            format!("<dnp3-server><event-logging>/dev/null</event-logging>{inner}</dnp3-server>");
+        let doc = roxmltree::Document::parse(&xml).unwrap();
+        Outstation::parse(doc.root_element(), &mut tags(), opts)
+    }
+
+    const HEAD: &str = "<endpoint>tcp://127.0.0.1:1</endpoint><address>10</address>";
+
+    fn err(inner: &str) -> String {
+        parse(inner, &Opts::default()).err().expect("an error").0
+    }
+
+    #[test]
+    fn a_server_element_becomes_two_point_maps() {
+        let o = parse(
+            &format!("{HEAD}<binary-input><address>2</address><tag>bi</tag></binary-input><analog-output><address>1</address><tag>an</tag><sbo>true</sbo></analog-output>"),
+            &Opts::default(),
+        )
+        .unwrap();
+        let d = o.device();
+        assert_eq!((d.local, d.master, d.bin.len(), d.ana.len()), (10, 1, 1, 1));
+        assert!(d.bin[&2].input && !d.bin[&2].sbo && !d.ana[&1].input && d.ana[&1].sbo);
+    }
+
+    #[test]
+    fn missing_keys_are_named() {
+        assert!(err("<address>10</address>").contains("<dnp3-server> has no <endpoint>"));
+        assert!(err("<endpoint>tcp://127.0.0.1:1</endpoint>")
+            .contains("<dnp3-server> has no <address>"));
+        let pt = |inner: &str| err(&format!("{HEAD}<binary-input>{inner}</binary-input>"));
+        assert!(pt("<tag>bi</tag>").contains("<binary-input> has no <address>"));
+        assert!(pt("<address>2</address>").contains("has no <tag>"));
+        assert!(pt("<address>70000</address><tag>bi</tag>").contains("not a valid number"));
+        assert!(err("<endpoint>x</endpoint><address>-1</address>").contains("not a valid number"));
+    }
+
+    #[test]
+    fn variations_classes_and_deadbands_are_refused_by_name() {
+        for key in ["sgvar", "egvar", "class", "deadband"] {
+            let e = err(&format!("{HEAD}<analog-input><address>0</address><tag>an</tag><{key}>x</{key}></analog-input>"));
+            assert!(
+                e.contains(&format!("<{key}> is not supported")) && e.contains("<analog-input>"),
+                "{e}"
+            );
+        }
+    }
+
+    #[test]
+    fn sbo_is_a_boolean_and_only_outputs_have_one() {
+        let sbo = |v: &str| {
+            let inner = format!("{HEAD}<binary-output><address>5</address><tag>bi</tag><sbo>{v}</sbo></binary-output>");
+            parse(&inner, &Opts::default()).map(|o| o.device().bin[&5].sbo)
+        };
+        assert_eq!(sbo("1"), Ok(true));
+        assert_eq!(sbo("true"), Ok(true));
+        assert_eq!(sbo("0"), Ok(false));
+        assert_eq!(sbo("false"), Ok(false));
+        assert!(sbo("2").unwrap_err().0.contains("`2` is not a boolean"));
+        let input = format!(
+            "{HEAD}<binary-input><address>5</address><tag>bi</tag><sbo>1</sbo></binary-input>"
+        );
+        assert!(
+            !parse(&input, &Opts::default()).unwrap().device().bin[&5].sbo,
+            "an input ignores <sbo>"
+        );
+    }
+
+    #[test]
+    fn unknown_tags_are_skipped_wrong_kinds_refused_and_a_later_element_replaces_an_earlier() {
+        let skip =
+            format!("{HEAD}<binary-input><address>2</address><tag>nope</tag></binary-input>");
+        assert_eq!(
+            parse(&skip, &Opts::default()).unwrap().device().bin.len(),
+            0
+        );
+        assert!(parse(&skip, &Opts { strict: true }).is_err());
+        let kind = format!("{HEAD}<binary-input><address>2</address><tag>an</tag></binary-input>");
+        assert!(err(&kind).contains("is Analog but its mapping needs Binary"));
+        let both = format!(
+            "{HEAD}<binary-output><address>2</address><tag>bi</tag></binary-output><binary-input><address>2</address><tag>bi</tag></binary-input>"
+        );
+        let d = parse(&both, &Opts::default()).unwrap().device();
+        assert_eq!(d.bin.len(), 1);
+        assert!(
+            !d.bin[&2].input,
+            "outputs are read after inputs, so the output replaced the input at that address"
+        );
+    }
 }
