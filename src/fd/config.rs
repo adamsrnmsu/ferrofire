@@ -126,6 +126,15 @@ pub struct InputSpec {
     pub points: Vec<String>,
 }
 
+impl From<Section> for InputSpec {
+    fn from((endpoint, points): Section) -> InputSpec {
+        InputSpec {
+            endpoint,
+            points: points.into_iter().map(|(_, name, _)| name).collect(),
+        }
+    }
+}
+
 /// One `<output>` element: a REQ client to the provider. Its position in `Config::outputs` is its owner index.
 pub struct OutputSpec {
     pub endpoint: String,
@@ -206,6 +215,56 @@ fn internal_tag(n: Node) -> Option<(String, Value)> {
     Some((name, Value::Analog(x.parse().unwrap_or(0.0))))
 }
 
+/// The `<field-device>` element: the root itself, or its child.
+fn device_of<'a, 'i>(root: Node<'a, 'i>) -> Result<Node<'a, 'i>, ConfigError> {
+    let fd = match root.has_tag_name("field-device") {
+        true => Some(root),
+        false => child(root, "field-device"),
+    };
+    fd.ok_or_else(|| ConfigError("no <field-device> in the config".into()))
+}
+
+type Section = (String, Vec<PointDef>);
+
+/// Points of every section (outputs first, so an output's kind and owner win for a name both list) and the `id -> (name, kind)` map.
+fn point_layout(
+    inputs: &[Section],
+    outputs: &[Section],
+) -> (Layout, HashMap<String, (String, Kind)>) {
+    let owned = outputs.iter().enumerate().map(|(i, o)| (Some(i), o));
+    let all = owned.chain(inputs.iter().map(|i| (None, i)));
+    let (mut layout, mut ids) = (Layout::default(), HashMap::new());
+    for (owner, (_, pts)) in all {
+        for (id, name, kind) in pts {
+            layout.points.push((name.clone(), *kind, owner));
+            if let Some(id) = id {
+                ids.entry(id.clone()).or_insert((name.clone(), *kind));
+            }
+        }
+    }
+    (layout, ids)
+}
+
+/// Start every `<comms>` child that has a module.
+fn start_comms(
+    fd: Node,
+    tags: &mut Tags,
+    opts: &Opts,
+    registry: &[(&str, Start)],
+) -> Result<Vec<(String, Runner)>, ConfigError> {
+    let mut modules = vec![];
+    for node in child(fd, "comms")
+        .into_iter()
+        .flat_map(|c| c.children().filter(Node::is_element))
+    {
+        let tag = node.tag_name().name();
+        if let Some(run) = proto::start_module(tag, node, tags, opts, registry)? {
+            modules.push((tag.to_string(), run));
+        }
+    }
+    Ok(modules)
+}
+
 impl Config {
     pub fn parse(
         xml: &str,
@@ -215,42 +274,19 @@ impl Config {
         let xml = normalise(xml);
         let doc = roxmltree::Document::parse(&xml)
             .map_err(|e| ConfigError(format!("config is not valid XML: {e}")))?;
-        let root = doc.root_element();
-        let fd = if root.has_tag_name("field-device") {
-            Some(root)
-        } else {
-            child(root, "field-device")
-        };
-        let fd = fd.ok_or_else(|| ConfigError("no <field-device> in the config".into()))?;
-        let inputs = sections(fd, "input")?;
-        let outputs = sections(fd, "output")?;
-        let mut layout = Layout::default();
-        let mut ids = HashMap::new();
-        for (owner, (_, pts)) in outputs
-            .iter()
-            .enumerate()
-            .map(|(i, o)| (Some(i), o))
-            .chain(inputs.iter().map(|i| (None, i)))
-        {
-            for (id, name, kind) in pts {
-                layout.points.push((name.clone(), *kind, owner));
-                if let Some(id) = id {
-                    ids.entry(id.clone()).or_insert((name.clone(), *kind));
-                }
-            }
-        }
+        Config::from_device(device_of(doc.root_element())?, registry, opts)
+    }
+
+    fn from_device(
+        fd: Node,
+        registry: &[(&str, Start)],
+        opts: &Opts,
+    ) -> Result<Config, ConfigError> {
+        let (inputs, outputs) = (sections(fd, "input")?, sections(fd, "output")?);
+        let (mut layout, ids) = point_layout(&inputs, &outputs);
         let mut tags = Tags::default();
         add_tags(fd, &ids, &mut tags, &mut layout, opts)?;
-        let mut modules = vec![];
-        for node in child(fd, "comms")
-            .into_iter()
-            .flat_map(|c| c.children().filter(Node::is_element))
-        {
-            let tag = node.tag_name().name();
-            if let Some(run) = proto::start_module(tag, node, &mut tags, opts, registry)? {
-                modules.push((tag.to_string(), run));
-            }
-        }
+        let modules = start_comms(fd, &mut tags, opts, registry)?;
         layout.internal.extend(tags.internal.iter().cloned());
         let logic = Logic::parse(&text(fd, "logic").unwrap_or_default(), &tags.kinds, opts)?;
         Ok(Config {
@@ -287,48 +323,60 @@ fn add_tags(
     };
     for n in section.children().filter(Node::is_element) {
         match n.tag_name().name() {
-            "external-tag" => {
-                let (name, io) = (require(n, "name")?, require(n, "io")?);
-                let want = kind_named(&require(n, "type")?)?;
-                let Some((point, kind)) = ids.get(&io) else {
-                    opts.warn(format!(
-                        "Cannot map an alias: tag `{}` names unknown io `{}`",
-                        show(&name),
-                        show(&io)
-                    ))?;
-                    continue;
-                };
-                if *kind != want {
-                    return Err(ConfigError(format!(
-                        "tag `{}` is {want:?} but point `{}` is {kind:?}",
-                        show(&name),
-                        show(point)
-                    )));
-                }
-                tags.insert(&name, want)?;
-                layout.external.push((name, point.clone()));
-            }
-            "internal-tag" => {
-                let Some((name, v)) = internal_tag(n) else {
-                    opts.warn("internal-tag without <name> and <status>/<value> ignored".into())?;
-                    continue;
-                };
-                tags.insert(
-                    &name,
-                    if matches!(v, Value::Binary(_)) {
-                        Kind::Binary
-                    } else {
-                        Kind::Analog
-                    },
-                )?;
-                layout.internal.push((name, v));
-            }
+            "external-tag" => external_tag(n, ids, tags, layout, opts)?,
+            "internal-tag" => local_tag(n, tags, layout, opts)?,
             other => opts.warn(format!(
                 "unknown element <{}> in <tags> ignored",
                 show(other)
             ))?,
         }
     }
+    Ok(())
+}
+
+fn external_tag(
+    n: Node,
+    ids: &HashMap<String, (String, Kind)>,
+    tags: &mut Tags,
+    layout: &mut Layout,
+    opts: &Opts,
+) -> Result<(), ConfigError> {
+    let (name, io) = (require(n, "name")?, require(n, "io")?);
+    let want = kind_named(&require(n, "type")?)?;
+    let Some((point, kind)) = ids.get(&io) else {
+        return opts.warn(format!(
+            "Cannot map an alias: tag `{}` names unknown io `{}`",
+            show(&name),
+            show(&io)
+        ));
+    };
+    if *kind != want {
+        return Err(ConfigError(format!(
+            "tag `{}` is {want:?} but point `{}` is {kind:?}",
+            show(&name),
+            show(point)
+        )));
+    }
+    tags.insert(&name, want)?;
+    layout.external.push((name, point.clone()));
+    Ok(())
+}
+
+fn local_tag(
+    n: Node,
+    tags: &mut Tags,
+    layout: &mut Layout,
+    opts: &Opts,
+) -> Result<(), ConfigError> {
+    let Some((name, v)) = internal_tag(n) else {
+        return opts.warn("internal-tag without <name> and <status>/<value> ignored".into());
+    };
+    let kind = match v {
+        Value::Binary(_) => Kind::Binary,
+        Value::Analog(_) => Kind::Analog,
+    };
+    tags.insert(&name, kind)?;
+    layout.internal.push((name, v));
     Ok(())
 }
 

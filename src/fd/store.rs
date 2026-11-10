@@ -106,18 +106,18 @@ impl Store {
 
     /// The value of a binary tag; `None` for an unknown tag or an analog one.
     pub fn get_bool(&self, tag: &str) -> Option<bool> {
-        match self.get(tag)? {
-            Value::Binary(b) => Some(b),
-            Value::Analog(_) => None,
+        if let Some(Value::Binary(b)) = self.get(tag) {
+            return Some(b);
         }
+        None
     }
 
     /// The value of an analog tag; `None` for an unknown tag or a binary one.
     pub fn get_f64(&self, tag: &str) -> Option<f64> {
-        match self.get(tag)? {
+        self.get(tag).and_then(|v| match v {
             Value::Analog(x) => Some(x),
             Value::Binary(_) => None,
-        }
+        })
     }
 
     /// Unix seconds of the provider's last update of the point behind `tag`; `None` for an internal or unknown tag.

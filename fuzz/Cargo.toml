@@ -1,0 +1,27 @@
+[package]
+name = "ferrofire-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+ferrofire = { path = ".." }
+
+# detach from the root crate's workspace; run with `cargo +nightly fuzz run <target>` (needs cargo-fuzz)
+[workspace]
+
+[[bin]]
+name = "fd_datagram"
+path = "fuzz_targets/fd_datagram.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fd_config"
+path = "fuzz_targets/fd_config.rs"
+test = false
+doc = false

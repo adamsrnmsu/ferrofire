@@ -201,18 +201,23 @@ impl Expr {
     fn eval(&self, store: &Store) -> Res<f64> {
         match self {
             Expr::Num(x) => Ok(*x),
-            Expr::Tag(t) => match store.get(t) {
-                Some(Value::Analog(x)) => Ok(x),
-                Some(Value::Binary(b)) => Ok(flag(b)),
-                None => Err(format!("unknown tag `{t}`")),
-            },
-            Expr::Unary(f, e) => Ok(f(e.eval(store)?)),
+            Expr::Tag(t) => tag_value(store, t),
+            Expr::Unary(f, e) => e.eval(store).map(f),
             Expr::Bin(f, a, b) => f(a.eval(store)?, b.eval(store)?),
-            Expr::Call(f, args) => {
-                let v: Res<Vec<f64>> = args.iter().map(|a| a.eval(store)).collect();
-                Ok(f(&v?))
-            }
+            Expr::Call(f, args) => values(args, store).map(|v| f(&v)),
         }
+    }
+}
+
+fn values(args: &[Expr], store: &Store) -> Res<Vec<f64>> {
+    args.iter().map(|a| a.eval(store)).collect()
+}
+
+fn tag_value(store: &Store, tag: &str) -> Res<f64> {
+    match store.get(tag) {
+        Some(Value::Analog(x)) => Ok(x),
+        Some(Value::Binary(b)) => Ok(flag(b)),
+        None => Err(format!("unknown tag `{tag}`")),
     }
 }
 
@@ -316,22 +321,25 @@ impl Parser {
             .iter()
             .find(|f| f.0 == name)
             .ok_or_else(|| format!("unknown name `{}`", show(name)))?;
-        let mut args = vec![];
-        if !self.eat(&Tok::Open) {
-            return Err(format!("`{name}` needs `(`"));
-        }
-        loop {
-            args.push(self.level(0)?);
-            if !self.eat(&Tok::Comma) {
-                break;
-            }
-        }
-        if !self.eat(&Tok::Close) {
-            return Err("missing `)`".into());
-        }
+        let args = self.arguments(name)?;
         match args.len() == arity {
             true => Ok(Expr::Call(f, args)),
             false => Err(format!("`{name}` takes {arity} argument(s)")),
+        }
+    }
+
+    /// `( expr {, expr} )`
+    fn arguments(&mut self, name: &str) -> Res<Vec<Expr>> {
+        if !self.eat(&Tok::Open) {
+            return Err(format!("`{name}` needs `(`"));
+        }
+        let mut args = vec![self.level(0)?];
+        while self.eat(&Tok::Comma) {
+            args.push(self.level(0)?);
+        }
+        match self.eat(&Tok::Close) {
+            true => Ok(args),
+            false => Err("missing `)`".into()),
         }
     }
 }

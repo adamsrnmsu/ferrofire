@@ -6,7 +6,7 @@ use super::store::Store;
 use crate::bennu::{group_for, parse_udp};
 use crate::datagram::Receiver;
 use socket2::{Domain, Socket, Type};
-use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio_util::sync::CancellationToken;
 
@@ -16,31 +16,39 @@ const POLL: Duration = Duration::from_millis(200);
 /// A socket for `udp://[iface;]host:port`: address reuse so several devices (or inputs) share a port; a multicast group is joined.
 pub fn bind(endpoint: &str) -> Result<UdpSocket, String> {
     let (iface, addr) = parse_udp(endpoint)?;
-    let err = |e: std::io::Error| format!("{endpoint}: {e}");
-    let s = Socket::new(Domain::IPV4, Type::DGRAM, None).map_err(err)?;
-    s.set_reuse_address(true).map_err(err)?;
-    s.set_reuse_port(true).map_err(err)?;
-    let SocketAddr::V4(v4) = addr else {
-        return Err(format!("{endpoint}: only IPv4 is supported"));
-    };
-    let to_bind = if v4.ip().is_multicast() {
-        SocketAddr::from((Ipv4Addr::UNSPECIFIED, v4.port()))
-    } else {
-        addr
-    };
-    s.bind(&to_bind.into()).map_err(err)?;
-    if v4.ip().is_multicast() {
-        let nic = match iface {
-            Some(i) => i
-                .parse()
-                .map_err(|_| format!("interface `{i}`: only IPv4 addresses are supported"))?,
-            None => Ipv4Addr::UNSPECIFIED,
-        };
-        s.join_multicast_v4(v4.ip(), &nic).map_err(err)?;
+    open(iface, addr).map_err(|e| format!("{endpoint}: {e}"))
+}
+
+fn open(iface: Option<String>, addr: SocketAddr) -> std::io::Result<UdpSocket> {
+    let s = shared_socket()?;
+    match addr.ip() {
+        IpAddr::V4(group) if group.is_multicast() => {
+            s.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, addr.port())).into())?;
+            s.join_multicast_v4(&group, &interface(iface)?)?;
+        }
+        _ => s.bind(&addr.into())?,
     }
     let sock: UdpSocket = s.into();
-    sock.set_read_timeout(Some(POLL)).map_err(err)?;
+    sock.set_read_timeout(Some(POLL))?;
     Ok(sock)
+}
+
+fn shared_socket() -> std::io::Result<Socket> {
+    let s = Socket::new(Domain::IPV4, Type::DGRAM, None)?;
+    s.set_reuse_address(true)?;
+    s.set_reuse_port(true)?;
+    Ok(s)
+}
+
+/// The `iface;` part of an endpoint as the address of the interface to join on (any, when absent).
+fn interface(iface: Option<String>) -> std::io::Result<Ipv4Addr> {
+    let Some(i) = iface else {
+        return Ok(Ipv4Addr::UNSPECIFIED);
+    };
+    i.parse().map_err(|_| {
+        let msg = format!("interface `{i}`: only IPv4 addresses are supported");
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, msg)
+    })
 }
 
 fn unix_now() -> u64 {
