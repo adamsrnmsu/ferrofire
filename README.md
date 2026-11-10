@@ -273,6 +273,7 @@ outputs:
   lock.height: {type: analog}
 ```
 
+- Optional `units: m3/s` on an input, state or output is documentation only; `ferrofire explain MODEL.YAML TAG` prints it with the tag's kind (param, input, state, body, output, power tag), type, defining expression (`ode`, `toward`, `expr`, `drive`, or "AC power flow"), `default`/`init`, `min`/`max`, what it `depends on` and what it is `used by`. Offline, nothing is stepped; an unknown tag gets a "did you mean". Power tags get units from their field name (`MW`, `MVAr`, `pu`, `deg`, `kV`).
 - Full examples: `models/waterway.yaml`, `models/pump-station.yaml`.
 - Full design: `docs/provider-spec.md` in the [range repo](https://github.com/adamsrnmsu) and `docs/field-device-spec.md` here.
 

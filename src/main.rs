@@ -39,6 +39,13 @@ enum Cmd {
     },
     /// Query, read, write and watch tags on a running provider (bennu-probe equivalent)
     Probe(ferrofire::probe::ProbeCli),
+    /// Describe a tag from the model file: kind, expression, inputs, units, limits
+    Explain {
+        /// Model file
+        #[arg(value_name = "MODEL.YAML")]
+        path: String,
+        tag: String,
+    },
     /// Print a shell completion script
     Completions { shell: clap_complete::Shell },
 }
@@ -62,7 +69,21 @@ fn main() {
     dispatch(Cli::parse().cmd);
 }
 
+/// The subcommands that only read files or print; any other command is handed back.
+fn offline(cmd: Cmd) -> Option<Cmd> {
+    match cmd {
+        Cmd::Check(a) => check(a),
+        Cmd::Explain { path, tag } => explain(&path, &tag),
+        Cmd::Completions { shell } => completions(shell),
+        other => return Some(other),
+    }
+    None
+}
+
 fn dispatch(cmd: Cmd) {
+    let Some(cmd) = offline(cmd) else {
+        return;
+    };
     match cmd {
         Cmd::Run(a) => ferrofire::bennu::main(a),
         Cmd::PullBridge(a) => ferrofire::pull::main(a),
@@ -70,8 +91,7 @@ fn dispatch(cmd: Cmd) {
         Cmd::Simulink { args } => ferrofire::simulink::main(&args),
         Cmd::Log { args } => ferrofire::log::main(&args),
         Cmd::Probe(a) => ferrofire::probe::main(a),
-        Cmd::Check(a) => check(a),
-        Cmd::Completions { shell } => completions(shell),
+        _ => {}
     }
 }
 
@@ -123,6 +143,16 @@ struct CheckArgs {
     /// Set a tag at model time t, repeatable
     #[arg(long = "write", value_name = "TAG=VALUE[@T]", value_parser = parse_write)]
     writes: Vec<Write>,
+}
+
+/// Print what defines `tag` in the model file.
+fn explain(path: &str, tag: &str) {
+    let yaml = std::fs::read_to_string(path).unwrap_or_else(|e| fail(format!("{path}: {e}")));
+    let dir = std::path::Path::new(path).parent();
+    match ferrofire::model::explain(&yaml, dir, tag) {
+        Ok(s) => print!("{s}"),
+        Err(e) => fail(e),
+    }
 }
 
 fn fail(msg: impl std::fmt::Display) -> ! {

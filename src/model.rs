@@ -14,6 +14,9 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 
+mod explain;
+pub use explain::explain;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Value {
     Analog(f64),
@@ -124,6 +127,7 @@ struct InputDef {
     default: Option<Default_>,
     min: Option<f64>,
     max: Option<f64>,
+    units: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -141,6 +145,7 @@ struct StateDef {
     init: Src,
     min: Option<f64>,
     max: Option<f64>,
+    units: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -173,6 +178,7 @@ struct OutDef {
     #[serde(rename = "type")]
     ty: Kind,
     expr: Option<Src>,
+    units: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
