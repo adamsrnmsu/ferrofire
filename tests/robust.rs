@@ -255,8 +255,8 @@ fn the_receiver_ignores_garbage_truncated_unknown_duplicate_and_old_datagrams() 
         vec![("a".to_string(), 1.5), ("b".to_string(), 1.0)]
     );
     assert_eq!(r.accept(&ok), Err(Reject::Stale), "duplicate");
-    let old = dgram(&g, "a:2,_ff.seq:4,_ff.cyc:2,_ff.t:90,");
-    assert_eq!(r.accept(&old), Err(Reject::Stale), "out of order");
+    let old = dgram(&g, "a:2,_ff.seq:4,_ff.cyc:1,_ff.t:90,");
+    assert_eq!(r.accept(&old), Err(Reject::Stale), "older cycle");
     let next = dgram(&g, "a:3,_ff.seq:6,_ff.cyc:3,_ff.t:110,");
     assert_eq!(r.accept(&next).unwrap(), vec![("a".to_string(), 3.0)]);
     // a provider restart: the counter starts over but the clock moved on
@@ -279,6 +279,109 @@ fn the_receiver_ignores_garbage_truncated_unknown_duplicate_and_old_datagrams() 
     let stock = dgram(&g, "a:7,");
     assert_eq!(r.accept(&stock).unwrap().len(), 1);
     assert_eq!(r.accept(&stock).unwrap().len(), 1);
+}
+
+fn chunk(g: &str, seq: u64, cyc: u64, body: &str) -> Vec<u8> {
+    dgram(
+        g,
+        &format!("{body}_ff.seq:{seq},_ff.cyc:{cyc},_ff.t:{},", 1000 + seq),
+    )
+}
+
+fn names(r: Result<Vec<(String, f64)>, Reject>) -> Vec<String> {
+    r.unwrap().into_iter().map(|p| p.0).collect()
+}
+
+#[test]
+fn reordered_chunks_of_one_cycle_all_apply_and_duplicates_do_not() {
+    let g = group_for("udp://239.0.0.1:40000");
+    let mut r = Receiver::new(&g, ["a", "b", "c"]);
+    assert_eq!(names(r.accept(&chunk(&g, 2, 1, "c:3,"))), ["c"]);
+    assert_eq!(
+        names(r.accept(&chunk(&g, 0, 1, "a:1,"))),
+        ["a"],
+        "late, lower seq"
+    );
+    assert_eq!(names(r.accept(&chunk(&g, 1, 1, "b:2,"))), ["b"]);
+    assert_eq!(
+        r.accept(&chunk(&g, 1, 1, "b:2,")),
+        Err(Reject::Stale),
+        "repeat of a late seq"
+    );
+    assert_eq!(
+        r.accept(&chunk(&g, 2, 1, "c:3,")),
+        Err(Reject::Stale),
+        "repeat of the newest seq"
+    );
+}
+
+#[test]
+fn a_late_old_cycle_does_not_overwrite_newer_values() {
+    let g = group_for("udp://239.0.0.1:40000");
+    let mut r = Receiver::new(&g, ["a", "b"]);
+    r.accept(&chunk(&g, 2, 2, "a:20,")).unwrap();
+    assert_eq!(r.accept(&chunk(&g, 0, 1, "a:10,")), Err(Reject::Stale));
+    // per tag: b was never seen in cycle 2, so its cycle 1 value still counts
+    assert_eq!(names(r.accept(&chunk(&g, 1, 1, "a:10,b:11,"))), ["b"]);
+    // a seq far behind the newest is out of the window even if never seen
+    r.accept(&chunk(&g, 10_000, 9, "a:90,")).unwrap();
+    assert_eq!(r.accept(&chunk(&g, 5, 9, "b:1,")), Err(Reject::Stale));
+}
+
+#[test]
+fn a_restarted_provider_is_still_detected_after_reordering() {
+    let g = group_for("udp://239.0.0.1:40000");
+    let mut r = Receiver::new(&g, ["a"]);
+    r.accept(&chunk(&g, 7, 3, "a:1,")).unwrap();
+    r.accept(&chunk(&g, 6, 3, "a:2,")).unwrap();
+    // counters back at 0, clock moved on; seq 6 and cycle 3 are now new again
+    let restart = dgram(&g, "a:9,_ff.seq:6,_ff.cyc:0,_ff.t:5000,");
+    assert_eq!(names(r.accept(&restart)), ["a"]);
+    assert_eq!(
+        names(r.accept(&dgram(&g, "a:8,_ff.seq:7,_ff.cyc:1,_ff.t:5001,"))),
+        ["a"]
+    );
+}
+
+#[test]
+fn shuffled_chunks_give_the_state_of_in_order_delivery() {
+    let g = group_for("udp://239.0.0.1:40000");
+    let tags = ["a", "b", "c", "d", "e", "f"];
+    let all: Vec<Vec<u8>> = (0..12u64)
+        .map(|seq| {
+            let (cyc, i) = (seq / 3, (seq % 3) as usize * 2);
+            let body = format!(
+                "{}:{},{}:{},",
+                tags[i],
+                cyc * 10 + 1,
+                tags[i + 1],
+                cyc * 10 + 2
+            );
+            chunk(&g, seq, cyc, &body)
+        })
+        .collect();
+    let state = |order: &[usize]| {
+        let mut r = Receiver::new(&g, tags);
+        let mut m = std::collections::BTreeMap::new();
+        for &i in order {
+            for (k, v) in r.accept(&all[i]).unwrap_or_default() {
+                m.insert(k, v as i64);
+            }
+        }
+        m
+    };
+    let in_order = state(&(0..12).collect::<Vec<_>>());
+    let mut rng = Rng(7);
+    for _ in 0..200 {
+        // shuffle within a window of 4, as jitter does: never further than a cycle or two
+        let mut order: Vec<usize> = (0..12).collect();
+        for w in order.chunks_mut(4) {
+            for i in (1..w.len()).rev() {
+                w.swap(i, rng.below(i + 1));
+            }
+        }
+        assert_eq!(state(&order), in_order, "{order:?}");
+    }
 }
 
 #[test]

@@ -3,7 +3,10 @@
 //! network can do makes it panic; a datagram it cannot use is a `Reject`, never a crash.
 
 use crate::bennu::unframe;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
+
+/// How many recent `_ff.seq` values are remembered for duplicate detection; a seq this far behind the newest is dropped unseen.
+const WINDOW: u64 = 256;
 
 /// Why a datagram was ignored.
 #[derive(Debug, PartialEq, Eq)]
@@ -21,8 +24,12 @@ pub enum Reject {
 pub struct Receiver {
     group: String,
     known: HashSet<String>,
-    /// (`_ff.seq`, `_ff.t`) of the newest datagram accepted.
-    last: Option<(u64, u64)>,
+    /// Newest `_ff.seq` and `_ff.t` seen.
+    newest: Option<(u64, u64)>,
+    /// The last `WINDOW` seqs accepted: a repeat of one is a duplicate.
+    seen: VecDeque<u64>,
+    /// Newest `_ff.cyc` applied per tag: an older cycle's value never overwrites it.
+    cyc: HashMap<String, u64>,
 }
 
 impl Receiver {
@@ -30,19 +37,33 @@ impl Receiver {
         Receiver {
             group: group.into(),
             known: known.into_iter().map(String::from).collect(),
-            last: None,
+            newest: None,
+            seen: VecDeque::new(),
+            cyc: HashMap::new(),
         }
     }
 
     /// The `(tag, value)` pairs this datagram contributes: only subscribed tags, `true`/`false` as 1/0, bad pairs skipped.
-    /// A datagram is stale when its `_ff.seq` is not above the newest seen and its `_ff.t` is not newer either (a restarted
-    /// provider counts from 0 again but its clock has moved on). Datagrams without the trailer (a stock provider) are never stale.
+    /// Chunks of one cycle may arrive in any order. A datagram is stale when its `_ff.seq` was already seen (or is `WINDOW` behind
+    /// the newest); a tag whose value is from an older `_ff.cyc` than the one applied is dropped. A lower seq with a newer `_ff.t`
+    /// is a restarted provider: everything remembered is forgotten. Datagrams without the trailer (a stock provider) are never stale.
     pub fn accept(&mut self, d: &[u8]) -> Result<Vec<(String, f64)>, Reject> {
-        let body = self.body_of(d)?;
-        let (mut seq, mut t, mut out) = (None, 0, vec![]);
+        let (seq, cyc, t, out) = self.points(self.body_of(d)?);
+        match seq {
+            Some(seq) if self.duplicate(seq, t) => Err(Reject::Stale),
+            Some(_) => self.newest_cycle(cyc, out),
+            None => Ok(out),
+        }
+    }
+
+    /// The trailer (`_ff.seq`, `_ff.cyc`, `_ff.t`) and the subscribed `(tag, value)` pairs of a body.
+    #[allow(clippy::type_complexity)]
+    fn points(&self, body: &str) -> (Option<u64>, Option<u64>, u64, Vec<(String, f64)>) {
+        let (mut seq, mut cyc, mut t, mut out) = (None, None, 0, vec![]);
         for (name, val) in body.split(',').filter_map(|p| p.split_once(':')) {
             match name {
                 "_ff.seq" => seq = val.parse().ok(),
+                "_ff.cyc" => cyc = val.parse().ok(),
                 "_ff.t" => t = val.parse().unwrap_or(0),
                 _ if self.known.contains(name) => {
                     out.extend(value(val).map(|v| (name.to_string(), v)))
@@ -50,9 +71,23 @@ impl Receiver {
                 _ => {}
             }
         }
-        match seq {
-            Some(seq) if !self.newer(seq, t) => Err(Reject::Stale),
-            _ => Ok(out),
+        (seq, cyc, t, out)
+    }
+
+    /// Keep the values not older than the cycle already applied for their tag; some offered and none kept = stale.
+    fn newest_cycle(
+        &mut self,
+        cyc: Option<u64>,
+        mut out: Vec<(String, f64)>,
+    ) -> Result<Vec<(String, f64)>, Reject> {
+        let Some(cyc) = cyc else { return Ok(out) };
+        let before = out.len();
+        out.retain(|(tag, _)| self.cyc.get(tag).is_none_or(|&c| cyc >= c));
+        self.cyc
+            .extend(out.iter().map(|(tag, _)| (tag.clone(), cyc)));
+        match out.is_empty() && before > 0 {
+            true => Err(Reject::Stale),
+            false => Ok(out),
         }
     }
 
@@ -70,13 +105,23 @@ impl Receiver {
         }
     }
 
-    /// Is `(seq, t)` newer than anything seen? If so it becomes the newest.
-    fn newer(&mut self, seq: u64, t: u64) -> bool {
-        let stale = self.last.is_some_and(|(s, lt)| seq <= s && t <= lt);
-        if !stale {
-            self.last = Some((seq, t));
+    /// Has this seq been seen (or is it too far behind)? If not, remember it.
+    fn duplicate(&mut self, seq: u64, t: u64) -> bool {
+        if let Some((s, lt)) = self.newest {
+            if seq <= s && t > lt {
+                self.seen.clear();
+                self.cyc.clear();
+                self.newest = None;
+            }
         }
-        !stale
+        let (s, lt) = self.newest.unwrap_or((seq, t));
+        if seq + WINDOW <= s || self.seen.contains(&seq) {
+            return true;
+        }
+        self.newest = Some((s.max(seq), lt.max(t)));
+        self.seen.truncate(WINDOW as usize - 1);
+        self.seen.push_front(seq);
+        false
     }
 }
 

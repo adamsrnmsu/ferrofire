@@ -483,15 +483,15 @@ mod tests {
     }
 
     #[test]
-    fn a_chunk_that_overtakes_its_neighbour_completes_only_the_tolerant_view() {
+    fn a_chunk_that_overtakes_its_neighbour_still_completes_the_cycle() {
         let group = group_for("udp://239.0.0.1:40000");
         let mut rx = Receiver::new(&group, ["sim.t", "a"]);
         let mut log = Log::new(&["sim.t".to_string(), "a".to_string()]);
         let d = |seq, body: &str| frame(&group, format!("{body}_ff.seq:{seq},_ff.cyc:0,_ff.t:{},\0", 5 + seq).as_bytes());
         log.on_datagram(&mut rx, &group, 2, &d(1, "a:2,"), 100); // seq 1 first ...
-        log.on_datagram(&mut rx, &group, 2, &d(0, "sim.t:1,"), 101); // ... then seq 0: the shipped receiver calls it stale
-        assert_eq!((log.complete.len(), log.rejects[3]), (0, 1));
-        assert_eq!(log.complete_tol, [101]);
+        log.on_datagram(&mut rx, &group, 2, &d(0, "sim.t:1,"), 101); // ... then seq 0: reordered, not stale (ww-d4a)
+        assert_eq!((log.complete.len(), log.rejects[3]), (1, 0));
+        assert_eq!((log.complete.clone(), log.complete_tol.clone()), (vec![101], vec![101]));
         assert_eq!(log.seq.totals(), (2, 0));
     }
 
