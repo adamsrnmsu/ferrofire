@@ -107,6 +107,7 @@ impl Req {
     ) -> Result<::zmq::Socket, String> {
         let s = ctx.socket(::zmq::REQ).map_err(|e| e.to_string())?;
         s.set_rcvtimeo(timeout_ms).map_err(|e| e.to_string())?;
+        s.set_sndtimeo(timeout_ms).map_err(|e| e.to_string())?;
         s.set_linger(0).map_err(|e| e.to_string())?;
         s.connect(endpoint)
             .map_err(|e| format!("connect {endpoint}: {e}"))?;
