@@ -1,36 +1,49 @@
 use super::{Handler, Publisher, Requester};
 use crate::bennu::{datagrams_msg, group_for, parse_udp, udp_sender, with_nul, STOP};
 use crate::hint::{show, RateLimit};
+use ::zeromq::{Socket, SocketRecv, SocketSend};
 use std::net::{SocketAddr, UdpSocket};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tokio::time::timeout;
 
 /// Wait this long for a request or a reply send before looking at `STOP` again / giving up on a vanished peer.
-const IO_TIMEOUT_MS: i32 = 1000;
+const IO_TIMEOUT: Duration = Duration::from_millis(1000);
 /// At most one "UDP send failed" line per this long.
 const SEND_WARN_EVERY: Duration = Duration::from_secs(10);
+
+/// The pure-Rust `zeromq` crate is async; each socket owner drives it from its own single-threaded runtime.
+fn runtime() -> Result<tokio::runtime::Runtime, String> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+/// `zeromq` wants a concrete address; libzmq's `tcp://*:port` means every interface.
+fn endpoint_of(endpoint: &str) -> String {
+    endpoint.replace("tcp://*:", "tcp://0.0.0.0:")
+}
 
 /// Bind a REP socket on `endpoint` and answer each request with `handler` until `STOP` (polling, so it is noticed).
 /// A REP that skips a reply wedges its client, so every request gets exactly one: a handler that panics or a request
 /// in several frames is answered with an `ERR`, and the loop goes on.
 pub fn serve(endpoint: &str, handler: Handler) -> Result<std::thread::JoinHandle<()>, String> {
-    let rep = ::zmq::Context::new()
-        .socket(::zmq::REP)
-        .map_err(|e| e.to_string())?;
-    rep.set_rcvtimeo(IO_TIMEOUT_MS).map_err(|e| e.to_string())?;
-    rep.set_sndtimeo(IO_TIMEOUT_MS).map_err(|e| e.to_string())?;
-    rep.bind(endpoint)
+    let rt = runtime()?;
+    let mut rep = ::zeromq::RepSocket::new();
+    rt.block_on(rep.bind(&endpoint_of(endpoint)))
         .map_err(|e| format!("bind {endpoint}: {e}"))?;
     Ok(std::thread::spawn(move || {
-        while !STOP.load(Ordering::SeqCst) {
-            if !matches!(rep.poll(::zmq::POLLIN, 100), Ok(n) if n > 0) {
-                continue;
+        rt.block_on(async {
+            while !STOP.load(Ordering::SeqCst) {
+                let Ok(Ok(msg)) = timeout(Duration::from_millis(100), rep.recv()).await else {
+                    continue;
+                };
+                let parts: Vec<Vec<u8>> = msg.into_vec().iter().map(|f| f.to_vec()).collect();
+                let _ = timeout(IO_TIMEOUT, rep.send(answer(&handler, &parts).into())).await;
             }
-            if let Ok(parts) = rep.recv_multipart(0) {
-                let _ = rep.send(answer(&handler, &parts), 0);
-            }
-        }
+        });
     }))
 }
 
@@ -49,13 +62,13 @@ fn answer(handler: &Handler, parts: &[Vec<u8>]) -> Vec<u8> {
 }
 
 /// Connect a REQ client to `endpoint` (the provider's REP); calls give up after `timeout_ms`.
+/// The connection is made on the first call (and again after a failed one), so an absent provider is a timeout, not a startup error.
 pub fn requester(endpoint: &str, timeout_ms: i32) -> Result<Box<dyn Requester>, String> {
-    let ctx = ::zmq::Context::new();
     Ok(Box::new(Req {
-        sock: Req::connect(&ctx, endpoint, timeout_ms)?,
-        ctx,
-        endpoint: endpoint.into(),
-        timeout_ms,
+        rt: runtime()?,
+        endpoint: endpoint_of(endpoint),
+        timeout: Duration::from_millis(timeout_ms.max(0) as u64),
+        sock: None,
     }))
 }
 
@@ -91,41 +104,43 @@ struct Radio {
     warn: RateLimit,
 }
 
-/// A zmq REQ that timed out is wedged (it must not send twice), so a failed call drops it and connects a fresh one.
+/// A REQ that timed out is wedged (it must not send twice), so a failed call drops it and the next call connects a fresh one.
 struct Req {
-    ctx: ::zmq::Context,
+    rt: tokio::runtime::Runtime,
     endpoint: String,
-    timeout_ms: i32,
-    sock: ::zmq::Socket,
-}
-
-impl Req {
-    fn connect(
-        ctx: &::zmq::Context,
-        endpoint: &str,
-        timeout_ms: i32,
-    ) -> Result<::zmq::Socket, String> {
-        let s = ctx.socket(::zmq::REQ).map_err(|e| e.to_string())?;
-        s.set_rcvtimeo(timeout_ms).map_err(|e| e.to_string())?;
-        s.set_sndtimeo(timeout_ms).map_err(|e| e.to_string())?;
-        s.set_linger(0).map_err(|e| e.to_string())?;
-        s.connect(endpoint)
-            .map_err(|e| format!("connect {endpoint}: {e}"))?;
-        Ok(s)
-    }
+    timeout: Duration,
+    sock: Option<::zeromq::ReqSocket>,
 }
 
 impl Requester for Req {
     fn call(&mut self, req: &[u8]) -> Result<Vec<u8>, String> {
-        let r = self
-            .sock
-            .send(req, 0)
-            .and_then(|_| self.sock.recv_bytes(0))
-            .map_err(|e| e.to_string());
-        if r.is_err() {
-            self.sock = Req::connect(&self.ctx, &self.endpoint, self.timeout_ms)?;
+        let _in_rt = self.rt.enter(); // dropping a zeromq socket needs a runtime too
+        let mut sock = self.sock.take();
+        let endpoint = self.endpoint.clone();
+        let t = self.timeout;
+        let r = self.rt.block_on(async {
+            timeout(t, async {
+                let s = match &mut sock {
+                    Some(s) => s,
+                    None => {
+                        let mut s = ::zeromq::ReqSocket::new();
+                        s.connect(&endpoint).await?;
+                        sock.insert(s)
+                    }
+                };
+                s.send(req.to_vec().into()).await?;
+                s.recv().await
+            })
+            .await
+        });
+        match r {
+            Ok(Ok(m)) => {
+                self.sock = sock;
+                Ok(m.get(0).map(|f| f.to_vec()).unwrap_or_default())
+            }
+            Ok(Err(e)) => Err(format!("{}: {e}", self.endpoint)),
+            Err(_) => Err(format!("{}: timed out", self.endpoint)),
         }
-        r
     }
 }
 

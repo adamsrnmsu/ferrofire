@@ -119,7 +119,7 @@ flowchart LR
 
 ## Transports
 
-Requests (`QUERY=`, `READ=tag`, `WRITE=tag:value`, answered `ACK=...` / `ERR=...`) are libzmq REQ/REP. Updates (`tag:value,...`,
+Requests (`QUERY=`, `READ=tag`, `WRITE=tag:value`, answered `ACK=...` / `ERR=...`) are ZeroMQ REQ/REP (pure-Rust `zeromq` crate, wire-compatible with stock libzmq clients and servers; the interop tests run a libzmq peer; no libzmq in the binary). Updates (`tag:value,...`,
 NUL-terminated) are UDP datagrams in libzmq's RADIO framing, split into whole-point datagrams of at most 1400 bytes, each ending
 in `_ff.seq`, `_ff.cyc` and `_ff.t` pseudo-tags. The wire is owned by ferrofire and specified in
 [docs/datagram-v1.md](docs/datagram-v1.md) (byte layout, group hash, chunking, loss model, failure behaviour; Wireshark dissector in

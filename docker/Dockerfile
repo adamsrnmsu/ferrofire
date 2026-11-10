@@ -1,5 +1,5 @@
 FROM ubuntu:22.04
-RUN apt-get update -qq && apt-get install -y -qq curl gcc g++ pkg-config libzmq3-dev cmake file binutils ca-certificates git make >/dev/null && curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.99.1
+RUN apt-get update -qq && apt-get install -y -qq curl gcc g++ pkg-config cmake file binutils ca-certificates git make >/dev/null && curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.99.1
 ENV PATH=/root/.cargo/bin:/root/.local/bin:$PATH
 # Quality gates (ub-mode): rustfmt, clippy, coverage for crapper/mutator.
 RUN rustup component add rustfmt clippy llvm-tools-preview \

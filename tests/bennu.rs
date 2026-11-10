@@ -126,6 +126,32 @@ fn rep_round_trip() {
 }
 
 #[test]
+fn our_requester_talks_to_a_libzmq_rep_and_recovers_after_a_timeout() {
+    let rep = zmq::Context::new().socket(zmq::REP).unwrap();
+    rep.bind("tcp://127.0.0.1:*").unwrap();
+    let ep = rep.get_last_endpoint().unwrap().unwrap();
+    let t = std::thread::spawn(move || {
+        rep.send(
+            rep.recv_bytes(0)
+                .map(|r| [r, b"!".to_vec()].concat())
+                .unwrap(),
+            0,
+        )
+        .unwrap();
+        rep.recv_bytes(0).unwrap(); // the client gave up on this one (lazy pirate)
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        rep.send("late", 0).unwrap();
+        rep.send(rep.recv_bytes(0).unwrap(), 0).unwrap();
+    });
+    let mut req = ferrofire::transport::requester(&ep, 300).unwrap();
+    assert_eq!(req.call(b"READ=a\0").unwrap(), b"READ=a\0!");
+    assert!(req.call(b"slow").is_err());
+    std::thread::sleep(std::time::Duration::from_millis(800));
+    assert_eq!(req.call(b"again").unwrap(), b"again");
+    t.join().unwrap();
+}
+
+#[test]
 fn run_arguments() {
     use clap::Parser;
     let a = |s: &[&str]| RunArgs::try_parse_from(std::iter::once("run").chain(s.iter().copied()));

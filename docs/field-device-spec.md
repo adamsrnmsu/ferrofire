@@ -397,7 +397,7 @@ and a memory-unsafe dependency, which is what this migration is meant to remove.
 
 ### 5.3 ZeroMQ without libzmq
 
-The field device needs only a REQ client (and, for §4.4, a REP). `zeromq` 0.7 is MIT, pure Rust, tokio-based and states interop with libzmq; whether its REQ socket survives the "lazy pirate" cycle
+**Resolved (ww-otj.34): ferrofire uses `zeromq` 0.7; the libzmq `zmq` crate is a dev-dependency only (the interop tests use it as the stock-bennu stand-in), so the shipped binary links no libzmq.** The field device needs only a REQ client (and, for §4.4, a REP). `zeromq` 0.7 is MIT, pure Rust, tokio-based and states interop with libzmq; whether its REQ socket survives the "lazy pirate" cycle
 (timeout, drop, new socket) and talks to the **stock** `bennu-simulink-provider`'s libzmq REP is **UNVERIFIED** and is F0's first spike (≤ 0.5 day). If it fails, a hand-rolled ZMTP 3.0 NULL-mechanism REQ client
 (greeting, READY with `Socket-Type=REQ`, empty delimiter frame + body) is ~250 lines and testable against both libzmq (stock provider) and `ferrofire`'s own REP. The multicast receive path is plain UDP either way (`P:` Decision 2).
 
