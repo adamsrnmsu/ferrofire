@@ -168,6 +168,7 @@ ferrofire probe query                          # the tag list
 ferrofire probe read lock.height,lowergate.open
 ferrofire probe write lowervalve.open=1 --confirm
 ferrofire probe watch --listen 'udp://*;239.0.0.1:40000' [--tags a,b] [--stale-after 3]
+ferrofire probe record --out run.csv [--tags a,b*] [--duration 60] [--listen ...] [--stale-after 3]
 ferrofire probe play inject.yaml [--confirm] [--dry-run] [--keep-going] [--model m.yaml]
 ```
 
@@ -187,7 +188,17 @@ It asks `[y/N]` once for the whole script unless `--confirm`, and every write pr
 fails (an `ERR=` from the provider, a `wait_for` that times out) stops the run; `--keep-going` plays on and exits non-zero at the end.
 `--dry-run` prints `dry run, at <t>s [once <cond>] would send WRITE=...` per step and sends nothing; `--model` checks every step first.
 
-`read`, `write` and `watch --tags` accept globs (`*`, `?`) expanded against the provider's QUERY: `read 'bus-*.voltage'`,
+`record` listens like `watch` and writes a CSV with one row per publish cycle: `cycle,t,<tag>,<tag>_stale,..` (`t` is seconds since the
+first datagram, `_stale` is 1 once a tag missed `--stale-after` cycles, cells are empty until a tag has a value). It stops after `--duration`
+seconds or on SIGINT/SIGTERM, and a rejected datagram adds nothing. To replay a recording into an offline model, turn each change of a
+value into a `check --write tag=value@t`:
+
+```
+awk -F, 'NR==1{for(i=3;i<=NF;i++)h[i]=$i;next}{for(i=3;i<=NF;i++)if(h[i]!~/_stale$/&&$i!=""&&$i!=p[i]){print "--write";print h[i]"="$i"@"$2;p[i]=$i}}' run.csv |
+  xargs ferrofire check models/waterway.yaml --steps 400
+```
+
+`read`, `write` and `watch`/`record --tags` accept globs (`*`, `?`) expanded against the provider's QUERY: `read 'bus-*.voltage'`,
 `write --confirm 'valve-*.open=0'` (the value goes to every match). A glob that matches nothing is an error; plain names are
 left to the provider (and its `did you mean`). Every QUERY probe makes is cached in `$XDG_CACHE_HOME/ferrofire/tags` (the last
 provider queried), and `ferrofire completions bash|zsh|fish` completes tag names from it after `probe read|write|watch`.
