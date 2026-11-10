@@ -186,3 +186,28 @@ fn tail_streams_live_lines_with_no_file() {
     t.wait().unwrap();
     r.finish();
 }
+
+#[test]
+fn log_commands_snapshot() {
+    let r = spawn("snap");
+    let f = r.dir.join("x.log");
+    let (file, pid) = (f.to_str().unwrap(), r.child.id().to_string());
+    // pid and the per-run temp dir change every run; everything else is the output
+    let clean = |s: String| {
+        s.replace(&r.dir.to_str().unwrap().to_string(), "<dir>")
+            .replace(&pid, "<pid>")
+    };
+    let mut all = String::new();
+    for args in [
+        &["status"][..],
+        &["on", "--file", file],
+        &["on", "--file", file],
+        &["level", "debug"],
+        &["off"],
+        &["off"],
+    ] {
+        all += &format!("$ log {}\n{}", args[0], clean(r.out(args)));
+    }
+    insta::assert_snapshot!("log_commands", all.replace(file, "<file>"));
+    r.finish();
+}

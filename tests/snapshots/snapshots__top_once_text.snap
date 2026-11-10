@@ -1,0 +1,6 @@
+---
+source: tests/snapshots.rs
+expression: "once_text(&rows, false)"
+---
+a"b=1.5 age=4.0s STALE
+c=0 age=0.0s ok

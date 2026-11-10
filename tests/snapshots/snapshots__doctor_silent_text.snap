@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: "text.join(\"\\n\")"
+---
+FAIL  provider: timed out
+      fix: start `ferrofire run` (or the provider), check --server and that the REP port is not firewalled
+ok    group: id 54386972605942b for udp://239.0.0.1:40000
+FAIL  datagrams: none in 3s
+      fix: the provider's --publish must be the same endpoint string as --listen (the group id hashes it); check the multicast route, the host firewall for UDP, and an IGMP querier on the switch

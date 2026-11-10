@@ -1,0 +1,8 @@
+---
+source: tests/snapshots.rs
+expression: "json.join(\"\\n\")"
+---
+{"tag":"tank.level","value":2.5}
+{"tag":"pump.run","value":true,"age":0,"stale":false,"seq_gaps":0}
+{"tag":"valve.open","value":0.5,"age":4,"stale":true,"seq_gaps":2}
+{"tag":"note","value":"x\"y"}

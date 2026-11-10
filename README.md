@@ -322,6 +322,7 @@ outputs:
   - `make crap` ([crapper](https://github.com/unclebob/crapper)): every function CRAP < 10 (`--threshold 9.99`);
   - `make deny` ([cargo-deny](https://github.com/EmbarkStudios/cargo-deny), `deny.toml`): licence allowlist, RustSec advisories, yanked crates, wildcard deps, crate sources. Needs network for the advisory db.
   - `make dry` ([dryer](https://github.com/unclebob/dryer)): no duplicate candidate scoring 0.8 or more.
+- Output snapshots: [insta](https://insta.rs) files in `tests/snapshots/` pin the text and `--json` output of probe, doctor, explain, log and top `--once` (`tests/snapshots.rs`, `tests/log.rs`). A format change fails the test; review the diff and accept with `INSTA_UPDATE=always make test` (or `cargo insta review`).
 - `make mutate` ([mutator](https://github.com/unclebob/mutator)): mutation testing, slow (each mutant reruns the suite), so it is not part of `make check`. Exit 3 means a mutant survived.
 - `make fuzz-smoke` ([cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz), `fuzz/`, nightly toolchain in the container): four libFuzzer targets, `request` (the REP handler), `datagram` (`Receiver::accept`), `expr` (the expression parser) and `model` (YAML load), 10 s each (`FUZZ_SECS=60` for longer). CI runs it after `make check`. `make fuzz T=expr` runs one until stopped. A crash is written to `fuzz/artifacts/<target>/`; turn each into a regression test in `tests/robust.rs` before fixing it.
 - Numbers before and after the quality pass: [docs/quality.md](docs/quality.md). CI runs `make check` on every push.

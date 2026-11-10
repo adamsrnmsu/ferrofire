@@ -1,0 +1,8 @@
+---
+source: tests/snapshots.rs
+expression: "text.join(\"\\n\")"
+---
+ok    provider: REP answers QUERY: 2 tags
+ok    group: id 54386972605942b for udp://239.0.0.1:40000
+FAIL  multicast join: no such device
+      fix: use udp://[iface;]group:port with a multicast group (224.0.0.0/4) and an IPv4 interface address of this host

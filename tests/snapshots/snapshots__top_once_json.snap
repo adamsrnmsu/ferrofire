@@ -1,0 +1,6 @@
+---
+source: tests/snapshots.rs
+expression: "once_text(&rows, true)"
+---
+{"tag":"a\"b","value":1.5,"age":4.000,"stale":true}
+{"tag":"c","value":0,"age":0.000,"stale":false}

@@ -1,0 +1,5 @@
+---
+source: tests/snapshots.rs
+expression: "audit_line(42, \"me@pid7\", \"tcp://h:1\", &pts, \"ACK\")"
+---
+audit: write t=42 by=me@pid7 server=tcp://h:1 points=a=1,b=2 result=ACK

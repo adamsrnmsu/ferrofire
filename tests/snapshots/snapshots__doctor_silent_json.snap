@@ -1,0 +1,7 @@
+---
+source: tests/snapshots.rs
+expression: "json.join(\"\\n\")"
+---
+{"check":"provider","status":"fail","detail":"timed out","fix":"start `ferrofire run` (or the provider), check --server and that the REP port is not firewalled"}
+{"check":"group","status":"ok","detail":"id 54386972605942b for udp://239.0.0.1:40000","fix":null}
+{"check":"datagrams","status":"fail","detail":"none in 3s","fix":"the provider's --publish must be the same endpoint string as --listen (the group id hashes it); check the multicast route, the host firewall for UDP, and an IGMP querier on the switch"}

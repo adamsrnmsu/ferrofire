@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: "String::from_utf8_lossy(&o.stdout)"
+---
+valve.open: input
+  type: analog
+  default: 0.5
+  min: 0
+  max: 1
+  units: fraction
+used by: valve.flow

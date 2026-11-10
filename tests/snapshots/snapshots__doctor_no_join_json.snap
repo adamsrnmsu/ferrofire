@@ -1,0 +1,7 @@
+---
+source: tests/snapshots.rs
+expression: "json.join(\"\\n\")"
+---
+{"check":"provider","status":"ok","detail":"REP answers QUERY: 2 tags","fix":null}
+{"check":"group","status":"ok","detail":"id 54386972605942b for udp://239.0.0.1:40000","fix":null}
+{"check":"multicast join","status":"fail","detail":"no such device","fix":"use udp://[iface;]group:port with a multicast group (224.0.0.0/4) and an IPv4 interface address of this host"}

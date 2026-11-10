@@ -1,0 +1,15 @@
+---
+source: tests/snapshots.rs
+expression: "String::from_utf8_lossy(&o.stdout)"
+---
+tank.level: state
+  ode: d/dt = (pump.flow - valve.flow) / tank.area
+  init: 2.0
+  min: 0
+  max: 10
+  units: m
+  depends on: pump.flow, tank.area, valve.flow
+tank.level: output
+  type: analog
+  republishes: `tank.level`
+used by: valve.flow

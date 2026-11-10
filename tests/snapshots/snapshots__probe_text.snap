@@ -1,0 +1,8 @@
+---
+source: tests/snapshots.rs
+expression: "text.join(\"\\n\")"
+---
+tank.level=2.5
+pump.run=true age=0 ok gaps=0
+valve.open=0.5 age=4 STALE gaps=2
+note=x"y

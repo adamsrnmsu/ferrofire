@@ -1,0 +1,7 @@
+---
+source: tests/snapshots.rs
+expression: "String::from_utf8_lossy(&o.stdout)"
+---
+valve.cv: param
+  default: 0.3
+used by: valve.flow

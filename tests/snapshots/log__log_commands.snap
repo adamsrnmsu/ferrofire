@@ -1,0 +1,20 @@
+---
+source: tests/log.rs
+expression: "all.replace(file, \"<file>\")"
+---
+$ log status
+ferrofire run (pid <pid>): logging to stderr, level info
+$ log on
+logging to <dir>/x.log
+ferrofire run (pid <pid>): logging to <dir>/x.log, level info
+$ log on
+already logging to <dir>/x.log
+ferrofire run (pid <pid>): logging to <dir>/x.log, level info
+$ log level
+ferrofire run (pid <pid>): logging to <dir>/x.log, level debug
+$ log off
+stopped logging to <dir>/x.log
+ferrofire run (pid <pid>): logging to stderr, level debug
+$ log off
+already off
+ferrofire run (pid <pid>): logging to stderr, level debug

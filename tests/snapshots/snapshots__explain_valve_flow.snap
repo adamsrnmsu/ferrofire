@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: "String::from_utf8_lossy(&o.stdout)"
+---
+valve.flow: output
+  type: analog
+  expr: valve.open * valve.cv * sqrt(max(tank.level, 0))
+  units: m3/s
+  depends on: tank.level, valve.cv, valve.open
+used by: tank.level
