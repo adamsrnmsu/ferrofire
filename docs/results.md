@@ -67,6 +67,21 @@ arrives (per-tag p99 staleness 2-3 periods at 1 % loss, 3-9 at 5 %). Per-RTU sli
 
 The single stream is cheapest for the provider and costliest for every RTU (each receives all of it).
 
+## Tools on the live range
+
+`waterway-arm64`, ferrofire provider, stock bennu RTUs ([captures](live-tools/README.md)).
+
+| Tool | Result |
+|---|---|
+| `probe write lowervalve.open=1,lowergate.open=0` | reached rtu-1's Modbus registers within 577 ms |
+| `probe play` (3 timed writes at 0, 2, 4 s) | writes landed at 0, 2 012 and 4 023 ms |
+| `probe record`, 60 s | 601 rows, cycles 2249..2849, no gaps, no stale flags |
+| `probe diff` against both RTUs (22 registers) | 20 clean cycles; a holding register written straight onto rtu-1 gave 9 mismatches and exit 1, then clean |
+| `ferrofire top`, provider stopped | all 15 tags `STALE` at 4.4 s (stale-after 2 s), back to `good` on resume |
+| `ferrofire doctor`, OVS snooping off/on | caught a wrong multicast route on a multihomed host, a member starved after snooping was enabled late, and a 1.0 s clock skew between VMs |
+| `ferrofire log` | `on` x3 printed "already logging to" twice with one file; `off` x2 printed "already off"; `level debug --for 10s` reverted by itself |
+| Binary on a VM without libzmq | runs (pure-Rust zeromq; glibc dynamic, needs only libc/libm/libgcc_s) |
+
 ## Earlier: ZeroMQ vs NNG (historical)
 
 NNG was evaluated and dropped: no multicast (N RTUs = N copies, 19.6 MB/s vs 2.4 MB/s at 8 RTUs, 100 Hz), about

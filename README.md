@@ -32,7 +32,12 @@ ferrofire covers both layers, in Rust, as drop-ins for bennu's pieces:
 |---|---|---|
 | **Provider** (`ferrofire run`): a simple, fast process and power-flow simulator from a YAML model, no MATLAB, Simulink or PowerWorld | bennu's Simulink provider and PyPower solver | **Working**: runs the waterway range today with stock bennu RTUs |
 | **Field device**: the software RTU, speaking the same protocols and config files as `bennu-field-deviced`, plus more OT protocols | `bennu-field-deviced` | **In progress**: [spec](docs/field-device-spec.md); DNP3, IEC 61850 and ICCP first |
-| **Tools** (`probe`, `top`, `doctor`, `log`): read and write tags, watch live values and staleness, check a range's health | `bennu-probe`, reading log files | **In progress** |
+| **Tools** (`probe`, `top`, `doctor`, `log`, `explain`): read and write tags, play timed inject scripts, record, diff RTUs against the provider, watch live values and staleness, check a range's health, toggle logging on a running process | `bennu-probe`, reading log files | **Working**: proven live on the waterway range ([captures](docs/live-tools/README.md)) |
+
+![ferrofire top on the waterway range: live tag values, age, quality and trend, with a log pane](docs/img/top.png)
+
+*`ferrofire top` attached to the provider on the live waterway range. When the provider stops, every tag turns
+`STALE` within the configured age ([screenshot](docs/img/top-stale.png)).*
 
 The wire between layers 1 and 2 is documented as [datagram v1](docs/datagram-v1.md), and every claim about it is
 measured: see [Results at a glance](docs/results.md).
