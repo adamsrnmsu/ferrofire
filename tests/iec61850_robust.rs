@@ -114,7 +114,7 @@ fn drive(dev: &mut Device, chunks: &[Vec<u8>], now: Instant) -> (bool, usize) {
     let mut sent = 0;
     for (i, c) in chunks.iter().enumerate() {
         assoc.on_bytes(now, c);
-        let (_, closed) = step(dev, 1, &mut assoc, now);
+        let (_, closed) = step(dev, 1, &mut assoc, now, &mut false);
         while let Some(p) = assoc.poll_transmit() {
             sent += p.len();
         }

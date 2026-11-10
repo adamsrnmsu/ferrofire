@@ -34,7 +34,7 @@ fuzz_target!(|data: &[u8]| {
     let now = monotonic_now();
     for chunk in data.split(|&b| b == 0xFF) {
         assoc.on_bytes(now, chunk);
-        let (_, closed) = step(&mut dev, 1, &mut assoc, now);
+        let (_, closed) = step(&mut dev, 1, &mut assoc, now, &mut false);
         while assoc.poll_transmit().is_some() {}
         if closed {
             break;

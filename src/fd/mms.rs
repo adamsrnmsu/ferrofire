@@ -28,9 +28,9 @@ pub type Due = Vec<(AssocId, Vec<u8>)>;
 
 /// A reply that cannot be written within this long ends the association.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
-/// The association checks its own deadlines (handshake, request timeouts) at this pace; the handler's tick runs at `TICK`.
+/// The association checks its own deadlines (handshake, request timeouts) at this pace; the handler's tick runs at `TICK` (1 ms: GOOSE retransmits at T1, a few ms, and a coarser tick lumps frames together).
 const POLL: Duration = Duration::from_millis(100);
-const TICK: Duration = Duration::from_millis(10);
+const TICK: Duration = Duration::from_millis(1);
 
 pub trait Handler: Send + 'static {
     /// An association was accepted; `peer` is the remote IP's octets (empty if the socket will not say).
@@ -188,6 +188,7 @@ pub fn step<H: Handler>(
     id: AssocId,
     assoc: &mut Association,
     now: Instant,
+    up: &mut bool,
 ) -> (Due, bool) {
     let (mut due, mut closed) = (vec![], false);
     while let Some(ev) = assoc.poll_event() {
@@ -199,7 +200,10 @@ pub fn step<H: Handler>(
                     closed = true;
                 }
             }
-            AssociationEvent::Established(n) => h.established(id, &n),
+            AssociationEvent::Established(n) => {
+                *up = true;
+                h.established(id, &n)
+            }
             AssociationEvent::Closed(_) | AssociationEvent::Refused { .. } => closed = true,
             // responses, reports, rejects and undecodable PDUs from the client are no reason to drop it
             _ => {}
@@ -213,9 +217,10 @@ fn drain_events<H: Handler>(
     id: AssocId,
     assoc: &mut Association,
     now: Instant,
+    up: &mut bool,
 ) -> bool {
     let mut hub = lock(&mms.hub);
-    let (due, closed) = step(&mut hub.handler, id, assoc, now);
+    let (due, closed) = step(&mut hub.handler, id, assoc, now, up);
     hub.dispatch(due);
     closed
 }
@@ -246,11 +251,24 @@ async fn connection<H: Handler>(
     let mut assoc = Association::server(mms.cfg.association.clone());
     let mut buf = vec![0u8; 8192];
     let mut poll = tokio::time::interval(POLL);
+    // the association arms its handshake deadline only once a COTP request arrives: a socket that stays silent (or stops
+    // mid-TPKT) would hold one of the few slots for ever, so the same budget runs from accept to established
+    let (mut up, hello) = (
+        false,
+        Duration::from_millis(mms.cfg.association.connect_timeout_ms),
+    );
+    let giveup = tokio::time::sleep(if hello.is_zero() {
+        Duration::from_secs(86_400 * 365)
+    } else {
+        hello
+    });
+    tokio::pin!(giveup);
     loop {
         let now = monotonic_now();
         tokio::select! {
             _ = stop.cancelled() => break,
             _ = poll.tick() => assoc.on_timeout(now),
+            _ = &mut giveup, if !up => break,
             r = stream.read(&mut buf) => match r {
                 Ok(0) | Err(_) => break,
                 Ok(n) => assoc.on_bytes(now, &buf[..n]),
@@ -261,7 +279,8 @@ async fn connection<H: Handler>(
                 None => break,
             },
         }
-        if drain_events(&mms, id, &mut assoc, now) || !flush(&mut assoc, &mut stream).await {
+        if drain_events(&mms, id, &mut assoc, now, &mut up) || !flush(&mut assoc, &mut stream).await
+        {
             break;
         }
     }
@@ -364,5 +383,34 @@ mod tests {
     fn defaults_are_an_ieds_few_slots() {
         let c = Config::default();
         assert_eq!((c.max_associations, c.outbound_queue), (16, 256));
+    }
+
+    #[tokio::test]
+    async fn a_socket_that_never_completes_the_handshake_is_closed() {
+        let mut cfg = Config::default();
+        cfg.association.connect_timeout_ms = 300;
+        let m = Mms::new(Log::default(), cfg);
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        let log = Arc::new(EventLog::to("mms", Box::new(std::io::sink())));
+        let stop = CancellationToken::new();
+        tokio::spawn(m.clone().serve(l, log, stop.clone()));
+        let mut silent = TcpStream::connect(addr).await.unwrap();
+        let mut half = TcpStream::connect(addr).await.unwrap();
+        half.write_all(&[3, 0, 0]).await.unwrap(); // a TPKT header that never finishes
+        for s in [&mut silent, &mut half] {
+            let mut b = [0u8; 8];
+            let r = tokio::time::timeout(Duration::from_secs(3), s.read(&mut b)).await;
+            assert!(
+                matches!(r, Ok(Ok(0)) | Ok(Err(_))),
+                "closed, not held: {r:?}"
+            );
+        }
+        assert_eq!(
+            lock(&m.hub).handler.closed.len(),
+            2,
+            "both slots given back"
+        );
+        stop.cancel();
     }
 }

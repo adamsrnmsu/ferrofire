@@ -368,7 +368,9 @@ impl Device {
                 .write_leaf(&p.time_ref(&self.domain), Value::UtcTime(SystemClock.now()));
             self.last.insert(p.tag.clone(), v);
         }
-        self.acsi.commit(iec61850_rs::common::monotonic_now())
+        let due = self.acsi.commit(iec61850_rs::common::monotonic_now());
+        self.drain();
+        due
     }
 
     fn drain(&mut self) {
@@ -773,6 +775,25 @@ mod tests {
         d.tick(iec61850_rs::common::monotonic_now());
         let changed: Vec<u32> = rx.try_iter().map(|f| goose(&f).3).collect();
         assert!(changed.contains(&2), "stNum advanced: {changed:?}");
+    }
+
+    #[test]
+    fn a_state_change_leaves_at_once_not_at_the_next_tick() {
+        // stNum n sqNum 0 and the first retransmission (T1) must not leave the host in one burst
+        let st = store();
+        let (tx, rx) = mpsc::channel();
+        let frames: Frames = (
+            MacAddr([2, 0, 0, 0, 0, 0x61]),
+            Box::new(move |f| tx.send(f.to_vec()).unwrap()),
+        );
+        let s = parse(&format!("{POINTS}{GOOSE}"), &Opts::default()).unwrap();
+        let mut d = s.device(&st, Some(frames));
+        d.refresh(&st);
+        d.tick(iec61850_rs::common::monotonic_now());
+        while rx.try_recv().is_ok() {}
+        st.publish("an", 9.0, 1);
+        d.refresh(&st);
+        assert_eq!(rx.try_iter().count(), 1, "sent by the refresh itself");
     }
 
     #[test]
