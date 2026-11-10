@@ -11,3 +11,6 @@ ARG CRAPPER=git+https://github.com/unclebob/crapper@6fd92c4c9bcc56efb64a2f8743d5
 RUN uv tool install --python 3.11 "$CRAPPER" \
  && uv tool install --python 3.11 git+https://github.com/unclebob/dryer@66ff6d21a42c04afcad89c78a80066176d1294b0 \
  && uv tool install --python 3.11 git+https://github.com/unclebob/mutator@a5a0cb803b66e0cdb8bf471b3b08af701d424a41 --with "$CRAPPER"
+# Supply chain gate: licences + advisories + bans (deny.toml), pinned.
+ARG DENY=0.20.2
+RUN curl -sSfL "https://github.com/EmbarkStudios/cargo-deny/releases/download/${DENY}/cargo-deny-${DENY}-$(uname -m)-unknown-linux-musl.tar.gz" | tar xz --strip-components=1 -C /root/.cargo/bin --wildcards '*/cargo-deny'

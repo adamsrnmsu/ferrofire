@@ -10,7 +10,7 @@ DRY_MIN := 0.8
 # ponytail: pid lock; a kill -9 of make leaves a stale file that src-free ignores because the pid is gone.
 MUTATE_LOCK := .mutate.lock
 
-.PHONY: src-free help wireshark bench bench-report bench-dg bench-dg-report image fmt fmt-check lint test golden linux crap dry mutate check clean
+.PHONY: src-free help wireshark bench bench-report bench-dg bench-dg-report image fmt fmt-check lint test golden linux crap dry deny mutate check clean
 help:    # list targets
 	@grep -E '^[a-z-]+:.*#' $(MAKEFILE_LIST) | sed -E 's/^([a-z-]+):[^#]*#/\1\t/'
 src-free:   # fail fast while make mutate is rewriting src/
@@ -36,6 +36,8 @@ crap: golden image src-free   # crapper: CRAP score per function, fails above $(
 	$(IN) crapper --threshold $(CRAP_MAX) src
 dry: image src-free   # dryer: duplicate candidates scoring >= $(DRY_MIN), fails if any (dryer itself always exits 0)
 	$(IN) bash -c 'dryer --threshold $(DRY_MIN) src | tee /tmp/dry.out; ! grep -q ^DUPLICATE /tmp/dry.out'
+deny: image   # cargo-deny: licences, advisories, bans, sources (deny.toml; advisories need network)
+	$(IN) cargo deny check
 mutate: golden image src-free   # mutator: mutation testing (slow, not part of check); survivors exit 3
 	@echo $$$$ > $(MUTATE_LOCK); trap 'rm -f $(MUTATE_LOCK)' EXIT; $(IN) mutator src
 bench: image   # historical zmq vs nng benchmark matrix (NNG dropped 2026-11-09; needs the old nng build, ~1.2 h) -> docs/bench/results/raw; then: make bench-report
@@ -46,6 +48,6 @@ bench-dg: image   # datagram v1 matrix (age, netem loss, per-RTU fan-out, restar
 	python3 bench/run_dg.py
 bench-dg-report:   # docs/bench/datagram-v1-bench.md from the datagram v1 raw results
 	python3 bench/dg_report.py
-check: fmt-check lint test crap dry   # every gate except mutate
+check: fmt-check lint test crap dry deny   # every gate except mutate
 clean:   # remove build output and metrics
 	rm -rf target target-linux dist .metrics

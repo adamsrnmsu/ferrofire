@@ -22,5 +22,5 @@ jobs:
         run: make image
       - name: PYPOWER golden results
         run: make golden
-      - name: Quality gates (fmt, clippy, tests, CRAP, dryer)
+      - name: Quality gates (fmt, clippy, tests, CRAP, dryer, cargo-deny)
         run: make check

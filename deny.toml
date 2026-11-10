@@ -1,0 +1,16 @@
+# cargo-deny: licences, advisories, bans. Run by `make deny` (part of `make check`) and CI.
+# The PSERC BSD-3 code in src/power is ported source, not a crate; it is attributed in NOTICE, so it is not listed here.
+[graph]
+targets = ["aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]
+
+[licenses]
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib", "CC0-1.0"]
+confidence-threshold = 0.9
+unused-allowed-license = "allow"
+
+[advisories]
+yanked = "deny"
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
