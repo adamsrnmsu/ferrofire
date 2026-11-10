@@ -10,7 +10,7 @@ DRY_MIN := 0.8
 # ponytail: pid lock; a kill -9 of make leaves a stale file that src-free ignores because the pid is gone.
 MUTATE_LOCK := .mutate.lock
 
-.PHONY: src-free help wireshark bench bench-report bench-dg bench-dg-report image fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
+.PHONY: src-free help wireshark zeek-iccp bench bench-report bench-dg bench-dg-report image fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
 help:    # list targets
 	@grep -E '^[a-z-]+:.*#' $(MAKEFILE_LIST) | sed -E 's/^([a-z-]+):[^#]*#/\1\t/'
 src-free:   # fail fast while make mutate is rewriting src/
@@ -28,8 +28,10 @@ golden:  # PYPOWER 5.1.19 reference results -> target/golden (needs uv; generate
 	uv run --python 3.11 --with PYPOWER==5.1.19 --with 'numpy<2' --with 'scipy<1.14' python -I -W ignore tests/golden/gen_pypower.py target/golden
 test: golden image src-free   # unit + integration tests in the container (no cargo needed on the host)
 	$(IN) cargo test
-wireshark:   # decode the datagram v1 test vector with tshark and the Lua dissector (host tool, not in check)
+wireshark:   # tshark + Lua: datagram v1 test vector, and iccp.lua over tests/pcaps/iccp (field goldens, 0 malformed; host tool, not in check)
 	tools/wireshark/test.sh
+zeek-iccp:   # build the ICCP Spicy analyzer and run its btest suite on tests/pcaps/iccp in the ff-zeek container (--update: ZEEK_ICCP_FLAGS=--update)
+	tools/zeek/iccp/test.sh $(ZEEK_ICCP_FLAGS)
 linux: src-free   # glibc aarch64 binaries -> dist/ferrofire, dist/simulinksolver
 	./build-linux.sh
 crap: golden image src-free   # crapper: CRAP score per function, fails above $(CRAP_MAX); writes .metrics/crap.edn

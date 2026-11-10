@@ -9,3 +9,7 @@ fuzz/target/
 fuzz/artifacts/
 fuzz/Cargo.lock
 fuzz/corpus/
+
+# zeek-iccp build output
+tools/zeek/iccp/build/
+tools/zeek/iccp/tests/.tmp/

@@ -1,0 +1,482 @@
+# ICCP / TASE.2 (IEC 60870-6) over MMS (ISO 9506) over the OSI stack on tcp/102:
+#   TPKT (RFC 1006) / COTP DT / session SPDU / presentation PPDU / ACSE APDU / MMS PDU.
+# Session, presentation, ACSE and MMS are all BER, so after the TPKT/COTP/session framing one generic recursive TLV
+# unit (Node) parses the whole thing and plain functions walk the tree. Every reassembled COTP message is parsed by its
+# own throw-away unit through a local sink, so one malformed message cannot take the rest of the connection with it.
+# TPKT/COTP desync (bad version byte, impossible length) does end that direction: there is nothing to resync on.
+# Output is one ICCP::pdu event per MMS PDU (or ACSE release/abort); tools/zeek/iccp/scripts/main.zeek turns it into
+# mms.log and iccp.log. The TASE.2 interpretation here is shape based (real, state, discrete, quality flags) and
+# name based (Bilateral_Table_ID ...), see README.md "Assumptions".
+module ICCP;
+
+import spicy;
+import zeek;
+
+type SLen = unit {
+    b: uint8;
+    ext: uint16 if ( self.b == 0xFF );
+    var v: uint64 = 0;
+    on b { self.v = $$; }
+    on ext { self.v = $$; }
+};
+
+# One BER TLV. depth bounds recursion; constructed encodings are parsed down to their children.
+type Node = unit(depth: uint8) {
+    tag: uint8 &requires=(depth < 40 && ($$ & 0x1F) != 0x1F);
+    l0: uint8 &requires=($$ != 0x80 && $$ != 0xFF);
+    ext: bytes &size=(self.l0 & 0x7F) &requires=(|$$| <= 3) if ( self.l0 > 0x80 );
+    var len: uint64 = 0;
+    on l0 { if ( $$ < 0x80 ) self.len = $$; }
+    on ext { self.len = $$.to_uint(spicy::ByteOrder::Big); }
+    raw: bytes &size=self.len;
+    kids: Node(depth + 1)[] &parse-from=self.raw if ( (self.tag & 0x20) != 0 );
+    var v: int64 = 0;
+    on raw { if ( |$$| > 0 && |$$| <= 8 ) self.v = $$.to_int(spicy::ByteOrder::Big); }
+};
+
+# ---- framing ----------------------------------------------------------------------------------------------
+
+type DT = unit {
+    nr: uint8;
+    user: bytes &eod;
+};
+
+type COTP = unit {
+    li: uint8;
+    code: uint8;
+    dt: DT if ( self.code == 0xF0 && self.li == 2 );
+    : skip bytes &eod if ( self.code != 0xF0 || self.li != 2 );
+};
+
+type TPKT = unit {
+    ver: uint8 &requires=($$ == 3);
+    : skip uint8;
+    len: uint16 &requires=($$ >= 6);
+    cotp: COTP &size=(self.len - 4);
+    var is_dt: bool = False;
+    var eot: bool = False;
+    var data: bytes;
+    on cotp { if ( $$?.dt ) { self.is_dt = True; self.eot = ($$.dt.nr & 0x80) != 0; self.data = $$.dt.user; } }
+};
+
+public type Stream = unit {
+    var segs: bytes;
+    var seen: bool = False;
+    tpkts: TPKT[];
+    on tpkts foreach {
+        if ( ! $$.is_dt )
+            return;
+        if ( ! self.seen ) {
+            self.seen = True;
+            zeek::confirm_protocol();
+        }
+        self.segs += $$.data;
+        if ( |self.segs| > 4194304 )
+            self.segs = b"";
+        if ( $$.eot ) {
+            local s: sink;
+            s.connect(new Session);
+            s.write(self.segs);
+            s.close();
+            self.segs = b"";
+        }
+    }
+};
+
+# ---- session -----------------------------------------------------------------------------------------------
+
+type Param = unit {
+    pi: uint8;
+    len: SLen;
+    switch ( self.pi ) {
+        0xC1, 0xC2 -> pres: Node(0) &size=self.len.v;
+        * -> : skip bytes &size=self.len.v;
+    };
+};
+
+type Params = unit {
+    items: Param[] &eod;
+};
+
+type Spdu = unit {
+    si: uint8;
+    switch ( self.si ) {
+        0x01 -> gt: GiveTokens;
+        0x0D, 0x0E -> cn: Connect;
+        * -> other: Other;
+    };
+
+    # Interpretation results, see mms_pdu() below.
+    var kind: string = "";
+    var service: string = "";
+    var invoke_id: int64 = -1;
+    var scope: string = "";
+    var domain: string = "";
+    var target: string = "";
+    var detail: string = "";
+    var err: string = "";
+    var names: vector<string>;
+    var vtypes: vector<string>;
+    var values: vector<string>;
+    var quals: vector<string>;
+
+    on %done {
+        if ( self?.gt )
+            interpret(self, self.gt.pres);
+        else if ( self?.cn && self.cn.params?.items ) {
+            for ( p in self.cn.params.items ) {
+                if ( p?.pres ) {
+                    interpret(self, p.pres);
+                    break;
+                }
+            }
+        }
+    }
+};
+
+type GiveTokens = unit {
+    len: uint8 &requires=($$ == 0);
+    dt: uint8 &requires=($$ == 1);
+    dlen: uint8 &requires=($$ == 0);
+    pres: Node(0);
+};
+
+type Connect = unit {
+    len: SLen;
+    params: Params &size=self.len.v;
+};
+
+type Other = unit {
+    len: SLen;
+    : skip bytes &size=self.len.v;
+};
+
+public type Session = unit {
+    spdus: Spdu[];
+};
+
+# ---- MMS / TASE.2 interpretation ---------------------------------------------------------------------------
+
+# top: presentation PPDU (CP/CPA 0x31, or user data 0x61).
+function interpret(inout sp: Spdu, top: Node) {
+    local pdv = top;
+    if ( top.tag == 0x31 ) {
+        local i = find(top, 0xA2);
+        if ( i >= |top.kids| ) return;
+        local j = find(top.kids[i], 0x61);
+        if ( j >= |top.kids[i].kids| ) return;
+        pdv = top.kids[i].kids[j];
+    }
+    else if ( top.tag != 0x61 )
+        return;
+    local a = find(pdv, 0x30);
+    if ( a >= |pdv.kids| ) return;
+    local b = find(pdv.kids[a], 0xA0);
+    if ( b >= |pdv.kids[a].kids| || |pdv.kids[a].kids[b].kids| == 0 ) return;
+    local x = pdv.kids[a].kids[b].kids[0];
+    if ( x.tag == 0x60 || x.tag == 0x61 ) {  # AARQ / AARE carry the MMS initiate in user-information
+        local e = find(x, 0xBE);
+        if ( e >= |x.kids| ) return;
+        local f = find(x.kids[e], 0x28);
+        if ( f >= |x.kids[e].kids| ) return;
+        local g = find(x.kids[e].kids[f], 0xA0);
+        if ( g >= |x.kids[e].kids[f].kids| || |x.kids[e].kids[f].kids[g].kids| == 0 ) return;
+        sp.kind = x.tag == 0x60 ? "acse_aarq" : "acse_aare";
+        local m = x.kids[e].kids[f].kids[g].kids[0];
+        mms(sp, m);
+        return;
+    }
+    if ( x.tag >= 0x62 && x.tag <= 0x64 ) {
+        sp.kind = x.tag == 0x62 ? "acse_rlrq" : (x.tag == 0x63 ? "acse_rlre" : "acse_abrt");
+        return;
+    }
+    mms(sp, x);
+}
+
+function mms(inout sp: Spdu, m: Node) {
+    local k = sp.kind;
+    if ( m.tag == 0xA0 || m.tag == 0xA1 ) {
+        sp.kind = m.tag == 0xA0 ? "confirmed_req" : "confirmed_resp";
+        if ( |m.kids| < 2 ) return;
+        sp.invoke_id = m.kids[0].v;
+        confirmed(sp, m.tag == 0xA0, m.kids[1]);
+    }
+    else if ( m.tag == 0xA2 ) {
+        sp.kind = "confirmed_err";
+        if ( |m.kids| > 0 ) sp.invoke_id = m.kids[0].v;
+        local i = find(m, 0xA2);
+        if ( i < |m.kids| && |m.kids[i].kids| > 0 && |m.kids[i].kids[0].kids| > 0 ) {
+            local c = m.kids[i].kids[0].kids[0];
+            sp.err = ("class=%d code=%d" % (c.tag & 0x1F, c.v));
+        }
+    }
+    else if ( m.tag == 0xA3 ) {
+        sp.kind = "unconfirmed";
+        if ( |m.kids| > 0 && m.kids[0].tag == 0xA0 ) {
+            sp.service = "informationReport";
+            local r = m.kids[0];
+            if ( |r.kids| >= 2 ) {
+                varspec(sp, r.kids[0]);
+                results(sp, r.kids[1]);
+            }
+        }
+        else sp.service = "unconfirmed_other";
+    }
+    else if ( m.tag == 0xA4 ) {
+        sp.kind = "reject";
+        if ( |m.kids| > 0 ) sp.invoke_id = m.kids[0].v;
+    }
+    else if ( m.tag == 0xA8 || m.tag == 0xA9 || m.tag == 0xAA ) {
+        sp.kind = m.tag == 0xA8 ? "initiate_req" : (m.tag == 0xA9 ? "initiate_resp" : "initiate_err");
+        sp.service = "initiate";
+        for ( c in m.kids ) {
+            if ( c.tag == 0x80 ) sp.detail += ("localDetail=%d;" % c.v);
+            else if ( c.tag == 0x81 || c.tag == 0x82 ) sp.detail += ((c.tag == 0x81 ? "maxServOutstandingCalling=%d;" : "maxServOutstandingCalled=%d;") % c.v);
+            else if ( c.tag == 0x83 ) sp.detail += ("nesting=%d;" % c.v);
+            else if ( c.tag == 0xA4 ) {
+                for ( d in c.kids ) {
+                    if ( d.tag == 0x80 ) sp.detail += ("version=%d;" % d.v);
+                    else if ( d.tag == 0x81 ) sp.detail += "parameterCBB=" + bits(d.raw) + ";";
+                    else if ( d.tag == 0x82 ) sp.detail += "servicesSupported=" + bits(d.raw) + ";";
+                }
+            }
+        }
+    }
+    else if ( m.tag == 0x8B ) { sp.kind = "conclude_req"; sp.service = "conclude"; }
+    else if ( m.tag == 0x8C ) { sp.kind = "conclude_resp"; sp.service = "conclude"; }
+    else if ( m.tag == 0xAD ) { sp.kind = "conclude_err"; sp.service = "conclude"; }
+    else sp.kind = ("other_%02x" % m.tag);
+}
+
+function confirmed(inout sp: Spdu, req: bool, s: Node) {
+    if ( s.tag == 0xA4 ) {
+        sp.service = "read";
+        if ( req ) {
+            local i = find(s, 0xA1);
+            if ( i < |s.kids| && |s.kids[i].kids| > 0 ) varspec(sp, s.kids[i].kids[0]);
+        }
+        else {
+            local j = find(s, 0xA1);
+            if ( j < |s.kids| ) results(sp, s.kids[j]);
+        }
+    }
+    else if ( s.tag == 0xA5 ) {
+        sp.service = "write";
+        if ( req ) {
+            if ( |s.kids| >= 2 ) {
+                varspec(sp, s.kids[0]);
+                results(sp, s.kids[1]);
+            }
+        }
+        else {
+            for ( c in s.kids ) {
+                sp.vtypes.push_back("result");
+                sp.quals.push_back("");
+                sp.values.push_back(c.tag == 0x81 ? "success" : ("failure:%d" % c.v));
+            }
+        }
+    }
+    else if ( s.tag == 0xA1 ) {
+        sp.service = "getNameList";
+        if ( req ) {
+            for ( c in s.kids ) {
+                if ( c.tag == 0xA0 && |c.kids| > 0 ) sp.detail += ("class=%d;" % c.kids[0].v);
+                else if ( c.tag == 0xA1 && |c.kids| > 0 ) {
+                    sp.scope = c.kids[0].tag == 0x80 ? "vmd" : (c.kids[0].tag == 0x81 ? "domain" : "aa");
+                    if ( c.kids[0].tag == 0x81 ) sp.domain = c.kids[0].raw.decode(spicy::Charset::ASCII);
+                }
+                else if ( c.tag == 0x82 ) sp.detail += "continueAfter=" + c.raw.decode(spicy::Charset::ASCII) + ";";
+            }
+        }
+        else {
+            for ( c in s.kids ) {
+                if ( c.tag == 0xA0 ) {
+                    for ( n in c.kids ) sp.names.push_back(n.raw.decode(spicy::Charset::ASCII));
+                }
+                else if ( c.tag == 0x81 ) sp.detail += "moreFollows=" + (|c.raw| > 0 && at(c.raw, 0) != 0 ? "true" : "false") + ";";
+            }
+        }
+    }
+    else if ( s.tag == 0xAB ) {
+        sp.service = "defineNamedVariableList";
+        if ( req && |s.kids| >= 2 ) {
+            setname(sp, s.kids[0], True);
+            varspec(sp, s.kids[1]);
+        }
+    }
+    else if ( s.tag == 0x8B ) sp.service = "defineNamedVariableList";
+    else if ( s.tag == 0xA6 || s.tag == 0xAC || s.tag == 0xAD || s.tag == 0xAE ) {
+        sp.service = s.tag == 0xA6 ? "getVariableAccessAttributes" : (s.tag == 0xAC ? "getNamedVariableListAttributes" : "deleteNamedVariableList");
+        if ( req && |s.kids| > 0 ) {
+            if ( s.kids[0].tag == 0xA0 && |s.kids[0].kids| > 0 ) setname(sp, s.kids[0].kids[0], False);
+            else setname(sp, s.kids[0], False);
+        }
+    }
+    else if ( s.tag == 0x82 || s.tag == 0xA2 ) sp.service = "identify";
+    else sp.service = ("service_%02x" % s.tag);
+}
+
+# An ObjectName (CHOICE): vmd-specific 0x80, domain-specific 0xA1 {domainId, itemId}, aa-specific 0x82.
+function setname(inout sp: Spdu, n: Node, as_target: bool) {
+    local s = name_string(n);
+    if ( as_target ) sp.target = s;
+    else sp.names.push_back(s);
+    if ( sp.scope == "" ) {
+        sp.scope = n.tag == 0x80 ? "vmd" : (n.tag == 0xA1 ? "domain" : "aa");
+        if ( n.tag == 0xA1 && |n.kids| > 0 ) sp.domain = n.kids[0].raw.decode(spicy::Charset::ASCII);
+    }
+}
+
+# VariableAccessSpecification: listOfVariable 0xA0 {SEQUENCE{A0 {ObjectName}}} or variableListName 0xA1 {ObjectName}.
+function varspec(inout sp: Spdu, v: Node) {
+    if ( v.tag == 0xA0 ) {
+        for ( e in v.kids ) {
+            if ( |e.kids| > 0 && e.kids[0].tag == 0xA0 && |e.kids[0].kids| > 0 )
+                setname(sp, e.kids[0].kids[0], False);
+            else sp.names.push_back("?");
+        }
+    }
+    else if ( v.tag == 0xA1 && |v.kids| > 0 )
+        setname(sp, v.kids[0], True);
+}
+
+function results(inout sp: Spdu, l: Node) {
+    for ( d in l.kids ) {
+        if ( d.tag == 0x80 ) {
+            sp.vtypes.push_back("error");
+            sp.values.push_back(("%d" % d.v));
+            sp.quals.push_back("");
+        }
+        else {
+            local r = describe(d);
+            sp.vtypes.push_back(r[0]);
+            sp.values.push_back(r[1]);
+            sp.quals.push_back(r[2]);
+        }
+    }
+}
+
+# ---- BER tree helpers -------------------------------------------------------------------------------------
+
+function find(n: Node, tag: uint8): uint64 {
+    local i: uint64 = 0;
+    for ( c in n.kids ) {
+        if ( c.tag == tag )
+            return i;
+        i += 1;
+    }
+    return |n.kids|;
+}
+
+function at(b: bytes, i: uint64): uint64 {
+    return b.sub(i, i + 1).to_uint(spicy::ByteOrder::Big);
+}
+
+function bits(b: bytes): string {
+    if ( |b| < 1 || |b| > 513 )
+        return "";
+    local s = "";
+    local pad = at(b, 0);
+    local n: uint64 = (|b| - 1) * 8;
+    if ( pad > 7 || n < pad )
+        return "";
+    n -= pad;
+    local i: uint64 = 0;
+    while ( i < n ) {
+        local byte = at(b, 1 + i / 8);
+        s += ((byte >> (7 - i % 8)) & 1) == 1 ? "1" : "0";
+        i += 1;
+    }
+    return s;
+}
+
+# The first (up to 8) bits of a bit string as a byte, MSB first.
+function byte0(n: Node): uint64 {
+    return |n.raw| >= 2 ? at(n.raw, 1) : 0;
+}
+
+function nbits(n: Node): int64 {
+    return |n.raw| >= 1 ? (cast<int64>(|n.raw|) - 1) * 8 - cast<int64>(at(n.raw, 0)) : 0;
+}
+
+function name_string(n: Node): string {
+    if ( n.tag == 0xA1 && |n.kids| >= 2 )
+        return n.kids[0].raw.decode(spicy::Charset::ASCII) + "/" + n.kids[1].raw.decode(spicy::Charset::ASCII);
+    if ( n.tag == 0x82 )
+        return "aa:" + n.raw.decode(spicy::Charset::ASCII);
+    return n.raw.decode(spicy::Charset::ASCII);
+}
+
+# Data_Flags / Data_StateQ byte, MSB first: [0-1] state (StateQ) or spare, [2-3] validity, [4-5] current source,
+# [6] normal value, [7] time stamp quality.
+function quality(f: uint64): string {
+    local v = (f >> 4) & 3;
+    local s = (f >> 2) & 3;
+    return (v == 0 ? "VALID" : (v == 1 ? "HELD" : (v == 2 ? "SUSPECT" : "NOTVALID"))) + "|" +
+           (s == 0 ? "TELEMETERED" : (s == 1 ? "CALCULATED" : (s == 2 ? "ENTERED" : "ESTIMATED"))) + "|" +
+           (((f >> 1) & 1) == 0 ? "NORMAL" : "ABNORMAL") + "|" + ((f & 1) == 0 ? "TS_VALID" : "TS_SUSPECT");
+}
+
+function state_name(f: uint64): string {
+    local s = (f >> 6) & 3;
+    return s == 0 ? "BETWEEN" : (s == 1 ? "OFF" : (s == 2 ? "ON" : "INVALID"));
+}
+
+function scalar(d: Node): string {
+    if ( d.tag == 0x87 ) {
+        if ( |d.raw| == 5 ) {
+            local f = unpack<real>(d.raw.sub(1, 5), spicy::RealType::IEEE754_Single, spicy::ByteOrder::Big);
+            return ("%.6g" % f[0]);
+        }
+        if ( |d.raw| == 9 ) {
+            local g = unpack<real>(d.raw.sub(1, 9), spicy::RealType::IEEE754_Double, spicy::ByteOrder::Big);
+            return ("%.12g" % g[0]);
+        }
+        return "?";
+    }
+    if ( d.tag == 0x85 ) return ("%d" % d.v);
+    if ( d.tag == 0x86 ) return |d.raw| > 0 && |d.raw| <= 8 ? ("%d" % d.raw.to_uint(spicy::ByteOrder::Big)) : "?";
+    if ( d.tag == 0x83 ) return |d.raw| > 0 && at(d.raw, 0) != 0 ? "true" : "false";
+    if ( d.tag == 0x84 ) return bits(d.raw);
+    if ( d.tag == 0x8A || d.tag == 0x90 || d.tag == 0x8B ) return d.raw.decode(spicy::Charset::ASCII);
+    if ( d.tag == 0x89 ) return spicy::bytes_to_hexstring(d.raw);
+    if ( d.tag == 0x91 ) return |d.raw| >= 4 ? ("utc:%d" % d.raw.sub(0, 4).to_uint(spicy::ByteOrder::Big)) : "?";
+    if ( d.tag == 0x8C ) return spicy::bytes_to_hexstring(d.raw);
+    return ("tag_%02x" % d.tag);
+}
+
+function is_num(d: Node): bool {
+    return d.tag == 0x87 || d.tag == 0x85 || d.tag == 0x86;
+}
+
+# (type, value, quality) of one MMS Data by TASE.2 shape.
+function describe(d: Node): tuple<string, string, string> {
+    if ( d.tag == 0x87 ) return ("real", scalar(d), "");
+    if ( d.tag == 0x85 || d.tag == 0x86 ) return ("discrete", scalar(d), "");
+    if ( d.tag == 0x84 ) {
+        if ( nbits(d) == 8 ) return ("stateq", bits(d.raw), state_name(byte0(d)) + "|" + quality(byte0(d)));
+        if ( nbits(d) == 2 ) return ("state", bits(d.raw), state_name(byte0(d)));
+        return ("bitstring", bits(d.raw), "");
+    }
+    if ( d.tag == 0xA2 ) {
+        local n = |d.kids|;
+        if ( n == 2 && is_num(d.kids[0]) && d.kids[1].tag == 0x84 && nbits(d.kids[1]) == 8 )
+            return (d.kids[0].tag == 0x87 ? "realq" : "discreteq", scalar(d.kids[0]), quality(byte0(d.kids[1])));
+        if ( n == 3 && d.kids[0].tag != 0xA2 && is_num(d.kids[1]) && d.kids[2].tag == 0x84 && nbits(d.kids[2]) == 8 )
+            return ((d.kids[1].tag == 0x87 ? "realq" : "discreteq") + "timetag", scalar(d.kids[1]) + "@" + scalar(d.kids[0]), quality(byte0(d.kids[2])));
+        local s = "{";
+        local i = 0;
+        for ( c in d.kids ) {
+            if ( i >= 16 ) { s += ";..."; break; }
+            s += (i > 0 ? ";" : "") + (c.tag == 0xA2 ? "{..}" : scalar(c));
+            i += 1;
+        }
+        return ("struct", s + "}", "");
+    }
+    if ( d.tag == 0xA1 ) return ("array", ("%d items" % |d.kids|), "");
+    if ( d.tag == 0x8A || d.tag == 0x90 ) return ("string", scalar(d), "");
+    if ( d.tag == 0x83 ) return ("boolean", scalar(d), "");
+    if ( d.tag == 0x89 ) return ("octets", scalar(d), "");
+    if ( d.tag == 0x91 || d.tag == 0x8C || d.tag == 0x8B ) return ("time", scalar(d), "");
+    return ("other", scalar(d), "");
+}
