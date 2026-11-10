@@ -39,15 +39,16 @@ pub fn name_type() -> TypeSpec {
 }
 
 pub fn structure(parts: Vec<TypeSpec>) -> TypeSpec {
+    let components = parts
+        .into_iter()
+        .map(|type_spec| Component {
+            name: None,
+            type_spec,
+        })
+        .collect();
     TypeSpec::Structure {
         packed: false,
-        components: parts
-            .into_iter()
-            .map(|type_spec| Component {
-                name: None,
-                type_spec,
-            })
-            .collect(),
+        components,
     }
 }
 
@@ -231,9 +232,7 @@ impl Ts {
 
     /// The timer conditions that have run out at `now_ms`; each timer that fired starts again.
     fn timers(&mut self, now_ms: u64) -> u8 {
-        let Some(cfg) = self.cfg.as_ref() else {
-            return 0;
-        };
+        let cfg = self.cfg.clone().unwrap_or_default();
         let mut hit = 0;
         for (every, next, bit) in [
             (cfg.interval, &mut self.next_interval, INTERVAL),
