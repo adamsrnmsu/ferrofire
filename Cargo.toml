@@ -14,6 +14,22 @@ zmq = "0.10"
 num-complex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde-saphyr = "2"
+roxmltree = "0.20"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "signal", "sync", "io-util", "macros"] }
+tokio-util = { version = "0.7", default-features = false }
+socket2 = { version = "0.6", features = ["all"] }
+
+[features]
+# One feature per protocol module (docs/field-device-protocols-plan.md section 2). The parity set is default; extras are opt-in.
+default = ["proto-modbus", "proto-dnp3", "proto-iec104", "proto-bacnet", "proto-serial"]
+proto-modbus = []
+proto-dnp3 = []
+proto-iec104 = []
+proto-bacnet = []
+proto-serial = []
+proto-iec61850 = []
+proto-iccp = []
+all-protocols = ["default", "proto-iec61850", "proto-iccp"]
 
 [profile.release]
 opt-level = 2

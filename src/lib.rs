@@ -4,6 +4,7 @@
 pub mod bennu;
 pub mod datagram;
 pub mod expr;
+pub mod fd;
 pub mod hint;
 pub mod model;
 pub mod power;

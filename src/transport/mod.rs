@@ -20,7 +20,7 @@ pub trait Publisher: Send {
 }
 
 /// Client side of the request/reply half: one request, one reply, or an error after `timeout_ms`.
-pub trait Requester {
+pub trait Requester: Send {
     fn call(&mut self, req: &[u8]) -> Result<Vec<u8>, String>;
 }
 

@@ -29,6 +29,8 @@ enum Cmd {
     },
     /// Offline run printing the model snapshot at t=0 and after N steps
     Check(CheckArgs),
+    /// Stand-in for bennu-field-device: reads a sceptre config.xml, serves protocols over the provider's data
+    FieldDevice(ferrofire::fd::Cli),
     /// Print a shell completion script
     Completions { shell: clap_complete::Shell },
 }
@@ -54,6 +56,7 @@ fn main() {
         Cmd::PullBridge(a) => ferrofire::pull::main(a),
         Cmd::Pypower(a) => ferrofire::pypower::run_cli(a),
         Cmd::Simulink { args } => ferrofire::simulink::main(&args),
+        Cmd::FieldDevice(a) => std::process::exit(ferrofire::fd::main(a)),
         Cmd::Check(a) => check(a),
         Cmd::Completions { shell } => completions(shell),
     }
