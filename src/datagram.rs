@@ -64,6 +64,11 @@ impl Receiver {
         self.gaps
     }
 
+    /// The newest `_ff.cyc` seen in any datagram (0 before one with a trailer).
+    pub fn head(&self) -> u64 {
+        self.head
+    }
+
     /// Missed publish periods after which a held value turns `Stale` (default 3).
     pub fn set_stale_after(&mut self, periods: u64) {
         self.stale_after = periods;

@@ -15,7 +15,7 @@ use std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const USAGE: &str = "ferrofire probe [--server tcp://127.0.0.1:5555] [--json] (query | read a,b | write a=1,b=2 [--confirm] [--dry-run] [--model m.yaml] | play script.yaml [--confirm] [--dry-run] [--keep-going] [--model m.yaml] | watch [--listen udp://*;239.0.0.1:40000] [--tags a,b])";
+const USAGE: &str = "ferrofire probe [--server tcp://127.0.0.1:5555] [--json] (query | read a,b | write a=1,b=2 [--confirm] [--dry-run] [--model m.yaml] | play script.yaml [--confirm] [--dry-run] [--keep-going] [--model m.yaml] | record --out run.csv [--tags a,b] [--duration s] | watch [--listen udp://*;239.0.0.1:40000] [--tags a,b])";
 
 #[derive(Debug, clap::Parser)]
 #[command(name = "ferrofire probe")]
@@ -87,6 +87,24 @@ enum Sub {
         /// Publish periods without a refresh after which a tag is stale
         #[arg(long, default_value_t = 3)]
         stale_after: u64,
+    },
+    /// Record the published values to a CSV: one row per cycle (cycle, t, each tag and its stale flag)
+    Record {
+        /// CSV file to write
+        #[arg(long, value_name = "FILE")]
+        out: String,
+        /// Publish endpoint to listen on
+        #[arg(long, default_value = DEFAULT_PUBLISH, value_name = "ENDPOINT")]
+        listen: String,
+        /// Tags to record, globs allowed (default: all the provider has)
+        #[arg(long, value_delimiter = ',', value_name = "A,B,C")]
+        tags: Vec<String>,
+        /// Publish periods without a refresh after which a tag is stale
+        #[arg(long, default_value_t = 3)]
+        stale_after: u64,
+        /// Stop after this many seconds (default: until SIGINT/SIGTERM)
+        #[arg(long, value_name = "SECONDS")]
+        duration: Option<f64>,
     },
 }
 
@@ -316,6 +334,74 @@ impl Watcher {
     }
 }
 
+fn csv(a: impl ToString, b: impl ToString, cells: impl Iterator<Item = String>) -> String {
+    [a.to_string(), b.to_string()]
+        .into_iter()
+        .chain(cells)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// Turns datagrams into CSV rows, one per publish cycle: `cycle,t,<tag>,<tag>_stale,..` (empty until a tag has a value).
+/// A cycle's row is written once a later cycle shows up (its chunks may arrive in any order), and the last one by `finish`.
+pub struct Recorder {
+    w: Watcher,
+    /// The row of the newest cycle so far, and that cycle.
+    pending: Option<(u64, String)>,
+}
+
+impl Recorder {
+    pub fn new(group: &str, tags: Vec<String>, stale_after: u64) -> Recorder {
+        Recorder {
+            w: Watcher::new(group, tags, stale_after),
+            pending: None,
+        }
+    }
+
+    pub fn header(&self) -> String {
+        csv(
+            "cycle",
+            "t",
+            self.w
+                .tags
+                .iter()
+                .flat_map(|t| [t.clone(), format!("{t}_stale")]),
+        )
+    }
+
+    /// `t` is seconds since the recording began. Returns the row of the cycle this datagram finished, if it did.
+    pub fn feed(&mut self, d: &[u8], t: f64) -> Option<String> {
+        let points = self.w.rx.accept(d).ok()?;
+        self.w.last.extend(points);
+        let cyc = self.w.rx.head();
+        let first_t = match &self.pending {
+            Some((c, row)) if *c == cyc => row.split(',').nth(1).and_then(|x| x.parse().ok()),
+            _ => None,
+        };
+        let row = self.row(cyc, first_t.unwrap_or(t));
+        match self.pending.replace((cyc, row)) {
+            Some((c, done)) if c != cyc => Some(done),
+            _ => None,
+        }
+    }
+
+    pub fn finish(&mut self) -> Option<String> {
+        self.pending.take().map(|(_, row)| row)
+    }
+
+    fn row(&self, cyc: u64, t: f64) -> String {
+        let cells = self.w.tags.iter().flat_map(|tag| {
+            match (self.w.last.get(tag), self.w.rx.quality(tag)) {
+                (Some(v), Some((q, _))) => {
+                    [v.to_string(), u8::from(q == Quality::Stale).to_string()]
+                }
+                _ => [String::new(), String::new()],
+            }
+        });
+        csv(cyc, format!("{t:.3}"), cells)
+    }
+}
+
 pub fn main(cli: ProbeCli) {
     exit_on_err("probe", USAGE, run(cli));
 }
@@ -369,13 +455,15 @@ fn listen(endpoint: &str) -> Result<UdpSocket, String> {
     Ok(s)
 }
 
-fn watch(endpoint: &str, mut w: Watcher, json: bool) -> Result<(), String> {
+/// Hands every datagram on `endpoint` to `on` until SIGINT/SIGTERM or `duration` seconds have passed.
+fn follow(endpoint: &str, duration: Option<f64>, mut on: impl FnMut(&[u8])) -> Result<(), String> {
     let sock = listen(endpoint)?;
     install_signals();
+    let end = duration.map(|d| Instant::now() + Duration::from_secs_f64(d));
     let mut buf = vec![0u8; 65536];
-    while !STOP.load(Ordering::SeqCst) {
+    while !STOP.load(Ordering::SeqCst) && end.is_none_or(|e| Instant::now() < e) {
         match sock.recv(&mut buf) {
-            Ok(n) => print(&w.feed(&buf[..n]), json),
+            Ok(n) => on(&buf[..n]),
             Err(e)
                 if matches!(
                     e.kind(),
@@ -387,6 +475,29 @@ fn watch(endpoint: &str, mut w: Watcher, json: bool) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn watch(endpoint: &str, mut w: Watcher, json: bool) -> Result<(), String> {
+    follow(endpoint, None, |d| print(&w.feed(d), json))
+}
+
+fn record(endpoint: &str, mut r: Recorder, out: &str, duration: Option<f64>) -> Result<(), String> {
+    let mut f = std::fs::File::create(out).map_err(|e| format!("{out}: {e}"))?;
+    let (mut start, mut err) = (None, None);
+    writeln!(f, "{}", r.header()).map_err(|e| e.to_string())?;
+    follow(endpoint, duration, |d| {
+        let t = start
+            .get_or_insert_with(Instant::now)
+            .elapsed()
+            .as_secs_f64();
+        if let Some(Err(e)) = r.feed(d, t).map(|row| writeln!(f, "{row}")) {
+            err.get_or_insert(e.to_string());
+        }
+    })?;
+    if let Some(row) = r.finish() {
+        writeln!(f, "{row}").map_err(|e| e.to_string())?;
+    }
+    err.map_or(Ok(()), Err)
 }
 
 fn ask(req: &mut dyn Requester, r: &[u8]) -> Result<Vec<u8>, String> {
@@ -423,18 +534,34 @@ fn run(cli: ProbeCli) -> Result<(), String> {
                 model,
             },
         ),
+        stream => stream_cmd(req, stream, json),
+    }
+}
+
+/// `watch` and `record`: the subcommands that listen on the publish endpoint.
+fn stream_cmd(req: &mut dyn Requester, cmd: Sub, json: bool) -> Result<(), String> {
+    match cmd {
+        Sub::Record {
+            out,
+            listen,
+            tags,
+            stale_after,
+            duration,
+        } => {
+            let tags = watched(req, tags)?;
+            let r = Recorder::new(&group_for(&listen), tags, stale_after);
+            record(&listen, r, &out, duration)
+        }
         Sub::Watch {
             listen,
             tags,
             stale_after,
         } => {
             let tags = watched(req, tags)?;
-            watch(
-                &listen,
-                Watcher::new(&group_for(&listen), tags, stale_after),
-                json,
-            )
+            let w = Watcher::new(&group_for(&listen), tags, stale_after);
+            watch(&listen, w, json)
         }
+        _ => unreachable!("not a stream subcommand"),
     }
 }
 

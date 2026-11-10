@@ -519,3 +519,102 @@ fn wait_for_polls_until_met_or_out_of_time() {
     let e = wait_for(&mut Canned(vec!["ACK=\0"]), &c, std::time::Duration::ZERO).unwrap_err();
     assert!(e.contains("empty reply"), "{e}");
 }
+
+#[test]
+fn recorder_writes_one_row_per_cycle_with_stale_flags() {
+    let g = group_for("udp://*;239.0.0.1:40000");
+    let dg = |msg: &str, seq: u64, cyc: u64| datagrams_msg(&g, msg, seq, cyc, 1).remove(0);
+    let mut r = Recorder::new(&g, s(&["a", "b"]), 2);
+    assert_eq!(r.header(), "cycle,t,a,a_stale,b,b_stale");
+    assert_eq!(r.feed(&dg("a:1,", 1, 1), 0.5), None); // cycle 1 is not done yet
+    assert_eq!(r.feed(&dg("b:2,", 2, 1), 0.6), None); // another chunk of cycle 1: same t, b joins
+    assert_eq!(r.feed(b"garbage", 0.7), None);
+    assert_eq!(r.feed(&dg("a:1,", 2, 1), 0.7), None); // a duplicate seq changes nothing
+    assert_eq!(
+        r.feed(&dg("a:3,", 3, 2), 1.0).as_deref(),
+        Some("1,0.500,1,0,2,0")
+    );
+    assert_eq!(
+        r.feed(&dg("a:4,", 4, 3), 1.5).as_deref(),
+        Some("2,1.000,3,0,2,0")
+    );
+    assert_eq!(
+        r.feed(&dg("a:5,", 5, 4), 2.0).as_deref(),
+        Some("3,1.500,4,0,2,1")
+    ); // b is 2 cycles behind
+    assert_eq!(r.finish().as_deref(), Some("4,2.000,5,0,2,1"));
+    assert_eq!(r.finish(), None);
+    let mut e = Recorder::new(&g, s(&["a", "b"]), 2);
+    assert_eq!(e.feed(&dg("a:1,", 1, 1), 0.0), None);
+    assert_eq!(e.finish().as_deref(), Some("1,0.000,1,0,,")); // b never seen: empty
+}
+
+#[test]
+fn record_to_csv_stops_after_duration() {
+    let port = free_port();
+    let listen = format!("udp://239.0.0.8:{port}");
+    let (_srv, ep) = server(&listen);
+    let dir = std::env::temp_dir().join(format!("ff-rec-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let csv = dir.join("run.csv");
+    let (ok, _, err) = probe(
+        &ep,
+        &[
+            "record",
+            "--out",
+            csv.to_str().unwrap(),
+            "--listen",
+            &listen,
+            "--tags",
+            "lowerwater.*",
+            "--duration",
+            "1.5",
+        ],
+        "",
+    );
+    assert!(ok, "{err}");
+    let text = std::fs::read_to_string(&csv).unwrap();
+    let mut lines = text.lines();
+    assert!(
+        lines.next().unwrap().starts_with("cycle,t,lowerwater."),
+        "{text}"
+    );
+    let rows: Vec<&str> = lines.collect();
+    assert!(rows.len() >= 2, "{text}");
+    let cols = text.lines().next().unwrap().split(',').count();
+    assert!(rows.iter().all(|r| r.split(',').count() == cols), "{text}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// README "Record": a changed value becomes `--write tag=value@t` for `ferrofire check`.
+const REPLAY: &str = r#"awk -F, 'NR==1{for(i=3;i<=NF;i++)h[i]=$i;next}{for(i=3;i<=NF;i++)if(h[i]!~/_stale$/&&$i!=""&&$i!=p[i]){print "--write";print h[i]"="$i"@"$2;p[i]=$i}}'"#;
+
+#[test]
+fn recorded_csv_replays_into_check() {
+    let dir = std::env::temp_dir().join(format!("ff-replay-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let csv = dir.join("run.csv");
+    std::fs::write(
+        &csv,
+        "cycle,t,lowervalve.open,lowervalve.open_stale\n1,0.000,0,0\n2,1.000,1,0\n3,2.000,1,0\n",
+    )
+    .unwrap();
+    let o = Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "{REPLAY} {} | xargs {BIN} check {MODEL} --steps 100",
+            csv.display()
+        ))
+        .output()
+        .unwrap();
+    let (out, err) = (
+        String::from_utf8_lossy(&o.stdout),
+        String::from_utf8_lossy(&o.stderr),
+    );
+    assert!(o.status.success() && !err.contains("ignored"), "{err}");
+    assert!(
+        out.contains("lowervalve.open=true") || out.contains("lowervalve.open=1"),
+        "{out}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
