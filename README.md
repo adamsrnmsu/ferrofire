@@ -9,6 +9,34 @@
 ferrofire is the **F**ield-to-**I**nfrastructure **R**untime **E**ngine: the simulated plant behind a
 [phēnix](https://github.com/sandialabs/sceptre-phenix) / SCEPTRE cyber range.
 
+## What we are building
+
+A SCEPTRE range has three layers:
+
+1. **The process**: a simulator (a *provider*) that computes what the physical plant is doing, such as water
+   levels, valve positions or bus voltages, many times a second.
+2. **The field devices**: the RTUs and PLCs. Each one is a VM that takes the values it cares about from the
+   provider, runs the device's own logic, and serves them to the control system over real industrial protocols
+   (Modbus, DNP3, IEC 60870-5-104 and others). Commands from the control system (open a valve, trip a breaker)
+   go back through the device to the provider.
+3. **The control system**: OPC, SCADA, HMI and historian VMs that talk to the field devices exactly as they would
+   to real hardware, and that red and blue teams attack and defend.
+
+[**bennu**](https://github.com/sandialabs/sceptre-bennu) is SCEPTRE's toolkit for layers 1 and 2: its
+**field device** (`bennu-field-deviced`) is the software RTU, and it also ships providers (a Simulink bridge and
+Python power-flow solvers) that layer 1 runs.
+
+ferrofire covers both layers, in Rust, as drop-ins for bennu's pieces:
+
+| | Replaces | Status |
+|---|---|---|
+| **Provider** (`ferrofire run`): a simple, fast process and power-flow simulator from a YAML model, no MATLAB, Simulink or PowerWorld | bennu's Simulink provider and PyPower solver | **Working**: runs the waterway range today with stock bennu RTUs |
+| **Field device**: the software RTU, speaking the same protocols and config files as `bennu-field-deviced`, plus more OT protocols | `bennu-field-deviced` | **In progress**: [spec](docs/field-device-spec.md); DNP3, IEC 61850 and ICCP first |
+| **Tools** (`probe`, `top`, `doctor`, `log`): read and write tags, watch live values and staleness, check a range's health | `bennu-probe`, reading log files | **In progress** |
+
+The wire between layers 1 and 2 is documented as [datagram v1](docs/datagram-v1.md), and every claim about it is
+measured: see [Results at a glance](docs/results.md).
+
 ## The name
 
 - **Ferro** is iron, the metal that rusts. ferrofire is written in Rust.
