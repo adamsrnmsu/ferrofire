@@ -168,7 +168,24 @@ ferrofire probe query                          # the tag list
 ferrofire probe read lock.height,lowergate.open
 ferrofire probe write lowervalve.open=1 --confirm
 ferrofire probe watch --listen 'udp://*;239.0.0.1:40000' [--tags a,b] [--stale-after 3]
+ferrofire probe play inject.yaml [--confirm] [--dry-run] [--keep-going] [--model m.yaml]
 ```
+
+`play` runs a script of timed writes (exercise injects): a YAML list of steps, each `at` seconds after the start (default 0, never
+earlier than the step before) with a `write: tag=val[,tag=val]` (globs as in `write`) and an optional `wait_for: "tag >= 3"` (`>= <= == != > <`,
+a number or `true`/`false`) that holds the step until the tag satisfies it (polled every 200 ms, fails after 60 s):
+
+```yaml
+- at: 0
+  write: lowervalve.open=1
+- at: 30
+  wait_for: lowerwater.height >= 4
+  write: lowervalve.open=0
+```
+
+It asks `[y/N]` once for the whole script unless `--confirm`, and every write prints the same audit line as `write`. The first step that
+fails (an `ERR=` from the provider, a `wait_for` that times out) stops the run; `--keep-going` plays on and exits non-zero at the end.
+`--dry-run` prints `dry run, at <t>s [once <cond>] would send WRITE=...` per step and sends nothing; `--model` checks every step first.
 
 `read`, `write` and `watch --tags` accept globs (`*`, `?`) expanded against the provider's QUERY: `read 'bus-*.voltage'`,
 `write --confirm 'valve-*.open=0'` (the value goes to every match). A glob that matches nothing is an error; plain names are

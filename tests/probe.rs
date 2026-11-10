@@ -344,3 +344,178 @@ fn write_checks_against_the_model_and_dry_run_sends_nothing() {
     );
     assert!(ok, "{err}");
 }
+
+#[test]
+fn scripts_and_conditions_parse() {
+    let steps = parse_script(
+        "- at: 0.5\n  write: a=1, b=2\n- at: 1\n  write: c=true\n  wait_for: c >= 3\n",
+    )
+    .unwrap();
+    assert_eq!(
+        (steps[0].at, steps[0].write.as_str(), steps[1].at),
+        (0.5, "a=1, b=2", 1.0)
+    );
+    for (y, want) in [
+        ("- at: -1\n  write: a=1\n", "step 1: `at: -1`"),
+        (
+            "- at: 2\n  write: a=1\n- at: 1\n  write: a=1\n",
+            "step 2: `at: 1`",
+        ),
+        ("- write: a\n", "step 1: `a`: expected tag=value"),
+        (
+            "- write: a=1\n  wait_for: a ~ 1\n",
+            "step 1: `a ~ 1`: expected",
+        ),
+        ("- write: a=1\n  wait_for: a > x\n", "`x` is not a number"),
+        ("- write: a=1\n  wait_for: '> 1'\n", "no tag before"),
+        ("- write: a=1\n  when: 1\n", "when"),
+        ("- at: 1\n", "write"),
+    ] {
+        let e = parse_script(y).unwrap_err();
+        assert!(e.contains(want), "{y}: {e}");
+    }
+    let c = |s: &str, v: f64| Cond::parse(s).unwrap().holds(v);
+    assert!(c("t >= 3", 3.0) && !c("t >= 3", 2.9));
+    assert!(c("t<=3", 3.0) && !c("t <= 3", 3.1));
+    assert!(c("t == 3", 3.0) && !c("t == 3", 4.0));
+    assert!(c("t != 3", 4.0) && !c("t != 3", 3.0));
+    assert!(c("t > 3", 3.1) && !c("t > 3", 3.0));
+    assert!(c("t < 3", 2.9) && !c("t < 3", 3.0));
+    assert!(c("x.open == true", 1.0));
+    assert_eq!(Cond::parse("a.b>=1"), Cond::parse(" a.b >= 1 "));
+}
+
+/// A write lands on the provider's next cycle, so poll the read until it shows `want`.
+fn eventually(ep: &str, tag: &str, want: &str) {
+    for _ in 0..40 {
+        let (_, out, _) = probe(ep, &["read", tag], "");
+        if out == format!("{tag}={want}\n") {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    panic!("{tag} never became {want}");
+}
+
+fn script(name: &str, body: &str) -> String {
+    let p = std::env::temp_dir().join(format!("ff-play-{}-{name}.yaml", std::process::id()));
+    std::fs::write(&p, body).unwrap();
+    p.to_string_lossy().into_owned()
+}
+
+#[test]
+fn play_runs_timed_writes_audited_and_dry_run_sends_nothing() {
+    let (_srv, ep) = server("udp://*;127.0.0.1:9");
+    let ok_script = script(
+        "ok",
+        "- at: 0\n  write: lowervalve.open=1\n- at: 0.4\n  write: lowervalve.open=0\n  wait_for: lowervalve.open >= 1\n",
+    );
+    let (ok, out, err) = probe(&ep, &["play", "--dry-run", &ok_script], "");
+    assert!(
+        ok && out.contains("dry run, at 0s would send WRITE=lowervalve.open:1,")
+            && out.contains("at 0.4s once lowervalve.open >= 1 would send")
+            && !err.contains("audit:"),
+        "{out}{err}"
+    );
+    let (_, out, _) = probe(&ep, &["read", "lowervalve.open"], "");
+    assert_eq!(out, "lowervalve.open=0\n", "dry run wrote");
+
+    let (ok, _, err) = probe(&ep, &["play", &ok_script], "n\n");
+    assert!(
+        !ok && err.contains("not confirmed") && !err.contains("audit:"),
+        "{err}"
+    );
+
+    let t = std::time::Instant::now();
+    let (ok, _, err) = probe(&ep, &["play", "--confirm", &ok_script], "");
+    assert!(ok && t.elapsed().as_millis() >= 400, "{err}");
+    assert_eq!(err.matches("audit: write").count(), 2, "{err}");
+    assert!(err.contains("points=lowervalve.open=1 result=ACK"), "{err}");
+    eventually(&ep, "lowervalve.open", "0");
+
+    // --model rejects a bad value anywhere in the script before step 1 is sent
+    let bad = script(
+        "bad",
+        "- write: lowervalve.open=1\n- write: lowervalve.open=5\n",
+    );
+    let (ok, _, err) = probe(&ep, &["play", "--confirm", "--model", MODEL, &bad], "");
+    assert!(
+        !ok && err.contains("step 2:") && !err.contains("audit:"),
+        "{err}"
+    );
+    assert!(!probe(&ep, &["play", "--confirm", "/no/such.yaml"], "").0);
+}
+
+#[test]
+fn play_aborts_on_err_unless_keep_going() {
+    let (_srv, ep) = server("udp://*;127.0.0.1:9");
+    let s = script(
+        "err",
+        "- write: lowervalve.opn=1\n- write: lowervalve.open=1\n",
+    );
+    let (ok, _, err) = probe(&ep, &["play", "--confirm", &s], "");
+    assert!(
+        !ok && err.contains("did you mean `lowervalve.open`")
+            && err.contains("step 1 failed")
+            && err.matches("audit:").count() == 1,
+        "{err}"
+    );
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let (_, out, _) = probe(&ep, &["read", "lowervalve.open"], "");
+    assert_eq!(out, "lowervalve.open=0\n", "step 2 ran after step 1 failed");
+    let (ok, _, err) = probe(&ep, &["play", "--confirm", "--keep-going", &s], "");
+    assert!(
+        !ok && err.contains("1 step(s) failed") && err.matches("audit:").count() == 2,
+        "{err}"
+    );
+    eventually(&ep, "lowervalve.open", "1");
+}
+
+#[test]
+fn play_wait_for_blocks_until_the_tag_changes() {
+    let (_srv, ep) = server("udp://*;127.0.0.1:9");
+    let s = script(
+        "wait",
+        "- write: lowergate.open=1\n  wait_for: lowervalve.open == 1\n",
+    );
+    let mut p = Command::new(BIN)
+        .args(["probe", "--server", &ep, "play", "--confirm", &s])
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(700));
+    assert!(p.try_wait().unwrap().is_none(), "did not wait");
+    assert!(probe(&ep, &["write", "--confirm", "lowervalve.open=1"], "").0);
+    assert!(p.wait().unwrap().success());
+    eventually(&ep, "lowergate.open", "1");
+}
+
+struct Canned(Vec<&'static str>);
+impl ferrofire::transport::Requester for Canned {
+    fn call(&mut self, _: &[u8]) -> Result<Vec<u8>, String> {
+        Ok(self.0.remove(0).as_bytes().to_vec())
+    }
+}
+
+#[test]
+fn wait_for_polls_until_met_or_out_of_time() {
+    let c = Cond::parse("t >= 3").unwrap();
+    let mut r = Canned(vec!["ACK=t:1,\0", "ACK=t:3,\0"]);
+    assert_eq!(
+        wait_for(&mut r, &c, std::time::Duration::from_secs(5)),
+        Ok(())
+    );
+    assert!(r.0.is_empty());
+    let mut r = Canned(vec!["ACK=t:1,\0"]);
+    let e = wait_for(&mut r, &c, std::time::Duration::ZERO).unwrap_err();
+    assert!(e.contains("t >= 3") && e.contains("not met"), "{e}");
+    let e = wait_for(
+        &mut Canned(vec!["ACK=t:x,\0"]),
+        &c,
+        std::time::Duration::ZERO,
+    )
+    .unwrap_err();
+    assert!(e.contains("not a number"), "{e}");
+    let e = wait_for(&mut Canned(vec!["ACK=\0"]), &c, std::time::Duration::ZERO).unwrap_err();
+    assert!(e.contains("empty reply"), "{e}");
+}

@@ -2,18 +2,20 @@
 //! socket; `watch` decodes its datagrams (datagram v1) and shows each tag's value, age in publish periods, stale flag and
 //! the count of datagrams missing from the `_ff.seq` run. `--json` prints one JSON object per line.
 
-use crate::bennu::{exit_on_err, group_for, install_signals, parse_udp, parse_value, STOP};
+use crate::bennu::{
+    exit_on_err, group_for, install_signals, parse_udp, parse_value, sleep_until, STOP,
+};
 use crate::datagram::{Quality, Receiver};
-use crate::model::Model;
+use crate::model::{Model, Value};
 use crate::pull::{requests, update_msg, validate};
 use crate::transport::{self, Requester, DEFAULT_PUBLISH};
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use std::sync::atomic::Ordering;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const USAGE: &str = "ferrofire probe [--server tcp://127.0.0.1:5555] [--json] (query | read a,b | write a=1,b=2 [--confirm] [--dry-run] [--model m.yaml] | watch [--listen udp://*;239.0.0.1:40000] [--tags a,b])";
+const USAGE: &str = "ferrofire probe [--server tcp://127.0.0.1:5555] [--json] (query | read a,b | write a=1,b=2 [--confirm] [--dry-run] [--model m.yaml] | play script.yaml [--confirm] [--dry-run] [--keep-going] [--model m.yaml] | watch [--listen udp://*;239.0.0.1:40000] [--tags a,b])";
 
 #[derive(Debug, clap::Parser)]
 #[command(name = "ferrofire probe")]
@@ -50,6 +52,23 @@ enum Sub {
         /// Check the values and print the request that would be sent, send nothing
         #[arg(long)]
         dry_run: bool,
+        /// Model YAML to check types and min/max against before sending
+        #[arg(long, value_name = "FILE")]
+        model: Option<String>,
+    },
+    /// Play a script of timed writes (exercise injects); audited like `write`
+    Play {
+        /// YAML list of `{at: seconds, write: tag=val[,..], wait_for: "tag >= 3"}`
+        script: String,
+        /// Do not ask before playing
+        #[arg(long)]
+        confirm: bool,
+        /// Check the script and print each step, send nothing
+        #[arg(long)]
+        dry_run: bool,
+        /// Go on after a step fails (the exit status still reports it)
+        #[arg(long)]
+        keep_going: bool,
         /// Model YAML to check types and min/max against before sending
         #[arg(long, value_name = "FILE")]
         model: Option<String>,
@@ -387,6 +406,23 @@ fn run(cli: ProbeCli) -> Result<(), String> {
             dry_run,
             model,
         } => write(req, &cli.server, points, (confirm, dry_run, model)),
+        Sub::Play {
+            script,
+            confirm,
+            dry_run,
+            keep_going,
+            model,
+        } => play(
+            req,
+            &cli.server,
+            &script,
+            Flags {
+                confirm,
+                dry_run,
+                keep_going,
+                model,
+            },
+        ),
         Sub::Watch {
             listen,
             tags,
@@ -451,7 +487,17 @@ fn write(
         return Ok(());
     }
     confirmed(confirm, points, std::io::stdin().lock())?;
-    let res = req.call(&r).and_then(|reply| update_msg(&reply));
+    send_write(req, server, &r, points)
+}
+
+/// Send a write (once: it is not retried), then the audit line, whatever the provider said.
+fn send_write(
+    req: &mut dyn Requester,
+    server: &str,
+    r: &[u8],
+    points: &[String],
+) -> Result<(), String> {
+    let res = req.call(r).and_then(|reply| update_msg(&reply));
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_millis());
@@ -507,4 +553,200 @@ fn expand_points(req: &mut dyn Requester, points: Vec<String>) -> Result<Vec<Str
         }
     }
     Ok(out)
+}
+
+/// One line of a `play` script: write `write` at `at` seconds after the start, once `wait_for` (if any) holds.
+#[derive(Debug, PartialEq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Step {
+    #[serde(default)]
+    pub at: f64,
+    pub write: String,
+    pub wait_for: Option<String>,
+}
+
+impl Step {
+    fn points(&self) -> Vec<String> {
+        self.write.split(',').map(|p| p.trim().into()).collect()
+    }
+}
+
+/// The script's steps, checked: `at` finite, non-negative and not going back in time; each write and condition well formed.
+pub fn parse_script(yaml: &str) -> Result<Vec<Step>, String> {
+    let steps: Vec<Step> = serde_saphyr::from_str(yaml).map_err(|e| e.to_string())?;
+    let mut prev = 0.0;
+    for (i, s) in steps.iter().enumerate() {
+        let n = i + 1;
+        if !s.at.is_finite() || s.at < prev {
+            return Err(format!(
+                "step {n}: `at: {}` must be >= 0 and not earlier than the step before",
+                s.at
+            ));
+        }
+        prev = s.at;
+        write_request(&s.points()).map_err(|e| format!("step {n}: {e}"))?;
+        if let Some(c) = &s.wait_for {
+            Cond::parse(c).map_err(|e| format!("step {n}: {e}"))?;
+        }
+    }
+    Ok(steps)
+}
+
+/// A number, or `true`/`false` as 1/0.
+fn number(s: &str) -> Option<f64> {
+    parse_value(s).map(|v| match v {
+        Value::Analog(v) => v,
+        Value::Binary(b) => b as u8 as f64,
+    })
+}
+
+/// `tag >= 3`: a tag, a comparison and a number (or `true`/`false`).
+#[derive(Debug, PartialEq)]
+pub struct Cond {
+    tag: String,
+    op: &'static str,
+    rhs: f64,
+}
+
+impl Cond {
+    pub fn parse(s: &str) -> Result<Cond, String> {
+        // longest operators first, so `>=` is not read as `>`
+        let (i, op) = [">=", "<=", "==", "!=", ">", "<"]
+            .into_iter()
+            .filter_map(|op| s.find(op).map(|i| (i, op)))
+            .min_by_key(|&(i, op)| (i, -(op.len() as i32)))
+            .ok_or_else(|| format!("`{s}`: expected `tag >= value` (or <=, ==, !=, >, <)"))?;
+        let (tag, rhs) = (s[..i].trim(), s[i + op.len()..].trim());
+        let rhs = number(rhs).ok_or_else(|| format!("`{s}`: `{rhs}` is not a number"))?;
+        if tag.is_empty() {
+            return Err(format!("`{s}`: no tag before `{op}`"));
+        }
+        Ok(Cond {
+            tag: tag.into(),
+            op,
+            rhs,
+        })
+    }
+
+    pub fn holds(&self, v: f64) -> bool {
+        match self.op {
+            ">=" => v >= self.rhs,
+            "<=" => v <= self.rhs,
+            "==" => v == self.rhs,
+            "!=" => v != self.rhs,
+            ">" => v > self.rhs,
+            _ => v < self.rhs,
+        }
+    }
+}
+
+/// How long a `wait_for` may take before the step fails. ponytail: fixed; make it a script field if a scenario needs longer.
+const WAIT_LIMIT: Duration = Duration::from_secs(60);
+const WAIT_POLL: Duration = Duration::from_millis(200);
+
+/// Poll the provider until `c` holds or `limit` passes (`limit` 0: one look).
+pub fn wait_for(req: &mut dyn Requester, c: &Cond, limit: Duration) -> Result<(), String> {
+    let end = Instant::now() + limit;
+    loop {
+        let reply = ask(req, &requests(std::slice::from_ref(&c.tag))[0])?;
+        let row = read_rows(&reply)?.pop().ok_or("empty reply")?;
+        let v = number(&row.value)
+            .ok_or_else(|| format!("`{}` is `{}`, not a number", row.tag, row.value))?;
+        if c.holds(v) {
+            return Ok(());
+        }
+        if Instant::now() >= end {
+            return Err(format!(
+                "wait_for `{} {} {}` not met in time",
+                c.tag, c.op, c.rhs
+            ));
+        }
+        sleep_until(Instant::now() + WAIT_POLL, WAIT_POLL);
+    }
+}
+
+struct Flags {
+    confirm: bool,
+    dry_run: bool,
+    keep_going: bool,
+    model: Option<String>,
+}
+
+/// The script at `path`, parsed and (with `--model`) every write checked against the model before anything is sent.
+fn load_script(path: &str, model: Option<&str>) -> Result<Vec<Step>, String> {
+    let steps = parse_script(&std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?)?;
+    if let Some(m) = model {
+        let yaml = std::fs::read_to_string(m).map_err(|e| format!("{m}: {e}"))?;
+        let model = Model::load_in(&yaml, std::path::Path::new(m).parent())?;
+        for (i, s) in steps.iter().enumerate() {
+            check_points(&model, &s.points()).map_err(|e| format!("step {}: {e}", i + 1))?;
+        }
+    }
+    Ok(steps)
+}
+
+fn dry_run_lines(steps: &[Step]) -> Result<Vec<String>, String> {
+    steps
+        .iter()
+        .map(|s| {
+            let r = String::from_utf8_lossy(&write_request(&s.points())?).into_owned();
+            let w = s
+                .wait_for
+                .as_ref()
+                .map_or(String::new(), |c| format!(" once {c}"));
+            Ok(format!("dry run, at {}s{w} would send {r}", s.at))
+        })
+        .collect()
+}
+
+/// Play the script: each step at its time since the start, its `wait_for` first, then the write with an audit line.
+/// A failing step stops the run unless `--keep-going`, which finishes the script and then reports how many failed.
+fn play(req: &mut dyn Requester, server: &str, path: &str, f: Flags) -> Result<(), String> {
+    let steps = load_script(path, f.model.as_deref())?;
+    if f.dry_run {
+        print_lines(dry_run_lines(&steps)?.into_iter());
+        return Ok(());
+    }
+    let all: Vec<String> = steps.iter().flat_map(Step::points).collect();
+    confirmed(f.confirm, &all, std::io::stdin().lock())?;
+    run_steps(req, server, &steps, f.keep_going)
+}
+
+fn run_steps(
+    req: &mut dyn Requester,
+    server: &str,
+    steps: &[Step],
+    keep_going: bool,
+) -> Result<(), String> {
+    install_signals();
+    let start = Instant::now();
+    let mut failed = 0;
+    for (i, s) in steps.iter().enumerate() {
+        sleep_until(
+            start + Duration::from_secs_f64(s.at),
+            Duration::from_millis(50),
+        );
+        if STOP.load(Ordering::SeqCst) {
+            return Err("interrupted".into());
+        }
+        if let Err(e) = run_step(req, server, s) {
+            eprintln!("step {}: {e}", i + 1);
+            failed += 1;
+            if !keep_going {
+                return Err(format!("step {} failed", i + 1));
+            }
+        }
+    }
+    match failed {
+        0 => Ok(()),
+        n => Err(format!("{n} step(s) failed")),
+    }
+}
+
+fn run_step(req: &mut dyn Requester, server: &str, s: &Step) -> Result<(), String> {
+    if let Some(c) = &s.wait_for {
+        wait_for(req, &Cond::parse(c)?, WAIT_LIMIT)?;
+    }
+    let points = expand_points(req, s.points())?;
+    send_write(req, server, &write_request(&points)?, &points)
 }
