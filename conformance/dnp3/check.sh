@@ -9,3 +9,7 @@ want_field "$pcap" 'dnp3.al.func == 5'   dnp3.al.index 5      # ... on binary-ou
 want_field "$pcap" 'dnp3.al.func == 129' dnp3.al.obj 0x0c01   # echoed in the response
 want_field "$pcap" 'dnp3.al.func == 5'   dnp3.al.obj 0x2903   # analog output float g41v3
 want_field "$pcap" 'dnp3.al.func == 129' dnp3.src 10          # responses come from outstation address 10
+# what the master reported for each command (peer.out): CROB accepted, SBO analog refused without a select, direct analog accepted
+grep -q 'Index: 5 State: SUCCESS Status: SUCCESS' "$out/peer.out" && pass "master: CROB idx 5 SUCCESS" || fail "master: CROB idx 5 not SUCCESS"
+grep -q 'Index: 1 State: SUCCESS Status: NO_SELECT' "$out/peer.out" && pass "master: SBO analog idx 1 NO_SELECT" || fail "master: SBO analog idx 1 not refused"
+grep -q 'Index: 2 State: SUCCESS Status: SUCCESS' "$out/peer.out" && pass "master: analog idx 2 SUCCESS" || fail "master: analog idx 2 not SUCCESS"

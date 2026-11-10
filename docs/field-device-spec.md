@@ -329,6 +329,43 @@ Stock behaviour (source + `O:` transcript from `conformance/stock/probe_dnp3.py`
   A write only enqueues the tag (§3.2); the master sees it in the database after the provider echo + the next 1 Hz refresh.
 - Link layer: unconfirmed user data `ctrl 0x44` from the outstation; responses CRC-framed by the library.
 
+#### 4.2.1 F3 findings (2026-11-10, from `conformance/dnp3/stock-*.{golden,trace,logs}`, ww-otj.44; `O:`)
+
+Recorded from the stock `bennu:arm64` outstation with `probe_diff.py` and `probe_big.py`, and implemented in `src/fd/proto/dnp3/`
+(link, transport, app, db, read, command, outstation). Where this contradicts the text above, this wins.
+
+- **Link**: only master address 1 is heard (`respondToAnyMaster` false); destination = outstation address or 0xFFFD-0xFFFF (acted on,
+  never answered; the next response carries IIN1.0 BROADCAST once). DIR must be set, PRM set. RESET LINK STATES -> ACK and the
+  next FCB must be 1; TEST LINK STATES is answered (ACK) only with FCV set, after a reset, and with the expected FCB; CONFIRMED USER
+  DATA before a reset is ignored, after one it is ACKed always and delivered unless the FCB repeats; REQUEST LINK STATUS -> LINK STATUS
+  (0x0B). Responses are unconfirmed user data (0x44); the transport sequence number belongs to the device, not the connection.
+- **Application**: a request must be one fragment (FIR+FIN); unsolicited bit and CONFIRM-less multi-fragment requests are dropped.
+  READ of an unknown object (g99, g60v9) refuses the whole request with OBJECT_UNKNOWN; a count qualifier on static data, or any
+  qualifier on an event read other than all/count, is NO_FUNC_CODE_SUPPORT; a truncated header or an unknown qualifier is
+  PARAMETER_ERROR; a range with missing indices returns what exists and sets PARAMETER_ERROR. Known groups without points
+  (g3 g4 g10 g11 g20-g23 g40 g42) answer empty; g50 g51 g52 g80 g12 g41 cannot be read (NO_FUNC). Cold/warm restart, enable/disable
+  unsolicited, unknown and response function codes: NO_FUNC_CODE_SUPPORT; DELAY MEASURE g52v2 0 ms; IMMED FREEZE, ASSIGN CLASS,
+  RECORD CURRENT TIME: empty reply. WRITE g80v1 index 7 value 0 clears DEVICE_RESTART, WRITE g50v1 clears NEED_TIME, which comes
+  back 30 s later; anything else is PARAMETER_ERROR.
+- **Static data**: one range header per run of consecutive indices with the same variation, packed bits for g1v1; **range
+  qualifier 0x01 (two-octet) for every header of a type that has a point above index 255**, else 0x00. Variations convert on read
+  (g30v1..v6, saturating with OVER_RANGE 0x20, truncating toward zero). Events are written **before** static data, in the order
+  they happened across both types, as the variation asked for (g2v3 needs a g51v2 CTO first; analog times are the provider
+  timestamp in seconds placed in the millisecond field).
+- **Events**: 100 per type, the oldest dropped on overflow (IIN2.3 until a confirm leaves room); a point makes an event only if it
+  is an input and its flags or value changed; selected events leave IIN1.1; a new request, or 5 s without CONFIRM, returns them.
+- **Fragments**: 2048 bytes, filled exactly (a range is split mid-way); CON on every non-final fragment and on any fragment with
+  events; the next fragment only on a CONFIRM with the right sequence number.
+- **Commands**: as 4.2 above, plus: SELECT is remembered only if every object succeeded, OPERATE must follow with sequence+1, the
+  same object bytes, within 10 s, and uses the selection up either way; a failed OPERATE reports NO_SELECT for every object; DIRECT
+  OPERATE NO ACK acts and stays silent; CROB code is `code & 0x0F == 3` (LATCH_ON), so `0x43` (close+latch on) is true; an
+  analog-output index is looked up in the analog map only, a CROB index in the binary map only; g41 variations other than 3 (float)
+  are acknowledged and written nowhere (Q6), even for an unknown index.
+- **Config**: binary-input, binary-output, analog-input, analog-output in that order into one map per kind, a later element at
+  the same address replacing the earlier; `sgvar`, `egvar`, `class`, `deadband` are refused (the generator never emits them).
+- **Differential method**: a stand-in provider REP socket is required, otherwise stock applies queued writes only after its client
+  gives up (about 15-20 s) and the transcript cannot be pinned; devices share the multicast group, so probe runs must not overlap.
+
 ### 4.3 IEC 60870-5-104 slave (`<iec60870-5-104-server>`)
 
 Config: `endpoint` (tcp only; otherwise logs `Unknown endpoint protocol` and no server), `rpoll-rate` seconds (**required**), `subtype` (**required**; contains `double` → double-point mode, else single),

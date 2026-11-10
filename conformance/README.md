@@ -4,6 +4,7 @@ Judges a field-device protocol the way a blue team sees it: capture the wire, th
 
     make testpeers                  # once: build the ferrofire-testpeers image (about 10 min; docker/testpeers/Dockerfile)
     make conformance PROTO=dnp3     # peers vs the stock oracle (bennu:arm64); exit 0 = PASS
+    DUT=rust make conformance PROTO=dnp3   # the same peers and judgement against our binary (FF_BIN, default target-linux/debug/ferrofire)
     make conformance-selftest       # negative control: a damaged and an empty capture must be rejected
 
 Output lands in `target/conformance/<PROTO>/`: the pcap, `peer.out`, `dut.out`, `zeek/*.log`.
@@ -27,7 +28,7 @@ Files go in and out with `docker cp` (no bind mounts: the Lima docker daemon can
 
 ## Pointing it at another device
 `DUT_IMAGE=<image> DUT_CMD='<command reading /tmp/cfg.xml>' conformance/run.sh dnp3` (the config is `CFG`, default the stock sample from
-`BENNU_DATA`, default `~/git/sceptre-bennu/data/configs/ep`). The binary must be in `DUT_IMAGE`. With `DUT` unset the oracle is
+`BENNU_DATA`, default `~/git/sceptre-bennu/data/configs/ep`; for DNP3 it is `conformance/dnp3/server.xml`, because the stock parser exits silently on an XML comment before the root element). The binary must be in `DUT_IMAGE`. With `DUT` unset the oracle is
 `bennu:arm64` (SPEC section 8), so run on the daemon that has it: the Makefile defaults `TP_DOCKER_HOST` to the Lima socket.
 
 ## Differential and golden replay (DNP3)
