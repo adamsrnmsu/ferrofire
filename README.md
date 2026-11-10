@@ -124,7 +124,7 @@ ferrofire pull-bridge --server tcp://provider:5555 --transport zmq --rate 100 \
 ```
 
 `--tags-from` takes the names of the `<analog>`/`<binary>` points in the config's `<input>` (or give `--tags a,b,c`); `--rate` is
-in ms; `--publish` must be the same string as the field device's `<input><endpoint>` (point the device at the loopback endpoint).
+in ms; `--publish` must be the same string as the field device's `<input><endpoint>` (point the device at the loopback endpoint; a stock bennu field device accepts a plain unicast `udp://127.0.0.1:40000`, checked live on the waterway range).
 A request that times out is retried once; if that fails too nothing is published (the field device keeps its last values, as
 when a push provider goes quiet) and one line is logged per outage. Writes are untouched: the device still `WRITE`s to the provider.
 Numbers: [docs/bench/transport-comparison.md](docs/bench/transport-comparison.md#pull-bridge-prototype-ww-otj11).

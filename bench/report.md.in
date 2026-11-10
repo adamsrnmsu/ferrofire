@@ -270,9 +270,31 @@ What it shows:
 - **Provider CPU is higher for pull, not lower**: 15-25% of a core at 100 Hz (8 REQ streams at 100 Hz = 800 requests/s) against 11% for zmq push and 15-16% for nng push to 8 subscribers; at 10 Hz 4-6% vs 4%. Each request is a full round trip on the provider's single REP thread (not profiled further; the per-tag linear lookup in `READ` is one suspect).
 - **Staleness is unchanged within noise** (p50 2-7 ms, p99 6-10 ms for pull; 5 ms and 13 ms for nng push; both small against the 10 ms engine tick): the bridge pulls fresh values and republishes immediately, so pull adds no scan-rate delay on top; the value is as old as the last engine tick plus one round trip. The scan rate is what bounds freshness (a 10 Hz pull can show a value up to 100 ms old to the device if the device scans in between), which this ageing measure does not capture.
 - Writes were not exercised here (the field device still WRITEs to the provider as before).
-- Not measured: a live check on the waterway-arm64 range (rtu-1/rtu-2) and a stock bennu field device in front of the bridge; the bridge's republish format is tested against the RADIO framing and the nng subscriber in `tests/pull.rs`, not against stock bennu.
+- Not measured in the bench container: a stock bennu field device in front of the bridge and writes (both done on the live range, see the next subsection); the bridge's republish format is also tested against the RADIO framing and the nng subscriber in `tests/pull.rs`.
 
 Reproduce: `MODE=pull python3 bench/run.py; MODE=push TRANSPORTS=nng python3 bench/run.py; python3 bench/pull_report.py`.
+
+### Live check on the waterway-arm64 range (ww-otj.10)
+
+*Real VMs, not the bench container: provider VM `waterway-provider` and RTU VMs `rtu-1` (10 tags) / `rtu-2` (8 tags) of the `waterway-arm64` experiment (aarch64 Linux guests, stock `bennu-field-device`, 10 Hz publish). Scripts in `bench/live/`. One 30 s capture per cell, not repeated, so treat the numbers as single samples.*
+
+Setup: the stock provider (`bennu-simulink-provider` + `simulinksolver`) cannot answer a batched `READ`, so it was replaced by `ferrofire run waterway.yaml` on the same endpoints (`tcp://172.16.1.2:5555`; publish `udp://*;239.0.0.1:40000` for push, `udp://127.0.0.1:40000` (nobody listening, no traffic) for pull). On each RTU the daemon and watcher were stopped, `config.xml` copied with only `<input><endpoint>` changed to `udp://127.0.0.1:40000`, `ferrofire pull-bridge --tags-from <copy> --publish udp://127.0.0.1:40000` started, and the stock `bennu-field-device --file <copy>` started. Traffic is a `tcpdump` on the provider's and RTUs' mgmt NIC (172.16.1.0/16) for `udp 40000 or tcp 5555`, frame bytes.
+
+What worked, exactly:
+
+- **A plain loopback unicast endpoint `udp://127.0.0.1:40000` works with stock bennu.** Its DISH binds `127.0.0.1:40000` and joins the group; the bridge's RADIO group hash (`9ceaac3fa29ea7c`) is derived from the endpoint string, so the bridge and the device agree as long as `--publish` is the identical string. A loopback multicast group was not needed.
+- **Modbus tracks the process behind the bridge.** Input registers 30000-30009 on rtu-1 (`10.1.1.101:502`), sampled every 2 s from a fresh provider start: `boat.location` rose 3375 -> 12582 and `lock.height` 327 -> 896 (the lock filling after the boat entered), `lowersensor`/`locksensor` active flags switched 65/0 -> 0/65 at the right moment, at both 100 ms and 1000 ms scan. Same shape as the push run (boat 6143 -> 14384, lock 327 -> 983 over the same kind of window).
+- **Writes still reach the provider.** `FC6` write of 65535 to rtu-2 holding register 40001 (`uppervalve.open`): the provider (`bennu-probe read`) read 0 before, 1 at t+2 s, then 0 again from t+3 s because the RTU's own logic rewrote the output on its next cycle (that is the RTU logic, not the bridge).
+- **Restore.** `bennu-watcherd restart` alone does not start the device; the originals were brought back with `bennu-field-deviced --c restart --env default --file /etc/sceptre/config.xml`, after which Modbus reads on both RTUs returned live values from the (ferrofire push) provider on the stock multicast endpoint. Stopping the experiment discards the rest.
+
+| Provider-link traffic, 2 RTUs (30 s) | Provider NIC, all udp/40000 + tcp/5555 | Per RTU NIC | Provider CPU (core %, 30 s of `/proc` utime+stime) |
+|---|---|---|---|
+| push, stock `bennu-simulink-provider` (10 Hz multicast) | 3555 B/s (udp) + 28 B/s (tcp) | 3.7 KB/s (the same one stream) | 1.0% (provider + solver) |
+| push, `ferrofire run` (10 Hz multicast) | 3660 B/s (udp) + 48 B/s (tcp) | 3.8 KB/s | 1.4% |
+| pull, `--rate 100` ms | **11665 B/s** (tcp) | 5.3 KB/s (rtu-2), 6.0 KB/s (rtu-1) | 2.1% |
+| pull, `--rate 1000` ms | **1206 B/s** (tcp) | 0.55 KB/s (rtu-2), 0.65 KB/s (rtu-1) | 0.6% |
+
+Reading: on this range multicast is one 3.6 KB/s stream no matter how many RTUs listen, and pull is one request/reply stream per RTU, so with 2 RTUs a 10 Hz pull costs 3.3x the bytes of push (the replies are tiny, so TCP/ZMTP framing dominates: about 32 packets/s per RTU) while a 1 Hz pull costs 0.34x. The field device's `cycle-time` is 1000 ms, so a 1 s scan is enough for these RTUs; break-even against the multicast stream is about 5-6 RTUs at 1 Hz and under 1 at 10 Hz. Provider CPU is again slightly higher for pull. The pull win on the wire only appears where push has no multicast (nng/TCP) or the RTUs need a small slice of many tags (see the bench numbers above). Caveats: one run per cell, the ferrofire waterway model plays one transit then idles (stock provider behaviour at the start of the run was not compared), pull-bridge and field device CPU on the RTUs were not separated, and nng was not exercised live (zmq only).
 
 ## Caveats
 
