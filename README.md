@@ -158,6 +158,27 @@ provider goes quiet) and the failure is logged with the provider's text, then re
 while a slow request was pending are skipped, not replayed back to back. Writes are untouched: the device still `WRITE`s to the provider.
 Numbers: [docs/bench/transport-comparison.md](docs/bench/transport-comparison.md#pull-bridge-prototype-ww-otj11).
 
+## Probe
+
+`ferrofire probe` is the operator's view of a provider (the bennu-probe equivalent). `--server` (default `tcp://127.0.0.1:5555`),
+`--json` (one JSON object per line) and `--timeout-ms` go before or after the subcommand.
+
+```
+ferrofire probe query                          # the tag list
+ferrofire probe read lock.height,lowergate.open
+ferrofire probe write lowervalve.open=1 --confirm
+ferrofire probe watch --listen 'udp://*;239.0.0.1:40000' [--tags a,b] [--stale-after 3]
+```
+
+`read` and `write` surface the provider's `did you mean` errors. A request that times out is retried once (a write is not).
+`write` asks `[y/N]` on stdin unless `--confirm`, and prints one audit line on stderr whether the provider accepted it or not:
+`audit: write t=<unix ms> by=<user>@pid<N> server=<endpoint> points=a=1 result=ACK`.
+`watch` decodes datagram v1 and prints a line whenever a tag's value or stale flag changes: `lock.height=4.2 age=0 ok gaps=0`.
+`age` is in publish periods (how far the tag is behind the newest `_ff.cyc`), `STALE` appears after `--stale-after` missed periods
+(the value is held, not live), `gaps` counts datagrams missing from the `_ff.seq` run. With no `--tags` it watches every tag
+the provider has (`QUERY`). Limit: it binds the publish port without `SO_REUSEADDR`, so it cannot run on a host where another
+subscriber already holds that port.
+
 ## Quick start
 
 - The compiler is pinned in `rust-toolchain.toml` (exact version, with `rust-version` in `Cargo.toml` and `docker/Dockerfile` kept in step; `tests/toolchain.rs` checks it). To bump: change all three, then `docker build -t ff-rust:22.04 docker`.

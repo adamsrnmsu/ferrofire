@@ -37,6 +37,8 @@ enum Cmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Query, read, write and watch tags on a running provider (bennu-probe equivalent)
+    Probe(ferrofire::probe::ProbeCli),
     /// Print a shell completion script
     Completions { shell: clap_complete::Shell },
 }
@@ -57,12 +59,17 @@ fn main() {
     if by_install_name(prog, rest) {
         return;
     }
-    match Cli::parse().cmd {
+    dispatch(Cli::parse().cmd);
+}
+
+fn dispatch(cmd: Cmd) {
+    match cmd {
         Cmd::Run(a) => ferrofire::bennu::main(a),
         Cmd::PullBridge(a) => ferrofire::pull::main(a),
         Cmd::Pypower(a) => ferrofire::pypower::run_cli(a),
         Cmd::Simulink { args } => ferrofire::simulink::main(&args),
         Cmd::Log { args } => ferrofire::log::main(&args),
+        Cmd::Probe(a) => ferrofire::probe::main(a),
         Cmd::Check(a) => check(a),
         Cmd::Completions { shell } => completions(shell),
     }

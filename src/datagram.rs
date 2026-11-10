@@ -41,6 +41,8 @@ pub struct Receiver {
     /// Newest `_ff.cyc` seen in any datagram: a tag's age is how far it is behind this.
     head: u64,
     stale_after: u64,
+    /// Datagrams skipped between consecutive `_ff.seq` values (a late arrival of one takes it back).
+    gaps: u64,
 }
 
 impl Receiver {
@@ -53,7 +55,13 @@ impl Receiver {
             cyc: HashMap::new(),
             head: 0,
             stale_after: 3,
+            gaps: 0,
         }
+    }
+
+    /// Datagrams missing from the `_ff.seq` run so far.
+    pub fn gaps(&self) -> u64 {
+        self.gaps
     }
 
     /// Missed publish periods after which a held value turns `Stale` (default 3).
@@ -149,6 +157,11 @@ impl Receiver {
         let (s, lt) = self.newest.unwrap_or((seq, t));
         if seq + WINDOW <= s || self.seen.contains(&seq) {
             return true;
+        }
+        if seq > s + 1 {
+            self.gaps += seq - s - 1;
+        } else if seq < s {
+            self.gaps = self.gaps.saturating_sub(1);
         }
         self.newest = Some((s.max(seq), lt.max(t)));
         self.seen.truncate(WINDOW as usize - 1);

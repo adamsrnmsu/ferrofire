@@ -10,6 +10,7 @@ pub mod hint;
 pub mod log;
 pub mod model;
 pub mod power;
+pub mod probe;
 pub mod pull;
 pub mod pypower;
 pub mod simulink;
