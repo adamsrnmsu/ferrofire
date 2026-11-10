@@ -178,6 +178,10 @@ provider queried), and `ferrofire completions bash|zsh|fish` completes tag names
 `read` and `write` surface the provider's `did you mean` errors. A request that times out is retried once (a write is not).
 `write` asks `[y/N]` on stdin unless `--confirm`, and prints one audit line on stderr whether the provider accepted it or not:
 `audit: write t=<unix ms> by=<user>@pid<N> server=<endpoint> points=a=1 result=ACK`.
+`write --dry-run` prints `dry run, would send WRITE=...` and sends nothing (no question, no audit line). `write --model m.yaml` first checks
+each value against the model: a binary tag takes `true`/`false`/`0`/`1`, an analog tag a number, and an analog input declared with
+`min:`/`max:` must be inside them; the error names the limit. The provider enforces the same rules itself and answers
+`ERR=Tag 'sp' value 11 is above its max 10`, so a probe without `--model` is still safe.
 `watch` decodes datagram v1 and prints a line whenever a tag's value or stale flag changes: `lock.height=4.2 age=0 ok gaps=0`.
 `age` is in publish periods (how far the tag is behind the newest `_ff.cyc`), `STALE` appears after `--stale-after` missed periods
 (the value is held, not live), `gaps` counts datagrams missing from the `_ff.seq` run. With no `--tags` it watches every tag

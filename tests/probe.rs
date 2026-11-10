@@ -312,3 +312,35 @@ fn globs_and_completion_cache_against_a_running_provider() {
         );
     }
 }
+
+#[test]
+fn write_checks_against_the_model_and_dry_run_sends_nothing() {
+    let (_srv, ep) = server("udp://*;127.0.0.1:9");
+    let m = MODEL;
+    let (ok, out, err) = probe(
+        &ep,
+        &["write", "--dry-run", "--model", m, "lowervalve.open=1"],
+        "",
+    );
+    assert!(
+        ok && out == "dry run, would send WRITE=lowervalve.open:1,\n" && !err.contains("audit:"),
+        "{out}{err}"
+    );
+    let (_, out, _) = probe(&ep, &["read", "lowervalve.open"], "");
+    assert_eq!(out, "lowervalve.open=0\n", "dry run wrote");
+    let (ok, _, err) = probe(
+        &ep,
+        &["write", "--confirm", "--model", m, "lowervalve.open=5"],
+        "",
+    );
+    assert!(
+        !ok && err.contains("is binary") && !err.contains("audit:"),
+        "{err}"
+    );
+    let (ok, _, err) = probe(
+        &ep,
+        &["write", "--dry-run", "--model", m, "lowervalve.open=true"],
+        "",
+    );
+    assert!(ok, "{err}");
+}

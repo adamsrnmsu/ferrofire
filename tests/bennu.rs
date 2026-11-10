@@ -452,3 +452,27 @@ fn the_spec_test_vector_matches_the_code() {
         vec![("lock.height".to_string(), 5.0)]
     );
 }
+
+#[test]
+fn writes_are_checked_against_type_and_limits() {
+    let m = Model::load("version: 1\ndt: 0.1\ninputs:\n  sp: {type: analog, min: 0, max: 10}\n  en: {type: binary}\noutputs:\n  sp: {type: analog}\n  en: {type: binary}\n").unwrap();
+    let meta = Meta::of(&m);
+    let sh = Mutex::new(Shared::default());
+    let h = |s: &str| String::from_utf8(handle(s.as_bytes(), &meta, &sh)).unwrap();
+    assert_eq!(h("WRITE=sp:10,en:1\0"), "ACK=\0");
+    assert_eq!(
+        h("WRITE=sp:11\0"),
+        "ERR=Tag 'sp' value 11 is above its max 10\0"
+    );
+    assert_eq!(
+        h("WRITE=sp:-1\0"),
+        "ERR=Tag 'sp' value -1 is below its min 0\0"
+    );
+    assert!(h("WRITE=sp:true\0").contains("is analog"));
+    assert!(h("WRITE=en:5\0").contains("is binary"));
+    assert_eq!(
+        sh.lock().unwrap().queue.len(),
+        2,
+        "rejected writes queue nothing"
+    );
+}

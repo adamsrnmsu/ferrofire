@@ -2,8 +2,9 @@
 //! socket; `watch` decodes its datagrams (datagram v1) and shows each tag's value, age in publish periods, stale flag and
 //! the count of datagrams missing from the `_ff.seq` run. `--json` prints one JSON object per line.
 
-use crate::bennu::{exit_on_err, group_for, install_signals, parse_udp, STOP};
+use crate::bennu::{exit_on_err, group_for, install_signals, parse_udp, parse_value, STOP};
 use crate::datagram::{Quality, Receiver};
+use crate::model::Model;
 use crate::pull::{requests, update_msg, validate};
 use crate::transport::{self, Requester, DEFAULT_PUBLISH};
 use std::collections::HashMap;
@@ -12,7 +13,7 @@ use std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-const USAGE: &str = "ferrofire probe [--server tcp://127.0.0.1:5555] [--json] (query | read a,b | write a=1,b=2 [--confirm] | watch [--listen udp://*;239.0.0.1:40000] [--tags a,b])";
+const USAGE: &str = "ferrofire probe [--server tcp://127.0.0.1:5555] [--json] (query | read a,b | write a=1,b=2 [--confirm] [--dry-run] [--model m.yaml] | watch [--listen udp://*;239.0.0.1:40000] [--tags a,b])";
 
 #[derive(Debug, clap::Parser)]
 #[command(name = "ferrofire probe")]
@@ -46,6 +47,12 @@ enum Sub {
         /// Do not ask before writing
         #[arg(long)]
         confirm: bool,
+        /// Check the values and print the request that would be sent, send nothing
+        #[arg(long)]
+        dry_run: bool,
+        /// Model YAML to check types and min/max against before sending
+        #[arg(long, value_name = "FILE")]
+        model: Option<String>,
     },
     /// Tag names from the last query (for shell completion)
     #[command(hide = true)]
@@ -207,6 +214,18 @@ pub fn write_request(points: &[String]) -> Result<Vec<u8>, String> {
     Ok(req.into_bytes())
 }
 
+/// Each `tag=value` against the model's type and limits for that tag (tags the model does not publish are left to the provider).
+pub fn check_points(model: &Model, points: &[String]) -> Result<(), String> {
+    for p in points {
+        let (tag, val) = p.split_once('=').unwrap_or((p, ""));
+        let v = parse_value(val).ok_or_else(|| format!("Bad value '{val}' for '{tag}'"))?;
+        if let Some(spec) = model.write_spec(tag) {
+            spec.check(tag, v)?;
+        }
+    }
+    Ok(())
+}
+
 /// The audit record of a write: time (unix ms), who, where, what and the provider's answer.
 pub fn audit_line(
     now_ms: u128,
@@ -362,7 +381,12 @@ fn run(cli: ProbeCli) -> Result<(), String> {
         Sub::Query => query(req, json),
         Sub::CachedTags => cached_tags(),
         Sub::Read { tags } => read(req, tags, json),
-        Sub::Write { points, confirm } => write(req, &cli.server, points, confirm),
+        Sub::Write {
+            points,
+            confirm,
+            dry_run,
+            model,
+        } => write(req, &cli.server, points, (confirm, dry_run, model)),
         Sub::Watch {
             listen,
             tags,
@@ -408,10 +432,24 @@ fn write(
     req: &mut dyn Requester,
     server: &str,
     points: Vec<String>,
-    confirm: bool,
+    (confirm, dry_run, model): (bool, bool, Option<String>),
 ) -> Result<(), String> {
     let points = &expand_points(req, points)?[..];
     let r = write_request(points)?;
+    if let Some(f) = model {
+        let yaml = std::fs::read_to_string(&f).map_err(|e| format!("{f}: {e}"))?;
+        check_points(
+            &Model::load_in(&yaml, std::path::Path::new(&f).parent())?,
+            points,
+        )?;
+    }
+    if dry_run {
+        print_lines(std::iter::once(format!(
+            "dry run, would send {}",
+            String::from_utf8_lossy(&r)
+        )));
+        return Ok(());
+    }
     confirmed(confirm, points, std::io::stdin().lock())?;
     let res = req.call(&r).and_then(|reply| update_msg(&reply));
     let now = SystemTime::now()

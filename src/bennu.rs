@@ -4,9 +4,9 @@
 
 use crate::hint::{did_you_mean, lock, show, RateLimit};
 use crate::model::SliceSpec;
-use crate::model::{Model, Value};
+use crate::model::{Model, Value, WriteSpec};
 use crate::transport::{self, Publisher};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -142,6 +142,8 @@ pub struct Shared {
 pub struct Meta {
     pub tags: Vec<String>,
     pub writable: HashSet<String>,
+    /// Type and limits of each writable tag.
+    pub specs: HashMap<String, WriteSpec>,
     /// Limits the runtime "bad request" warnings to one per `WARN_EVERY`.
     pub warn: RateLimit,
 }
@@ -154,15 +156,21 @@ impl Meta {
     pub fn of(m: &Model) -> Meta {
         let tags: Vec<String> = m.tags().map(|(t, _)| t.to_string()).collect();
         let writable = tags.iter().filter(|t| m.writable(t)).cloned().collect();
+        let specs = tags
+            .iter()
+            .filter(|t| m.writable(t))
+            .filter_map(|t| Some((t.clone(), m.write_spec(t)?)))
+            .collect();
         Meta {
             tags,
             writable,
+            specs,
             warn: RateLimit::new(WARN_EVERY),
         }
     }
 }
 
-fn parse_value(s: &str) -> Option<Value> {
+pub fn parse_value(s: &str) -> Option<Value> {
     match s {
         "true" => Some(Value::Binary(true)),
         "false" => Some(Value::Binary(false)),
@@ -246,6 +254,9 @@ fn reply(req: &[u8], meta: &Meta, sh: &Mutex<Shared>) -> String {
                 let Some(v) = parse_value(val) else {
                     return format!("ERR=Bad value '{}' for '{tag}'", show(val));
                 };
+                if let Some(Err(msg)) = meta.specs.get(tag).map(|s| s.check(tag, v)) {
+                    return format!("ERR={msg}");
+                }
                 batch.push((tag.to_string(), v));
             }
             // all-or-nothing: the field device's retry logic isolates a bad point

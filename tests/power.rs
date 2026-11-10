@@ -443,6 +443,16 @@ fn pump_station_trips_when_the_feeder_opens() {
         ("bus-3.gen_mw".into(), Value::Analog(1.0)),
     ]);
     assert_eq!(bad, vec!["bus-3.gen_mw"]); // read-only power tag is refused
+                                           // a writable power tag is judged by its wire type: active is binary, so 5 is refused and 0 or true pass
+    let spec = m.write_spec("branch-1_2-3.active").unwrap();
+    assert_eq!(spec.kind, ferrofire::model::Kind::Binary);
+    assert!(spec
+        .check("branch-1_2-3.active", Value::Analog(5.0))
+        .is_err());
+    assert!(spec
+        .check("branch-1_2-3.active", Value::Analog(0.0))
+        .is_ok());
+    assert!(m.write_spec("nope").is_none());
     let mut level_before_open = 0.0;
     for k in 0..600 {
         if k == 300 {

@@ -20,6 +20,39 @@ pub enum Value {
     Binary(bool),
 }
 
+/// What a writable tag accepts: its wire type and, for analog inputs, the `min`/`max` the model declares.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WriteSpec {
+    pub kind: Kind,
+    pub min: f64,
+    pub max: f64,
+}
+
+impl WriteSpec {
+    /// Binary tags take true/false/0/1, analog tags a number within the limits; the error names the limit.
+    pub fn check(&self, tag: &str, val: Value) -> Result<(), String> {
+        match (self.kind, val) {
+            (Kind::Binary, Value::Binary(_)) => Ok(()),
+            (Kind::Binary, Value::Analog(x)) if x == 0.0 || x == 1.0 => Ok(()),
+            (Kind::Binary, Value::Analog(x)) => Err(format!(
+                "Tag '{tag}' is binary: value {x} is not true/false/0/1"
+            )),
+            (Kind::Analog, Value::Binary(_)) => Err(format!(
+                "Tag '{tag}' is analog: expected a number, not true/false"
+            )),
+            (Kind::Analog, Value::Analog(x)) if x < self.min => Err(format!(
+                "Tag '{tag}' value {x} is below its min {}",
+                self.min
+            )),
+            (Kind::Analog, Value::Analog(x)) if x > self.max => Err(format!(
+                "Tag '{tag}' value {x} is above its max {}",
+                self.max
+            )),
+            _ => Ok(()),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
@@ -89,6 +122,8 @@ struct InputDef {
     is_bool: bool,
     #[serde(default)]
     default: Option<Default_>,
+    min: Option<f64>,
+    max: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -201,6 +236,8 @@ fn one() -> usize {
 struct Input {
     slot: usize,
     is_bool: bool,
+    min: f64,
+    max: f64,
 }
 struct Ode {
     slot: usize,
@@ -396,7 +433,15 @@ fn declare_inputs(
             None => 0.0,
         };
         init.push((slot, if is_bool { bit(dv != 0.0) } else { dv }));
-        inputs.insert(n.clone(), Input { slot, is_bool });
+        inputs.insert(
+            n.clone(),
+            Input {
+                slot,
+                is_bool,
+                min: d.min.unwrap_or(f64::NEG_INFINITY),
+                max: d.max.unwrap_or(f64::INFINITY),
+            },
+        );
     }
     Ok(inputs)
 }
@@ -751,6 +796,28 @@ impl Model {
         }
         self.eval();
         rejected
+    }
+
+    /// The wire type and limits a write to `tag` is judged by (None when the tag is not published).
+    pub fn write_spec(&self, tag: &str) -> Option<WriteSpec> {
+        if let Some(i) = self.inputs.get(tag) {
+            let kind = if i.is_bool {
+                Kind::Binary
+            } else {
+                Kind::Analog
+            };
+            return Some(WriteSpec {
+                kind,
+                min: i.min,
+                max: i.max,
+            });
+        }
+        let (_, kind) = self.tags().find(|(t, _)| *t == tag)?;
+        Some(WriteSpec {
+            kind,
+            min: f64::NEG_INFINITY,
+            max: f64::INFINITY,
+        })
     }
 
     /// True when a write to `tag` would be accepted (a model input, or a writable power tag).
