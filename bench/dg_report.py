@@ -135,6 +135,28 @@ def section_c():
     return out
 
 
+def section_after():
+    """The netem cells re-run with the order-tolerant Receiver (ww-d4a): the shipped Receiver's own column, next to the old one."""
+    after = defaultdict(list)
+    for f in sorted(glob.glob(f"{RES}/raw-datagram-v1-d4a/C_netem_*.client.json")):
+        after[re.sub(r"_r\d+\.client\.json$", "", pathlib.Path(f).name)].append(json.load(open(f)))
+    before, rows = load("C_netem_"), []
+    for n, p in [(100, "0.1"), (100, "0.01"), (800, "0.1")]:
+        for loss in ["0", "0.1", "1", "5"]:
+            key = f"C_netem_n{n}_p{p}_loss{loss}"
+            js, old = after.get(key, []), before.get(key, [])
+            if not js:
+                continue
+            pct = lambda xs: mean_sd((100 * stream(j, "whole")["delivered_per_s"] / (1 / float(p)) for j in xs), lambda x: f"{x:.1f}")
+            tol = mean_sd((100 * stream(j, "whole")["tolerant"]["delivered_per_s"] / (1 / float(p)) for j in js), lambda x: f"{x:.1f}")
+            rows.append((n, f"{round(1 / float(p))} Hz", f"{loss}%", pct(old), pct(js), tol, stat(js, "whole", "staleness", "p50_us"),
+                         stat(js, "whole", "staleness", "p99_us"), worst(js, "whole", "staleness", "max_us"),
+                         mean_sd((stream(j, "whole")["rejects"]["stale"] for j in js), lambda x: f"{x:.0f}"), len(js)))
+    head = ["tags", "rate", "netem loss", "complete % before (receiver as shipped)", "complete % after ww-d4a", "complete % (separate order-tolerant count, same run)",
+            "stale p50 ms", "p99", "max (worst rep)", "datagrams rejected stale / rep", "reps"]
+    return {"C_after": table(head, rows)}
+
+
 # ---- D: per-RTU fan-out -----------------------------------------------------------------------------------------
 
 def section_d():
@@ -221,7 +243,7 @@ def section_f():
 
 
 def main():
-    t = {"A": section_a(), "D": section_d(), "E": section_e(), **{k: v for k, v in section_c().items()}, **{f"F_{k}": v for k, v in section_f().items()}}
+    t = {"A": section_a(), "D": section_d(), "E": section_e(), **{k: v for k, v in section_c().items()}, **section_after(), **{f"F_{k}": v for k, v in section_f().items()}}
     n = len(glob.glob(f"{RAW}/*.client.json"))
     text = (ROOT / "bench/datagram_report.md.in").read_text().replace("{{runs}}", str(n))
     for k, v in t.items():

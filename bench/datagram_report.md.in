@@ -12,10 +12,10 @@ This is a separate report: the zmq-vs-NNG report ([transport-comparison.md](tran
   (cycle spread unchanged at 0.4 ms; transit from `_ff.t` is 0.3-0.4 ms p50, 0.5-0.7 ms p99 on the bridge). Different build and client than the "before" rows (see caveats).
 - **`_ff.seq` measures datagram loss exactly (B).** netem 0.1 / 1 / 5 % came out as 0.10-0.17 / 1.07-1.34 / 5.07-5.14 % missing sequence numbers, in every cell, with no
   false loss from reordering or from the 100/s garbage (replays older than 10 s are ignored by the counter).
-- **The receiver as shipped breaks under reordering, which is a real bug (ww-d4a, P1).** With netem `delay 2ms 1ms` and *zero* loss, `ferrofire::datagram::Receiver` completes only
+- **The receiver as first shipped broke under reordering, a real bug (ww-d4a, P1), fixed since: see "After ww-d4a" in section B and C (100 tags: 17 % -> 100 % complete at zero loss; 800 tags: 0 % -> 100 %; every loss cell now matches the order-tolerant count).** With netem `delay 2ms 1ms` and *zero* loss, `ferrofire::datagram::Receiver` completes only
   about 17 % of 100-tag cycles and 0.0 % of 800-tag cycles: the 3 (or 18) datagrams of a cycle leave back to back, jitter swaps them, and the monotonic-`seq` rule drops the
-  late one as `stale` even though it carries different tags. The same datagrams reassembled order-tolerantly (dedupe by `_ff.seq`) complete 100 %. This is the benchmark's
-  most important number: it is not the network that hurts, it is the stale rule. It will not show on a quiet switched LAN; it will on Wi-Fi, VPN or ECMP paths.
+  late one as `stale` even though it carries different tags. The same datagrams reassembled order-tolerantly (dedupe by `_ff.seq`) complete 100 %. This was the benchmark's
+  most important number: it was not the network that hurt, it was the stale rule. It will not show on a quiet switched LAN; it will on Wi-Fi, VPN or ECMP paths.
 - **With order-tolerant reassembly, multicast loss behaves as the refresh model predicts, and gets bad with big cycles.** A cycle is complete with probability (1-p)^datagrams:
   100 tags (3 datagrams) at 1 % / 5 % loss: 96.2 % / 85.3 % complete (predicted 96.7 / 85.7); 800 tags (18 datagrams): 80.7 % / 36.9 % (83.4 / 39.6). Staleness is *not* bounded by one
   period: p50 stays at the period, but at 1 % the p99 is 2-3 periods (200-300 ms at 10 Hz) and at 5 % 3-9 periods (330 ms for 100 tags, 930 ms for 800 tags; worst rep 2 s). At 0.1 % the
@@ -87,6 +87,16 @@ Age = last-chunk receipt minus (`sim.t` + a constant chosen so the smallest age 
 ### 800 tags, 10 Hz
 
 {{C_800_0.1}}
+
+### After ww-d4a: the same netem cells with the order-tolerant `Receiver`
+
+The receiver now accepts a chunk of a cycle that overtakes its neighbour (stale only on an exact repeat of a recent `_ff.seq`, or a value from an older `_ff.cyc` than the newest
+applied for that tag). The reorder-and-loss cells of B and C (`delay 2ms 1ms`, 100 tags at 10 and 100 Hz, 800 tags at 10 Hz, loss 0 / 0.1 / 1 / 5 %) were re-run with the fixed
+receiver, 3 reps each, same build otherwise (`SCEN=C RAWDIR=docs/bench/results/raw-datagram-v1-d4a python3 bench/run_dg.py`; raw files in `docs/bench/results/raw-datagram-v1-d4a/`).
+The "before" column is the table above (receiver as shipped), kept as measured; the two "complete %" columns after it are the shipped receiver and the separate order-tolerant count taken in
+the same run, which must agree.
+
+{{C_after}}
 
 ## D. Per-RTU groups vs one whole-model stream vs pull-bridges
 
