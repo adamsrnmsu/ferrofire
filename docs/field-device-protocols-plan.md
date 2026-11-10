@@ -132,7 +132,7 @@ pub static REGISTRY: &[(&str, Start)] = &[            // Start = fn(Node, &mut T
 | OPC UA | `async-opcua-server` 0.19.0 / 2026-07 / 152k | **MPL-2.0** (file-level copyleft: fine unmodified, NOTICE entry, publish any patch to its files, explicit cargo-deny exception) | `open62541` (C), `opcua` 0.12 (unmaintained) |
 | MQTT | `rumqttc` 0.25.1 / 9.9M; `prost` for Sparkplug | Apache-2.0 | `sparkplug-rs` (EPL-2.0) |
 | FINS, C37.118, GE SRTP, ENIP | own; test clients `omron-fins` 0.6.0 (MIT), `pypmu` (BSD-3), `rust-ethernet-ip` 1.2.1 (MIT) | MIT (own) | `cip` 0.1.0 ("non-standard") |
-| IEC 61850 (if ever) | `iec61850-rs` 0.4.0 or csp0924 `iec61850-*` 0.4.0, after a 1-day spike | MIT OR Apache-2.0 | `libiec61850` (GPL) |
+| IEC 61850 | **`iec61850-rs` 0.4.0, pinned** (spike done 2026-11-10, ww-otj.45, docs/field-device-iec61850.md); csp0924 `iec61850-*` and an own stack not chosen | MIT OR Apache-2.0 | `libiec61850` (GPL, test peer only) |
 
 Policy (lands with ww-otj.35 `deny.toml`): allow MIT, Apache-2.0, BSD-2/3, ISC, Zlib, Unicode; MPL-2.0 only by named exception; deny GPL/LGPL/AGPL/EPL
 and anything crates.io calls "non-standard".

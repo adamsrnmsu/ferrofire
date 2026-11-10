@@ -52,12 +52,25 @@ publishes land on the other device (this contaminated the first goldens).
 
 To re-record the stock side: `TRACE=conformance/dnp3/stock-diff.trace LOGS=conformance/dnp3/stock-diff.logs conformance/differential.sh dnp3 stock diff > conformance/dnp3/stock-diff.golden` (and `big`).
 
+## IEC 61850 (no oracle)
+Bennu never loads an IEC 61850 server, so `conformance/iec61850/` has only the acceptance half, and `proto.env` sets `DUT_DEFAULT=rust`:
+
+    make conformance PROTO=iec61850     # libiec61850's unmodified example clients + GOOSE subscriber against our server, on lo
+
+`server.xml` uses libiec61850's default names, so nothing is patched. `check.sh` asserts tshark's `mms` Initiate, GetNameList, Read,
+Write, InformationReport and `goose` fields (appid, gocbRef, data set, entries) and what the peers printed. Values are not asserted: the
+DUT's inputs come from whatever publishes on the multicast group. No Zeek parser exists for MMS or GOOSE (`zeek.sh` prints SKIP). The
+DUT container gets `--cap-add NET_RAW` (`DUT_CAPS` in `proto.env`) because GOOSE needs `CAP_NET_RAW`; see docs/field-device-iec61850.md.
+The image built before 2026-11-10 lacks the control client and the GOOSE subscriber (their binaries are named
+`client_example_control` and `goose_subscriber_example`; the Dockerfile asked for other names): run `make testpeers` again, or point
+`TESTPEERS=` at an image that has them.
+
 ## Test peers (docker/testpeers)
 | Peer | Source | Licence | Use |
 |---|---|---|---|
 | `outstation-demo`, `master-demo` | opendnp3 3.1.2 examples | Apache-2.0 | stock DNP3 peers (interactive master) |
 | `ff-dnp3-master HOST PORT LOCAL REMOTE [wait_s] [crob IDX CODE\|select-crob IDX CODE\|ao IDX VALUE]...` | ours, on opendnp3 | MIT / Apache-2.0 | scriptable master: integrity poll, commands, poll |
-| `server_example_*`, `iec61850_client_example*`, `goose_publisher/subscriber/observer` | libiec61850 v1.6.2 | **GPL-3.0, test peers only, never linked** | IEC 61850 server/client/GOOSE |
+| `server_example_*`, `iec61850_client_example1`, `client_example_control`, `iec61850_client_example_reporting`, `goose_publisher_example`, `goose_subscriber_example`, `goose_observer` | libiec61850 v1.6.2 | **GPL-3.0, test peers only, never linked** | IEC 61850 server/client/GOOSE |
 | `mms_utility -h HOST -d`, `-r VAR -a DOMAIN` | libiec61850 | GPL-3.0 | generic MMS client for ICCP named-variable reads |
 | tshark 4.4, tcpdump, nmap 7.95 (`iec61850-mms`, `iec-identify`, `s7-info`, `bacnet-info`, `enip-info`, `modbus-discover`) | Debian | | analysis |
 | Zeek 9.0.1 + icsnpp-dnp3, modbus, bacnet, s7comm, enip, opcua-binary, synchrophasor | CISA | | `/etc/ff-testpeers.zeek-packages` lists what installed |
