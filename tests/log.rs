@@ -211,3 +211,21 @@ fn log_commands_snapshot() {
     insta::assert_snapshot!("log_commands", all.replace(file, "<file>"));
     r.finish();
 }
+
+#[test]
+fn a_process_that_never_answers_is_a_timeout_not_a_hang() {
+    let dir = std::env::temp_dir().join(format!("ff-logit-hang-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    // accepts (the kernel does that for a stopped process too) and never replies
+    let l = std::os::unix::net::UnixListener::bind(dir.join("run-1.sock")).unwrap();
+    let o = Command::new(BIN)
+        .args(["log", "status"])
+        .env("FERROFIRE_RUN_DIR", &dir)
+        .output()
+        .unwrap();
+    drop(l);
+    assert_eq!(o.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.contains("no reply within 5s"), "{err}");
+}

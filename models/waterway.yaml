@@ -5,7 +5,7 @@
 version: 1
 dt: 0.05
 params: {lowerpool: 5.0, upperpool: 15.0, fill_rate: 0.5}
-inputs:                      # RTU-written; boolean in meaning (any nonzero write latches 1)
+inputs:                      # RTU-written; boolean in meaning (the provider accepts 0, 1, true, false and refuses any other value)
   lowergate.open:  {type: analog, bool: true, default: 0}
   lowervalve.open: {type: analog, bool: true, default: 0}
   uppergate.open:  {type: analog, bool: true, default: 0}

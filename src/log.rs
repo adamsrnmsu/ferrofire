@@ -72,6 +72,8 @@ impl Level {
 const SIZE: [(char, u64); 3] = [('k', 1 << 10), ('m', 1 << 20), ('g', 1 << 30)];
 const TIME: [(char, u64); 3] = [('s', 1), ('m', 60), ('h', 3600)];
 const ON_FLAGS: [&str; 4] = ["--file", "--level", "--max-size", "--keep"];
+/// How long the client waits for a control reply.
+const REPLY_WAIT: Duration = Duration::from_secs(5);
 const COMMANDS: [&str; 5] = ["status", "on", "off", "level", "tail"];
 const TAIL_WRITE: Duration = Duration::from_millis(100);
 
@@ -508,14 +510,26 @@ pub fn main(args: &[String]) {
     crate::bennu::exit_on_err("log", USAGE, run(args));
 }
 
+/// A failed read of the reply: a silent process (stopped, wedged) gets a message of its own.
+fn reply_error(e: std::io::Error) -> String {
+    match e.kind() {
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
+            format!("no reply within {REPLY_WAIT:?} (is the process stopped?)")
+        }
+        _ => e.to_string(),
+    }
+}
+
 fn run(args: &[String]) -> Result<(), String> {
     let (pid, name, words) = parse_client(args)?;
     let sock = pick(&run_dirs(), pid, name.as_deref())?;
     let mut s = UnixStream::connect(&sock).map_err(|e| format!("{}: {e}", sock.display()))?;
     writeln!(s, "{}", words.join("\t")).map_err(|e| e.to_string())?;
+    // a stopped or wedged process still accepts into the socket backlog: bound every reply but the endless `tail`
+    let _ = s.set_read_timeout((words[0] != "tail").then_some(REPLY_WAIT));
     let mut out = std::io::stdout().lock();
     for l in BufReader::new(s).lines() {
-        let l = l.map_err(|e| e.to_string())?;
+        let l = l.map_err(reply_error)?;
         if let Some(e) = l.strip_prefix("error: ") {
             return Err(e.into());
         }
