@@ -1,0 +1,7 @@
+== rtu-1 fdlog dg1h 2026-11-10T08:46:44Z log=/etc/sceptre/log/default-bennu-field-deviced-stdout.log
+    419    4664 bennu-watcherd restart --f /etc/sceptre/config.xml --b /home/sceptre/bennu-field-deviced.firmware --w /etc/sceptre/watcher.ini
+    423    4664 /usr/bin/bennu-field-deviced --c start --env default --file /etc/sceptre/config.xml
+lines 15923, error-ish: 0, timeouts/retries: 0, unknown: 0, seq/_ff mentions: 0
+stderr/other /etc/sceptre/log/default-bennu-field-deviced-stderr.log: 660 error-ish of 1324 lines
+stderr/other /etc/sceptre/log/watcher-stderr.log: 0 error-ish of 451404 lines
+stderr/other /etc/sceptre/log/watcher-stdout.log: 0 error-ish of 4 lines

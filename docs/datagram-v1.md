@@ -109,6 +109,12 @@ simply go stale. Unknown point names in an update are ignored. A malformed `ERR=
 not copy the 5 s: use a 1 s reply timeout, 2 tries, then recreate the socket (linger 0), with 100 ms to 1 s backoff, and mark the
 RTU's inputs stale after 3 missed publish periods. See `docs/field-device-spec.md` section 14.
 
+Measured on the live range (ww-otj.19, [section G of the benchmark report](bench/datagram-v1-bench.md#g-live-range-waterway-arm64-across-ovs-ww-otj19-ww-2s0)): the stock device ran 1 h on the sequenced
+stream with no restart and no log line about the `_ff.*` tags, and kept running through 11,000 injected malformed datagrams, but it has no validation of its own: every `name:value,` point it can parse is applied, including the complete
+points of a datagram cut at a point boundary and `nan`/`inf` values. A stock receiver therefore shows transient wrong values (until the next good cycle, 100 ms) while garbage arrives; it does not crash. The datagram has no
+authentication, so anyone on the segment can set values the same way. The `Receiver` rules in the table above are what a Rust field device should do instead. The stock Modbus/TCP server leaks one fd per closed
+client connection (bead ww-1p6): a poller must keep its connection open.
+
 Provider request side (REP): every request gets exactly one reply on every path (unknown tag, malformed text, bad value, empty,
 oversized over 64 KiB, non-UTF-8, several frames, a panic inside a handler: `ERR=<reason naming the tag or problem>`), the receive
 loop wakes at least every 100 ms, and the shared state's locks ignore poisoning, so one bad request cannot wedge a client or the engine.

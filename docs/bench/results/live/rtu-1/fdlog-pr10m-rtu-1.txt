@@ -1,0 +1,8 @@
+== rtu-1 fdlog pr10m 2026-11-10T09:00:29Z log=/root/ff/fd.log
+    816     722 bennu-field-device --file rtu.xml
+lines 2693, error-ish: 108, timeouts/retries: 0, unknown: 0, seq/_ff mentions: 0
+    108 Modbus RTU receive message failed with error: End of file
+stderr/other /etc/sceptre/log/default-bennu-field-deviced-stderr.log: 660 error-ish of 1325 lines
+stderr/other /etc/sceptre/log/watcher-stderr.log: 0 error-ish of 461183 lines
+stderr/other /etc/sceptre/log/watcher-stdout.log: 0 error-ish of 4 lines
+stderr/other /root/ff/fd.log: 108 error-ish of 2693 lines

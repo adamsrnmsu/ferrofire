@@ -1,0 +1,15 @@
+== rtu-1 fdlog kill20 2026-11-10T10:02:27Z log=/etc/sceptre/log/default-bennu-field-deviced-stdout.log
+   1502    1507 bennu-watcherd restart --f /etc/sceptre/config.xml --b /home/sceptre/bennu-field-deviced.firmware --w /etc/sceptre/watcher.ini
+   1504    1504 bennu-field-deviced --c restart --env default --file /etc/sceptre/config.xml
+lines 5083, error-ish: 0, timeouts/retries: 2, unknown: 0, seq/_ff mentions: 0
+      2 I: Client send: no response from server, retrying...
+stderr/other /etc/sceptre/log/default-bennu-field-deviced-stderr.log: 3 error-ish of 10 lines
+stderr/other /etc/sceptre/log/watcher-stderr.log: 0 error-ish of 144474 lines
+stderr/other /etc/sceptre/log/watcher-stdout.log: 0 error-ish of 4 lines
+-- message mix of the device log (LOGIC lines dropped, numbers masked)
+    288 
+    144 lowerwaterNheight -- N
+    144 lowervalveNopen -- N
+    144 lowersensorNactive -- N
+    144 lowergateNopen -- N
+    144 locksensorNactive -- N

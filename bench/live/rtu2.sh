@@ -8,7 +8,7 @@ fi
 EP=$2
 sed "s#<endpoint>udp://[^<]*</endpoint>#<endpoint>$EP</endpoint>#" /etc/sceptre/config.xml > rtu.xml
 grep -n "<endpoint>" rtu.xml
-setsid nohup ./ferrofire pull-bridge --server tcp://172.16.1.2:5555 --transport zmq --rate ${RATE:-100} --tags-from rtu.xml --publish "$EP" > bridge.log 2>&1 </dev/null &
+setsid nohup ./ferrofire pull-bridge --server tcp://172.16.1.2:5555 --rate ${RATE:-100} --tags-from rtu.xml --publish "$EP" > bridge.log 2>&1 </dev/null &
 sleep 1
 setsid nohup bennu-field-device --file rtu.xml > fd.log 2>&1 </dev/null &
 sleep 4

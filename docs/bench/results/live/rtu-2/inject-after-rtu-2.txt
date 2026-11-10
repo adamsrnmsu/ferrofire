@@ -1,0 +1,5 @@
+== rtu-2 after injection: process alive 1307, uptime s    2314
+stderr lines: 15, stdout lines: 9600
+Modbus RTU receive message failed with error: End of file
+A new incoming connection started.
+Modbus RTU receive message failed with error: End of file

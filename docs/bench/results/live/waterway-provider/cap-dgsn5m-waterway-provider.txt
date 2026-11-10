@@ -1,0 +1,11 @@
+== waterway-provider dgsn5m cpu ticks before: 55  after: 309  (CLK_TCK 100, over 300s)
+captured 2026-11-10T09:20:18Z
+   3382 ./ferrofire run waterway.yaml --server tcp://172.16.1.2:5555 --publish udp://*;239.0.0.1:40000
+packets 3080 bytes 1242909 dur 298.9s B/s 4158
+  tcp:5555 pkts 90 bytes 7240 B/s 24
+  udp:40000 pkts 2990 bytes 1235669 B/s 4134
+udp/40000 datagrams 2990, sources 172.16.1.2, malformed/truncated 0, no _ff.seq 0
+group 54386972605942b: received 2990, seq 568..3557, missing 0 (0.0000%), longest run lost 0, dup/reordered 0, restarts 0, cycles 568..3557
+  inter-arrival ms: p50 100.0 p99 100.4 max 105.4
+-- prov.log (tail)
+Info: ferrofire run: waterway.yaml dt=0.05s; REP tcp://172.16.1.2:5555; RADIO udp://*;239.0.0.1:40000 group 54386972605942b every 0.1s

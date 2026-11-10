@@ -1,0 +1,17 @@
+== rtu-2 fdlog inject 2026-11-10T10:16:13Z log=/etc/sceptre/log/default-bennu-field-deviced-stdout.log
+   1305    2317 bennu-watcherd restart --f /etc/sceptre/config.xml --b /home/sceptre/bennu-field-deviced.firmware --w /etc/sceptre/watcher.ini
+   1307    2313 bennu-field-deviced --c restart --env default --file /etc/sceptre/config.xml
+lines 9600, error-ish: 1, timeouts/retries/offline: 4, unknown: 0, seq/_ff mentions: 0
+      3 I: Client send: no response from server, retrying...
+      1 I: ERR -- Malformed request ''
+      1 E: Client send: server seems to be offline, abandoning
+stderr/other /etc/sceptre/log/default-bennu-field-deviced-stderr.log: 5 error-ish of 15 lines
+stderr/other /etc/sceptre/log/watcher-stderr.log: 0 error-ish of 222246 lines
+stderr/other /etc/sceptre/log/watcher-stdout.log: 0 error-ish of 4 lines
+-- message mix of the device log (LOGIC lines dropped, numbers masked)
+    736 E: InputModule::subscriptionHandler -- value=abc -- stod
+    736 E: InputModule::subscriptionHandler -- value=N -- stod
+    736 E: InputModule::subscriptionHandler -- value= -- stod
+    444 
+    222 upperwaterNheight -- N
+    222 uppervalveNopen -- N

@@ -1,0 +1,11 @@
+== rtu-1 dg1h cpu ticks before: 316 383  after: 2083 2531  (CLK_TCK 100, over 3600s)
+captured 2026-11-10T08:39:13Z
+    419 bennu-watcherd restart --f /etc/sceptre/config.xml --b /home/sceptre/bennu-field-deviced.firmware --w /etc/sceptre/watcher.ini
+    423 /usr/bin/bennu-field-deviced --c start --env default --file /etc/sceptre/config.xml
+    481 -bennu-brash
+packets 36521 bytes 14994371 dur 3598.3s B/s 4167
+  tcp:5555 pkts 528 bytes 42474 B/s 12
+  udp:40000 pkts 35993 bytes 14951897 B/s 4155
+udp/40000 datagrams 35993, sources 172.16.1.2, malformed/truncated 0, no _ff.seq 0
+group 54386972605942b: received 35993, seq 2454..38446, missing 0 (0.0000%), longest run lost 0, dup/reordered 0, restarts 0, cycles 2454..38446
+  inter-arrival ms: p50 100.0 p99 101.3 max 109.7

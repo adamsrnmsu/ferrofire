@@ -1,0 +1,15 @@
+== rtu-2 lines of the stock device log that are not LOGIC/data, around the kill20 outage (first 2 retries then abandon, then reconnect):
+11:I: Client connect (tcp://172.16.1.2:5555): Connecting to provider
+3754:I: Client send: no response from server, retrying...
+3755:I: Client connect (tcp://172.16.1.2:5555): Connecting to provider
+3756:I: Client send: no response from server, retrying...
+3757:I: Client connect (tcp://172.16.1.2:5555): Connecting to provider
+3758:E: Client send: server seems to be offline, abandoning
+3759:I: Client connect (tcp://172.16.1.2:5555): Connecting to provider
+5330:I: Client send: no response from server, retrying...
+5331:I: Client connect (tcp://172.16.1.2:5555): Connecting to provider
+-- stderr (modbus client EOFs are the sampler closing its connection):
+      1 INFO: Loader changed library name: "bennu-field-device-base" -> "libbennu-field-device-base.so
+      1 INFO: Loader changed library name: "bennu-modbus-tcp" -> "libbennu-modbus-tcp.so
+      1 INFO: Parser changed file name: "/etc/sceptre/config.xml" --> "/etc/sceptre/config.xml"
+      3 Modbus RTU receive message failed with error: End of file

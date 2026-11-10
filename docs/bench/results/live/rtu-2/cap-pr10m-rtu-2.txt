@@ -1,0 +1,12 @@
+== rtu-2 pr10m cpu ticks before: 25  after: 540  (CLK_TCK 100, over 600s)
+captured 2026-11-10T08:58:58Z
+    480 -bennu-brash
+    715 bennu-field-device --file rtu.xml
+packets 12072 bytes 3524032 dur 598.0s B/s 5894
+  tcp:5555 pkts 92 bytes 7372 B/s 12
+  udp:40000 pkts 11980 bytes 3516660 B/s 5881
+udp/40000 datagrams 11980, sources 172.16.1.2, malformed/truncated 0, no _ff.seq 0
+group 417543b472ecd36: received 5990, seq 350..6339, missing 0 (0.0000%), longest run lost 0, dup/reordered 0, restarts 0, cycles 350..6339
+  inter-arrival ms: p50 100.0 p99 103.5 max 111.2
+group b491d2086255b78: received 5990, seq 350..6339, missing 0 (0.0000%), longest run lost 0, dup/reordered 0, restarts 0, cycles 350..6339
+  inter-arrival ms: p50 100.1 p99 103.5 max 111.2

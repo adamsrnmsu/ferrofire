@@ -1,0 +1,11 @@
+== rtu-2 dgsn5m cpu ticks before: 27 28  after: 244 243  (CLK_TCK 100, over 300s)
+captured 2026-11-10T09:20:20Z
+    480 -bennu-brash
+    991 bennu-watcherd restart --f /etc/sceptre/config.xml --b /home/sceptre/bennu-field-deviced.firmware --w /etc/sceptre/watcher.ini
+    993 bennu-field-deviced --c restart --env default --file /etc/sceptre/config.xml
+packets 3032 bytes 1239047 dur 298.0s B/s 4158
+  tcp:5555 pkts 42 bytes 3378 B/s 11
+  udp:40000 pkts 2990 bytes 1235669 B/s 4147
+udp/40000 datagrams 2990, sources 172.16.1.2, malformed/truncated 0, no _ff.seq 0
+group 54386972605942b: received 2990, seq 568..3557, missing 0 (0.0000%), longest run lost 0, dup/reordered 0, restarts 0, cycles 568..3557
+  inter-arrival ms: p50 100.0 p99 101.0 max 105.9

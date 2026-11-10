@@ -1,0 +1,11 @@
+== waterway-provider pushff-1 cpu ticks before: 42  after: 74  (CLK_TCK 100, over 30s)
+captured 2026-11-10T11:37:16Z
+   5305 ./ferrofire run waterway.yaml --server tcp://172.16.1.2:5555 --publish udp://*;239.0.0.1:40000
+packets 305 bytes 122974 dur 29.5s B/s 4169
+  tcp:5555 pkts 9 bytes 724 B/s 25
+  udp:40000 pkts 296 bytes 122250 B/s 4144
+udp/40000 datagrams 296, sources 172.16.1.2, malformed/truncated 0, no _ff.seq 0
+group 54386972605942b: received 296, seq 255..550, missing 0 (0.0000%), longest run lost 0, dup/reordered 0, restarts 0, cycles 255..550
+  inter-arrival ms: p50 100.0 p99 101.1 max 101.5
+-- prov.log (tail)
+Info: ferrofire run: waterway.yaml dt=0.05s; REP tcp://172.16.1.2:5555; RADIO udp://*;239.0.0.1:40000 group 54386972605942b every 0.1s

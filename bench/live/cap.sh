@@ -9,11 +9,12 @@ tck=$(getconf CLK_TCK)
 cpu(){ for p in $(pgrep -f "bennu-simulink-provider|simulinksolver|ferrofire (run|pull)|bennu-field-device"); do awk '{s+=$14+$15} END{printf "%d ",s}' /proc/$p/stat; done; echo; }
 OUT=/root/ff/live-out; mkdir -p $OUT
 c0=$(cpu)
-timeout $S tcpdump -nn -q -i $IF -w /root/cap-$L-$H.pcap 'udp port 40000 or tcp port 5555' 2>/dev/null
+timeout $S tcpdump -nn -q -i $IF -w /root/cap-$L-$H.pcap 'udp port 40000 or tcp port 5555 or igmp' 2>/dev/null
 c1=$(cpu)
 {
 echo "== $H $L cpu ticks before: $c0 after: $c1 (CLK_TCK $tck, over ${S}s)"
 date -u +"captured %Y-%m-%dT%H:%M:%SZ"; ps -eo pid,cmd | grep -E "[f]errofire|[b]ennu-"
 python3 /root/ff/cap.py /root/cap-$L-$H.pcap
+python3 /root/ff/seqgap.py /root/cap-$L-$H.pcap
 [ -f /root/ff/prov.log ] && { echo "-- prov.log (tail)"; tail -20 /root/ff/prov.log; }
 } 2>&1 | tee $OUT/cap-$L-$H.txt

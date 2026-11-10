@@ -1,0 +1,10 @@
+== waterway-provider pushstock-1 cpu ticks before: 48 6  after: 88 10  (CLK_TCK 100, over 30s)
+captured 2026-11-10T11:36:06Z
+   5249 bennu-simulink-provider --server-endpoint tcp://172.16.1.2:5555 --publish-endpoint udp://*;239.0.0.1:40000
+packets 307 bytes 106107 dur 29.6s B/s 3589
+  tcp:5555 pkts 12 bytes 1097 B/s 37
+  udp:40000 pkts 295 bytes 105010 B/s 3552
+udp/40000 datagrams 295, sources 172.16.1.2, malformed/truncated 0, no _ff.seq 295
+-- prov.log (tail)
+Info: ferrofire run: waterway.yaml dt=0.05s; REP tcp://172.16.1.2:5555; RADIO udp://*;239.0.0.1:40000 group 54386972605942b every 0.1s
+Info: stopped

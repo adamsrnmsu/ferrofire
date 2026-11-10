@@ -1,0 +1,8 @@
+== rtu-1 pull100-2 cpu ticks before: 37 17  after: 87 34  (CLK_TCK 100, over 30s)
+captured 2026-11-10T11:55:35Z
+    481 -bennu-brash
+   3887 ./ferrofire pull-bridge --server tcp://172.16.1.2:5555 --rate 100 --tags-from rtu.xml --publish udp://127.0.0.1:40000
+   3891 bennu-field-device --file rtu.xml
+packets 901 bytes 172990 dur 29.4s B/s 5885
+  tcp:5555 pkts 901 bytes 172990 B/s 5885
+udp/40000 datagrams 0, sources , malformed/truncated 0, no _ff.seq 0

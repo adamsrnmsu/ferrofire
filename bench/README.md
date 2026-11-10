@@ -78,3 +78,11 @@ raw data are untouched (the new report only reads them for the "before" age numb
   Reply blackhole = a `prio` qdisc with a u32 filter on source port 5555 sending to a `netem loss 100%` band.
 - Fault cells run the provider as an exec'd process (PID 1 is `sleep`) so it can be killed and restarted without losing the network namespace;
   event timestamps come from `date` inside that container, the same clock the client stamps with.
+
+## Live range runs (ww-otj.19, ww-2s0)
+
+`bench/live/` drives the `waterway-arm64` range (provider VM, rtu-1, rtu-2 with stock bennu) from the Mac through minimega `cc` (no host route to the guests):
+`rng.sh` (run a snippet on VMs), `deploy.sh`/`fetch.sh` (files to `/root/ff`, summaries back into `docs/bench/results/live/<host>/`), `cap.sh` + `cap.py` + `seqgap.py` (tcpdump
+summary, `_ff.seq` gaps), `trk.py` (Modbus vs provider READ), `ovsb.sh` (OVS port counters), `fault.py`/`inject.py`/`misspell.sh`/`fdlog.sh` (fault injection and device-log health),
+`provrtu.sh`/`rtudg.sh` (per-RTU groups, restore), `rtu2.sh` (pull-bridge), `matrix.sh` + `matrix_table.py` (the 4 x 3 push/pull matrix). Results: section G of
+`docs/bench/datagram-v1-bench.md`. Pollers must keep one Modbus connection open (stock bennu leaks an fd per closed connection, ww-1p6).

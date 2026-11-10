@@ -1,0 +1,11 @@
+== rtu-2 inject cpu ticks before: 1478 1751  after: 1575 2017  (CLK_TCK 100, over 150s)
+captured 2026-11-10T10:14:48Z
+    480 -bennu-brash
+   1305 bennu-watcherd restart --f /etc/sceptre/config.xml --b /home/sceptre/bennu-field-deviced.firmware --w /etc/sceptre/watcher.ini
+   1307 bennu-field-deviced --c restart --env default --file /etc/sceptre/config.xml
+packets 12599 bytes 3271853 dur 148.4s B/s 22041
+  tcp:5555 pkts 63 bytes 5070 B/s 34
+  udp:40000 pkts 12536 bytes 3266783 B/s 22007
+udp/40000 datagrams 12536, sources 172.16.1.102,172.16.1.2, malformed/truncated 5148, no _ff.seq 5893
+group 54386972605942b: received 1495, seq 8974..10468, missing 0 (0.0000%), longest run lost 0, dup/reordered 0, restarts 0, cycles 8974..10468
+  inter-arrival ms: p50 100.0 p99 102.5 max 106.2

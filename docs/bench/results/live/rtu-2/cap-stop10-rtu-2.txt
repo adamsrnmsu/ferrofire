@@ -1,0 +1,11 @@
+== rtu-2 stop10 cpu ticks before: 1160 1366  after: 1405 1664  (CLK_TCK 100, over 330s)
+captured 2026-11-10T10:10:37Z
+    480 -bennu-brash
+   1305 bennu-watcherd restart --f /etc/sceptre/config.xml --b /home/sceptre/bennu-field-deviced.firmware --w /etc/sceptre/watcher.ini
+   1307 bennu-field-deviced --c restart --env default --file /etc/sceptre/config.xml
+packets 3378 bytes 1369724 dur 328.7s B/s 4167
+  tcp:5555 pkts 80 bytes 6347 B/s 19
+  udp:40000 pkts 3298 bytes 1363377 B/s 4148
+udp/40000 datagrams 3298, sources 172.16.1.2, malformed/truncated 0, no _ff.seq 0
+group 54386972605942b: received 3298, seq 4660..7957, missing 0 (0.0000%), longest run lost 0, dup/reordered 0, restarts 0, cycles 4660..7957
+  inter-arrival ms: p50 100.0 p99 102.6 max 10268.6

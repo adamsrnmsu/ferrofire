@@ -1,0 +1,8 @@
+== waterway-provider pull100-2 cpu ticks before: 43  after: 98  (CLK_TCK 100, over 30s)
+captured 2026-11-10T11:55:34Z
+   6027 ./ferrofire run waterway.yaml --server tcp://172.16.1.2:5555 --publish udp://127.0.0.1:40000
+packets 1811 bytes 327932 dur 28.6s B/s 11460
+  tcp:5555 pkts 1811 bytes 327932 B/s 11460
+udp/40000 datagrams 0, sources , malformed/truncated 0, no _ff.seq 0
+-- prov.log (tail)
+Info: ferrofire run: waterway.yaml dt=0.05s; REP tcp://172.16.1.2:5555; RADIO udp://127.0.0.1:40000 group 9ceaac3fa29ea7c every 0.1s

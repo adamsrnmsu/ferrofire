@@ -1,0 +1,16 @@
+== rtu-1 fdlog inject 2026-11-10T10:16:12Z log=/etc/sceptre/log/default-bennu-field-deviced-stdout.log
+   1502    2332 bennu-watcherd restart --f /etc/sceptre/config.xml --b /home/sceptre/bennu-field-deviced.firmware --w /etc/sceptre/watcher.ini
+   1504    2329 bennu-field-deviced --c restart --env default --file /etc/sceptre/config.xml
+lines 9358, error-ish: 1, timeouts/retries: 3, unknown: 0, seq/_ff mentions: 0
+      3 I: Client send: no response from server, retrying...
+      1 I: ERR -- Malformed request ''
+stderr/other /etc/sceptre/log/default-bennu-field-deviced-stderr.log: 5 error-ish of 14 lines
+stderr/other /etc/sceptre/log/watcher-stderr.log: 0 error-ish of 223611 lines
+stderr/other /etc/sceptre/log/watcher-stdout.log: 0 error-ish of 4 lines
+-- message mix of the device log (LOGIC lines dropped, numbers masked)
+    736 E: InputModule::subscriptionHandler -- value=abc -- stod
+    736 E: InputModule::subscriptionHandler -- value=N -- stod
+    444 
+    222 lowerwaterNheight -- N
+    222 lowervalveNopen -- N
+    222 lowersensorNactive -- N

@@ -1,0 +1,14 @@
+== rtu-1 fdlog kill5 2026-11-10T09:54:19Z log=/etc/sceptre/log/default-bennu-field-deviced-stdout.log
+   1502    1019 bennu-watcherd restart --f /etc/sceptre/config.xml --b /home/sceptre/bennu-field-deviced.firmware --w /etc/sceptre/watcher.ini
+   1504    1016 bennu-field-deviced --c restart --env default --file /etc/sceptre/config.xml
+lines 3465, error-ish: 0, timeouts/retries: 0, unknown: 0, seq/_ff mentions: 0
+stderr/other /etc/sceptre/log/default-bennu-field-deviced-stderr.log: 2 error-ish of 8 lines
+stderr/other /etc/sceptre/log/watcher-stderr.log: 0 error-ish of 97771 lines
+stderr/other /etc/sceptre/log/watcher-stdout.log: 0 error-ish of 4 lines
+-- message mix of the device log (LOGIC lines dropped, numbers masked)
+    196 
+     98 lowerwaterNheight -- N
+     98 lowervalveNopen -- N
+     98 lowersensorNactive -- N
+     98 lowergateNopen -- N
+     98 locksensorNactive -- N

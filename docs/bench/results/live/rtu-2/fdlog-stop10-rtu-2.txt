@@ -1,0 +1,17 @@
+== rtu-2 fdlog stop10 2026-11-10T10:11:11Z log=/etc/sceptre/log/default-bennu-field-deviced-stdout.log
+   1305    2015 bennu-watcherd restart --f /etc/sceptre/config.xml --b /home/sceptre/bennu-field-deviced.firmware --w /etc/sceptre/watcher.ini
+   1307    2011 bennu-field-deviced --c restart --env default --file /etc/sceptre/config.xml
+lines 6414, error-ish: 1, timeouts/retries/offline: 4, unknown: 0, seq/_ff mentions: 0
+      3 I: Client send: no response from server, retrying...
+      1 I: ERR -- Malformed request ''
+      1 E: Client send: server seems to be offline, abandoning
+stderr/other /etc/sceptre/log/default-bennu-field-deviced-stderr.log: 4 error-ish of 13 lines
+stderr/other /etc/sceptre/log/watcher-stderr.log: 0 error-ish of 193210 lines
+stderr/other /etc/sceptre/log/watcher-stdout.log: 0 error-ish of 4 lines
+-- message mix of the device log (LOGIC lines dropped, numbers masked)
+    386 
+    193 upperwaterNheight -- N
+    193 uppervalveNopen -- N
+    193 uppersensorNactive -- N
+    193 uppergateNopen -- N
+    193 locksensorNactive -- N

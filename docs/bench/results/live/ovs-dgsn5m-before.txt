@@ -1,0 +1,76 @@
+OFPST_PORT reply (xid=0x2): 19 ports
+  port 538: rx pkts=16, bytes=1216, drop=0, errs=0, frame=0, over=0, crc=0
+           tx pkts=71692, bytes=24872491, drop=0, errs=0, coll=0
+  port 550: rx pkts=3682, bytes=259116, drop=0, errs=0, frame=0, over=0, crc=0
+           tx pkts=79205, bytes=27031346, drop=0, errs=0, coll=0
+  port 546: rx pkts=73, bytes=9088, drop=0, errs=0, frame=0, over=0, crc=0
+           tx pkts=71635, bytes=24864619, drop=0, errs=0, coll=0
+  port 547: rx pkts=6669, bytes=655740, drop=0, errs=0, frame=0, over=0, crc=0
+           tx pkts=18298, bytes=1299829, drop=0, errs=0, coll=0
+  port 539: rx pkts=2594, bytes=1263979, drop=0, errs=0, frame=0, over=0, crc=0
+           tx pkts=1527, bytes=695150, drop=0, errs=0, coll=0
+  port 544: rx pkts=16, bytes=1216, drop=0, errs=0, frame=0, over=0, crc=0
+           tx pkts=71692, bytes=24872491, drop=0, errs=0, coll=0
+  port 552: rx pkts=33860, bytes=2411060, drop=0, errs=0, frame=0, over=0, crc=0
+           tx pkts=13358, bytes=1288175, drop=0, errs=0, coll=0
+  port 536: rx pkts=88948, bytes=29616342, drop=0, errs=0, frame=0, over=0, crc=0
+           tx pkts=9813, bytes=698600, drop=0, errs=0, coll=0
+  port 541: rx pkts=7765, bytes=540373, drop=0, errs=0, frame=0, over=0, crc=0
+           tx pkts=14195, bytes=15547307, drop=0, errs=0, coll=0
+  port LOCAL: rx pkts=385044, bytes=118146650, drop=0, errs=0, frame=0, over=0, crc=0
+           tx pkts=47, bytes=3881, drop=0, errs=0, coll=0
+  port 548: rx pkts=5904, bytes=414267, drop=0, errs=0, frame=0, over=0, crc=0
+           tx pkts=79434, bytes=27383842, drop=0, errs=0, coll=0
+  port 540: rx pkts=16, bytes=1216, drop=0, errs=0, frame=0, over=0, crc=0
+           tx pkts=71692, bytes=24872491, drop=0, errs=0, coll=0
+  port 542: rx pkts=79, bytes=9784, drop=0, errs=0, frame=0, over=0, crc=0
+           tx pkts=71629, bytes=24863923, drop=0, errs=0, coll=0
+  port 551: rx pkts=13086, bytes=1270778, drop=0, errs=0, frame=0, over=0, crc=0
+           tx pkts=25923, bytes=1879891, drop=0, errs=0, coll=0
+  port 545: rx pkts=178, bytes=23567, drop=0, errs=0, frame=0, over=0, crc=0
+           tx pkts=277, bytes=90592, drop=0, errs=0, coll=0
+  port 553: rx pkts=20, bytes=1456, drop=0, errs=0, frame=0, over=0, crc=0
+           tx pkts=74050, bytes=25033171, drop=0, errs=0, coll=0
+  port 543: rx pkts=20386, bytes=16402235, drop=0, errs=0, frame=0, over=0, crc=0
+           tx pkts=20517, bytes=2404492, drop=0, errs=0, coll=0
+  port 537: rx pkts=39505, bytes=4360506, drop=0, errs=0, frame=0, over=0, crc=0
+           tx pkts=22113, bytes=3354180, drop=0, errs=0, coll=0
+  port 549: rx pkts=6666, bytes=630234, drop=0, errs=0, frame=0, over=0, crc=0
+           tx pkts=15658, bytes=1119401, drop=0, errs=0, coll=0
+-- ports
+name                : mega_tap546	ofport              : 547
+name                : mega_tap545	ofport              : 546
+name                : mega_tap548	ofport              : 549
+name                : mega_tap542	ofport              : 543
+name                : mega_tap537	ofport              : 538
+name                : mega_tap539	ofport              : 540
+name                : mega_tap551	ofport              : 552
+name                : mega_tap538	ofport              : 539
+name                : mega_tap540	ofport              : 541
+name                : mega_tap550	ofport              : 551
+name                : mega_tap543	ofport              : 544
+name                : mega_tap535	ofport              : 536
+name                : phenix	ofport              : 65534
+name                : mega_tap541	ofport              : 542
+name                : mega_tap549	ofport              : 550
+name                : mega_tap547	ofport              : 548
+name                : mega_tap536	ofport              : 537
+name                : mega_tap552	ofport              : 553
+name                : mega_tap544	ofport              : 545
+-- snooping
+true
+-- vms
+host        | name                 | tap
+lima-phenix | engineer-workstation | [mega_tap544, mega_tap545]
+lima-phenix | historian            | [mega_tap538, mega_tap539]
+lima-phenix | hmi                  | [mega_tap540, mega_tap541]
+lima-phenix | opc                  | [mega_tap536, mega_tap537]
+lima-phenix | router               | [mega_tap550, mega_tap551, mega_tap552]
+lima-phenix | rtu-1                | [mega_tap546, mega_tap547]
+lima-phenix | rtu-2                | [mega_tap548, mega_tap549]
+lima-phenix | scada-server         | [mega_tap542, mega_tap543]
+lima-phenix | waterway-provider    | [mega_tap535]
+-- end
+ port  VLAN  GROUP                Age
+  548   101  239.0.0.1          46
+  550   101  239.0.0.1          34

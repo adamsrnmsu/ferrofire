@@ -1,0 +1,17 @@
+--- read --t lock.height
+Reply:  15 
+--- write --t lowergate.opn --v 1
+I: ERR -- Tag 'lowergate.opn' is unknown or read-only (did you mean `lowergate.open`?) 
+--- write --t lowergate.open.x --v 1
+I: ERR -- Tag 'lowergate.open.x' is unknown or read-only (did you mean `lowergate.open`?) 
+--- read --t lock.hieght
+I: ERR -- Tag 'lock.hieght' not found (did you mean `lock.height`?) 
+--- read --t BOAT.LOCATION
+I: ERR -- Tag 'BOAT.LOCATION' not found 
+--- write --t Lowergate.open --v 1
+I: ERR -- Tag 'Lowergate.open' is unknown or read-only (did you mean `lowergate.open`?) 
+--- write --t lock.height --v 1e999
+terminate called after throwing an instance of 'boost::wrapexcept<boost::program_options::invalid_option_value>'   what():  the argument ('1e999') for option '--value' is invalid 
+--- read --t lock.height
+Reply:  15 
+model still answering: 267.5

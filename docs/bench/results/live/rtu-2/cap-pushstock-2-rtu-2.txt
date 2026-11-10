@@ -1,0 +1,9 @@
+== rtu-2 pushstock-2 cpu ticks before: 18 22  after: 41 48  (CLK_TCK 100, over 30s)
+captured 2026-11-10T11:40:58Z
+    480 -bennu-brash
+   2850 bennu-watcherd restart --f /etc/sceptre/config.xml --b /home/sceptre/bennu-field-deviced.firmware --w /etc/sceptre/watcher.ini
+   2852 bennu-field-deviced --c restart --env default --file /etc/sceptre/config.xml
+packets 308 bytes 106136 dur 28.7s B/s 3703
+  tcp:5555 pkts 13 bytes 1163 B/s 41
+  udp:40000 pkts 295 bytes 104973 B/s 3663
+udp/40000 datagrams 295, sources 172.16.1.2, malformed/truncated 0, no _ff.seq 295

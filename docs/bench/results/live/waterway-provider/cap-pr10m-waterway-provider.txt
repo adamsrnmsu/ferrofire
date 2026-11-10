@@ -1,0 +1,13 @@
+== waterway-provider pr10m cpu ticks before: 50  after: 1025  (CLK_TCK 100, over 600s)
+captured 2026-11-10T08:58:57Z
+   2614 ./ferrofire run waterway.yaml --server tcp://172.16.1.2:5555 --publish-tags udp://*;239.0.1.1:40000=lowerwater.height,lock.height,lowergate.open,lowervalve.open,lowersensor.active,lowersensor.direction,locksensor.active,locksensor.direction,boat.location,boat.direction --publish-tags udp://*;239.0.1.2:40000=upperwater.height,lock.height,uppergate.open,uppervalve.open,uppersensor.active,uppersensor.direction,locksensor.active,locksensor.direction
+packets 12165 bytes 3531945 dur 599.0s B/s 5896
+  tcp:5555 pkts 183 bytes 14678 B/s 25
+  udp:40000 pkts 11982 bytes 3517267 B/s 5872
+udp/40000 datagrams 11982, sources 172.16.1.2, malformed/truncated 0, no _ff.seq 0
+group 417543b472ecd36: received 5991, seq 350..6340, missing 0 (0.0000%), longest run lost 0, dup/reordered 0, restarts 0, cycles 350..6340
+  inter-arrival ms: p50 100.0 p99 102.8 max 110.9
+group b491d2086255b78: received 5991, seq 350..6340, missing 0 (0.0000%), longest run lost 0, dup/reordered 0, restarts 0, cycles 350..6340
+  inter-arrival ms: p50 100.0 p99 102.9 max 110.9
+-- prov.log (tail)
+Info: ferrofire run: waterway.yaml dt=0.05s; REP tcp://172.16.1.2:5555; RADIO udp://*;239.0.1.1:40000 group 417543b472ecd36; RADIO udp://*;239.0.1.2:40000 group b491d2086255b78 every 0.1s
