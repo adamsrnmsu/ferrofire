@@ -75,6 +75,18 @@ fn dispatch(cmd: Cmd) {
     }
 }
 
+/// Tag completion for `probe read|write|watch`, appended to the generated script: the names come from `probe cached-tags`
+/// (the last `probe query`, read, write or watch). ponytail: elvish and powershell get the static script only.
+fn tag_hook(shell: clap_complete::Shell) -> &'static str {
+    use clap_complete::Shell::*;
+    match shell {
+        Bash => "\n_ferrofire_tags() {\n  local cur=${COMP_WORDS[COMP_CWORD]}\n  if [[ ${COMP_WORDS[1]} == probe && ${COMP_WORDS[2]} =~ ^(read|write|watch)$ && $cur != -* ]]; then\n    COMPREPLY=($(compgen -W \"$(ferrofire probe cached-tags 2>/dev/null)\" -- \"$cur\"))\n  else\n    _ferrofire \"$@\"\n  fi\n}\ncomplete -F _ferrofire_tags -o bashdefault -o default ferrofire\n",
+        Zsh => "\n_ferrofire_tags() {\n  if [[ $words[2] == probe && $words[3] == (read|write|watch) && $words[CURRENT] != -* ]]; then\n    compadd -- ${(f)\"$(ferrofire probe cached-tags 2>/dev/null)\"}\n  else\n    _ferrofire \"$@\"\n  fi\n}\ncompdef _ferrofire_tags ferrofire\n",
+        Fish => "\ncomplete -c ferrofire -n '__fish_seen_subcommand_from probe; and __fish_seen_subcommand_from read write watch' -f -a '(ferrofire probe cached-tags 2>/dev/null)'\n",
+        _ => "",
+    }
+}
+
 fn completions(shell: clap_complete::Shell) {
     clap_complete::generate(
         shell,
@@ -82,6 +94,7 @@ fn completions(shell: clap_complete::Shell) {
         "ferrofire",
         &mut std::io::stdout(),
     );
+    print!("{}", tag_hook(shell));
 }
 
 type Write = (f64, String, f64);

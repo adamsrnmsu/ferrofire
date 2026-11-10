@@ -34,7 +34,7 @@ pub struct ProbeCli {
 enum Sub {
     /// List the provider's tags
     Query,
-    /// Print the current value of tags
+    /// Print the current value of tags (`*` and `?` expand against QUERY)
     Read {
         #[arg(value_delimiter = ',', required = true, value_name = "A,B,C")]
         tags: Vec<String>,
@@ -47,6 +47,9 @@ enum Sub {
         #[arg(long)]
         confirm: bool,
     },
+    /// Tag names from the last query (for shell completion)
+    #[command(hide = true)]
+    CachedTags,
     /// Follow the published datagrams: value, age, stale, sequence gaps
     Watch {
         /// Publish endpoint to listen on
@@ -104,6 +107,65 @@ fn json_str(s: &str) -> String {
         }
     }
     out + "\""
+}
+
+/// Whole-string match of `pat` (`*` any run, `?` one char) against `s`.
+pub fn glob_match(pat: &str, s: &str) -> bool {
+    fn go(p: &[char], s: &[char]) -> bool {
+        match p.split_first() {
+            None => s.is_empty(),
+            Some(('*', rest)) => (0..=s.len()).any(|i| go(rest, &s[i..])),
+            Some((c, rest)) => s
+                .split_first()
+                .is_some_and(|(x, tail)| (*c == '?' || c == x) && go(rest, tail)),
+        }
+    }
+    go(
+        &pat.chars().collect::<Vec<_>>(),
+        &s.chars().collect::<Vec<_>>(),
+    )
+}
+
+/// Globs replaced by the tags they match (in `all` order, no repeats); plain names pass through for the provider to check.
+/// A glob matching nothing is an error.
+pub fn expand(pats: &[String], all: &[String]) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = vec![];
+    for p in pats {
+        if !p.contains(['*', '?']) {
+            out.push(p.clone());
+            continue;
+        }
+        let hits: Vec<&String> = all.iter().filter(|t| glob_match(p, t)).collect();
+        if hits.is_empty() {
+            return Err(format!("no tag matches `{p}`"));
+        }
+        out.extend(hits.into_iter().cloned());
+    }
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|t| seen.insert(t.clone()));
+    Ok(out)
+}
+
+fn has_glob(pats: &[String]) -> bool {
+    pats.iter().any(|p| p.contains(['*', '?']))
+}
+
+/// Where the last QUERY answer is kept for shell completion. ponytail: one file, the last provider queried; key it by server if completion must follow `--server`.
+pub fn cache_path() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".cache")))?;
+    Some(base.join("ferrofire").join("tags"))
+}
+
+/// QUERY the provider and remember the answer for completion (a cache that cannot be written is ignored).
+fn fetch_tags(req: &mut dyn Requester) -> Result<Vec<String>, String> {
+    let tags = tag_list(&ask(req, b"QUERY=")?)?;
+    if let Some(p) = cache_path() {
+        let _ = p.parent().map(std::fs::create_dir_all);
+        let _ = std::fs::write(p, tags.join("\n") + "\n");
+    }
+    Ok(tags)
 }
 
 /// The tag names in a `QUERY=` reply.
@@ -298,8 +360,9 @@ fn run(cli: ProbeCli) -> Result<(), String> {
     let (req, json) = (&mut *req, cli.json);
     match cli.cmd {
         Sub::Query => query(req, json),
-        Sub::Read { tags } => read(req, &tags, json),
-        Sub::Write { points, confirm } => write(req, &cli.server, &points, confirm),
+        Sub::CachedTags => cached_tags(),
+        Sub::Read { tags } => read(req, tags, json),
+        Sub::Write { points, confirm } => write(req, &cli.server, points, confirm),
         Sub::Watch {
             listen,
             tags,
@@ -316,13 +379,25 @@ fn run(cli: ProbeCli) -> Result<(), String> {
 }
 
 fn query(req: &mut dyn Requester, json: bool) -> Result<(), String> {
-    let tags = tag_list(&ask(req, b"QUERY=")?)?;
+    let tags = fetch_tags(req)?;
     print_lines(tags.iter().map(|t| tag_line(t, json)));
     Ok(())
 }
 
-fn read(req: &mut dyn Requester, tags: &[String], json: bool) -> Result<(), String> {
-    for r in requests(tags) {
+fn cached_tags() -> Result<(), String> {
+    let text =
+        std::fs::read_to_string(cache_path().ok_or("no cache directory")?).unwrap_or_default();
+    print_lines(text.lines().map(String::from));
+    Ok(())
+}
+
+fn read(req: &mut dyn Requester, tags: Vec<String>, json: bool) -> Result<(), String> {
+    let tags = if has_glob(&tags) {
+        expand(&tags, &fetch_tags(req)?)?
+    } else {
+        tags
+    };
+    for r in requests(&tags) {
         print(&read_rows(&ask(req, &r)?)?, json);
     }
     Ok(())
@@ -332,9 +407,10 @@ fn read(req: &mut dyn Requester, tags: &[String], json: bool) -> Result<(), Stri
 fn write(
     req: &mut dyn Requester,
     server: &str,
-    points: &[String],
+    points: Vec<String>,
     confirm: bool,
 ) -> Result<(), String> {
+    let points = &expand_points(req, points)?[..];
     let r = write_request(points)?;
     confirmed(confirm, points, std::io::stdin().lock())?;
     let res = req.call(&r).and_then(|reply| update_msg(&reply));
@@ -359,8 +435,38 @@ fn write(
 /// The tags to watch: those named (checked against the provider) or all it has.
 fn watched(req: &mut dyn Requester, tags: Vec<String>) -> Result<Vec<String>, String> {
     if tags.is_empty() {
-        return tag_list(&ask(req, b"QUERY=")?);
+        return fetch_tags(req);
     }
+    let tags = if has_glob(&tags) {
+        expand(&tags, &fetch_tags(req)?)?
+    } else {
+        tags
+    };
     validate(req, &tags)?;
     Ok(tags)
+}
+
+/// `bus-*.v=1` -> the same value on every tag the glob matches.
+fn expand_points(req: &mut dyn Requester, points: Vec<String>) -> Result<Vec<String>, String> {
+    if !has_glob(
+        &points
+            .iter()
+            .map(|p| p.split('=').next().unwrap_or("").to_string())
+            .collect::<Vec<_>>(),
+    ) {
+        return Ok(points);
+    }
+    let all = fetch_tags(req)?;
+    let mut out = vec![];
+    for p in points {
+        let (t, v) = p.split_once('=').unwrap_or((&p, ""));
+        for tag in expand(&[t.to_string()], &all)? {
+            out.push(if v.is_empty() {
+                tag
+            } else {
+                format!("{tag}={v}")
+            });
+        }
+    }
+    Ok(out)
 }

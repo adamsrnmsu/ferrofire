@@ -253,3 +253,62 @@ fn watch_prints_value_age_and_stale() {
         "{line}"
     );
 }
+
+#[test]
+fn globs_match_and_expand() {
+    assert!(glob_match("bus-*.voltage", "bus-12.voltage"));
+    assert!(glob_match("a?c", "abc") && !glob_match("a?c", "ac"));
+    assert!(glob_match("*", "") && !glob_match("a*", "ba"));
+    let all = s(&["a.x", "b.x", "b.y"]);
+    assert_eq!(
+        expand(&s(&["*.x", "b.*", "c"]), &all),
+        Ok(s(&["a.x", "b.x", "b.y", "c"]))
+    );
+    assert!(expand(&s(&["z*"]), &all)
+        .unwrap_err()
+        .contains("no tag matches `z*`"));
+}
+
+#[test]
+fn globs_and_completion_cache_against_a_running_provider() {
+    let (_srv, ep) = server("udp://*;127.0.0.1:9");
+    let (ok, out, _) = probe(&ep, &["read", "lowervalve.*"], "");
+    assert!(
+        ok && out.starts_with("lowervalve.") && out.contains("lowervalve.open=0"),
+        "{out}"
+    );
+    let (ok, _, err) = probe(&ep, &["read", "nothing.*"], "");
+    assert!(!ok && err.contains("no tag matches"), "{err}");
+    let (ok, _, err) = probe(&ep, &["write", "--confirm", "lowervalve.op*=1"], "");
+    assert!(ok && err.contains("points=lowervalve.open=1 "), "{err}");
+
+    // the QUERY is cached for completion
+    let dir = std::env::temp_dir().join(format!("ff-cache-{}", std::process::id()));
+    let run = |args: &[&str]| {
+        let o = Command::new(BIN)
+            .env("XDG_CACHE_HOME", &dir)
+            .args(["probe", "--server", &ep])
+            .args(args)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&o.stdout).into_owned()
+    };
+    assert_eq!(run(&["cached-tags"]), "");
+    run(&["query"]);
+    assert!(run(&["cached-tags"]).contains("lowervalve.open\n"));
+    let _ = std::fs::remove_dir_all(&dir);
+    for (shell, needle) in [
+        ("bash", "cached-tags"),
+        ("zsh", "compdef"),
+        ("fish", "cached-tags"),
+    ] {
+        let o = Command::new(BIN)
+            .args(["completions", shell])
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&o.stdout).contains(needle),
+            "{shell}"
+        );
+    }
+}

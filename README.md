@@ -170,6 +170,11 @@ ferrofire probe write lowervalve.open=1 --confirm
 ferrofire probe watch --listen 'udp://*;239.0.0.1:40000' [--tags a,b] [--stale-after 3]
 ```
 
+`read`, `write` and `watch --tags` accept globs (`*`, `?`) expanded against the provider's QUERY: `read 'bus-*.voltage'`,
+`write --confirm 'valve-*.open=0'` (the value goes to every match). A glob that matches nothing is an error; plain names are
+left to the provider (and its `did you mean`). Every QUERY probe makes is cached in `$XDG_CACHE_HOME/ferrofire/tags` (the last
+provider queried), and `ferrofire completions bash|zsh|fish` completes tag names from it after `probe read|write|watch`.
+
 `read` and `write` surface the provider's `did you mean` errors. A request that times out is retried once (a write is not).
 `write` asks `[y/N]` on stdin unless `--confirm`, and prints one audit line on stderr whether the provider accepted it or not:
 `audit: write t=<unix ms> by=<user>@pid<N> server=<endpoint> points=a=1 result=ACK`.
