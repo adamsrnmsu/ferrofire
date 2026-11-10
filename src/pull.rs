@@ -8,6 +8,7 @@ use crate::transport::{self, Publisher, Requester};
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
+use tracing::Level;
 
 const USAGE: &str = "ferrofire pull-bridge --publish udp://127.0.0.1:40000 (--tags-from config.xml | --tags a,b,c) [--server tcp://127.0.0.1:5555] [--rate 100]  (--rate in ms)";
 
@@ -168,21 +169,25 @@ pub struct Outage {
 }
 
 impl Outage {
-    pub fn log_line(&mut self, res: Result<(), String>, now: Instant) -> Option<String> {
+    pub fn log_line(&mut self, res: Result<(), String>, now: Instant) -> Option<(Level, String)> {
         match (res, self.last) {
             (Err(e), None) => {
                 self.last = Some(now);
-                Some(format!("Warn: pull failed, keeping last values: {e}"))
+                Some((
+                    Level::WARN,
+                    format!("pull failed, keeping last values: {e}"),
+                ))
             }
             (Err(e), Some(t)) if now.duration_since(t) >= LOG_EVERY => {
                 self.last = Some(now);
-                Some(format!(
-                    "Warn: pull still failing, keeping last values: {e}"
+                Some((
+                    Level::WARN,
+                    format!("pull still failing, keeping last values: {e}"),
                 ))
             }
             (Ok(()), Some(_)) => {
                 self.last = None;
-                Some("Info: pull recovered".into())
+                Some((Level::INFO, "pull recovered".into()))
             }
             _ => None,
         }
@@ -218,10 +223,11 @@ fn run(args: PullCli) -> Result<(), String> {
     let (t0, mut k, mut outage) = (Instant::now(), 0u32, Outage::default());
     while !STOP.load(Ordering::SeqCst) {
         let res = tick(&mut *req, &requests, &*out);
-        outage
-            .log_line(res, Instant::now())
-            .iter()
-            .for_each(|l| eprintln!("{l}"));
+        match outage.log_line(res, Instant::now()) {
+            Some((Level::WARN, m)) => tracing::warn!("{m}"),
+            Some((_, m)) => tracing::info!("{m}"),
+            None => {}
+        }
         k = next_k(t0, period, Instant::now(), k);
         sleep_until(t0 + period * k, Duration::from_millis(2));
     }

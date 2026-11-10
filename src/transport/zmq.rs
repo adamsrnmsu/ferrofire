@@ -142,8 +142,8 @@ impl Publisher for Radio {
             if let Err(e) = self.sock.send_to(&d, self.dest) {
                 let n = self.dropped.fetch_add(1, Ordering::SeqCst) + 1;
                 if self.warn.allow(Instant::now()) {
-                    eprintln!(
-                        "Warn: {}: UDP send failed ({e}); {n} datagrams dropped so far",
+                    tracing::warn!(
+                        "{}: UDP send failed ({e}); {n} datagrams dropped so far",
                         self.endpoint
                     );
                 }

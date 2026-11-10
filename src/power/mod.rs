@@ -453,8 +453,8 @@ impl Power {
             Err(e) => e,
         };
         if !self.alert {
-            eprintln!(
-                "ferrofire: power flow failed ({why}); keeping the last solution, bus-alert raised"
+            tracing::warn!(
+                "power flow failed ({why}); keeping the last solution, bus-alert raised"
             );
         }
         self.alert = true;
