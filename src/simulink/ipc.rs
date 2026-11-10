@@ -1,6 +1,13 @@
 //! Thin libc wrappers: SysV shm, POSIX named semaphores, updates FIFO. Same calls as modelHooks.c.
 //! Real-IPC testing happens in the Lima VM (macOS SysV/POSIX semantics differ); this compiles on both.
 
+//!
+//! Unsafe invariants: `Shm::addr` is a live shmat mapping of `size` bytes until `destroy`, and every access is
+//! bounds-checked against `size`; `Sem::p` is a valid sem_open handle until `destroy`; `Fifo::fd` is an open fd
+//! until `destroy`; every `CString` outlives the call using its pointer; other calls pass only ints or null.
+#![allow(unsafe_code)]
+#![deny(unsafe_op_in_unsafe_fn)]
+
 use super::contract::*;
 use std::ffi::CString;
 use std::io;

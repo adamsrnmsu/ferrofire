@@ -246,25 +246,14 @@ fn pid_of(pidfile: &str) -> Option<i32> {
     std::fs::read_to_string(pidfile).ok()?.trim().parse().ok()
 }
 fn alive(pid: i32) -> bool {
-    unsafe { libc::kill(pid, 0) == 0 }
+    crate::sys::kill(pid, 0)
 }
 
 fn daemonize(pidfile: &str, out: &str, err: &str) -> Result<(), String> {
-    unsafe {
-        if libc::fork() > 0 {
-            std::process::exit(0); // not _exit: flush, so coverage of the parent's path is recorded
-        }
-        libc::setsid();
-        if libc::fork() > 0 {
-            std::process::exit(0);
-        }
-        libc::chdir(c"/".as_ptr());
-        libc::umask(0);
-    }
+    crate::sys::double_fork_detach();
     let pid = std::process::id();
     std::fs::write(pidfile, format!("{pid}\n")).map_err(|e| format!("{pidfile}: {e}"))?;
     eprintln!("\nProcess started with PID {pid}");
-    use std::os::fd::AsRawFd;
     let open = |p: &str, w: bool| {
         if w {
             std::fs::OpenOptions::new()
@@ -277,9 +266,7 @@ fn daemonize(pidfile: &str, out: &str, err: &str) -> Result<(), String> {
     };
     for (path, fd, w) in [("/dev/null", 0, false), (out, 1, true), (err, 2, true)] {
         let f = open(path, w).map_err(|e| format!("{path}: {e}"))?;
-        unsafe {
-            libc::dup2(f.as_raw_fd(), fd);
-        }
+        crate::sys::dup2(&f, fd);
     }
     Ok(())
 }
@@ -293,15 +280,13 @@ fn stop(pidfile: &str, silent: bool) {
     };
     for _ in 0..100 {
         // ~10 s of SIGTERM, then SIGKILL
-        if unsafe { libc::kill(pid, libc::SIGTERM) } != 0 {
+        if !crate::sys::kill(pid, libc::SIGTERM) {
             break;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
     if alive(pid) {
-        unsafe {
-            libc::kill(pid, libc::SIGKILL);
-        }
+        crate::sys::kill(pid, libc::SIGKILL);
     }
     let _ = std::fs::remove_file(pidfile);
 }

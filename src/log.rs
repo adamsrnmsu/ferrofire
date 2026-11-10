@@ -377,7 +377,7 @@ pub fn run_dirs() -> Vec<PathBuf> {
     let xdg = std::env::var("XDG_RUNTIME_DIR").map(|x| Path::new(&x).join("ferrofire"));
     let mut dirs = vec![PathBuf::from("/run/ferrofire")];
     dirs.extend(xdg);
-    dirs.push(format!("/tmp/ferrofire-{}", unsafe { libc::getuid() }).into());
+    dirs.push(format!("/tmp/ferrofire-{}", crate::sys::getuid()).into());
     dirs
 }
 

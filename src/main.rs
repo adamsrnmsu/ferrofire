@@ -1,5 +1,7 @@
 //! ferrofire CLI. Also the `simulinksolver` entry point: selected when argv[0] ends in `simulinksolver`.
 
+#![forbid(unsafe_code)]
+
 use clap::{CommandFactory, Parser, Subcommand};
 use ferrofire::model::{Model, Value};
 

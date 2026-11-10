@@ -276,10 +276,7 @@ pub extern "C" fn on_signal(_: libc::c_int) {
 /// Start logging; SIGINT and SIGTERM raise `STOP`, which every loop in the process polls.
 pub fn install_signals() {
     crate::trace::init(); // every long-running subcommand starts here, so logging starts with it
-    unsafe {
-        libc::signal(libc::SIGINT, on_signal as *const () as usize);
-        libc::signal(libc::SIGTERM, on_signal as *const () as usize);
-    }
+    crate::sys::on_stop_signals(on_signal);
 }
 
 /// Sleep in short slices until `deadline`, returning early on `STOP` so a stop signal is noticed promptly.
@@ -306,30 +303,6 @@ pub fn parse_udp(ep: &str) -> Result<(Option<String>, SocketAddr), String> {
     Ok((iface, addr))
 }
 
-/// IP_MULTICAST_IF: send multicast datagrams out of the interface that owns `a`.
-fn set_multicast_if(s: &UdpSocket, a: Ipv4Addr) -> Result<(), String> {
-    use std::os::fd::AsRawFd;
-    let ia = libc::in_addr {
-        s_addr: u32::from(a).to_be(),
-    };
-    let rc = unsafe {
-        libc::setsockopt(
-            s.as_raw_fd(),
-            libc::IPPROTO_IP,
-            libc::IP_MULTICAST_IF,
-            &ia as *const _ as *const libc::c_void,
-            std::mem::size_of::<libc::in_addr>() as u32,
-        )
-    };
-    match rc {
-        0 => Ok(()),
-        _ => Err(format!(
-            "IP_MULTICAST_IF {a}: {}",
-            std::io::Error::last_os_error()
-        )),
-    }
-}
-
 fn multicast_setup(s: &UdpSocket, iface: Option<&str>) -> Result<(), String> {
     s.set_multicast_ttl_v4(1).map_err(|e| e.to_string())?; // libzmq multicast_hops default
     s.set_multicast_loop_v4(true).map_err(|e| e.to_string())?; // same-host subscribers work
@@ -337,7 +310,7 @@ fn multicast_setup(s: &UdpSocket, iface: Option<&str>) -> Result<(), String> {
     let a: Ipv4Addr = i
         .parse()
         .map_err(|_| format!("interface `{i}`: only IPv4 addresses are supported"))?;
-    set_multicast_if(s, a)
+    crate::sys::set_multicast_if(s, a)
 }
 
 pub fn udp_sender(iface: Option<&str>, dest: SocketAddr) -> Result<UdpSocket, String> {

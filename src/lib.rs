@@ -1,6 +1,8 @@
 //! ferrofire: process (and, later, power-flow) simulator. `model` is the engine core; `simulink` is the shm
 //! frontend that stands in for the Simulink-generated solver.
 
+#![deny(unsafe_code)] // allowed only in `sys` and `simulink::ipc`
+
 pub mod bennu;
 pub mod datagram;
 pub mod expr;
@@ -11,6 +13,7 @@ pub mod power;
 pub mod pull;
 pub mod pypower;
 pub mod simulink;
+pub mod sys;
 pub mod trace;
 pub mod transport;
 
