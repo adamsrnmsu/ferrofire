@@ -10,7 +10,7 @@ DRY_MIN := 0.8
 # ponytail: pid lock; a kill -9 of make leaves a stale file that src-free ignores because the pid is gone.
 MUTATE_LOCK := .mutate.lock
 
-.PHONY: testpeers conformance conformance-selftest src-free help wireshark bench bench-report bench-dg bench-dg-report image fmt fmt-check lint test golden linux crap dry mutate check clean
+.PHONY: differential diff-dnp3 testpeers conformance conformance-selftest src-free help wireshark bench bench-report bench-dg bench-dg-report image fmt fmt-check lint test golden linux crap dry mutate check clean
 help:    # list targets
 	@grep -E '^[a-z-]+:.*#' $(MAKEFILE_LIST) | sed -E 's/^([a-z-]+):[^#]*#/\1\t/'
 src-free:   # fail fast while make mutate is rewriting src/
@@ -60,6 +60,14 @@ conformance:   # acceptance harness for one protocol vs the stock oracle: make c
 conformance-selftest: export DOCKER_HOST := $(TP_DOCKER_HOST)
 conformance-selftest:   # prove the harness fails on a damaged and on an empty capture (negative control)
 	SELFTEST=1 conformance/run.sh dnp3
+
+differential: export DOCKER_HOST := $(TP_DOCKER_HOST)
+differential:   # one differential probe against the stock oracle or our binary: make differential PROTO=dnp3 WHO=stock|rust SET=diff|big
+	@test -n "$(PROTO)" -a -n "$(WHO)" || { echo "usage: make differential PROTO=dnp3 WHO=stock|rust [SET=diff|big]"; exit 2; }
+	conformance/differential.sh $(PROTO) $(WHO) $(or $(SET),diff)
+diff-dnp3: export DOCKER_HOST := $(TP_DOCKER_HOST)
+diff-dnp3:   # our DNP3 outstation vs the recorded stock transcripts, live in containers (build target-linux/debug/ferrofire first: make test)
+	@for s in diff big; do conformance/differential.sh dnp3 rust $$s | diff conformance/dnp3/stock-$$s.golden - && echo "dnp3 $$s: byte-equal to stock" || exit 1; done
 
 clean:   # remove build output and metrics
 	rm -rf target target-linux dist .metrics

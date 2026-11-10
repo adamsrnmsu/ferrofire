@@ -30,6 +30,27 @@ Files go in and out with `docker cp` (no bind mounts: the Lima docker daemon can
 `BENNU_DATA`, default `~/git/sceptre-bennu/data/configs/ep`). The binary must be in `DUT_IMAGE`. With `DUT` unset the oracle is
 `bennu:arm64` (SPEC section 8), so run on the daemon that has it: the Makefile defaults `TP_DOCKER_HOST` to the Lima socket.
 
+## Differential and golden replay (DNP3)
+The acceptance harness above judges what a blue team sees. The differential proves the device answers like the stock one, byte for byte.
+
+    make differential PROTO=dnp3 WHO=stock SET=diff   # the transcript of probe_diff.py against bennu:arm64
+    make diff-dnp3                                    # our binary vs the recorded stock transcripts, live (build with make test first)
+
+`conformance/dnp3/`: `probe_diff.py` (about 230 requests: link layer, reads by group and variation, events and their order, IIN, every
+control function, routing, CloseNew), `probe_big.py` (130 binary + 130 analog + 450 analog-output points: event overflow,
+multi-fragment responses, two-octet ranges), `dnp3probe.py` (helpers, and a stand-in provider REP socket so that commands reach the
+datastore as they do with a live provider), `diff-server.xml` / `diff-big-server.xml` (configs), and what the stock device did:
+`stock-*.golden` (transcript), `stock-*.trace` (the same run as machine-readable `send` / `sleep` / `publish` / `recv` steps) and
+`stock-*.logs` (its event log). The transcripts mask two things a wall clock decides: the provider time inside time-bearing objects
+and IIN1.4 NEED_TIME.
+
+`tests/dnp3_golden.rs` replays the traces against our state machine with a virtual clock (no docker, runs in `cargo test` and
+under the mutator): every reply must be the same link frames and application bytes, and the event log the same lines. **Runs of
+`differential.sh` must not overlap**: every device joins the multicast group 239.0.0.1:40000 on the same bridge, so one probe's
+publishes land on the other device (this contaminated the first goldens).
+
+To re-record the stock side: `TRACE=conformance/dnp3/stock-diff.trace LOGS=conformance/dnp3/stock-diff.logs conformance/differential.sh dnp3 stock diff > conformance/dnp3/stock-diff.golden` (and `big`).
+
 ## Test peers (docker/testpeers)
 | Peer | Source | Licence | Use |
 |---|---|---|---|

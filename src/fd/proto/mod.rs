@@ -2,6 +2,9 @@
 //! child, parses its own element, and serves on the shared `Store` until told to stop. To add one: write
 //! `proto/<name>.rs` implementing `Module`, add a `REGISTRY` line behind its `proto-<name>` feature, and list its tag in `KNOWN`.
 
+#[cfg(feature = "proto-dnp3")]
+pub mod dnp3;
+
 use super::config::{ConfigError, Opts, Tags};
 use super::store::Store;
 use roxmltree::Node;
@@ -31,7 +34,8 @@ pub fn start<M: Module>(node: Node, tags: &mut Tags, opts: &Opts) -> Result<Runn
 
 /// The protocols compiled into this binary: `<comms>` tag -> starter.
 pub static REGISTRY: &[(&str, Start)] = &[
-    // #[cfg(feature = "proto-dnp3")] ("dnp3-server", start::<dnp3::Outstation>),
+    #[cfg(feature = "proto-dnp3")]
+    ("dnp3-server", start::<dnp3::Outstation>),
 ];
 
 /// Every `<comms>` tag a build can have, and the Cargo feature that provides it.

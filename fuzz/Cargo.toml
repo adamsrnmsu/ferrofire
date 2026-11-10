@@ -25,3 +25,9 @@ name = "fd_config"
 path = "fuzz_targets/fd_config.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "fd_dnp3"
+path = "fuzz_targets/fd_dnp3.rs"
+test = false
+doc = false

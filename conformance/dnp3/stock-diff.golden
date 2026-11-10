@@ -1,0 +1,226 @@
+== a fresh connection that never resets the link
+test-link before reset -- no reply
+confirmed data before reset -- no reply
+unconfirmed data before reset link ctrl=44 1<-10 tp=c0 frames=1 app: e1 81 80 00 02 02 28 05 00 00 00 01 00 00 00 00 00 00 01 00 01 00 00 00 00 00 00 02 00 01 00 00 00 00 00 00 03 00 01 00 00 00 00 00 00 0a 00 01 00 00 00 00 00 00 20 06 28 04 00 00 00 01 00 00 00 00 00 00 00 00 01 00 01 00 00 00 00 00 00 00 00 02 00 01 00 00 00 00 00 00 00 00 07 00 01 00 00 00 00 00 00 00 00
+== link layer
+req-link-status link ctrl=0b 1<-10
+reset-link link ctrl=00 1<-10
+test-link(fcv fcb=0) -- no reply
+test-link(no fcv) -- no reply
+== initial state
+integrity link ctrl=44 1<-10 tp=c1 frames=1 app: e0 81 80 00 02 02 28 05 00 00 00 01 00 00 00 00 00 00 01 00 01 00 00 00 00 00 00 02 00 01 00 00 00 00 00 00 03 00 01 00 00 00 00 00 00 0a 00 01 00 00 00 00 00 00 20 06 28 04 00 00 00 01 00 00 00 00 00 00 00 00 01 00 01 00 00 00 00 00 00 00 00 02 00 01 00 00 00 00 00 00 00 00 07 00 01 00 00 00 00 00 00 00 00 01 02 00 00 03 01 01 01 01 01 01 00 04 05 00 01 02 00 0a 0a 01 1e 06 00 00 02 01 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00 1e 01 00 03 03 01 00 00 00 00 1e 06 00 07 07 01 00 00 00 00 00 00 00 00 1e 01 00 08 08 01 00 00 00 00
+confirm integrity -- no reply
+integrity-again link ctrl=44 1<-10 tp=c2 frames=1 app: c1 81 80 00 01 02 00 00 03 01 01 01 01 01 01 00 04 05 00 01 02 00 0a 0a 01 1e 06 00 00 02 01 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00 1e 01 00 03 03 01 00 00 00 00 1e 06 00 07 07 01 00 00 00 00 00 00 00 00 1e 01 00 08 08 01 00 00 00 00
+class1-after link ctrl=44 1<-10 tp=c3 frames=1 app: c2 81 80 00
+class2 link ctrl=44 1<-10 tp=c4 frames=1 app: c3 81 80 00
+class3 link ctrl=44 1<-10 tp=c5 frames=1 app: c4 81 80 00
+class0 link ctrl=44 1<-10 tp=c6 frames=1 app: c5 81 80 00 01 02 00 00 03 01 01 01 01 01 01 00 04 05 00 01 02 00 0a 0a 01 1e 06 00 00 02 01 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00 1e 01 00 03 03 01 00 00 00 00 1e 06 00 07 07 01 00 00 00 00 00 00 00 00 1e 01 00 08 08 01 00 00 00 00
+== publish and events
+class1-events link ctrl=44 1<-10 tp=c7 frames=1 app: e6 81 80 00 02 02 28 03 00 00 00 81 00 00 00 00 00 00 02 00 81 00 00 00 00 00 00 03 00 81 00 00 00 00 00 00 20 06 28 04 00 00 00 01 00 00 00 00 00 00 29 40 01 00 01 00 00 00 00 00 00 08 c0 02 00 01 00 00 00 00 04 17 f1 40 07 00 01 00 00 00 20 5f a0 02 42
+confirm events -- no reply
+class1-empty link ctrl=44 1<-10 tp=c8 frames=1 app: c7 81 80 00
+class123 link ctrl=44 1<-10 tp=c9 frames=1 app: e8 81 80 00 02 02 28 01 00 00 00 01 00 00 00 00 00 00 20 06 28 01 00 00 00 01 00 00 00 00 00 80 29 40
+confirm -- no reply
+class0-values link ctrl=44 1<-10 tp=ca frames=1 app: c9 81 80 00 01 02 00 00 03 01 01 81 81 01 01 00 04 05 00 01 02 00 0a 0a 01 1e 06 00 00 02 01 00 00 00 00 00 80 29 40 01 00 00 00 00 00 00 08 c0 01 00 00 00 00 04 17 f1 40 1e 01 00 03 03 01 00 00 00 00 1e 06 00 07 07 01 00 00 00 20 5f a0 02 42 1e 01 00 08 08 01 00 00 00 00
+== reads by group and variation
+g1v0 all link ctrl=44 1<-10 tp=cb frames=1 app: ca 81 80 00 01 02 00 00 03 01 01 81 81 01 01 00 04 05 00 01 02 00 0a 0a 01
+g1v1 all link ctrl=44 1<-10 tp=cc frames=1 app: cb 81 80 00 01 01 00 00 05 0c 01 01 00 0a 0a 00
+g1v2 all link ctrl=44 1<-10 tp=cd frames=1 app: cc 81 80 00 01 02 00 00 05 01 01 81 81 01 01 01 02 00 0a 0a 01
+g1v2 range 0-3 link ctrl=44 1<-10 tp=ce frames=1 app: cd 81 80 00 01 02 00 00 03 01 01 81 81
+g1v2 range 2-10 link ctrl=44 1<-10 tp=cf frames=1 app: ce 81 80 04 01 02 00 02 05 81 81 01 01 01 02 00 0a 0a 01
+g1v1 range 2-2 link ctrl=44 1<-10 tp=d0 frames=1 app: cf 81 80 00 01 01 00 02 02 01
+g1v2 range16 0-3 link ctrl=44 1<-10 tp=d1 frames=1 app: c0 81 80 00 01 02 00 00 03 01 01 81 81
+g1v2 range 20-30 link ctrl=44 1<-10 tp=d2 frames=1 app: c1 81 80 04
+g1v2 range 3-1 link ctrl=44 1<-10 tp=d3 frames=1 app: c2 81 80 04
+g1v2 count1 link ctrl=44 1<-10 tp=d4 frames=1 app: c3 81 80 01
+g1v2 count16 link ctrl=44 1<-10 tp=d5 frames=1 app: c4 81 80 01
+g1v2 list idx link ctrl=44 1<-10 tp=d6 frames=1 app: c5 81 80 00 01 02 00 02 02 81 01 02 00 0a 0a 01
+g1v2 list idx unknown link ctrl=44 1<-10 tp=d7 frames=1 app: c6 81 80 04 01 02 00 02 02 81
+g2v0 link ctrl=44 1<-10 tp=d8 frames=1 app: c7 81 80 00
+g2v1 link ctrl=44 1<-10 tp=d9 frames=1 app: c8 81 80 00
+g2v2 link ctrl=44 1<-10 tp=da frames=1 app: c9 81 80 00
+g2v3 link ctrl=44 1<-10 tp=db frames=1 app: ca 81 80 00
+g2v2 count1 link ctrl=44 1<-10 tp=dc frames=1 app: cb 81 80 00
+g10v0 link ctrl=44 1<-10 tp=dd frames=1 app: cc 81 80 00
+g10v2 link ctrl=44 1<-10 tp=de frames=1 app: cd 81 80 00
+g30v0 link ctrl=44 1<-10 tp=df frames=1 app: ce 81 80 00 1e 06 00 00 02 01 00 00 00 00 00 80 29 40 01 00 00 00 00 00 00 08 c0 01 00 00 00 00 04 17 f1 40 1e 01 00 03 03 01 00 00 00 00 1e 06 00 07 07 01 00 00 00 20 5f a0 02 42 1e 01 00 08 08 01 00 00 00 00
+g30v1 link ctrl=44 1<-10 tp=e0 frames=1 app: cf 81 80 00 1e 01 00 00 03 01 0c 00 00 00 01 fd ff ff ff 01 70 11 01 00 01 00 00 00 00 1e 01 00 07 08 21 ff ff ff 7f 01 00 00 00 00
+g30v2 link ctrl=44 1<-10 tp=e1 frames=1 app: c0 81 80 00 1e 02 00 00 03 01 0c 00 01 fd ff 21 ff 7f 01 00 00 1e 02 00 07 08 21 ff 7f 01 00 00
+g30v3 link ctrl=44 1<-10 tp=e2 frames=1 app: c1 81 80 00 1e 03 00 00 03 0c 00 00 00 fd ff ff ff 70 11 01 00 00 00 00 00 1e 03 00 07 08 ff ff ff 7f 00 00 00 00
+g30v4 link ctrl=44 1<-10 tp=e3 frames=1 app: c2 81 80 00 1e 04 00 00 03 0c 00 fd ff ff 7f 00 00 1e 04 00 07 08 ff 7f 00 00
+g30v5 link ctrl=44 1<-10 tp=e4 frames=1 app: c3 81 80 00 1e 05 00 00 03 01 00 00 4c 41 01 00 00 40 c0 01 20 b8 88 47 01 00 00 00 00 1e 05 00 07 08 01 f9 02 15 50 01 00 00 00 00
+g30v6 link ctrl=44 1<-10 tp=e5 frames=1 app: c4 81 80 00 1e 06 00 00 03 01 00 00 00 00 00 80 29 40 01 00 00 00 00 00 00 08 c0 01 00 00 00 00 04 17 f1 40 01 00 00 00 00 00 00 00 00 1e 06 00 07 08 01 00 00 00 20 5f a0 02 42 01 00 00 00 00 00 00 00 00
+g30v6 range 1-2 link ctrl=44 1<-10 tp=e6 frames=1 app: c5 81 80 00 1e 06 00 01 02 01 00 00 00 00 00 00 08 c0 01 00 00 00 00 04 17 f1 40
+g30v6 range 5-6 link ctrl=44 1<-10 tp=e7 frames=1 app: c6 81 80 04
+g32v0 link ctrl=44 1<-10 tp=e8 frames=1 app: c7 81 80 00
+g32v1 link ctrl=44 1<-10 tp=e9 frames=1 app: c8 81 80 00
+g32v3 link ctrl=44 1<-10 tp=ea frames=1 app: c9 81 80 00
+g32v5 link ctrl=44 1<-10 tp=eb frames=1 app: ca 81 80 00
+g32v7 link ctrl=44 1<-10 tp=ec frames=1 app: cb 81 80 00
+g32v8 link ctrl=44 1<-10 tp=ed frames=1 app: cc 81 80 00
+g40v0 link ctrl=44 1<-10 tp=ee frames=1 app: cd 81 80 00
+g40v1 link ctrl=44 1<-10 tp=ef frames=1 app: ce 81 80 00
+g20v0 link ctrl=44 1<-10 tp=f0 frames=1 app: cf 81 80 00
+g21v0 link ctrl=44 1<-10 tp=f1 frames=1 app: c0 81 80 00
+g99v1 link ctrl=44 1<-10 tp=f2 frames=1 app: c1 81 80 02
+g60v1+g1v2 link ctrl=44 1<-10 tp=f3 frames=1 app: c2 81 80 00 01 02 00 00 05 01 01 81 81 01 01 01 02 00 0a 0a 01 1e 06 00 00 02 01 00 00 00 00 00 80 29 40 01 00 00 00 00 00 00 08 c0 01 00 00 00 00 04 17 f1 40 1e 01 00 03 03 01 00 00 00 00 1e 06 00 07 07 01 00 00 00 20 5f a0 02 42 1e 01 00 08 08 01 00 00 00 00
+g60v2 count link ctrl=44 1<-10 tp=f4 frames=1 app: c3 81 80 00
+g60v9 link ctrl=44 1<-10 tp=f5 frames=1 app: c4 81 80 02
+g50v1 link ctrl=44 1<-10 tp=f6 frames=1 app: c5 81 80 01
+g80v1 link ctrl=44 1<-10 tp=f7 frames=1 app: c6 81 80 01
+empty read link ctrl=44 1<-10 tp=f8 frames=1 app: c7 81 80 00
+truncated header link ctrl=44 1<-10 tp=f9 frames=1 app: c8 81 80 04
+truncated range link ctrl=44 1<-10 tp=fa frames=1 app: c9 81 80 04
+g1v2 q99 link ctrl=44 1<-10 tp=fb frames=1 app: ca 81 80 04
+== other function codes
+write clear restart link ctrl=44 1<-10 tp=fc frames=1 app: cb 81 00 00
+after clear restart link ctrl=44 1<-10 tp=fd frames=1 app: cc 81 00 00 01 02 00 00 03 01 01 81 81 01 01 00 04 05 00 01 02 00 0a 0a 01 1e 06 00 00 02 01 00 00 00 00 00 80 29 40 01 00 00 00 00 00 00 08 c0 01 00 00 00 00 04 17 f1 40 1e 01 00 03 03 01 00 00 00 00 1e 06 00 07 07 01 00 00 00 20 5f a0 02 42 1e 01 00 08 08 01 00 00 00 00
+write time link ctrl=44 1<-10 tp=fe frames=1 app: cd 81 00 00
+write bad link ctrl=44 1<-10 tp=ff frames=1 app: ce 81 00 04
+cold restart link ctrl=44 1<-10 tp=c0 frames=1 app: cf 81 00 01
+warm restart link ctrl=44 1<-10 tp=c1 frames=1 app: c0 81 00 01
+delay measure link ctrl=44 1<-10 tp=c2 frames=1 app: c1 81 00 00 34 02 07 01 00 00
+record time link ctrl=44 1<-10 tp=c3 frames=1 app: c2 81 00 00
+enable unsol link ctrl=44 1<-10 tp=c4 frames=1 app: c3 81 00 01
+disable unsol link ctrl=44 1<-10 tp=c5 frames=1 app: c4 81 00 01
+enable unsol no objs link ctrl=44 1<-10 tp=c6 frames=1 app: c5 81 00 01
+assign class link ctrl=44 1<-10 tp=c7 frames=1 app: c6 81 00 00
+freeze link ctrl=44 1<-10 tp=c8 frames=1 app: c7 81 00 00
+fc 0x55 link ctrl=44 1<-10 tp=c9 frames=1 app: c8 81 00 01
+fc response(129) link ctrl=44 1<-10 tp=ca frames=1 app: c9 81 00 01
+confirm via req -- no reply
+direct op no ack -- no reply
+sol null-ish read class1 multi link ctrl=44 1<-10 tp=cb frames=1 app: cc 81 00 00
+== commands
+direct crob 5 latch-on link ctrl=44 1<-10 tp=cc frames=1 app: cd 81 00 00 0c 01 17 01 05 03 01 64 00 00 00 00 00 00 00 00
+direct crob 5 latch-off link ctrl=44 1<-10 tp=cd frames=1 app: ce 81 00 00 0c 01 17 01 05 04 01 64 00 00 00 00 00 00 00 00
+direct crob 5 pulse-on link ctrl=44 1<-10 tp=ce frames=1 app: cf 81 00 00 0c 01 17 01 05 01 01 64 00 00 00 00 00 00 00 00
+direct crob 5 op 0x0f link ctrl=44 1<-10 tp=cf frames=1 app: c0 81 00 00 0c 01 17 01 05 0f 01 64 00 00 00 00 00 00 00 00
+direct crob 5 tcc link ctrl=44 1<-10 tp=d0 frames=1 app: c1 81 00 00 0c 01 17 01 05 43 01 64 00 00 00 00 00 00 00 00
+direct crob 5 cnt0 link ctrl=44 1<-10 tp=d1 frames=1 app: c2 81 00 00 0c 01 17 01 05 03 00 64 00 00 00 00 00 00 00 00
+direct crob 9 unmapped link ctrl=44 1<-10 tp=d2 frames=1 app: c3 81 00 00 0c 01 17 01 09 03 01 64 00 00 00 00 00 00 00 0c
+direct crob 2 (input point) link ctrl=44 1<-10 tp=d3 frames=1 app: c4 81 00 00 0c 01 17 01 02 03 01 64 00 00 00 00 00 00 00 00
+direct crob 4 sbo link ctrl=44 1<-10 tp=d4 frames=1 app: c5 81 00 00 0c 01 17 01 04 03 01 64 00 00 00 00 00 00 00 02
+select crob 4 link ctrl=44 1<-10 tp=d5 frames=1 app: c6 81 00 00 0c 01 17 01 04 03 01 64 00 00 00 00 00 00 00 00
+operate crob 4 link ctrl=44 1<-10 tp=d6 frames=1 app: c7 81 00 00 0c 01 17 01 04 03 01 64 00 00 00 00 00 00 00 00
+operate crob 4 again link ctrl=44 1<-10 tp=d7 frames=1 app: c8 81 00 00 0c 01 17 01 04 03 01 64 00 00 00 00 00 00 00 02
+operate crob 5 no select link ctrl=44 1<-10 tp=d8 frames=1 app: c9 81 00 00 0c 01 17 01 05 03 01 64 00 00 00 00 00 00 00 02
+select crob 9 link ctrl=44 1<-10 tp=d9 frames=1 app: ca 81 00 00 0c 01 17 01 09 03 01 64 00 00 00 00 00 00 00 0c
+operate crob 9 link ctrl=44 1<-10 tp=da frames=1 app: cb 81 00 00 0c 01 17 01 09 03 01 64 00 00 00 00 00 00 00 02
+select crob 5 link ctrl=44 1<-10 tp=db frames=1 app: cc 81 00 00 0c 01 17 01 05 03 01 64 00 00 00 00 00 00 00 00
+operate crob 5 different op link ctrl=44 1<-10 tp=dc frames=1 app: cd 81 00 00 0c 01 17 01 05 04 01 64 00 00 00 00 00 00 00 02
+operate crob 5 matching link ctrl=44 1<-10 tp=dd frames=1 app: ce 81 00 00 0c 01 17 01 05 03 01 64 00 00 00 00 00 00 00 02
+direct crob 5+9 link ctrl=44 1<-10 tp=de frames=1 app: cf 81 00 00 0c 01 17 02 05 03 01 64 00 00 00 00 00 00 00 00 09 03 01 64 00 00 00 00 00 00 00 0c
+direct crob q28 link ctrl=44 1<-10 tp=df frames=1 app: c0 81 00 00 0c 01 28 01 00 05 00 03 01 64 00 00 00 00 00 00 00 00
+direct crob bad len link ctrl=44 1<-10 tp=e0 frames=1 app: c1 81 00 04
+direct ao32 8 link ctrl=44 1<-10 tp=e1 frames=1 app: c2 81 00 00 29 01 17 01 08 4d 00 00 00 00
+direct aof 8 link ctrl=44 1<-10 tp=e2 frames=1 app: c3 81 00 00 29 03 17 01 08 00 00 c0 3f 00
+direct aod 8 link ctrl=44 1<-10 tp=e3 frames=1 app: c4 81 00 00 29 04 17 01 08 00 00 00 00 00 00 04 40 00
+direct aof 3 sbo link ctrl=44 1<-10 tp=e4 frames=1 app: c5 81 00 00 29 03 17 01 03 00 00 c0 3f 02
+select aof 3 link ctrl=44 1<-10 tp=e5 frames=1 app: c6 81 00 00 29 03 17 01 03 00 00 c0 3f 00
+operate aof 3 link ctrl=44 1<-10 tp=e6 frames=1 app: c7 81 00 00 29 03 17 01 03 00 00 c0 3f 00
+operate aof 3 again link ctrl=44 1<-10 tp=e7 frames=1 app: c8 81 00 00 29 03 17 01 03 00 00 c0 3f 02
+select aof 3 / operate other val link ctrl=44 1<-10 tp=e8 frames=1 app: c9 81 00 00 29 03 17 01 03 00 00 c0 3f 00
+operate aof 3 other val link ctrl=44 1<-10 tp=e9 frames=1 app: ca 81 00 00 29 03 17 01 03 00 00 18 41 02
+direct aof 99 link ctrl=44 1<-10 tp=ea frames=1 app: cb 81 00 00 29 03 17 01 63 00 00 c0 3f 0c
+direct aof 4 (binary idx) link ctrl=44 1<-10 tp=eb frames=1 app: cc 81 00 00 29 03 17 01 04 00 00 c0 3f 0c
+select aof 99 link ctrl=44 1<-10 tp=ec frames=1 app: cd 81 00 00 29 03 17 01 63 00 00 c0 3f 0c
+select ao32 8 link ctrl=44 1<-10 tp=ed frames=1 app: ce 81 00 00 29 01 17 01 08 05 00 00 00 00
+operate ao32 8 link ctrl=44 1<-10 tp=ee frames=1 app: cf 81 00 00 29 01 17 01 08 05 00 00 00 00
+direct g41v2 link ctrl=44 1<-10 tp=ef frames=1 app: c0 81 00 00 29 02 17 01 08 07 00 00
+direct g41v3 q28 link ctrl=44 1<-10 tp=f0 frames=1 app: c1 81 00 00 29 03 28 01 00 08 00 00 00 60 40 00
+direct unknown obj g12v2 link ctrl=44 1<-10 tp=f1 frames=1 app: c2 81 00 02
+direct g10v2 write link ctrl=44 1<-10 tp=f2 frames=1 app: c3 81 00 04
+direct empty link ctrl=44 1<-10 tp=f3 frames=1 app: c4 81 00 00
+== event order, selection and variations
+drain events link ctrl=44 1<-10 tp=f4 frames=1 app: c5 81 00 00
+confirm drain -- no reply
+class1 insertion order link ctrl=44 1<-10 tp=f5 frames=1 app: e6 81 00 00 20 06 28 01 00 00 00 01 00 00 00 00 00 80 34 40 02 02 28 01 00 01 00 81 00 00 00 00 00 00
+confirm order -- no reply
+g2v0+g32v0 request order link ctrl=44 1<-10 tp=f6 frames=1 app: e7 81 00 00 20 06 28 01 00 00 00 01 00 00 00 00 00 80 35 40 02 02 28 01 00 01 00 01 00 00 00 00 00 00
+confirm order2 -- no reply
+g32v0+g2v0 request order link ctrl=44 1<-10 tp=f7 frames=1 app: e8 81 00 00 20 06 28 01 00 00 00 01 00 00 00 00 00 80 36 40 02 02 28 01 00 01 00 81 00 00 00 00 00 00
+confirm order3 -- no reply
+class0 then class1 link ctrl=44 1<-10 tp=f8 frames=1 app: e9 81 00 00 20 06 28 01 00 00 00 01 00 00 00 00 00 80 37 40 02 02 28 01 00 01 00 01 00 00 00 00 00 00 01 02 00 00 03 01 01 81 81 01 01 00 04 05 03 01 02 00 0a 0a 01 1e 06 00 00 02 01 00 00 00 00 00 80 37 40 01 00 00 00 00 00 00 08 c0 01 00 00 00 00 04 17 f1 40 1e 01 00 03 03 01 01 00 00 00 1e 06 00 07 07 01 00 00 00 20 5f a0 02 42 1e 01 00 08 08 01 03 00 00 00
+confirm c0c1 -- no reply
+class1 then class0 link ctrl=44 1<-10 tp=f9 frames=1 app: ea 81 00 00 20 06 28 01 00 00 00 01 00 00 00 00 00 80 38 40 02 02 28 01 00 01 00 81 00 00 00 00 00 00 01 02 00 00 03 01 81 81 81 01 01 00 04 05 03 01 02 00 0a 0a 01 1e 06 00 00 02 01 00 00 00 00 00 80 38 40 01 00 00 00 00 00 00 08 c0 01 00 00 00 00 04 17 f1 40 1e 01 00 03 03 01 01 00 00 00 1e 06 00 07 07 01 00 00 00 20 5f a0 02 42 1e 01 00 08 08 01 03 00 00 00
+confirm c1c0 -- no reply
+class0 only, events pending (iin class bit) link ctrl=44 1<-10 tp=fa frames=1 app: cb 81 02 00 01 02 00 00 03 01 01 81 81 01 01 00 04 05 03 01 02 00 0a 0a 01 1e 06 00 00 02 01 00 00 00 00 00 80 39 40 01 00 00 00 00 00 00 08 c0 01 00 00 00 00 04 17 f1 40 1e 01 00 03 03 01 01 00 00 00 1e 06 00 07 07 01 00 00 00 20 5f a0 02 42 1e 01 00 08 08 01 03 00 00 00
+g1v2 range + g2v0 link ctrl=44 1<-10 tp=fb frames=1 app: ec 81 02 00 02 02 28 01 00 01 00 01 00 00 00 00 00 00 01 02 00 00 01 01 01
+confirm rg -- no reply
+g2v0 count 0 link ctrl=44 1<-10 tp=fc frames=1 app: cd 81 02 04
+g2v0 count 1 link ctrl=44 1<-10 tp=fd frames=1 app: ee 81 02 00 02 02 28 01 00 01 00 81 00 00 00 00 00 00
+confirm count1 -- no reply
+g32v0 count 1 link ctrl=44 1<-10 tp=fe frames=1 app: ef 81 02 00 20 06 28 01 00 00 00 01 00 00 00 00 00 80 39 40
+confirm g32 count1 -- no reply
+class1 rest link ctrl=44 1<-10 tp=ff frames=1 app: e0 81 00 00 20 06 28 02 00 00 00 01 00 00 00 00 00 80 3a 40 01 00 01 00 00 00 00 00 00 16 40 02 02 28 01 00 02 00 01 00 00 00 00 00 00
+confirm rest -- no reply
+events g2v1 g32v1 link ctrl=44 1<-10 tp=c0 frames=1 app: e1 81 00 00 20 01 28 03 00 00 00 01 1f 00 00 00 01 00 01 fe ff ff ff 02 00 01 00 00 00 00
+confirm var -- no reply
+events g2v2 g32v2 link ctrl=44 1<-10 tp=c1 frames=1 app: e2 81 00 00 02 02 28 02 00 01 00 01 00 00 00 00 00 00 02 00 81 00 00 00 00 00 00 20 02 28 01 00 00 00 01 20 00
+confirm var -- no reply
+events g2v3 g32v3 link ctrl=44 1<-10 tp=c2 frames=1 app: e3 81 00 00 33 02 07 01 00 00 00 00 00 00 02 03 28 02 00 01 00 81 00 00 02 00 01 00 00 20 03 28 01 00 00 00 01 21 00 00 00 00 00 00 00 00 00
+confirm var -- no reply
+events g2v1+g32v2 link ctrl=44 1<-10 tp=c3 frames=1 app: e4 81 00 00 20 02 28 04 00 00 00 01 29 00 01 00 21 ff 7f 02 00 21 00 80 07 00 01 00 00
+c -- no reply
+events g2v2+g32v4 link ctrl=44 1<-10 tp=c4 frames=1 app: e5 81 00 00 02 02 28 01 00 01 00 01 00 00 00 00 00 00 20 04 28 03 00 00 00 01 2a 00 00 00 00 00 00 00 01 00 21 ff 7f 00 00 00 00 00 00 02 00 01 01 00 00 00 00 00 00 00
+c -- no reply
+events g32v5 link ctrl=44 1<-10 tp=c5 frames=1 app: e6 81 02 00 20 05 28 02 00 00 00 01 00 00 2d 42 07 00 01 00 00 20 40
+c -- no reply
+events g2v3 g32v7 link ctrl=44 1<-10 tp=c6 frames=1 app: e7 81 00 00 33 02 07 01 00 00 00 00 00 00 02 03 28 01 00 01 00 81 00 00
+c -- no reply
+events g32v8 g2v0 link ctrl=44 1<-10 tp=c7 frames=1 app: e8 81 00 00 02 02 28 01 00 01 00 01 00 00 00 00 00 00 20 08 28 01 00 00 00 01 00 00 00 00 00 20 46 40 00 00 00 00 00 00
+c -- no reply
+events g32v6 q28 indices link ctrl=44 1<-10 tp=c8 frames=1 app: c9 81 00 01
+mixed unknown link ctrl=44 1<-10 tp=c9 frames=1 app: ca 81 00 02
+== event variations, one change at a time
+drain link ctrl=44 1<-10 tp=ca frames=1 app: cb 81 00 00
+confirm drain -- no reply
+drain link ctrl=44 1<-10 tp=cb frames=1 app: ec 81 00 00 02 02 28 01 00 01 00 81 00 00 00 00 00 00
+confirm drain -- no reply
+events g2v1 g32v1 link ctrl=44 1<-10 tp=cc frames=1 app: ed 81 00 00 02 01 28 01 00 01 00 01 20 01 28 02 00 00 00 01 33 00 00 00 01 00 01 c3 ff ff ff
+confirm var -- no reply
+events g2v1 g32v2 link ctrl=44 1<-10 tp=cd frames=1 app: ee 81 00 00 02 01 28 01 00 01 00 81 20 02 28 02 00 00 00 01 34 00 01 00 01 c2 ff
+confirm var -- no reply
+events g2v2 g32v4 link ctrl=44 1<-10 tp=ce frames=1 app: ef 81 00 00 02 02 28 01 00 01 00 01 00 00 00 00 00 00 20 04 28 02 00 00 00 01 36 00 00 00 00 00 00 00 01 00 01 c0 ff 00 00 00 00 00 00
+confirm var -- no reply
+events g2v3 g32v7 link ctrl=44 1<-10 tp=cf frames=1 app: e0 81 00 00 33 02 07 01 00 00 00 00 00 00 02 03 28 01 00 01 00 81 00 00 20 07 28 02 00 00 00 01 00 00 67 42 00 00 00 00 00 00 01 00 01 00 80 86 c2 00 00 00 00 00 00
+confirm var -- no reply
+events g2v1 g32v5 link ctrl=44 1<-10 tp=d0 frames=1 app: e1 81 00 00 02 01 28 01 00 01 00 01 20 05 28 02 00 00 00 01 00 00 5f 42 01 00 01 00 80 82 c2
+confirm var -- no reply
+events g2v2 g32v8 link ctrl=44 1<-10 tp=d1 frames=1 app: e2 81 00 00 02 02 28 01 00 01 00 81 00 00 00 00 00 00 20 08 28 02 00 00 00 01 00 00 00 00 00 60 4d 40 00 00 00 00 00 00 01 00 01 00 00 00 00 00 10 51 c0 00 00 00 00 00 00
+confirm var -- no reply
+events g2v3 g32v3 link ctrl=44 1<-10 tp=d2 frames=1 app: e3 81 00 00 33 02 07 01 00 00 00 00 00 00 02 03 28 01 00 01 00 01 00 00 20 03 28 02 00 00 00 01 35 00 00 00 00 00 00 00 00 00 01 00 01 c1 ff ff ff 00 00 00 00 00 00
+confirm var -- no reply
+events g2v0 g32v0 link ctrl=44 1<-10 tp=d3 frames=1 app: e4 81 00 00 02 02 28 01 00 01 00 81 00 00 00 00 00 00 20 06 28 02 00 00 00 01 00 00 00 00 00 60 49 40 01 00 01 00 00 00 00 00 20 4e c0
+confirm var -- no reply
+== pipelined and fragmented requests
+two frames one write link ctrl=44 1<-10 tp=d4 frames=1 app: c3 81 00 00 01 02 00 00 03 01 81 01 81 01 01 00 04 05 03 01 02 00 0a 0a 01 1e 06 00 00 02 01 00 00 00 00 00 60 49 40 01 00 00 00 00 00 20 4e c0 01 00 00 00 00 00 00 f8 3f 1e 01 00 03 03 01 01 00 00 00 1e 06 00 07 07 01 00 00 00 00 00 00 04 40 1e 01 00 08 08 01 03 00 00 00
+two frames one write link ctrl=44 1<-10 tp=d5 frames=1 app: c4 81 00 00 01 02 00 00 05 01 81 01 81 81 81 01 02 00 0a 0a 01
+three-byte dribble link ctrl=44 1<-10 tp=d6 frames=1 app: c5 81 00 00 01 02 00 00 05 01 81 01 81 81 81 01 02 00 0a 0a 01
+fragmented request link ctrl=44 1<-10 tp=d7 frames=1 app: c5 81 00 00 01 02 00 00 05 01 81 01 81 81 81 01 02 00 0a 0a 01
+== link layer after reset
+test-link fcb=1 fcv link ctrl=00 1<-10
+test-link fcb=1 again -- no reply
+test-link fcb=0 link ctrl=00 1<-10
+confirmed user data fcb=1 link ctrl=00 1<-10
+confirmed user data fcb=1 link ctrl=44 1<-10 tp=d8 frames=2 app: c6 81 00 00
+confirmed user data fcb=0 link ctrl=00 1<-10
+confirmed user data fcb=0 link ctrl=44 1<-10 tp=d9 frames=2 app: c7 81 00 00
+confirmed user data fcb=0 again link ctrl=00 1<-10
+reset-link again link ctrl=00 1<-10
+link func 10 (req status? ) -- no reply
+secondary-originated frame -- no reply
+DIR=0 unconfirmed -- no reply
+== routing
+wrong dst -- no reply
+broadcast -- no reply
+other master -- no reply
+no FIR/FIN -- no reply
+empty tp -- no reply
+== one master at a time (CloseNew), and state outlives a connection
+second connection: closed
+first still served link ctrl=44 1<-10 tp=da frames=1 app: c5 81 01 00
+after reconnect: class1 link ctrl=44 1<-10 tp=db frames=1 app: c6 81 00 00
+after reconnect: class0 iin link ctrl=44 1<-10 tp=dc frames=1 app: c7 81 00 00 01 02 00 00 03 01 81 01 81 01 01 00 04 05 03 01 02 00 0a 0a 01 1e 06 00 00 02 01 00 00 00 00 00 60 49 40 01 00 00 00 00 00 20 4e c0 01 00 00 00 00 00 00 f8 3f 1e 01 00 03 03 01 01 00 00 00 1e 06 00 07 07 01 00 00 00 00 00 00 04 40 1e 01 00 08 08 01 03 00 00 00
+== done

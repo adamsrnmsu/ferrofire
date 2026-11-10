@@ -3,7 +3,7 @@
 # blue team would (tshark expert info, decoded fields, Zeek logs). Usage: conformance/run.sh PROTO   (or: make conformance PROTO=dnp3)
 # Two containers, both named ff-conf-*: the DUT, and the testpeers image sharing its network namespace (so peers talk to 127.0.0.1
 # and the capture on lo sees everything). Only these two are ever removed. Layout of conformance/<PROTO>/ : proto.env, peer.sh, check.sh.
-# env: DUT=stock (default, bennu:arm64 oracle) | DUT_IMAGE + DUT_CMD (anything else: DUT_CMD gets the config at /tmp/cfg.xml)
+# env: DUT=stock (default, bennu:arm64 oracle) | rust (our binary, FF_BIN) | DUT_IMAGE + DUT_CMD (anything else: the config is at /tmp/cfg.xml)
 #      TESTPEERS=ferrofire-testpeers  OUT=target/conformance/PROTO  ZEEK_REQUIRED=1 (a missing Zeek parser fails instead of skipping)
 #      BENNU_DATA=dir holding the stock sample configs (default ~/git/sceptre-bennu/data/configs/ep)
 set -eu
@@ -15,6 +15,11 @@ DUT=${DUT:-stock}
 # shellcheck source=/dev/null
 . "$here/$proto/proto.env"   # sets CFG (path), STOCK_CMD, WARMUP
 if [ "$DUT" = stock ]; then DUT_IMAGE=bennu:arm64; DUT_CMD=$STOCK_CMD; fi
+# DUT=rust: our binary (FF_BIN, default target-linux/debug/ferrofire from make test/linux) is copied into a bennu:arm64 container
+if [ "$DUT" = rust ]; then
+  DUT_IMAGE=bennu:arm64; DUT_BIN=${FF_BIN:-$here/../target-linux/debug/ferrofire}
+  DUT_CMD='ferrofire field-device --file /tmp/cfg.xml'
+fi
 : "${DUT_IMAGE:?set DUT_IMAGE and DUT_CMD}" "${DUT_CMD:?}"
 TESTPEERS=${TESTPEERS:-ferrofire-testpeers}
 OUT=${OUT:-$here/../target/conformance/$proto}
@@ -22,6 +27,7 @@ rm -rf "$OUT"; mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
 cleanup() { docker rm -f ff-conf-dut ff-conf-peers >/dev/null 2>&1 || true; }
 cleanup; trap cleanup EXIT
 docker run -d --name ff-conf-dut "$DUT_IMAGE" sleep 900 >/dev/null
+[ -z "${DUT_BIN:-}" ] || docker cp "$DUT_BIN" ff-conf-dut:/usr/local/bin/ferrofire
 docker exec -i ff-conf-dut sh -c 'cat > /tmp/cfg.xml' < "$CFG"
 docker exec -d ff-conf-dut sh -c "$DUT_CMD > /tmp/dut.out 2>&1"
 sleep "${WARMUP:-4}"
