@@ -1,5 +1,4 @@
 //! The `ferrofire` binary as an operator runs it: `run` (REP + UDP RADIO until SIGTERM) and `check` (offline trace).
-#![cfg(feature = "zmq")] // drives the zmq transport; tests/nng.rs is the nng counterpart
 use ferrofire::bennu::{group_for, unframe};
 use std::io::Read;
 use std::process::{Child, Command, Output, Stdio};
@@ -191,4 +190,79 @@ fn a_write_due_exactly_at_the_tolerance_applies_once_in_the_first_step() {
         "zz=1@0.000000001",
     ]);
     assert_eq!(text(&o.stderr).matches("tag zz ignored").count(), 1);
+}
+
+/// Datagram body of the next packet on `rx` as `tag:value` strings, trailer included.
+fn next_pairs(rx: &std::net::UdpSocket) -> Vec<String> {
+    let mut buf = [0u8; 2000];
+    let n = rx.recv(&mut buf).unwrap();
+    let body = unframe(&buf[..n]).unwrap().1;
+    text(&body[..body.len() - 1])
+        .split(',')
+        .filter(|p| !p.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+#[test]
+fn run_publishes_per_rtu_slices_to_their_own_endpoints_with_a_counter_each() {
+    let rx = |_| {
+        let s = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        s
+    };
+    let (a, b) = (rx(0), rx(1));
+    let ep =
+        |s: &std::net::UdpSocket| format!("udp://127.0.0.1:{}", s.local_addr().unwrap().port());
+    let xml = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/conformance/rtu-1.xml");
+    let child = Command::new(BIN)
+        .args([
+            "run",
+            MODEL,
+            "--server",
+            &format!("tcp://127.0.0.1:{}", free_port()),
+        ])
+        .args([
+            "--publish-tags",
+            &format!("{}=lock.height,lowervalve.open", ep(&a)),
+        ])
+        .args(["--publish-tags", &format!("{}=@{xml}", ep(&b))])
+        .args(["--rate", "0.05"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let tag = |p: &str| p.split(':').next().unwrap().to_string();
+    let (a1, a2, b1) = (next_pairs(&a), next_pairs(&a), next_pairs(&b));
+    assert_eq!(
+        a1.iter().map(|p| tag(p)).collect::<Vec<_>>(),
+        [
+            "lock.height",
+            "lowervalve.open",
+            "_ff.seq",
+            "_ff.cyc",
+            "_ff.t"
+        ]
+    );
+    assert_eq!(
+        b1.iter().map(|p| tag(p)).collect::<Vec<_>>(),
+        [
+            "lock.height",
+            "lowergate.open",
+            "_ff.seq",
+            "_ff.cyc",
+            "_ff.t"
+        ]
+    ); // overlaps a on lock.height
+    let seq = |v: &[String]| {
+        v[2].strip_prefix("_ff.seq:")
+            .unwrap()
+            .parse::<u64>()
+            .unwrap()
+    };
+    assert_eq!(seq(&a2), seq(&a1) + 1); // one datagram per cycle here: per-endpoint counter
+    assert!(terminate(child).0);
+    // an unknown tag in a slice stops startup
+    let o = ff(&["run", MODEL, "--publish-tags", "udp://127.0.0.1:41990=nope"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(text(&o.stderr).contains("unknown tags: nope"));
 }

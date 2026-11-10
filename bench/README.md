@@ -1,3 +1,5 @@
+> Historical: NNG was dropped on 2026-11-09. Running the nng arm of this benchmark needs a checkout from before that date; the data in `docs/bench/results/` is kept.
+
 # Transport benchmark: zmq vs nng
 
 Compares `ferrofire run --transport zmq` (libzmq REP + UDP RADIO/DISH multicast) with `--transport nng` (NNG REP0 + PUB0 over TCP)

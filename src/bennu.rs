@@ -2,6 +2,7 @@
 //! Wire formats are matched from the bennu protocol documentation only; no bennu code is used.
 //! Pure pieces (hash, framing, chunking, request handling) are plain functions so tests need no sockets.
 
+use crate::model::SliceSpec;
 use crate::model::{Model, Value};
 use crate::transport::{self, Publisher};
 use std::collections::HashSet;
@@ -84,6 +85,9 @@ pub fn chunk_message(msg: &str, mtu: usize) -> Vec<String> {
 /// Chunk size: UDP + IP + group headers still fit a 1500-byte Ethernet MTU.
 pub const CHUNK: usize = 1400;
 
+/// Bytes kept free in every chunk for the sequence trailer: `_ff.seq:` + `_ff.cyc:` + `_ff.t:` with 20-digit values is 85.
+pub const TRAILER_MAX: usize = 96;
+
 pub fn fmt_value(v: Value) -> String {
     match v {
         Value::Binary(b) => b.to_string(),
@@ -98,26 +102,29 @@ pub fn snapshot_msg(snap: &[(String, Value)]) -> String {
         .collect()
 }
 
-/// Datagrams for one publish tick (each `tag:value,...` chunk NUL-terminated, then framed).
-pub fn datagrams(group: &str, snap: &[(String, Value)]) -> Vec<Vec<u8>> {
-    datagrams_msg(group, &snapshot_msg(snap))
+/// The pseudo-tags appended to every datagram (ferrofire datagram v1): the per-endpoint datagram counter, the
+/// publish-cycle counter and the send time in unix ns. Stock bennu ignores point names it does not subscribe to.
+pub fn trailer(seq: u64, cyc: u64, t_ns: u64) -> String {
+    format!("_ff.seq:{seq},_ff.cyc:{cyc},_ff.t:{t_ns},")
 }
 
-/// The wire chunks of a `tag:value,...` message, each NUL-terminated (both transports send these bytes).
-pub fn chunks_nul(msg: &str) -> Vec<Vec<u8>> {
-    chunk_message(msg, CHUNK)
+/// The wire chunks of a `tag:value,...` message: whole points, then the trailer, then a NUL. Datagram `i` of the
+/// cycle carries `seq0 + i`. The tag part is cut `TRAILER_MAX` short of `CHUNK`, so no chunk exceeds `CHUNK`.
+pub fn chunks_nul(msg: &str, seq0: u64, cyc: u64, t_ns: u64) -> Vec<Vec<u8>> {
+    chunk_message(msg, CHUNK - TRAILER_MAX)
         .into_iter()
-        .map(|c| {
-            let mut b = c.into_bytes();
+        .zip(seq0..)
+        .map(|(c, seq)| {
+            let mut b = (c + &trailer(seq, cyc, t_ns)).into_bytes();
             b.push(0);
             b
         })
         .collect()
 }
 
-/// Same as `datagrams`, from an already-built message.
-pub fn datagrams_msg(group: &str, msg: &str) -> Vec<Vec<u8>> {
-    chunks_nul(msg)
+/// Framed datagrams for one publish cycle of an already-built message.
+pub fn datagrams_msg(group: &str, msg: &str, seq0: u64, cyc: u64, t_ns: u64) -> Vec<Vec<u8>> {
+    chunks_nul(msg, seq0, cyc, t_ns)
         .into_iter()
         .map(|b| frame(group, &b))
         .collect()
@@ -305,7 +312,7 @@ pub fn udp_sender(iface: Option<&str>, dest: SocketAddr) -> Result<UdpSocket, St
     Ok(s)
 }
 
-const USAGE: &str = "ferrofire run [model.yaml | --model model.yaml] [--server tcp://0.0.0.0:5555] [--publish 'udp://*;239.0.0.1:40000'] [--rate 0.1] [--transport zmq|nng] [--nng-sendbuf 128]";
+const USAGE: &str = "ferrofire run [model.yaml | --model model.yaml] [--server tcp://0.0.0.0:5555] [--publish 'udp://*;239.0.0.1:40000'] [--publish-tags 'ENDPOINT=a,b,c' | 'ENDPOINT=@config.xml']... [--rate 0.1]";
 
 pub fn main(args: &[String]) {
     exit_on_err("run", USAGE, run(args));
@@ -323,22 +330,19 @@ pub fn exit_on_err(cmd: &str, usage: &str, res: Result<(), String>) {
 pub struct RunArgs {
     pub path: Option<String>,
     pub server: String,
-    /// None: the chosen transport's default endpoint.
+    /// None: the default endpoint, unless slices are given (then only the slices).
     pub publish: Option<String>,
     pub rate: Option<f64>,
-    /// None: the model's `transport:`, else zmq.
-    pub transport: Option<String>,
-    /// None: the model's `nng_sendbuf:`, else the default.
-    pub nng_sendbuf: Option<usize>,
+    /// `--publish-tags ENDPOINT=a,b,c` or `ENDPOINT=@config.xml`, repeatable.
+    pub slices: Vec<String>,
 }
 
-const FLAGS: [&str; 6] = [
+const FLAGS: [&str; 5] = [
     "--model",
     "--server",
     "--publish",
+    "--publish-tags",
     "--rate",
-    "--transport",
-    "--nng-sendbuf",
 ];
 
 impl RunArgs {
@@ -347,24 +351,20 @@ impl RunArgs {
             "--model" => self.path = Some(v),
             "--server" => self.server = v,
             "--publish" => self.publish = Some(v),
-            "--transport" => self.transport = Some(v),
-            "--nng-sendbuf" => {
-                self.nng_sendbuf = Some(v.parse().map_err(|e| format!("--nng-sendbuf: {e}"))?)
-            }
+            "--publish-tags" => self.slices.push(v),
             _ => self.rate = Some(v.parse::<f64>().map_err(|e| format!("--rate: {e}"))?),
         }
         Ok(())
     }
 
-    /// `[model.yaml | --model model.yaml] [--server ep] [--publish ep] [--rate seconds] [--transport nng|zmq] [--nng-sendbuf n]`
+    /// `[model.yaml | --model model.yaml] [--server ep] [--publish ep] [--publish-tags spec]... [--rate seconds]`
     pub fn parse(args: &[String]) -> Result<RunArgs, String> {
         let mut r = RunArgs {
             path: None,
             server: "tcp://0.0.0.0:5555".into(),
             publish: None,
             rate: None,
-            transport: None,
-            nng_sendbuf: None,
+            slices: vec![],
         };
         let mut it = args.iter();
         while let Some(a) = it.next() {
@@ -381,6 +381,111 @@ impl RunArgs {
             }
         }
         Ok(r)
+    }
+}
+
+// ---- publish targets: one endpoint per RTU, each with its own slice of the tags ------------------------------
+
+/// An endpoint and the tags it carries (empty: all of them).
+#[derive(Debug, PartialEq, Clone)]
+pub struct Slice {
+    pub endpoint: String,
+    pub tags: Vec<String>,
+}
+
+/// A slice as the model YAML or the command line wrote it: tags inline or read from a bennu `config.xml`
+/// (relative paths resolve against the model's directory).
+pub fn resolve_slice(spec: &SliceSpec, base: Option<&std::path::Path>) -> Result<Slice, String> {
+    let mut tags = spec.tags.clone();
+    if let Some(f) = &spec.tags_from {
+        let path = base.map_or(f.into(), |b| b.join(f));
+        tags.extend(crate::pull::tags_from_file(&path.to_string_lossy())?);
+    }
+    Ok(Slice {
+        endpoint: spec.endpoint.clone(),
+        tags,
+    })
+}
+
+/// `ENDPOINT=a,b,c` or `ENDPOINT=@config.xml`.
+pub fn parse_slice(arg: &str) -> Result<SliceSpec, String> {
+    let (endpoint, rest) = arg.split_once('=').ok_or_else(|| {
+        format!("--publish-tags `{arg}`: expected ENDPOINT=a,b,c or ENDPOINT=@config.xml")
+    })?;
+    let (tags, tags_from) = match rest.strip_prefix('@') {
+        Some(f) => (vec![], Some(f.to_string())),
+        None => (rest.split(',').map(String::from).collect(), None),
+    };
+    Ok(SliceSpec {
+        endpoint: endpoint.into(),
+        tags,
+        tags_from,
+    })
+}
+
+/// Endpoints to publish to, each with its tags (None: all). `--publish` is the all-tags endpoint; slices add
+/// per-RTU endpoints; with neither, the default endpoint carries everything. Tags must exist, endpoints must differ
+/// (two with one group would share a counter stream), and a tag may appear in several slices.
+pub fn plan(publish: Option<&str>, slices: Vec<Slice>, known: &[String]) -> Result<Plan, String> {
+    let mut out: Plan = vec![];
+    if publish.is_some() || slices.is_empty() {
+        out.push((publish.unwrap_or(transport::DEFAULT_PUBLISH).into(), None));
+    }
+    let known: HashSet<&String> = known.iter().collect();
+    for s in slices {
+        let bad: Vec<&str> = s
+            .tags
+            .iter()
+            .filter(|t| !known.contains(t))
+            .map(String::as_str)
+            .collect();
+        if !bad.is_empty() || s.tags.is_empty() {
+            return Err(format!(
+                "publish slice {}: {}",
+                s.endpoint,
+                if s.tags.is_empty() {
+                    "no tags".into()
+                } else {
+                    format!("unknown tags: {}", bad.join(", "))
+                }
+            ));
+        }
+        out.push((s.endpoint, Some(s.tags)));
+    }
+    let mut groups = HashSet::new();
+    for (ep, _) in &out {
+        if !groups.insert(group_for(ep)) {
+            return Err(format!(
+                "publish endpoint {ep} is listed twice (same RADIO group)"
+            ));
+        }
+    }
+    Ok(out)
+}
+
+/// Endpoint and tags (None: all) per publish target.
+pub type Plan = Vec<(String, Option<Vec<String>>)>;
+
+/// A publisher and the tags it carries (None: all).
+pub struct Target {
+    pub out: Box<dyn Publisher>,
+    pub tags: Option<HashSet<String>>,
+}
+
+/// Send each target its part of `snap`, in snapshot order.
+pub fn publish_all(targets: &[Target], snap: &[(String, Value)]) {
+    for t in targets {
+        match &t.tags {
+            None => t.out.publish(&snapshot_msg(snap)),
+            Some(set) => {
+                let part: Vec<_> = snap
+                    .iter()
+                    .filter(|(n, _)| set.contains(n))
+                    .cloned()
+                    .collect();
+                t.out.publish(&snapshot_msg(&part));
+            }
+        }
     }
 }
 
@@ -407,42 +512,39 @@ fn owned_snapshot(model: &Model) -> Vec<(String, Value)> {
         .collect()
 }
 
-/// Publisher thread: one message per `period` until `STOP`.
-fn spawn_publisher(
-    sh: Arc<Mutex<Shared>>,
-    out: Box<dyn Publisher>,
-    period: f64,
-) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
-        let t0 = Instant::now();
-        let mut k = 0u64;
-        while !STOP.load(Ordering::SeqCst) {
-            out.publish(&snapshot_msg(&sh.lock().unwrap().snap));
-            k += 1;
-            sleep_until(
-                t0 + Duration::from_secs_f64(k as f64 * period),
-                Duration::from_millis(5),
-            );
-        }
-    })
-}
-
-/// One engine tick: apply queued writes, publish the snapshot, then advance the model.
-fn engine_tick(model: &mut Model, sh: &Mutex<Shared>) {
+/// One engine tick: apply queued writes, store the snapshot for the REP side, then advance the model.
+/// Returns the snapshot taken before the step.
+fn engine_tick(model: &mut Model, sh: &Mutex<Shared>) -> Vec<(String, Value)> {
     let writes = std::mem::take(&mut sh.lock().unwrap().queue);
     for tag in model.apply_writes(&writes) {
         println!("Warn: write to {tag} rejected");
     }
-    sh.lock().unwrap().snap = owned_snapshot(model);
+    let snap = owned_snapshot(model);
+    sh.lock().unwrap().snap = snap.clone();
     model.step(model.dt);
+    snap
+}
+
+/// Tick `k` (0-based): tick the engine, then publish its snapshot from the same thread on every `every`-th tick.
+pub fn tick_and_publish(
+    model: &mut Model,
+    sh: &Mutex<Shared>,
+    targets: &[Target],
+    k: u64,
+    every: u64,
+) {
+    let snap = engine_tick(model, sh);
+    if k.is_multiple_of(every) {
+        publish_all(targets, &snap);
+    }
 }
 
 /// Engine: tick in real time (one model step per `dt` of wall clock) until `STOP`.
-fn engine(model: &mut Model, sh: &Mutex<Shared>) {
+fn engine(model: &mut Model, sh: &Mutex<Shared>, targets: &[Target], every: u64) {
     let t0 = Instant::now();
     let mut k = 0u64;
     while !STOP.load(Ordering::SeqCst) {
-        engine_tick(model, sh);
+        tick_and_publish(model, sh, targets, k, every);
         k += 1;
         let due = t0 + Duration::from_secs_f64(k as f64 * model.dt);
         if let Some(d) = due.checked_duration_since(Instant::now()) {
@@ -451,39 +553,62 @@ fn engine(model: &mut Model, sh: &Mutex<Shared>) {
     }
 }
 
+fn targets_of(plan: Plan) -> Result<Vec<Target>, String> {
+    plan.into_iter()
+        .map(|(ep, tags)| {
+            Ok(Target {
+                out: transport::publisher(&ep)?,
+                tags: tags.map(|t| t.into_iter().collect()),
+            })
+        })
+        .collect()
+}
+
 fn run(args: &[String]) -> Result<(), String> {
     let a = RunArgs::parse(args)?;
     let mut model = load_model(a.path.as_deref())?;
     let period = publish_period(a.rate, &model)?;
     let meta = Meta::of(&model);
+    let base = a
+        .path
+        .as_deref()
+        .and_then(|p| std::path::Path::new(p).parent());
+    let specs = model.publish_slices.iter().cloned();
+    let specs: Vec<SliceSpec> = specs
+        .chain(
+            a.slices
+                .iter()
+                .map(|s| parse_slice(s))
+                .collect::<Result<Vec<_>, _>>()?,
+        )
+        .collect();
+    let slices = specs
+        .iter()
+        .map(|s| resolve_slice(s, base))
+        .collect::<Result<Vec<_>, _>>()?;
+    let targets = targets_of(plan(a.publish.as_deref(), slices, &meta.tags)?)?;
     let sh = Arc::new(Mutex::new(Shared {
         snap: owned_snapshot(&model),
         queue: vec![],
     }));
     install_signals();
 
-    let t = transport::select(
-        a.transport.as_deref(),
-        model.transport.as_deref(),
-        a.nng_sendbuf.or(model.nng_sendbuf),
-    )?;
     let sh2 = sh.clone();
-    let rep_t = t.serve(&a.server, Box::new(move |req| handle(req, &meta, &sh2)))?;
-    let publish = a.publish.as_deref().unwrap_or(t.default_publish());
-    let out = t.publisher(publish)?;
+    let rep_t = transport::serve(&a.server, Box::new(move |req| handle(req, &meta, &sh2)))?;
     println!(
-        "Info: ferrofire run: {} dt={}s; transport {}; REP {}; {} every {period}s",
+        "Info: ferrofire run: {} dt={}s; REP {}; {} every {period}s",
         a.path.as_deref().unwrap_or(""),
         model.dt,
-        t.name(),
         a.server,
-        out.describe()
+        targets
+            .iter()
+            .map(|t| t.out.describe())
+            .collect::<Vec<_>>()
+            .join("; ")
     );
-    let pub_t = spawn_publisher(sh.clone(), out, period);
-
-    engine(&mut model, &sh);
+    let every = ((period / model.dt).round() as u64).max(1);
+    engine(&mut model, &sh, &targets, every);
     let _ = rep_t.join();
-    let _ = pub_t.join();
     println!("Info: stopped");
     Ok(())
 }

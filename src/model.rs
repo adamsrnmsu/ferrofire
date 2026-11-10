@@ -156,6 +156,16 @@ struct PowerDef {
     inline: Option<case::Inline>,
 }
 
+/// One publish endpoint and the tags it carries: listed inline, read from a bennu `config.xml`, or both.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SliceSpec {
+    pub endpoint: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub tags_from: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Doc {
@@ -165,10 +175,9 @@ struct Doc {
     substeps: usize,
     #[allow(dead_code)]
     publish_rate: Option<f64>,
-    /// `zmq` or `nng`; the `--transport` flag overrides it.
-    transport: Option<String>,
-    /// nng PUB0 send queue per subscriber, in messages; the `--nng-sendbuf` flag overrides it.
-    nng_sendbuf: Option<usize>,
+    /// Per-RTU publish endpoints, each carrying a slice of the tags.
+    #[serde(default)]
+    publish_slices: Vec<SliceSpec>,
     #[serde(default)]
     params: Ordered<f64>,
     #[serde(default)]
@@ -234,8 +243,7 @@ struct Body {
 pub struct Model {
     pub dt: f64,
     pub publish_rate: Option<f64>,
-    pub transport: Option<String>,
-    pub nng_sendbuf: Option<usize>,
+    pub publish_slices: Vec<SliceSpec>,
     pub time: f64,
     substeps: usize,
     v: Vec<f64>,
@@ -657,8 +665,7 @@ impl Model {
         Ok(Model {
             dt: doc.dt,
             publish_rate: doc.publish_rate,
-            transport: doc.transport.clone(),
-            nng_sendbuf: doc.nng_sendbuf,
+            publish_slices: doc.publish_slices.clone(),
             time: 0.0,
             substeps: doc.substeps,
             v,

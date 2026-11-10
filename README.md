@@ -47,7 +47,7 @@ flowchart LR
     P["AC Newton-Raphson /<br/>DC power flow"]
   end
   subgraph fe["Frontends (pick one)"]
-    N["ferrofire run<br/>native bennu provider<br/>transport: zmq (REP + UDP RADIO)<br/>or nng (REP0 + PUB0)"]
+    N["ferrofire run<br/>native bennu provider<br/>libzmq REP + UDP RADIO datagrams"]
     SL["simulinksolver<br/>Simulink shm adapter"]
     PY["pybennu-power-solver<br/>PyPower drop-in"]
   end
@@ -62,8 +62,8 @@ flowchart LR
   core --> N & SL & PY
   SL -- "shm + semaphores" --> BP
   BP -- "ZMQ" --> FD
-  N -- "ZMQ (default) or NNG" --> FD
-  PY -- "ZMQ (default) or NNG" --> FD
+  N -- "UDP multicast (datagram v1)" --> FD
+  PY -- "UDP multicast (datagram v1)" --> FD
   FD -- "Modbus / DNP3" --> SC
   SC -. "writes: gates, valves, breakers" .-> FD
 ```
@@ -85,41 +85,38 @@ flowchart LR
 
 | Frontend | How it starts | Protocol | Replaces |
 |---|---|---|---|
-| Native bennu provider | `ferrofire run model.yaml [--transport nng\|zmq]` | zmq: REP on tcp + UDP RADIO/DISH multicast; nng: REP0 + PUB0 on tcp | any bennu provider |
+| Native bennu provider | `ferrofire run model.yaml` | REP on tcp + UDP RADIO/DISH multicast | any bennu provider |
 | Simulink adapter | `simulinksolver -tf inf` (or `ferrofire simulink`) | SysV shm + POSIX semaphores to stock `bennu-simulink-provider` | the Simulink solver binary |
-| PyPower drop-in | `pybennu-power-solver start -c config.ini [--transport nng\|zmq]` (or `ferrofire pypower`) | same INI, pidfile, logs and ZMQ as pybennu (`transport = nng` in the INI switches it) | `pybennu-power-solver` |
+| PyPower drop-in | `pybennu-power-solver start -c config.ini` (or `ferrofire pypower`) | same INI, pidfile, logs and ZMQ as pybennu | `pybennu-power-solver` |
 
 ## Transports
 
-Requests (`QUERY=`, `READ=tag`, `WRITE=tag:value`, answered `ACK=...` / `ERR=...`) and updates (`tag:value,...`, NUL-terminated)
-carry the same points on both transports; zmq/UDP splits a cycle into whole-point datagrams of at most 1400 bytes, nng/TCP sends
-the whole cycle as one message. Pick one per run; the choice is `--transport` on `run` and
-`pypower`, else `transport:` in the model YAML, else `transport =` in `config.ini`, else `zmq`.
+Requests (`QUERY=`, `READ=tag`, `WRITE=tag:value`, answered `ACK=...` / `ERR=...`) are libzmq REQ/REP. Updates (`tag:value,...`,
+NUL-terminated) are UDP datagrams in libzmq's RADIO framing, split into whole-point datagrams of at most 1400 bytes, each ending
+in `_ff.seq`, `_ff.cyc` and `_ff.t` pseudo-tags. The wire is owned by ferrofire and specified in
+[docs/datagram-v1.md](docs/datagram-v1.md) (byte layout, group hash, chunking, loss model, failure behaviour; Wireshark dissector in
+`tools/wireshark/`). It is byte-compatible with stock bennu DISH subscribers and bennu-probe, so nothing depends on libzmq's DRAFT
+RADIO/DISH API. Defaults: `tcp://0.0.0.0:5555`, `udp://*;239.0.0.1:40000`; the image is `bennu-ferrofire-arm64`.
 
-| | `zmq` (default) | `nng` |
-|---|---|---|
-| Requests | libzmq REP | NNG REP0 |
-| Updates | UDP RADIO/DISH framing (multicast ok) | NNG PUB0 (subscribers connect; no multicast) |
-| Default endpoints | `tcp://0.0.0.0:5555`, `udp://*;239.0.0.1:40000` | `tcp://0.0.0.0:5555`, `tcp://0.0.0.0:5556` |
-| Talks to stock bennu field devices and bennu-probe | yes | no (NNG clients only) |
-| Cargo feature / image | `zmq`, `bennu-ferrofire-arm64` | `nng`, `bennu-ferrofire-nng-arm64` |
+NNG was evaluated as a second transport and dropped on 2026-11-09: see the
+[historical comparison](docs/bench/transport-comparison.md). Where multicast is not available use the pull-bridge below.
 
-nng PUB0 never blocks and never retransmits at the application layer: when a subscriber's send queue is full it drops the
-message. One message per cycle keeps a cycle from overflowing it (the old 1400-byte chunking made 800 tags 17 messages against
-nng's default queue of 16, ww-a8n). The queue is `nng_sendbuf` messages per subscriber, default 128, range 1..=8192: set
-`nng_sendbuf:` in the model YAML, `--nng-sendbuf N` on `run` (beats the model), or `nng-sendbuf = N` in `config.ini`. It only
-matters for slow subscribers, which lose whole cycles once that many are queued; zmq/UDP ignores it.
+### Per-RTU endpoints
+
+`publish_slices:` in the model YAML (or `--publish-tags ENDPOINT=a,b,c` / `ENDPOINT=@config.xml`, repeatable) publishes named tag
+slices to separate endpoints, one RADIO group each; a tag may appear in several slices. `--publish` stays the all-tags endpoint
+(used alone when no slice is given).
 
 ### Pull instead of push (prototype)
 
-Push sends every tag to every subscriber: nng PUB0 over TCP has no multicast, so N RTUs cost N copies of the whole tag list.
+Push sends every tag to every subscriber; without multicast N RTUs would cost N copies of the whole tag list.
 A `READ` may name several tags, `READ=a,b,c`, and is answered with one `ACK=a:1,b:2,c:3,` (the update format, request order;
 an unknown tag fails the whole request with `ERR=Tag 'x' not found`; `READ=tag` is unchanged). `ferrofire pull-bridge` runs next to
 a field device, asks for just that device's tags once per tick, and republishes the reply on a local endpoint, so a stock
 (push-subscribing) bennu field device needs no change:
 
 ```
-ferrofire pull-bridge --server tcp://provider:5555 --transport zmq --rate 100 \
+ferrofire pull-bridge --server tcp://provider:5555 --rate 100 \
     --tags-from /etc/sceptre/config.xml --publish udp://127.0.0.1:40000
 ```
 
@@ -132,10 +129,6 @@ that fails too (or the provider answers `ERR`) nothing is published (the field d
 provider goes quiet) and the failure is logged with the provider's text, then repeated every 10 s while it lasts. Ticks missed
 while a slow request was pending are skipped, not replayed back to back. Writes are untouched: the device still `WRITE`s to the provider.
 Numbers: [docs/bench/transport-comparison.md](docs/bench/transport-comparison.md#pull-bridge-prototype-ww-otj11).
-
-Both features are on by default. `cargo build --no-default-features --features nng` links no libzmq; `--features zmq` links no
-NNG. Asking for a transport the binary was built without stops at startup, naming the cargo feature. `make variants` builds,
-lints and tests both single-transport binaries.
 
 ## Quick start
 

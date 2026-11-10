@@ -2,7 +2,6 @@
 # Build ferrofire for aarch64-unknown-linux-gnu (glibc 2.35, jammy) in a container; outputs dist/ferrofire and dist/simulinksolver.
 # Must be glibc, not musl: POSIX named semaphores in /dev/shm are shared with the glibc bennu-simulink-provider and
 # musl's sem_t layout is incompatible. jammy = the guest images' glibc, so the binary runs on every guest.
-# CARGO_FLAGS="--no-default-features --features nng" builds the single-transport binary (nng: no libzmq; zmq: no libnng).
 # On an Apple-silicon Mac Docker Desktop runs linux/arm64 natively; set PLATFORM=linux/amd64 for an x86-64 build.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"

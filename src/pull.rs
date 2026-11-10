@@ -8,12 +8,11 @@ use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "ferrofire pull-bridge --publish udp://127.0.0.1:40000 (--tags-from config.xml | --tags a,b,c) [--server tcp://127.0.0.1:5555] [--transport zmq|nng] [--rate 100]  (--rate in ms)";
+const USAGE: &str = "ferrofire pull-bridge --publish udp://127.0.0.1:40000 (--tags-from config.xml | --tags a,b,c) [--server tcp://127.0.0.1:5555] [--rate 100]  (--rate in ms)";
 
 #[derive(Debug, PartialEq)]
 pub struct PullArgs {
     pub server: String,
-    pub transport: Option<String>,
     pub rate_ms: u64,
     pub tags: Vec<String>,
     pub publish: String,
@@ -64,7 +63,7 @@ fn parse_rate(v: &str) -> Result<u64, String> {
     v.parse().map_err(|e| format!("--rate: {e}"))
 }
 
-fn tags_from_file(path: &str) -> Result<Vec<String>, String> {
+pub fn tags_from_file(path: &str) -> Result<Vec<String>, String> {
     let xml = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
     tags_from_config(&xml).map_err(|e| format!("{path}: {e}"))
 }
@@ -83,7 +82,6 @@ impl PullArgs {
     fn set_text(&mut self, flag: &str, v: &str) -> Result<(), String> {
         match flag {
             "--server" => self.server = v.into(),
-            "--transport" => self.transport = Some(v.into()),
             "--publish" => self.publish = v.into(),
             _ => return Err(format!("unknown argument `{flag}`")),
         }
@@ -93,7 +91,6 @@ impl PullArgs {
     pub fn parse(args: &[String]) -> Result<PullArgs, String> {
         let mut a = PullArgs {
             server: "tcp://127.0.0.1:5555".into(),
-            transport: None,
             rate_ms: 100,
             tags: vec![],
             publish: String::new(),
@@ -218,19 +215,17 @@ pub fn main(args: &[String]) {
 
 fn run(args: &[String]) -> Result<(), String> {
     let a = PullArgs::parse(args)?;
-    let t = transport::select(a.transport.as_deref(), None, None)?;
     let timeout = (a.rate_ms * 2).max(100) as i32;
-    let mut req = t.requester(&a.server, timeout)?;
-    let out = t.publisher(&a.publish)?;
+    let mut req = transport::requester(&a.server, timeout)?;
+    let out = transport::publisher(&a.publish)?;
     validate(&mut *req, &a.tags)?;
     let (requests, period) = (requests(&a.tags), Duration::from_millis(a.rate_ms));
     install_signals();
     println!(
-        "Info: ferrofire pull-bridge: {} tags from {} every {} ms ({}); {}",
+        "Info: ferrofire pull-bridge: {} tags from {} every {} ms; {}",
         a.tags.len(),
         a.server,
         a.rate_ms,
-        t.name(),
         out.describe()
     );
     let (t0, mut k, mut outage) = (Instant::now(), 0u32, Outage::default());

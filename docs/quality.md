@@ -123,7 +123,7 @@ make mutate    # mutation testing; exit 3 means a mutant survived
 
 `.metrics/` (crap.edn, dry.edn, mutate/) is generated and git-ignored.
 
-## After the transport work (zmq and nng, ww-1df.17)
+## After the transport work (zmq and nng, ww-1df.17; historical, NNG dropped 2026-11-09)
 
 | Gate | Result |
 |---|---|

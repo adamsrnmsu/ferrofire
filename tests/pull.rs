@@ -43,7 +43,6 @@ fn arguments() {
         a,
         PullArgs {
             server: "tcp://127.0.0.1:5555".into(),
-            transport: None,
             rate_ms: 100,
             tags: s(&["x", "y"]),
             publish: "udp://127.0.0.1:40000".into()
@@ -57,18 +56,15 @@ fn arguments() {
         &rtu,
         "--server",
         "tcp://h:1",
-        "--transport",
-        "nng",
         "--rate",
         "10",
     ]))
     .unwrap();
     assert_eq!(
-        (b.tags, b.server, b.transport, b.rate_ms),
+        (b.tags, b.server, b.rate_ms),
         (
             s(&["lock.height", "lowergate.open"]),
             "tcp://h:1".into(),
-            Some("nng".into()),
             10
         )
     );
@@ -262,28 +258,19 @@ fn terminate(mut c: Child) -> (bool, String) {
     (ok, out)
 }
 
-/// Provider on `transport`, bridge pulling `lock.height,lowergate.open` from it, `listen` receives what the bridge publishes.
-fn bridge_round_trip(transport: &str, publish: &str, listen: impl FnOnce() -> String) {
+/// Provider, bridge pulling `lock.height,lowergate.open` from it, `listen` receives what the bridge publishes.
+fn bridge_round_trip(publish: &str, listen: impl FnOnce() -> String) {
     let server = format!("tcp://127.0.0.1:{}", free_port());
-    let prov_pub = format!("tcp://127.0.0.1:{}", free_port());
     let prov = spawn(&[
         "run",
         MODEL,
-        "--transport",
-        transport,
         "--server",
         &server,
         "--publish",
-        if transport == "nng" {
-            &prov_pub
-        } else {
-            "udp://127.0.0.1:41999"
-        },
+        "udp://127.0.0.1:41999",
     ]);
     let bridge = spawn(&[
         "pull-bridge",
-        "--transport",
-        transport,
         "--server",
         &server,
         "--publish",
@@ -294,6 +281,7 @@ fn bridge_round_trip(transport: &str, publish: &str, listen: impl FnOnce() -> St
         "20",
     ]);
     let got = listen();
+    let got = got.split(",_ff.seq:").next().unwrap().to_string() + ","; // the sequence trailer is checked in tests/bennu.rs
     assert!(terminate(bridge).0);
     assert!(terminate(prov).0);
     assert!(
@@ -303,7 +291,6 @@ fn bridge_round_trip(transport: &str, publish: &str, listen: impl FnOnce() -> St
     assert_eq!(got.matches(',').count(), 2, "{got}");
 }
 
-#[cfg(feature = "zmq")]
 #[test]
 fn bridge_republishes_as_radio_datagrams() {
     use ferrofire::bennu::{group_for, unframe};
@@ -311,7 +298,7 @@ fn bridge_republishes_as_radio_datagrams() {
     sock.set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();
     let ep = format!("udp://127.0.0.1:{}", sock.local_addr().unwrap().port());
-    bridge_round_trip("zmq", &ep, || {
+    bridge_round_trip(&ep, || {
         let mut buf = [0u8; 2048];
         let n = sock.recv(&mut buf).unwrap();
         let (group, body) = unframe(&buf[..n]).unwrap();
@@ -321,54 +308,25 @@ fn bridge_republishes_as_radio_datagrams() {
     });
 }
 
-#[cfg(feature = "nng")]
-#[test]
-fn bridge_republishes_over_nng() {
-    use nng::options::{protocol::pubsub::Subscribe, Options, RecvTimeout};
-    let ep = format!("tcp://127.0.0.1:{}", free_port());
-    let sub = nng::Socket::new(nng::Protocol::Sub0).unwrap();
-    sub.set_opt::<Subscribe>(vec![]).unwrap();
-    sub.set_opt::<RecvTimeout>(Some(Duration::from_secs(10)))
-        .unwrap();
-    sub.dial_async(&ep).unwrap();
-    bridge_round_trip("nng", &ep, || {
-        let m = sub.recv().unwrap();
-        String::from_utf8(m[..m.len() - 1].to_vec()).unwrap()
-    });
-}
-
 /// Provider (`ferrofire run`) on `server`; its own publish goes nowhere useful.
-fn provider(transport: &str, server: &str) -> Child {
-    let prov_pub = format!("tcp://127.0.0.1:{}", free_port());
+fn provider(server: &str) -> Child {
     spawn(&[
         "run",
         MODEL,
-        "--transport",
-        transport,
         "--server",
         server,
         "--publish",
-        if transport == "nng" {
-            &prov_pub
-        } else {
-            "udp://127.0.0.1:41998"
-        },
+        "udp://127.0.0.1:41998",
     ])
 }
 
 /// Kill the provider under a running bridge, start a new one on the same endpoint: the bridge must go on publishing.
 /// `recv(timeout)` reads one message the bridge published, if any arrives in time.
-fn restart_recovers(
-    transport: &str,
-    publish: &str,
-    mut recv: impl FnMut(Duration) -> Option<String>,
-) {
+fn restart_recovers(publish: &str, mut recv: impl FnMut(Duration) -> Option<String>) {
     let server = format!("tcp://127.0.0.1:{}", free_port());
-    let prov = provider(transport, &server);
+    let prov = provider(&server);
     let mut bridge = spawn(&[
         "pull-bridge",
-        "--transport",
-        transport,
         "--server",
         &server,
         "--publish",
@@ -386,7 +344,7 @@ fn restart_recovers(
     assert!(seen(&mut recv), "no first update");
     assert!(terminate(prov).0);
     while recv(Duration::from_millis(500)).is_some() {} // drain; the bridge publishes nothing while the provider is gone
-    let prov = provider(transport, &server);
+    let prov = provider(&server);
     let got = seen(&mut recv);
     assert!(bridge.try_wait().unwrap().is_none(), "bridge died");
     assert!(terminate(bridge).0);
@@ -394,12 +352,11 @@ fn restart_recovers(
     assert!(got, "no update after the provider came back");
 }
 
-#[cfg(feature = "zmq")]
 #[test]
 fn bridge_recovers_when_the_zmq_provider_restarts() {
     let sock = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     let ep = format!("udp://127.0.0.1:{}", sock.local_addr().unwrap().port());
-    restart_recovers("zmq", &ep, |d| {
+    restart_recovers(&ep, |d| {
         sock.set_read_timeout(Some(d)).unwrap();
         let mut buf = [0u8; 2048];
         let n = sock.recv(&mut buf).ok()?;
@@ -407,40 +364,18 @@ fn bridge_recovers_when_the_zmq_provider_restarts() {
     });
 }
 
-#[cfg(feature = "nng")]
-#[test]
-fn bridge_recovers_when_the_nng_provider_restarts() {
-    use nng::options::{protocol::pubsub::Subscribe, Options, RecvTimeout};
-    let ep = format!("tcp://127.0.0.1:{}", free_port());
-    let sub = nng::Socket::new(nng::Protocol::Sub0).unwrap();
-    sub.set_opt::<Subscribe>(vec![]).unwrap();
-    sub.dial_async(&ep).unwrap();
-    restart_recovers("nng", &ep, |d| {
-        sub.set_opt::<RecvTimeout>(Some(d)).unwrap();
-        sub.recv()
-            .ok()
-            .map(|m| String::from_utf8_lossy(&m).into_owned())
-    });
-}
-
 #[test]
 fn bridge_exits_1_naming_unknown_tags() {
     let server = format!("tcp://127.0.0.1:{}", free_port());
-    let tr = if cfg!(feature = "zmq") { "zmq" } else { "nng" };
-    let prov = provider(tr, &server);
-    let publish = match tr {
-        "nng" => format!("tcp://127.0.0.1:{}", free_port()),
-        _ => "udp://127.0.0.1:41997".into(),
-    };
+    let prov = provider(&server);
+    let publish = "udp://127.0.0.1:41997";
     let o = Command::new(BIN)
         .args([
             "pull-bridge",
-            "--transport",
-            tr,
             "--server",
             &server,
             "--publish",
-            &publish,
+            publish,
             "--tags",
             "lock.height,no.such,also.bad",
         ])

@@ -202,8 +202,6 @@ struct Cfg {
     publish: String,
     case: String,
     debug: bool,
-    transport: Option<String>,
-    nng_sendbuf: Option<usize>,
 }
 
 /// Absolute form of `f` when it exists, else `f` as given.
@@ -241,11 +239,6 @@ fn load_cfg(path: &str, debug: bool) -> Result<Cfg, String> {
         publish: required(s, "publish-endpoint")?.replace("*;", ""),
         case: canon(&required(s, "case-file")?),
         debug,
-        transport: s.get("transport").cloned(),
-        nng_sendbuf: s
-            .get("nng-sendbuf")
-            .map(|v| v.parse().map_err(|e| format!("nng-sendbuf: {e}")))
-            .transpose()?,
     })
 }
 
@@ -329,12 +322,11 @@ struct Cli {
     env: String,
     daemon: bool,
     debug: bool,
-    transport: Option<String>,
 }
 
 fn usage() -> ! {
     crate::usage_exit(
-        "usage: pybennu-power-solver [-c CONFIG_FILE] [-d] [-e ENV] [-v] [--transport {zmq,nng}] {start,stop,restart,status}",
+        "usage: pybennu-power-solver [-c CONFIG_FILE] [-d] [-e ENV] [-v] {start,stop,restart,status}",
     )
 }
 
@@ -342,14 +334,13 @@ fn flag_value<'a>(it: &mut impl Iterator<Item = &'a String>) -> String {
     it.next().cloned().unwrap_or_else(|| usage())
 }
 
-const VALUE_FLAGS: [&str; 5] = ["-c", "--config-file", "-e", "--env", "--transport"];
+const VALUE_FLAGS: [&str; 4] = ["-c", "--config-file", "-e", "--env"];
 
 impl Cli {
     fn set(&mut self, flag: &str, v: String) {
         match flag {
             "-c" | "--config-file" => self.conf = v,
-            "-e" | "--env" => self.env = v,
-            _ => self.transport = Some(v),
+            _ => self.env = v,
         }
     }
 }
@@ -361,7 +352,6 @@ fn parse_cli(args: &[String]) -> Cli {
         env: "pybennu".into(),
         daemon: false,
         debug: false,
-        transport: None,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -442,8 +432,7 @@ fn load_service(c: &Cli) -> Result<(Cfg, Power), String> {
             c.conf
         ));
     }
-    let mut cfg = load_cfg(&canon(&c.conf), c.debug)?;
-    cfg.transport = c.transport.clone().or(cfg.transport); // the flag beats config.ini
+    let cfg = load_cfg(&canon(&c.conf), c.debug)?;
     let case = case::load_file(std::path::Path::new(&cfg.case))?;
     let power = Power::new(case, Islands::Fail, false, &[], &[])?;
     Ok((cfg, power))
@@ -462,14 +451,12 @@ fn publish_loop(p: &Mutex<Power>, out: &dyn Publisher) {
 fn serve(cfg: Cfg, power: Power) -> Result<(), String> {
     install_signals();
     let p = Arc::new(Mutex::new(power));
-    let t = transport::select(cfg.transport.as_deref(), None, cfg.nng_sendbuf)?;
     let (p2, debug) = (p.clone(), cfg.debug);
-    let rep_t = t.serve(&cfg.server, Box::new(move |req| handle(req, &p2, debug)))?;
-    let out = t.publisher(&cfg.publish)?;
+    let rep_t = transport::serve(&cfg.server, Box::new(move |req| handle(req, &p2, debug)))?;
+    let out = transport::publisher(&cfg.publish)?;
     println!(
-        "Info: pybennu-power-solver (ferrofire): case {}; transport {}; REP {}; {} every 1s",
+        "Info: pybennu-power-solver (ferrofire): case {}; REP {}; {} every 1s",
         cfg.case,
-        t.name(),
         cfg.server,
         out.describe()
     );
