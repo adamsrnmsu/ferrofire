@@ -429,6 +429,7 @@ fn publish_loop(p: &Mutex<Power>, out: &dyn Publisher) {
 
 fn serve(cfg: Cfg, power: Power) -> Result<(), String> {
     install_signals();
+    crate::log::start("pypower");
     let p = Arc::new(Mutex::new(power));
     let (p2, debug) = (p.clone(), cfg.debug);
     let rep_t = transport::serve(&cfg.server, Box::new(move |req| handle(req, &p2, debug)))?;
@@ -441,6 +442,7 @@ fn serve(cfg: Cfg, power: Power) -> Result<(), String> {
     );
     publish_loop(&p, out.as_ref());
     let _ = rep_t.join();
+    crate::log::stop();
     println!("Info: stopped");
     Ok(())
 }

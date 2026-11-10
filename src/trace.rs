@@ -49,6 +49,9 @@ struct Out;
 
 impl Write for Out {
     fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+        if crate::log::route(b) {
+            return Ok(b.len()); // the control socket's file sink or tails took it (ferrofire log)
+        }
         match crate::hint::lock(&FILE).as_mut() {
             Some(f) => f.write(b),
             None => io::stderr().write(b),

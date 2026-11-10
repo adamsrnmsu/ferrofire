@@ -597,6 +597,7 @@ fn run(a: RunArgs) -> Result<(), String> {
         queue: vec![],
     }));
     install_signals();
+    crate::log::start("run");
 
     let sh2 = sh.clone();
     let rep_t = transport::serve(&a.server, Box::new(move |req| handle(req, &meta, &sh2)))?;
@@ -614,6 +615,7 @@ fn run(a: RunArgs) -> Result<(), String> {
     let every = ((period / model.dt).round() as u64).max(1);
     engine(&mut model, &sh, &targets, every);
     let _ = rep_t.join();
+    crate::log::stop();
     println!("Info: stopped");
     Ok(())
 }

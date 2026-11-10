@@ -142,6 +142,7 @@ pub fn main(args: &[String]) {
         return;
     }
     install_signals();
+    crate::log::start("simulink");
     let mut model = load_model(args);
     let io = Io::open(read_points(&model));
     io.publish(&model);
@@ -162,4 +163,5 @@ pub fn main(args: &[String]) {
         }
     }
     io.term();
+    crate::log::stop();
 }

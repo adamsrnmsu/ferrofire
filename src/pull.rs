@@ -213,6 +213,7 @@ fn run(args: PullCli) -> Result<(), String> {
     validate(&mut *req, &a.tags)?;
     let (requests, period) = (requests(&a.tags), Duration::from_millis(a.rate_ms));
     install_signals();
+    crate::log::start("pull-bridge");
     println!(
         "Info: ferrofire pull-bridge: {} tags from {} every {} ms; {}",
         a.tags.len(),
@@ -231,6 +232,7 @@ fn run(args: PullCli) -> Result<(), String> {
         k = next_k(t0, period, Instant::now(), k);
         sleep_until(t0 + period * k, Duration::from_millis(2));
     }
+    crate::log::stop();
     println!("Info: stopped");
     Ok(())
 }

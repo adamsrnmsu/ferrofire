@@ -29,6 +29,12 @@ enum Cmd {
     },
     /// Offline run printing the model snapshot at t=0 and after N steps
     Check(CheckArgs),
+    /// Toggle file logging, level and tail on a running process
+    #[command(disable_help_flag = true)]
+    Log {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Print a shell completion script
     Completions { shell: clap_complete::Shell },
 }
@@ -54,6 +60,7 @@ fn main() {
         Cmd::PullBridge(a) => ferrofire::pull::main(a),
         Cmd::Pypower(a) => ferrofire::pypower::run_cli(a),
         Cmd::Simulink { args } => ferrofire::simulink::main(&args),
+        Cmd::Log { args } => ferrofire::log::main(&args),
         Cmd::Check(a) => check(a),
         Cmd::Completions { shell } => completions(shell),
     }
