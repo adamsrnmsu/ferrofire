@@ -705,13 +705,16 @@ impl Step {
     }
 }
 
-/// The script's steps, checked: `at` finite, non-negative and not going back in time; each write and condition well formed.
+/// Longest `at` a script may use (about 31 years): beyond it `Duration`/`Instant` arithmetic panics.
+const MAX_AT: f64 = 1e9;
+
+/// The script's steps, checked: `at` finite, at most MAX_AT, non-negative and not going back in time; each write and condition well formed.
 pub fn parse_script(yaml: &str) -> Result<Vec<Step>, String> {
     let steps: Vec<Step> = serde_saphyr::from_str(yaml).map_err(|e| e.to_string())?;
     let mut prev = 0.0;
     for (i, s) in steps.iter().enumerate() {
         let n = i + 1;
-        if !s.at.is_finite() || s.at < prev {
+        if !s.at.is_finite() || s.at < prev || s.at > MAX_AT {
             return Err(format!(
                 "step {n}: `at: {}` must be >= 0 and not earlier than the step before",
                 s.at

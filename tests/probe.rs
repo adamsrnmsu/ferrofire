@@ -357,6 +357,8 @@ fn scripts_and_conditions_parse() {
     );
     for (y, want) in [
         ("- at: -1\n  write: a=1\n", "step 1: `at: -1`"),
+        // a finite but absurd delay would panic in Duration::from_secs_f64 / Instant + Duration
+        ("- at: 1e300\n  write: a=1\n", "step 1: `at: 1000000000"),
         (
             "- at: 2\n  write: a=1\n- at: 1\n  write: a=1\n",
             "step 2: `at: 1`",
