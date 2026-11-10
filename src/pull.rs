@@ -4,6 +4,7 @@
 
 use crate::bennu::{exit_on_err, install_signals, sleep_until, STOP};
 use crate::transport::{self, Publisher, Requester};
+use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
@@ -16,6 +17,21 @@ pub struct PullArgs {
     pub rate_ms: u64,
     pub tags: Vec<String>,
     pub publish: String,
+}
+
+/// Most tags in one `READ`, so a request stays far under any transport's message limit; more tags go in several requests.
+pub const MAX_TAGS_PER_READ: usize = 200;
+/// Attempts at the startup `QUERY` before giving up on an unreachable provider (each waits up to the request timeout).
+pub const STARTUP_TRIES: usize = 10;
+/// Minimum gap between repeated "still failing" lines.
+pub const LOG_EVERY: Duration = Duration::from_secs(10);
+
+/// Drop repeats, keeping the first occurrence and the order.
+fn unique(tags: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    tags.into_iter()
+        .filter(|t| seen.insert(t.clone()))
+        .collect()
 }
 
 /// The text between the first `open` and the next `close` after it.
@@ -37,7 +53,7 @@ pub fn tags_from_config(xml: &str) -> Result<Vec<String>, String> {
             tags.extend(name.map(|n| n.trim().to_string()));
         }
     }
-    tags.dedup();
+    let tags = unique(tags);
     match tags.is_empty() {
         true => Err("no <analog>/<binary> points in the config's <input>".into()),
         false => Ok(tags),
@@ -95,14 +111,44 @@ impl PullArgs {
             (true, ..) => Err("--publish is required".into()),
             (_, true, _) => Err("--tags or --tags-from is required".into()),
             (.., 0) => Err("--rate must be > 0".into()),
-            _ => Ok(self),
+            _ => Ok(PullArgs {
+                tags: unique(self.tags),
+                ..self
+            }),
         }
     }
 }
 
-/// `READ=a,b,c`
-pub fn request(tags: &[String]) -> Vec<u8> {
-    format!("READ={}", tags.join(",")).into_bytes()
+/// `READ=a,b,c,`, one request per `MAX_TAGS_PER_READ` tags. The trailing comma keeps a one-tag request in batch form:
+/// `READ=a` alone is the single-tag form and is answered with a bare value, not `a:value,`.
+pub fn requests(tags: &[String]) -> Vec<Vec<u8>> {
+    tags.chunks(MAX_TAGS_PER_READ)
+        .map(|c| format!("READ={},", c.join(",")).into_bytes())
+        .collect()
+}
+
+/// Startup check: every tag must exist at the provider (`QUERY` lists them), else the bridge would never publish.
+pub fn validate(req: &mut dyn Requester, tags: &[String]) -> Result<(), String> {
+    let mut last = String::new();
+    for _ in 0..STARTUP_TRIES {
+        match req.call(b"QUERY=") {
+            Ok(reply) => {
+                let known: HashSet<String> =
+                    update_msg(&reply)?.split(',').map(String::from).collect();
+                let bad: Vec<&str> = tags
+                    .iter()
+                    .filter(|t| !known.contains(*t))
+                    .map(String::as_str)
+                    .collect();
+                return match bad.is_empty() {
+                    true => Ok(()),
+                    false => Err(format!("unknown tags at the provider: {}", bad.join(", "))),
+                };
+            }
+            Err(e) => last = e,
+        }
+    }
+    Err(format!("provider unreachable: {last}"))
 }
 
 /// The update message inside an `ACK=a:1,b:2,` reply; an `ERR=` (or anything else) is an error.
@@ -114,23 +160,56 @@ pub fn update_msg(reply: &[u8]) -> Result<String, String> {
         .ok_or_else(|| format!("provider said `{r}`"))
 }
 
-/// One pull: ask (retrying once on timeout), republish the reply. On failure nothing is published, so the field
-/// device keeps its last values exactly as it does when a push provider goes quiet.
-pub fn tick(req: &mut dyn Requester, request: &[u8], out: &dyn Publisher) -> Result<(), String> {
-    let reply = req.call(request).or_else(|_| req.call(request))?;
-    out.publish(&update_msg(&reply)?);
+/// One pull: ask (retrying each request once on timeout), republish the replies as one update. On failure nothing is
+/// published, so the field device keeps its last values exactly as it does when a push provider goes quiet.
+pub fn tick(
+    req: &mut dyn Requester,
+    requests: &[Vec<u8>],
+    out: &dyn Publisher,
+) -> Result<(), String> {
+    let mut msg = String::new();
+    for r in requests {
+        let reply = req.call(r).or_else(|_| req.call(r))?;
+        msg += &update_msg(&reply)?;
+    }
+    out.publish(&msg);
     Ok(())
 }
 
-/// One log line per outage and one when it ends; returns whether the pull is failing now.
-fn log_change(res: Result<(), String>, failing: bool) -> bool {
-    let now = res.is_err();
-    match res {
-        Err(e) if !failing => eprintln!("Warn: pull failed, keeping last values: {e}"),
-        Ok(()) if failing => eprintln!("Info: pull recovered"),
-        _ => {}
+/// Failure logging: the first line of an outage, then one every `LOG_EVERY` with the provider's text (an ERR stalls
+/// every tag, so it must never go quiet), then one when it ends.
+#[derive(Default)]
+pub struct Outage {
+    last: Option<Instant>,
+}
+
+impl Outage {
+    pub fn log_line(&mut self, res: Result<(), String>, now: Instant) -> Option<String> {
+        match (res, self.last) {
+            (Err(e), None) => {
+                self.last = Some(now);
+                Some(format!("Warn: pull failed, keeping last values: {e}"))
+            }
+            (Err(e), Some(t)) if now.duration_since(t) >= LOG_EVERY => {
+                self.last = Some(now);
+                Some(format!(
+                    "Warn: pull still failing, keeping last values: {e}"
+                ))
+            }
+            (Ok(()), Some(_)) => {
+                self.last = None;
+                Some("Info: pull recovered".into())
+            }
+            _ => None,
+        }
     }
-    now
+}
+
+/// The next tick slot (after slot `k`) that is still in the future: slots missed during a slow or failed tick are
+/// skipped, not replayed back to back.
+pub fn next_k(t0: Instant, period: Duration, now: Instant, k: u32) -> u32 {
+    let due = (now.saturating_duration_since(t0).as_nanos() / period.as_nanos()) as u32 + 1;
+    due.max(k + 1)
 }
 
 pub fn main(args: &[String]) {
@@ -143,7 +222,8 @@ fn run(args: &[String]) -> Result<(), String> {
     let timeout = (a.rate_ms * 2).max(100) as i32;
     let mut req = t.requester(&a.server, timeout)?;
     let out = t.publisher(&a.publish)?;
-    let (request, period) = (request(&a.tags), Duration::from_millis(a.rate_ms));
+    validate(&mut *req, &a.tags)?;
+    let (requests, period) = (requests(&a.tags), Duration::from_millis(a.rate_ms));
     install_signals();
     println!(
         "Info: ferrofire pull-bridge: {} tags from {} every {} ms ({}); {}",
@@ -153,10 +233,14 @@ fn run(args: &[String]) -> Result<(), String> {
         t.name(),
         out.describe()
     );
-    let (t0, mut k, mut failing) = (Instant::now(), 0u32, false);
+    let (t0, mut k, mut outage) = (Instant::now(), 0u32, Outage::default());
     while !STOP.load(Ordering::SeqCst) {
-        failing = log_change(tick(&mut *req, &request, &*out), failing);
-        k += 1;
+        let res = tick(&mut *req, &requests, &*out);
+        outage
+            .log_line(res, Instant::now())
+            .iter()
+            .for_each(|l| eprintln!("{l}"));
+        k = next_k(t0, period, Instant::now(), k);
         sleep_until(t0 + period * k, Duration::from_millis(2));
     }
     println!("Info: stopped");
