@@ -39,6 +39,8 @@ enum Cmd {
     },
     /// Query, read, write and watch tags on a running provider (bennu-probe equivalent)
     Probe(ferrofire::probe::ProbeCli),
+    /// Check a range's plumbing: provider reachable, multicast arriving, gaps, skew, stale tags; prints a fix per problem
+    Doctor(ferrofire::doctor::DoctorArgs),
     /// Describe a tag from the model file: kind, expression, inputs, units, limits
     Explain {
         /// Model file
@@ -91,6 +93,7 @@ fn dispatch(cmd: Cmd) {
         Cmd::Simulink { args } => ferrofire::simulink::main(&args),
         Cmd::Log { args } => ferrofire::log::main(&args),
         Cmd::Probe(a) => ferrofire::probe::main(a),
+        Cmd::Doctor(a) => ferrofire::doctor::main(a),
         _ => {}
     }
 }

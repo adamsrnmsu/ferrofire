@@ -6,6 +6,7 @@
 pub mod bennu;
 pub mod datagram;
 pub mod diff;
+pub mod doctor;
 pub mod expr;
 pub mod hint;
 pub mod log;

@@ -158,6 +158,16 @@ provider goes quiet) and the failure is logged with the provider's text, then re
 while a slow request was pending are skipped, not replayed back to back. Writes are untouched: the device still `WRITE`s to the provider.
 Numbers: [docs/bench/transport-comparison.md](docs/bench/transport-comparison.md#pull-bridge-prototype-ww-otj11).
 
+## Doctor
+
+`ferrofire doctor [--server tcp://127.0.0.1:5555] [--listen udp://*;239.0.0.1:40000] [--seconds 3] [--json]` checks a range's plumbing
+and prints a fix under every problem; exit status 1 if any check fails. It asks the provider's REP socket for its tags, listens on the
+publish endpoint for `--seconds`, and reports: `provider` (QUERY answers), `multicast join`, `group` (the id the endpoint string hashes
+to; the provider must be given the same string), `datagrams` arriving, `seq gaps` (loss from the `_ff.seq` run), `bystanders` (datagrams
+for other groups reaching the socket: a switch flooding multicast, so IGMP snooping or a querier is missing), `clock skew` (this host
+against the provider's `_ff.t`, warned past 1 s) and `stale tags` (the stale quality of [datagram v1](docs/datagram-v1.md), judged
+within the listening window). The provider exposes no ERR/drop counters, so none are read.
+
 ## Probe
 
 `ferrofire probe` is the operator's view of a provider (the bennu-probe equivalent). `--server` (default `tcp://127.0.0.1:5555`),

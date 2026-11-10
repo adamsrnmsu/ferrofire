@@ -205,7 +205,7 @@ pub fn cache_path() -> Option<std::path::PathBuf> {
 }
 
 /// QUERY the provider and remember the answer for completion (a cache that cannot be written is ignored).
-fn fetch_tags(req: &mut dyn Requester) -> Result<Vec<String>, String> {
+pub(crate) fn fetch_tags(req: &mut dyn Requester) -> Result<Vec<String>, String> {
     let tags = tag_list(&ask(req, b"QUERY=")?)?;
     if let Some(p) = cache_path() {
         let _ = p.parent().map(std::fs::create_dir_all);
@@ -458,7 +458,11 @@ fn listen(endpoint: &str) -> Result<UdpSocket, String> {
 }
 
 /// Hands every datagram on `endpoint` to `on` until SIGINT/SIGTERM or `duration` seconds have passed.
-fn follow(endpoint: &str, duration: Option<f64>, mut on: impl FnMut(&[u8])) -> Result<(), String> {
+pub(crate) fn follow(
+    endpoint: &str,
+    duration: Option<f64>,
+    mut on: impl FnMut(&[u8]),
+) -> Result<(), String> {
     let sock = listen(endpoint)?;
     install_signals();
     let end = duration.map(|d| Instant::now() + Duration::from_secs_f64(d));
