@@ -127,7 +127,8 @@ fn rep_round_trip() {
 
 #[test]
 fn run_arguments() {
-    let a = |s: &[&str]| RunArgs::parse(&s.iter().map(|x| x.to_string()).collect::<Vec<_>>());
+    use clap::Parser;
+    let a = |s: &[&str]| RunArgs::try_parse_from(std::iter::once("run").chain(s.iter().copied()));
     let ok = a(&[
         "m.yaml",
         "--rate",
@@ -138,14 +139,14 @@ fn run_arguments() {
         "udp://*;239.0.0.1:2",
     ])
     .unwrap();
-    assert_eq!(ok.path.as_deref(), Some("m.yaml"));
+    assert_eq!(ok.path(), Some("m.yaml"));
     assert_eq!(
         (ok.server.as_str(), ok.publish.as_deref()),
         ("tcp://*:1", Some("udp://*;239.0.0.1:2"))
     );
     assert_eq!(ok.rate, Some(0.5));
     let d = a(&["--model", "x.yaml"]).unwrap();
-    assert_eq!(d.path.as_deref(), Some("x.yaml"));
+    assert_eq!(d.path(), Some("x.yaml"));
     assert_eq!((d.server.as_str(), d.rate), ("tcp://0.0.0.0:5555", None));
     assert_eq!((d.publish, d.slices.len()), (None, 0)); // none given: the default endpoint carries everything
     let t = a(&[
@@ -158,12 +159,10 @@ fn run_arguments() {
     .unwrap();
     assert_eq!(t.slices, vec!["udp://h:1=a,b", "udp://h:2=@c.xml"]);
     assert!(a(&["--transport", "zmq"]).is_err()); // gone with NNG
-                                                  // a second bare word is not a model, and a flag with no value is refused
-    assert!(a(&["--model", "x.yaml", "y.yaml"])
-        .unwrap_err()
-        .contains("unknown argument `y.yaml`"));
-    assert!(a(&["--rate"]).unwrap_err().contains("--rate needs a value"));
-    assert!(a(&["--rate", "fast"]).unwrap_err().starts_with("--rate:"));
+                                                  // a second model (bare word and --model together), a flag with no value, a non-number rate: clap refuses
+    assert!(a(&["--model", "x.yaml", "y.yaml"]).is_err());
+    assert!(a(&["--rate"]).is_err());
+    assert!(a(&["--rate", "fast"]).is_err());
 }
 
 #[test]

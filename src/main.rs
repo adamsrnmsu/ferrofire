@@ -1,62 +1,99 @@
 //! ferrofire CLI. Also the `simulinksolver` entry point: selected when argv[0] ends in `simulinksolver`.
-//! Subcommands: `simulink [args]`, `check model.yaml [--steps N] [--write tag=value@t]`.
 
+use clap::{CommandFactory, Parser, Subcommand};
 use ferrofire::model::{Model, Value};
 
-fn usage() -> ! {
-    ferrofire::usage_exit("usage: ferrofire run model.yaml [--server tcp://0.0.0.0:5555] [--publish udp://*;239.0.0.1:40000] [--rate 0.1]\n       ferrofire pull-bridge --publish ENDPOINT (--tags-from config.xml | --tags a,b,c) [--server tcp://127.0.0.1:5555] [--rate ms]\n       ferrofire pypower {start|stop|restart|status} [-c /etc/sceptre/config.ini] [-e pybennu] [-d] [-v]\n       ferrofire simulink [-tf inf] [--model model.yaml]\n       ferrofire check model.yaml [--steps N] [--write tag=value@t]...")
+#[derive(Parser)]
+#[command(
+    version,
+    about = "Process and power-flow simulator for sceptre/phenix ranges"
+)]
+struct Cli {
+    #[command(subcommand)]
+    cmd: Cmd,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// Serve a model over the field-device REP protocol and publish its tags
+    Run(ferrofire::bennu::RunArgs),
+    /// Poll a field-device REP server and publish what it answers
+    PullBridge(ferrofire::pull::PullCli),
+    /// pybennu-power-solver compatible power-flow daemon
+    Pypower(ferrofire::pypower::Cli),
+    /// Shared-memory simulinksolver stand-in; takes `--model FILE`, ignores the legacy solver flags (-tf inf, -v, ...)
+    #[command(disable_help_flag = true)]
+    Simulink {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Offline run printing the model snapshot at t=0 and after N steps
+    Check(CheckArgs),
+    /// Print a shell completion script
+    Completions { shell: clap_complete::Shell },
+}
+
+/// Run as an install name (`simulinksolver`, `pybennu-power-solver`) when argv[0] says so.
+fn by_install_name(prog: &str, rest: &[String]) -> bool {
+    match prog {
+        p if p.ends_with("simulinksolver") => ferrofire::simulink::main(rest),
+        p if p.ends_with("pybennu-power-solver") => ferrofire::pypower::main(rest),
+        _ => return false,
+    }
+    true
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let (prog, rest) = args.split_first().expect("argv[0]");
-    if prog.ends_with("simulinksolver") {
-        return ferrofire::simulink::main(rest);
+    if by_install_name(prog, rest) {
+        return;
     }
-    if prog.ends_with("pybennu-power-solver") {
-        return ferrofire::pypower::main(rest);
+    match Cli::parse().cmd {
+        Cmd::Run(a) => ferrofire::bennu::main(a),
+        Cmd::PullBridge(a) => ferrofire::pull::main(a),
+        Cmd::Pypower(a) => ferrofire::pypower::run_cli(a),
+        Cmd::Simulink { args } => ferrofire::simulink::main(&args),
+        Cmd::Check(a) => check(a),
+        Cmd::Completions { shell } => completions(shell),
     }
-    let Some((cmd, tail)) = rest.split_first() else {
-        usage()
-    };
-    match cmd.as_str() {
-        "simulink" => ferrofire::simulink::main(tail),
-        "run" => ferrofire::bennu::main(tail),
-        "pull-bridge" => ferrofire::pull::main(tail),
-        "pypower" => ferrofire::pypower::main(tail),
-        "check" => check(tail),
-        _ => usage(),
-    }
+}
+
+fn completions(shell: clap_complete::Shell) {
+    clap_complete::generate(
+        shell,
+        &mut Cli::command(),
+        "ferrofire",
+        &mut std::io::stdout(),
+    );
 }
 
 type Write = (f64, String, f64);
 
 /// `tag=value[@t]` (value `true`/`false` allowed) -> (t, tag, value).
-fn parse_write(s: &str) -> Option<Write> {
+fn parse_write(s: &str) -> Result<Write, String> {
+    let bad = || format!("`{s}`: expected tag=value[@t]");
     let (tv, t) = s.split_once('@').unwrap_or((s, "0"));
-    let (tag, v) = tv.split_once('=')?;
+    let (tag, v) = tv.split_once('=').ok_or_else(bad)?;
     let v = match v {
         "true" => 1.0,
         "false" => 0.0,
-        _ => v.parse().ok()?,
+        _ => v.parse().map_err(|_| bad())?,
     };
-    Some((t.parse().ok()?, tag.to_string(), v))
+    Ok((t.parse().map_err(|_| bad())?, tag.to_string(), v))
 }
 
-/// `model.yaml [--steps N] [--write tag=value@t]...`
-fn parse_check(args: &[String]) -> (&String, usize, Vec<Write>) {
-    let path = args.first().unwrap_or_else(|| usage());
-    let (mut steps, mut writes) = (100usize, vec![]);
-    let mut it = args[1..].iter();
-    while let Some(a) = it.next() {
-        let val = it.next().unwrap_or_else(|| usage());
-        match a.as_str() {
-            "--steps" => steps = val.parse().unwrap_or_else(|_| usage()),
-            "--write" => writes.push(parse_write(val).unwrap_or_else(|| usage())),
-            _ => usage(),
-        }
-    }
-    (path, steps, writes)
+#[derive(clap::Args)]
+struct CheckArgs {
+    /// Model file
+    #[arg(value_name = "MODEL.YAML")]
+    path: String,
+    /// Steps to run
+    #[arg(long, default_value_t = 100)]
+    steps: usize,
+    /// Set a tag at model time t, repeatable
+    #[arg(long = "write", value_name = "TAG=VALUE[@T]", value_parser = parse_write)]
+    writes: Vec<Write>,
 }
 
 fn fail(msg: impl std::fmt::Display) -> ! {
@@ -78,10 +115,15 @@ fn apply_due(m: &mut Model, writes: &mut Vec<Write>) {
 }
 
 /// Offline run printing the snapshot at t=0 and after N steps; `--write tag=value@t` applies at model time t.
-fn check(args: &[String]) {
-    let (path, steps, mut writes) = parse_check(args);
-    let yaml = std::fs::read_to_string(path).unwrap_or_else(|e| fail(format!("{path}: {e}")));
-    let mut m = Model::load_in(&yaml, std::path::Path::new(path).parent())
+fn check(
+    CheckArgs {
+        path,
+        steps,
+        mut writes,
+    }: CheckArgs,
+) {
+    let yaml = std::fs::read_to_string(&path).unwrap_or_else(|e| fail(format!("{path}: {e}")));
+    let mut m = Model::load_in(&yaml, std::path::Path::new(&path).parent())
         .unwrap_or_else(|e| fail(format!("{path}: {e}")));
     for _ in 0..steps {
         apply_due(&mut m, &mut writes);

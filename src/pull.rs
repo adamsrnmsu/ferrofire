@@ -11,6 +11,28 @@ use std::time::{Duration, Instant};
 
 const USAGE: &str = "ferrofire pull-bridge --publish udp://127.0.0.1:40000 (--tags-from config.xml | --tags a,b,c) [--server tcp://127.0.0.1:5555] [--rate 100]  (--rate in ms)";
 
+/// The command line as clap reads it; `resolve` turns it into the `PullArgs` the bridge runs on.
+/// Publish to ENDPOINT what a field-device REP server answers to READ, polled every --rate ms.
+#[derive(Debug, clap::Parser)]
+#[command(name = "ferrofire pull-bridge", group = clap::ArgGroup::new("source").required(true).args(["tags", "tags_from"]))]
+pub struct PullCli {
+    /// Where the polled tags are published, e.g. udp://127.0.0.1:40000
+    #[arg(long, value_name = "ENDPOINT")]
+    publish: String,
+    /// Comma-separated tags to poll
+    #[arg(long, value_delimiter = ',', value_name = "A,B,C")]
+    tags: Vec<String>,
+    /// bennu field-device config.xml to take the tags from
+    #[arg(long, value_name = "CONFIG.XML")]
+    tags_from: Option<String>,
+    /// REP endpoint of the provider
+    #[arg(long, default_value = "tcp://127.0.0.1:5555")]
+    server: String,
+    /// Poll period in milliseconds
+    #[arg(long = "rate", value_name = "MS", default_value_t = 100, value_parser = clap::value_parser!(u64).range(1..))]
+    rate_ms: u64,
+}
+
 #[derive(Debug, PartialEq)]
 pub struct PullArgs {
     pub server: String,
@@ -60,60 +82,24 @@ pub fn tags_from_config(xml: &str) -> Result<Vec<String>, String> {
     }
 }
 
-fn parse_rate(v: &str) -> Result<u64, String> {
-    v.parse().map_err(|e| format!("--rate: {e}"))
-}
-
 pub fn tags_from_file(path: &str) -> Result<Vec<String>, String> {
     let xml = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
     tags_from_config(&xml).map_err(|e| format!("{path}: {e}"))
 }
 
-impl PullArgs {
-    fn set(&mut self, flag: &str, v: &str) -> Result<(), String> {
-        match flag {
-            "--rate" => self.rate_ms = parse_rate(v)?,
-            "--tags" => self.tags = v.split(',').map(String::from).collect(),
-            "--tags-from" => self.tags = tags_from_file(v)?,
-            _ => return self.set_text(flag, v),
-        }
-        Ok(())
-    }
-
-    fn set_text(&mut self, flag: &str, v: &str) -> Result<(), String> {
-        match flag {
-            "--server" => self.server = v.into(),
-            "--publish" => self.publish = v.into(),
-            _ => return Err(format!("unknown argument `{flag}`")),
-        }
-        Ok(())
-    }
-
-    pub fn parse(args: &[String]) -> Result<PullArgs, String> {
-        let mut a = PullArgs {
-            server: "tcp://127.0.0.1:5555".into(),
-            rate_ms: 100,
-            tags: vec![],
-            publish: String::new(),
+impl PullCli {
+    /// Read `--tags-from` and drop repeated tags.
+    pub fn resolve(self) -> Result<PullArgs, String> {
+        let tags = match &self.tags_from {
+            Some(f) => tags_from_file(f)?,
+            None => self.tags,
         };
-        let mut it = args.iter();
-        while let Some(flag) = it.next() {
-            let v = it.next().ok_or_else(|| format!("{flag} needs a value"))?;
-            a.set(flag, v)?;
-        }
-        a.check()
-    }
-
-    fn check(self) -> Result<PullArgs, String> {
-        match (self.publish.is_empty(), self.tags.is_empty(), self.rate_ms) {
-            (true, ..) => Err("--publish is required".into()),
-            (_, true, _) => Err("--tags or --tags-from is required".into()),
-            (.., 0) => Err("--rate must be > 0".into()),
-            _ => Ok(PullArgs {
-                tags: unique(self.tags),
-                ..self
-            }),
-        }
+        Ok(PullArgs {
+            server: self.server,
+            rate_ms: self.rate_ms,
+            tags: unique(tags),
+            publish: self.publish,
+        })
     }
 }
 
@@ -210,12 +196,12 @@ pub fn next_k(t0: Instant, period: Duration, now: Instant, k: u32) -> u32 {
     due.max(k + 1)
 }
 
-pub fn main(args: &[String]) {
+pub fn main(args: PullCli) {
     exit_on_err("pull-bridge", USAGE, run(args));
 }
 
-fn run(args: &[String]) -> Result<(), String> {
-    let a = PullArgs::parse(args)?;
+fn run(args: PullCli) -> Result<(), String> {
+    let a = args.resolve()?;
     let timeout = (a.rate_ms * 2).max(100) as i32;
     let mut req = transport::requester(&a.server, timeout)?;
     let out = transport::publisher(&a.publish)?;

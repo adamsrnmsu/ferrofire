@@ -82,9 +82,6 @@ fn run_rejects_bad_invocations_with_usage() {
             vec!["run", MODEL, "--rate", "0"],
             "publish rate must be > 0",
         ),
-        (vec!["run", MODEL, "--rate", "x"], "--rate:"),
-        (vec!["run", MODEL, "--bogus"], "unknown argument `--bogus`"),
-        (vec!["run", MODEL, "--server"], "--server needs a value"),
         (
             vec!["run", MODEL, "--publish", "tcp://x:1"],
             "must be udp://",
@@ -97,6 +94,20 @@ fn run_rejects_bad_invocations_with_usage() {
             e.contains(want) && e.contains("usage: ferrofire run"),
             "{args:?}: {e}"
         );
+    }
+}
+
+#[test]
+fn run_syntax_errors_are_clap_errors_with_exit_2() {
+    for (args, want) in [
+        (vec!["run", MODEL, "--rate", "x"], "--rate"),
+        (vec!["run", MODEL, "--bogus"], "--bogus"),
+        (vec!["run", MODEL, "--server"], "--server"),
+    ] {
+        let o = ff(&args);
+        assert_eq!(o.status.code(), Some(2), "{args:?}");
+        let e = text(&o.stderr);
+        assert!(e.contains(want) && e.contains("--help"), "{args:?}: {e}");
     }
 }
 
@@ -142,7 +153,7 @@ fn check_rejects_bad_invocations() {
     ] {
         let o = ff(&args);
         assert_eq!(o.status.code(), Some(2), "{args:?}");
-        assert!(text(&o.stderr).contains("usage: ferrofire run"));
+        assert!(text(&o.stderr).contains("--help"));
     }
     let o = ff(&["check", "/nonexistent.yaml"]);
     assert_eq!(o.status.code(), Some(1));
@@ -265,4 +276,38 @@ fn run_publishes_per_rtu_slices_to_their_own_endpoints_with_a_counter_each() {
     let o = ff(&["run", MODEL, "--publish-tags", "udp://127.0.0.1:41990=nope"]);
     assert_eq!(o.status.code(), Some(1));
     assert!(text(&o.stderr).contains("unknown tags: nope"));
+}
+
+#[test]
+fn every_subcommand_has_help_and_typos_get_a_suggestion() {
+    for sub in ["run", "pull-bridge", "pypower", "check"] {
+        let o = ff(&[sub, "--help"]);
+        assert!(o.status.success(), "{sub}");
+        assert!(
+            text(&o.stdout).contains(&format!("Usage: ferrofire {sub}")),
+            "{sub}"
+        );
+    }
+    let o = ff(&["--help"]);
+    assert!(text(&o.stdout).contains("completions"));
+    let o = ff(&["pul-bridge"]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(text(&o.stderr).contains("pull-bridge"));
+    let o = ff(&["run", MODEL, "--sever", "x"]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(text(&o.stderr).contains("--server"));
+}
+
+#[test]
+fn completions_are_printed_for_each_shell() {
+    for shell in ["bash", "zsh", "fish"] {
+        let o = ff(&["completions", shell]);
+        assert!(o.status.success(), "{shell}");
+        let out = text(&o.stdout);
+        assert!(
+            out.contains("pull-bridge") && out.contains("completions"),
+            "{shell}"
+        );
+    }
+    assert_eq!(ff(&["completions", "nosh"]).status.code(), Some(2));
 }

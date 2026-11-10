@@ -8,6 +8,8 @@ description = "Simple process (and, later, power-flow) simulator for sceptre/phe
 
 [dependencies]
 libc = "0.2"
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 zmq = "0.10"
 num-complex = "0.4"
 serde = { version = "1", features = ["derive"] }

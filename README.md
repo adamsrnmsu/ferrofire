@@ -145,6 +145,7 @@ ferrofire check models/pump-station.yaml --steps 600 --write pump.run=true@0 --w
 ```
 
 - Serve a model to a range: `ferrofire run models/waterway.yaml --server tcp://0.0.0.0:5555 --publish 'udp://*;239.0.0.1:40000'`
+- Every subcommand has `--help` (clap); a mistyped subcommand or flag gets a "did you mean" suggestion, and a malformed command line exits 2. `ferrofire completions bash|zsh|fish|elvish|powershell` prints a completion script, e.g. `ferrofire completions bash > /etc/bash_completion.d/ferrofire`. `simulink` and `log` pass their arguments through unparsed (simulink ignores the legacy solver flags such as `-tf inf`).
 
 ## Model format (short)
 

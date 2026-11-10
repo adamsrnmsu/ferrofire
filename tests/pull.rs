@@ -26,7 +26,7 @@ fn tags_come_from_the_input_points_only() {
                                                              // a tag in both sections and non-adjacent repeats: first occurrence wins, order kept
     let xml = "<input><analog><name>x</name></analog><analog><name>y</name></analog><analog><name>x</name></analog><binary><name>y</name></binary><binary><name>z</name></binary></input>";
     assert_eq!(tags_from_config(xml), Ok(s(&["x", "y", "z"])));
-    let a = PullArgs::parse(&s(&["--publish", "p", "--tags", "b,a,b,c,a"])).unwrap();
+    let a = parse(&s(&["--publish", "p", "--tags", "b,a,b,c,a"])).unwrap();
     assert_eq!(a.tags, s(&["b", "a", "c"]));
     assert!(tags_from_config("<x/>").unwrap_err().contains("no <input>"));
     assert!(
@@ -36,9 +36,16 @@ fn tags_come_from_the_input_points_only() {
     );
 }
 
+fn parse(args: &[String]) -> Result<PullArgs, String> {
+    use clap::Parser;
+    PullCli::try_parse_from(std::iter::once("pull-bridge".to_string()).chain(args.iter().cloned()))
+        .map_err(|e| e.to_string())?
+        .resolve()
+}
+
 #[test]
 fn arguments() {
-    let a = PullArgs::parse(&s(&["--publish", "udp://127.0.0.1:40000", "--tags", "x,y"])).unwrap();
+    let a = parse(&s(&["--publish", "udp://127.0.0.1:40000", "--tags", "x,y"])).unwrap();
     assert_eq!(
         a,
         PullArgs {
@@ -49,7 +56,7 @@ fn arguments() {
         }
     );
     let rtu = format!("{}/tests/conformance/rtu-1.xml", env!("CARGO_MANIFEST_DIR"));
-    let b = PullArgs::parse(&s(&[
+    let b = parse(&s(&[
         "--publish",
         "p",
         "--tags-from",
@@ -69,30 +76,27 @@ fn arguments() {
         )
     );
     for (args, err) in [
-        (vec!["--tags", "x"], "--publish is required"),
-        (vec!["--publish", "p"], "--tags or --tags-from is required"),
+        (vec!["--tags", "x"], "--publish"),
+        (vec!["--publish", "p"], "--tags"),
         (
             vec!["--publish", "p", "--tags", "x", "--rate", "0"],
-            "--rate must be > 0",
+            "--rate",
         ),
         (
             vec!["--publish", "p", "--tags", "x", "--rate", "z"],
-            "--rate:",
+            "--rate",
         ),
         (
             vec!["--publish", "p", "--tags", "x", "--bogus", "1"],
-            "unknown argument `--bogus`",
+            "--bogus",
         ),
-        (vec!["--publish"], "--publish needs a value"),
+        (vec!["--publish"], "--publish"),
         (
-            vec!["--tags-from", "/nonexistent/c.xml"],
+            vec!["--publish", "p", "--tags-from", "/nonexistent/c.xml"],
             "/nonexistent/c.xml:",
         ),
     ] {
-        assert!(
-            PullArgs::parse(&s(&args)).unwrap_err().contains(err),
-            "{args:?}"
-        );
+        assert!(parse(&s(&args)).unwrap_err().contains(err), "{args:?}");
     }
 }
 
@@ -391,15 +395,15 @@ fn bridge_exits_1_naming_unknown_tags() {
 }
 
 #[test]
-fn bridge_with_a_bad_command_line_exits_1_with_usage() {
+fn bridge_with_a_bad_command_line_exits_2_with_usage() {
     let o = Command::new(BIN)
         .args(["pull-bridge", "--tags", "x"])
         .output()
         .unwrap();
-    assert_eq!(o.status.code(), Some(1));
+    assert_eq!(o.status.code(), Some(2));
     let e = String::from_utf8_lossy(&o.stderr);
     assert!(
-        e.contains("--publish is required") && e.contains("usage: ferrofire pull-bridge"),
+        e.contains("--publish") && e.contains("Usage: ferrofire pull-bridge"),
         "{e}"
     );
 }

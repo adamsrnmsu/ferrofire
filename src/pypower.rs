@@ -306,8 +306,16 @@ fn stop(pidfile: &str, silent: bool) {
     let _ = std::fs::remove_file(pidfile);
 }
 
+/// The `pybennu-power-solver` install name: the same options with no subcommand word in front.
 pub fn main(args: &[String]) {
-    std::process::exit(match cli(args) {
+    use clap::Parser;
+    run_cli(Cli::parse_from(
+        std::iter::once("pybennu-power-solver").chain(args.iter().map(String::as_str)),
+    ))
+}
+
+pub fn run_cli(c: Cli) {
+    std::process::exit(match cli(c) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("ERROR: {e}");
@@ -316,57 +324,29 @@ pub fn main(args: &[String]) {
     });
 }
 
-struct Cli {
+/// pybennu-power-solver compatible daemon control (also the `pybennu-power-solver` install name).
+#[derive(clap::Parser)]
+#[command(name = "ferrofire pypower")]
+pub struct Cli {
+    #[arg(value_parser = ["start", "stop", "restart", "status"])]
     op: String,
+    /// Solver config file
+    #[arg(
+        short = 'c',
+        long = "config-file",
+        default_value = "/etc/sceptre/config.ini",
+        value_name = "CONFIG_FILE"
+    )]
     conf: String,
+    /// Environment name (pid and log file suffix)
+    #[arg(short = 'e', long, default_value = "pybennu")]
     env: String,
+    /// Run in the background
+    #[arg(short = 'd', long = "daemonize")]
     daemon: bool,
+    /// Debug logging
+    #[arg(short = 'v', long = "debug")]
     debug: bool,
-}
-
-fn usage() -> ! {
-    crate::usage_exit(
-        "usage: pybennu-power-solver [-c CONFIG_FILE] [-d] [-e ENV] [-v] {start,stop,restart,status}",
-    )
-}
-
-fn flag_value<'a>(it: &mut impl Iterator<Item = &'a String>) -> String {
-    it.next().cloned().unwrap_or_else(|| usage())
-}
-
-const VALUE_FLAGS: [&str; 4] = ["-c", "--config-file", "-e", "--env"];
-
-impl Cli {
-    fn set(&mut self, flag: &str, v: String) {
-        match flag {
-            "-c" | "--config-file" => self.conf = v,
-            _ => self.env = v,
-        }
-    }
-}
-
-fn parse_cli(args: &[String]) -> Cli {
-    let mut c = Cli {
-        op: String::new(),
-        conf: "/etc/sceptre/config.ini".into(),
-        env: "pybennu".into(),
-        daemon: false,
-        debug: false,
-    };
-    let mut it = args.iter();
-    while let Some(a) = it.next() {
-        match a.as_str() {
-            f if VALUE_FLAGS.contains(&f) => c.set(f, flag_value(&mut it)),
-            "-d" | "--daemonize" => c.daemon = true,
-            "-v" | "--debug" => c.debug = true,
-            o @ ("start" | "stop" | "restart" | "status") if c.op.is_empty() => c.op = o.into(),
-            _ => usage(),
-        }
-    }
-    if c.op.is_empty() {
-        usage();
-    }
-    c
 }
 
 struct Paths {
@@ -375,8 +355,7 @@ struct Paths {
     err: String,
 }
 
-fn cli(args: &[String]) -> Result<(), String> {
-    let c = parse_cli(args);
+fn cli(c: Cli) -> Result<(), String> {
     let paths = Paths {
         pid: format!("/var/run/bennu-{}.pid", c.env),
         out: format!("/var/log/bennu-{}.out", c.env),

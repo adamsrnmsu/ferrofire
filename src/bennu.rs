@@ -349,7 +349,7 @@ pub fn udp_sender(iface: Option<&str>, dest: SocketAddr) -> Result<UdpSocket, St
 
 const USAGE: &str = "ferrofire run [model.yaml | --model model.yaml] [--server tcp://0.0.0.0:5555] [--publish 'udp://*;239.0.0.1:40000'] [--publish-tags 'ENDPOINT=a,b,c' | 'ENDPOINT=@config.xml']... [--rate 0.1]";
 
-pub fn main(args: &[String]) {
+pub fn main(args: RunArgs) {
     exit_on_err("run", USAGE, run(args));
 }
 
@@ -361,61 +361,34 @@ pub fn exit_on_err(cmd: &str, usage: &str, res: Result<(), String>) {
     }
 }
 
-#[derive(Debug)]
+/// Serve a model over the field-device REP protocol and publish its tags.
+#[derive(Debug, clap::Parser)]
+#[command(name = "ferrofire run")]
 pub struct RunArgs {
-    pub path: Option<String>,
+    /// Model file (or give it with --model)
+    #[arg(value_name = "MODEL.YAML", conflicts_with = "model")]
+    pos_model: Option<String>,
+    /// Model file
+    #[arg(long, value_name = "MODEL.YAML")]
+    model: Option<String>,
+    /// REP endpoint
+    #[arg(long, default_value = "tcp://0.0.0.0:5555")]
     pub server: String,
-    /// None: the default endpoint, unless slices are given (then only the slices).
+    /// All-tags publish endpoint, e.g. 'udp://*;239.0.0.1:40000' (default endpoint when no slices are given)
+    #[arg(long, value_name = "ENDPOINT")]
     pub publish: Option<String>,
+    /// Publish period in seconds (default: the model's publish_rate, else 0.1)
+    #[arg(long, value_name = "SECONDS")]
     pub rate: Option<f64>,
-    /// `--publish-tags ENDPOINT=a,b,c` or `ENDPOINT=@config.xml`, repeatable.
+    /// Per-RTU slice 'ENDPOINT=a,b,c' or 'ENDPOINT=@config.xml', repeatable
+    #[arg(long = "publish-tags", value_name = "SPEC")]
     pub slices: Vec<String>,
 }
 
-const FLAGS: [&str; 5] = [
-    "--model",
-    "--server",
-    "--publish",
-    "--publish-tags",
-    "--rate",
-];
-
 impl RunArgs {
-    fn set(&mut self, flag: &str, v: String) -> Result<(), String> {
-        match flag {
-            "--model" => self.path = Some(v),
-            "--server" => self.server = v,
-            "--publish" => self.publish = Some(v),
-            "--publish-tags" => self.slices.push(v),
-            _ => self.rate = Some(v.parse::<f64>().map_err(|e| format!("--rate: {e}"))?),
-        }
-        Ok(())
-    }
-
-    /// `[model.yaml | --model model.yaml] [--server ep] [--publish ep] [--publish-tags spec]... [--rate seconds]`
-    pub fn parse(args: &[String]) -> Result<RunArgs, String> {
-        let mut r = RunArgs {
-            path: None,
-            server: "tcp://0.0.0.0:5555".into(),
-            publish: None,
-            rate: None,
-            slices: vec![],
-        };
-        let mut it = args.iter();
-        while let Some(a) = it.next() {
-            if FLAGS.contains(&a.as_str()) {
-                let v = it
-                    .next()
-                    .cloned()
-                    .ok_or_else(|| format!("{a} needs a value"))?;
-                r.set(a, v)?;
-            } else if !a.starts_with('-') && r.path.is_none() {
-                r.path = Some(a.clone());
-            } else {
-                return Err(format!("unknown argument `{a}`"));
-            }
-        }
-        Ok(r)
+    /// `--model` or the positional model, whichever was given.
+    pub fn path(&self) -> Option<&str> {
+        self.model.as_deref().or(self.pos_model.as_deref())
     }
 }
 
@@ -599,15 +572,11 @@ fn targets_of(plan: Plan) -> Result<Vec<Target>, String> {
         .collect()
 }
 
-fn run(args: &[String]) -> Result<(), String> {
-    let a = RunArgs::parse(args)?;
-    let mut model = load_model(a.path.as_deref())?;
+fn run(a: RunArgs) -> Result<(), String> {
+    let mut model = load_model(a.path())?;
     let period = publish_period(a.rate, &model)?;
     let meta = Meta::of(&model);
-    let base = a
-        .path
-        .as_deref()
-        .and_then(|p| std::path::Path::new(p).parent());
+    let base = a.path().and_then(|p| std::path::Path::new(p).parent());
     let specs = model.publish_slices.iter().cloned();
     let specs: Vec<SliceSpec> = specs
         .chain(
@@ -632,7 +601,7 @@ fn run(args: &[String]) -> Result<(), String> {
     let rep_t = transport::serve(&a.server, Box::new(move |req| handle(req, &meta, &sh2)))?;
     println!(
         "Info: ferrofire run: {} dt={}s; REP {}; {} every {period}s",
-        a.path.as_deref().unwrap_or(""),
+        a.path().unwrap_or(""),
         model.dt,
         a.server,
         targets
