@@ -48,15 +48,13 @@ pub struct Server {
 }
 
 fn name_or(n: Node, key: &str, default: &str) -> Result<String, ConfigError> {
-    let v = text(n, key).unwrap_or_else(|| default.to_string());
-    if scl::valid_name(&v) {
-        Ok(v)
-    } else {
-        Err(ConfigError(format!(
-            "<{key}> `{}` is not a name (letters, digits, _; at most 32)",
-            show(&v)
-        )))
-    }
+    super::name_in(
+        n,
+        key,
+        default,
+        scl::valid_name,
+        "letters, digits, _; at most 32",
+    )
 }
 
 fn mac(s: &str) -> bool {

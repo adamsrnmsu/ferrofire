@@ -4,6 +4,8 @@
 
 #[cfg(feature = "proto-dnp3")]
 pub mod dnp3;
+#[cfg(feature = "proto-iccp")]
+pub mod iccp;
 #[cfg(feature = "proto-iec61850")]
 pub mod iec61850;
 
@@ -23,6 +25,25 @@ pub trait Module: Send + 'static {
     fn run(self, store: Store, stop: CancellationToken) -> impl Future<Output = ()> + Send;
 }
 
+/// The text of child `key` (or `default`), which must satisfy `ok`; `rule` says what a name is, for the error.
+pub fn name_in(
+    n: Node,
+    key: &str,
+    default: &str,
+    ok: fn(&str) -> bool,
+    rule: &str,
+) -> Result<String, ConfigError> {
+    let v = super::config::text(n, key).unwrap_or_else(|| default.to_string());
+    if ok(&v) {
+        Ok(v)
+    } else {
+        Err(ConfigError(format!(
+            "<{key}> `{}` is not a name ({rule})",
+            crate::hint::show(&v)
+        )))
+    }
+}
+
 pub type Task = Pin<Box<dyn Future<Output = ()> + Send>>;
 /// A parsed module, ready to be spawned on the runtime.
 pub type Runner = Box<dyn FnOnce(Store, CancellationToken) -> Task + Send>;
@@ -40,6 +61,8 @@ pub static REGISTRY: &[(&str, Start)] = &[
     ("dnp3-server", start::<dnp3::Outstation>),
     #[cfg(feature = "proto-iec61850")]
     ("iec61850-server", start::<iec61850::Server>),
+    #[cfg(feature = "proto-iccp")]
+    ("iccp-server", start::<iccp::Server>),
 ];
 
 /// Every `<comms>` tag a build can have, and the Cargo feature that provides it.

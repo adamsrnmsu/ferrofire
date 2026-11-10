@@ -81,3 +81,10 @@ and the nmap scripts). nmap has no `dnp3-info` script. Licence texts: `/usr/shar
 ## Publishing
 `.github/workflows/testpeers.yml` builds linux/amd64 + arm64 and pushes `ghcr.io/<owner>/ferrofire-testpeers` on a `v*` tag (or by hand).
 It does nothing until a tag exists.
+
+## ICCP / TASE.2 (no oracle, no open peer)
+`conformance/iccp/`: libiec61850's `mms_utility` (generic MMS client) browses and reads the server, and our thin ICCP client
+(`examples/iccp-client`, copied into the peers container through `PEER_BIN` in `proto.env`) does the TASE.2 part: write, data set,
+transfer set, InformationReport. `make conformance PROTO=iccp` (`DUT_DEFAULT=rust`). The judgement is tshark's `mms` dissector
+(0 malformed, 0 expert warnings, ICCP names in `mms.vmd_specific`/`mms.domainId`/`mms.itemId`); see docs/field-device-iccp.md for what that does
+and does not prove.

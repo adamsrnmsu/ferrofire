@@ -33,6 +33,11 @@ const POLL: Duration = Duration::from_millis(100);
 const TICK: Duration = Duration::from_millis(1);
 
 pub trait Handler: Send + 'static {
+    /// May this remote IP (octets) hold an association at all? `false` closes the socket before a slot is taken (ICCP: a peer not
+    /// in the bilateral table).
+    fn allow(&mut self, _peer: &[u8]) -> bool {
+        true
+    }
     /// An association was accepted; `peer` is the remote IP's octets (empty if the socket will not say).
     fn opened(&mut self, _id: AssocId, _peer: Vec<u8>) {}
     /// The handshake finished and the peer's PDU size is known.
@@ -119,7 +124,7 @@ impl<H: Handler> Mms<H> {
     /// Take a slot for a new association, or `None` when all are in use.
     fn admit(&self, peer: Vec<u8>) -> Option<(AssocId, mpsc::Receiver<Vec<u8>>)> {
         let mut hub = lock(&self.hub);
-        if hub.out.len() >= self.cfg.max_associations {
+        if hub.out.len() >= self.cfg.max_associations || !hub.handler.allow(&peer) {
             return None;
         }
         let id = hub.next;
@@ -339,6 +344,27 @@ mod tests {
         let hub = lock(&m.hub);
         assert_eq!(hub.handler.opened[0], (1, vec![10, 0, 0, 1]));
         assert_eq!(hub.handler.closed, [1]);
+    }
+
+    #[test]
+    fn a_handler_can_refuse_a_peer_before_it_takes_a_slot() {
+        struct Gate(Vec<u8>);
+        impl Handler for Gate {
+            fn allow(&mut self, peer: &[u8]) -> bool {
+                peer == self.0.as_slice()
+            }
+            fn request(&mut self, _: AssocId, _: Instant, _: i64, _: &[u8]) -> (Vec<u8>, Due) {
+                (vec![], vec![])
+            }
+            fn tick(&mut self, _: Instant) -> Due {
+                vec![]
+            }
+        }
+        let m = Mms::new(Gate(vec![10, 0, 0, 1]), Config::default());
+        assert!(m.admit(vec![10, 0, 0, 2]).is_none(), "not on the list");
+        assert!(lock(&m.hub).out.is_empty(), "no slot was taken");
+        assert_eq!(lock(&m.hub).next, 1, "no id was spent");
+        assert!(m.admit(vec![10, 0, 0, 1]).is_some());
     }
 
     #[test]

@@ -69,7 +69,8 @@ Wave 1 = rows 1-4 (9-12 days); rows 5-9 on request. Any Tier 2 protocol is reach
 |---|---|
 | Step Function `dnp3` 1.8.0 / `rodbus` 1.6.0 | non-commercial, non-production agreement, no redistribution (SPEC §5.2; text re-fetched 2026-11-10, unchanged) |
 | `lib60870(-sys)` GPL-3, roboplc `iec60870-5` (Bohemia, paid), `s7commplus` (LGPL-3), `sparkplug-rs` + Eclipse `.proto` (EPL-2.0), `cip` 0.1.0 ("non-standard"), `darra-profinet-slave` (proprietary), `rust-snap7` (C core, licence unverified), `bacnet-stack` port (GPL-2 + exception) | licence |
-| S7comm-plus, ICCP/TASE.2, Codesys | proprietary or 8-10+ days each, no blue parser, at most a banner stub later |
+| S7comm-plus, Codesys | proprietary or 8-10+ days each, no blue parser, at most a banner stub later |
+| ICCP/TASE.2 | was listed here; Ryan overrode it (2026-11-10) and it is built on the shared MMS layer: docs/field-device-iccp.md |
 | EtherCAT subdevice, KNX/IP, Niagara Fox, PCWorx/ProConOS, MELSEC/SLMP, ROC Plus, BSAP, Genisys, C12.22 | no phenix template, niche audience or real-time raw Ethernet; 2-7 days each on request only |
 | IEC 61850 as a *parity* item | stock never loads it (§0) |
 

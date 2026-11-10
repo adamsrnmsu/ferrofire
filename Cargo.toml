@@ -23,7 +23,7 @@ iec61850-rs = { version = "=0.4.0", default-features = false, features = ["serve
 
 [features]
 # One feature per protocol module (docs/field-device-protocols-plan.md section 2). The parity set is default; extras are opt-in.
-default = ["proto-modbus", "proto-dnp3", "proto-iec104", "proto-bacnet", "proto-serial", "proto-iec61850"]
+default = ["proto-modbus", "proto-dnp3", "proto-iec104", "proto-bacnet", "proto-serial", "proto-iec61850", "proto-iccp"]
 proto-modbus = []
 proto-dnp3 = []
 proto-iec104 = []

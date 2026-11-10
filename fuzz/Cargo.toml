@@ -39,3 +39,9 @@ name = "fd_iec61850"
 path = "fuzz_targets/fd_iec61850.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "fd_iccp"
+path = "fuzz_targets/fd_iccp.rs"
+test = false
+doc = false
