@@ -12,7 +12,7 @@ use std::time::Duration;
 const BASE_PORT: u16 = 41000;
 
 /// RTU `i`'s tag list: sim.t (the staleness probe) then K-1 tags taken round-robin from the rest, disjoint between RTUs while they fit.
-fn rtu_tags(all: &[String], i: usize, k: usize) -> Vec<String> {
+pub fn rtu_tags(all: &[String], i: usize, k: usize) -> Vec<String> {
     let rest: Vec<&String> = all.iter().filter(|t| *t != "sim.t").collect();
     let mut tags = vec!["sim.t".to_string()];
     tags.extend((0..k - 1).map(|j| rest[(i * (k - 1) + j) % rest.len()].clone()));

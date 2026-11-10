@@ -1,6 +1,7 @@
 //! ffbench: measuring client (`client`) and in-netns monitor (`mon`) for the zmq vs nng transport benchmark.
 //! `client`: REQ latency phases + a subscriber (zmq: UDP RADIO/DISH multicast; nng: SUB0), JSON on stdout.
 //! `mon`: AF_PACKET byte/packet counters by traffic class + provider (PID 1) CPU ticks and RSS, CSV rows.
+mod dg;
 mod mon;
 mod pull;
 mod stats;
@@ -288,8 +289,11 @@ fn main() {
         Some("client") => client(&args[1..]),
         Some("mon") => mon::run(&args[1..]),
         Some("pull") => pull::run(&args[1..]),
+        Some("dg") => dg::run(&args[1..]),
+        Some("inject") => dg::inject(&args[1..]),
+        Some("req") => dg::req(&args[1..]),
         _ => {
-            eprintln!("usage: ffbench client --transport zmq|nng --host H --n N --period S | mon --out FILE | pull --mode pull|push --transport zmq|nng --host H --rtus R --k K --period S");
+            eprintln!("usage: ffbench client --transport zmq|nng --host H --n N --period S | mon --out FILE | dg --whole --slices R --pull R ... | inject --rate N | req REQUEST... | pull --mode pull|push --transport zmq|nng --host H --rtus R --k K --period S");
             std::process::exit(2)
         }
     }

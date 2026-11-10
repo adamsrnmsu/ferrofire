@@ -1,0 +1,19 @@
+## runtime requests (provider up)
+exit 0
+WRITE=bench.in0x:1 => ERR=Tag 'bench.in0x' is unknown or read-only (did you mean `bench.in0`?)
+WRITE=bench.in0:nan => ERR=Bad value 'nan' for 'bench.in0'
+READ=bench.t0001x => ERR=Tag 'bench.t0001x' not found (did you mean `bench.t0001`?)
+READ=bench.t0001 => ACK=0.5290000000000001
+WRITE=bench.in0:7 => ACK=
+READ=bench.in0 => ACK=0
+
+## pull-bridge --tags sim.t,bench.t0001,bench.t0002x
+exit 1
+ferrofire pull-bridge: unknown tags at the provider: bench.t0002x (did you mean `bench.t0002`?)
+usage: ferrofire pull-bridge --publish udp://127.0.0.1:40000 (--tags-from config.xml | --tags a,b,c) [--server tcp://127.0.0.1:5555] [--rate 100]  (--rate in ms)
+
+## run --publish-tags ...=sim.t,bench.t0001x
+exit 1
+ferrofire run: publish slice udp://*;239.0.0.1:41000: unknown tags: bench.t0001x (did you mean `bench.t0001`?)
+usage: ferrofire run [model.yaml | --model model.yaml] [--server tcp://0.0.0.0:5555] [--publish 'udp://*;239.0.0.1:40000'] [--publish-tags 'ENDPOINT=a,b,c' | 'ENDPOINT=@config.xml']... [--rate 0.1]
+

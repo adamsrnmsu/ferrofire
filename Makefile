@@ -6,7 +6,7 @@ IN := docker run --rm --platform $(PLATFORM) -v $(CURDIR):/src -w /src -e CARGO_
 CRAP_MAX := 9.99
 DRY_MIN := 0.8
 
-.PHONY: help wireshark bench bench-report image fmt fmt-check lint test golden linux crap dry mutate check clean
+.PHONY: help wireshark bench bench-report bench-dg bench-dg-report image fmt fmt-check lint test golden linux crap dry mutate check clean
 help:    # list targets
 	@grep -E '^[a-z-]+:.*#' $(MAKEFILE_LIST) | sed -E 's/^([a-z-]+):[^#]*#/\1\t/'
 image:   # build the ff-rust container if missing (rebuild: docker build -t ff-rust:22.04 docker)
@@ -35,6 +35,10 @@ bench: image   # historical zmq vs nng benchmark matrix (NNG dropped 2026-11-09;
 	python3 bench/run.py
 bench-report:   # tables, charts and docs/bench/transport-comparison.md from the raw results (needs uv)
 	uv run --with matplotlib python bench/report.py
+bench-dg: image   # datagram v1 matrix (age, netem loss, per-RTU fan-out, restarts, faults; about 1.5 h) -> docs/bench/results/raw-datagram-v1
+	python3 bench/run_dg.py
+bench-dg-report:   # docs/bench/datagram-v1-bench.md from the datagram v1 raw results
+	python3 bench/dg_report.py
 check: fmt-check lint test crap dry   # every gate except mutate
 clean:   # remove build output and metrics
 	rm -rf target target-linux dist .metrics

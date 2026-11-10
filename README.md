@@ -99,7 +99,7 @@ in `_ff.seq`, `_ff.cyc` and `_ff.t` pseudo-tags. The wire is owned by ferrofire 
 RADIO/DISH API. Defaults: `tcp://0.0.0.0:5555`, `udp://*;239.0.0.1:40000`; the image is `bennu-ferrofire-arm64`.
 
 NNG was evaluated as a second transport and dropped on 2026-11-09: see the
-[historical comparison](docs/bench/transport-comparison.md). Where multicast is not available use the pull-bridge below.
+[historical comparison](docs/bench/transport-comparison.md); loss, reordering, fan-out, restart and fault numbers for datagram v1: [docs/bench/datagram-v1-bench.md](docs/bench/datagram-v1-bench.md). Where multicast is not available use the pull-bridge below.
 
 ### Per-RTU endpoints
 

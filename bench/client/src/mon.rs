@@ -9,7 +9,7 @@ extern "C" fn on_term(_: libc::c_int) {
     STOP.store(true, Ordering::SeqCst);
 }
 
-/// 0 = request/reply (tcp 5555), 1 = publish (tcp 5556 nng, udp 40000 zmq RADIO), 2 = other (ARP, IGMP, ...).
+/// 0 = request/reply (tcp 5555), 1 = publish (tcp 5556 nng, udp 40000..41999 datagram v1), 2 = other (ARP, IGMP, ...).
 pub fn classify(f: &[u8]) -> usize {
     if f.len() < 34 || f[12..14] != [8, 0] {
         return 2;
@@ -23,7 +23,7 @@ pub fn classify(f: &[u8]) -> usize {
     match f[23] {
         6 if sp == 5555 || dp == 5555 => 0,
         6 if sp == 5556 || dp == 5556 => 1,
-        17 if dp == 40000 || sp == 40000 => 1,
+        17 if (40000..42000).contains(&dp) || (40000..42000).contains(&sp) => 1, // datagram v1: whole-model 40000, per-RTU 41000+
         _ => 2,
     }
 }
@@ -105,6 +105,7 @@ mod tests {
         assert_eq!(classify(&frame(6, 40000, 5555)), 0);
         assert_eq!(classify(&frame(6, 5556, 33000)), 1);
         assert_eq!(classify(&frame(17, 50000, 40000)), 1);
+        assert_eq!(classify(&frame(17, 50000, 41007)), 1);
         assert_eq!(classify(&frame(17, 50000, 53)), 2);
         assert_eq!(classify(&[0u8; 20]), 2);
     }

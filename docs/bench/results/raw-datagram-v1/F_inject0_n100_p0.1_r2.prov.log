@@ -1,0 +1,1 @@
+Info: ferrofire run: /src/bench/models/m100.yaml dt=0.01s; REP tcp://0.0.0.0:5555; RADIO udp://*;239.0.0.1:40000 group 54386972605942b every 0.1s

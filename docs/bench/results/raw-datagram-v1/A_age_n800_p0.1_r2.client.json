@@ -1,0 +1,117 @@
+{
+  "host": "ffb-prov",
+  "k": 50,
+  "period_s": 0.1,
+  "phases": {
+    "publish": {
+      "end_ns": 1794292398889034630,
+      "start_ns": 1794292368883777214
+    }
+  },
+  "provider_tags": 800,
+  "restart_gap_s": 2.0879,
+  "secs": 30.0,
+  "streams": [
+    {
+      "age_above_floor": {
+        "max_us": 5456.896,
+        "mean_us": 3845.4237866666667,
+        "min_us": 0.0,
+        "n": 300,
+        "p50_us": 4173.056,
+        "p95_us": 5257.728,
+        "p99_us": 5345.28,
+        "stdev_us": 1254.4774673480624
+      },
+      "chunks_per_cycle": 18.28,
+      "complete_cycles": 300,
+      "cycle_spread": {
+        "max_us": 596.083,
+        "mean_us": 359.64514,
+        "min_us": 113.417,
+        "n": 300,
+        "p50_us": 395.333,
+        "p95_us": 446.75,
+        "p99_us": 515.291,
+        "stdev_us": 98.69134799711169
+      },
+      "cycles": 300,
+      "cycles_per_s": 9.998247835062,
+      "datagrams": {
+        "accepted": 5999,
+        "loss_pct": 0.0,
+        "lost": 0,
+        "provider_restarts": 0,
+        "seen": 5999
+      },
+      "delivered_per_s": 9.998247835062,
+      "expected_cycles": 300.0,
+      "interarrival": {
+        "max_us": 104787.875,
+        "mean_us": 100000.97617056855,
+        "min_us": 95576.583,
+        "n": 299,
+        "p50_us": 100174.291,
+        "p95_us": 102814.833,
+        "p99_us": 103539.625,
+        "stdev_us": 1814.6690506413945
+      },
+      "kind": "whole",
+      "loss_pct": 0.0,
+      "name": "whole",
+      "payload_bytes_per_s": 244067.12791922013,
+      "probe_gap": {
+        "max_us": 105050.708,
+        "mean_us": 100011.81954833333,
+        "min_us": 95332.375,
+        "n": 2400,
+        "p50_us": 100185.583,
+        "p95_us": 102938.166,
+        "p99_us": 103587.25,
+        "stdev_us": 1840.8095670526748
+      },
+      "rejects": {
+        "garbage": 0,
+        "stale": 0,
+        "truncated": 0,
+        "wrong_group": 0
+      },
+      "seconds": 30.005257416,
+      "staleness": {
+        "max_us": 105050.708,
+        "mean_us": 99685.2405847176,
+        "min_us": 18976.583,
+        "n": 301,
+        "p50_us": 100191.0,
+        "p95_us": 102962.667,
+        "p99_us": 103612.333,
+        "stdev_us": 5080.267326061334
+      },
+      "tags_per_cycle": 800,
+      "tags_per_s": 7998.5982680496,
+      "tolerant": {
+        "delivered_per_s": 9.998247835062,
+        "staleness": {
+          "max_us": 105050.708,
+          "mean_us": 99685.2405847176,
+          "min_us": 18976.583,
+          "n": 301,
+          "p50_us": 100191.0,
+          "p95_us": 102962.667,
+          "p99_us": 103612.333,
+          "stdev_us": 5080.267326061334
+        }
+      },
+      "transit": {
+        "max_us": 768.042,
+        "mean_us": 352.26516557257474,
+        "min_us": 51.75,
+        "n": 5484,
+        "p50_us": 350.916,
+        "p95_us": 572.167,
+        "p99_us": 621.625,
+        "stdev_us": 138.8964642303539
+      }
+    }
+  ]
+}

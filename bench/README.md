@@ -58,3 +58,23 @@ Source: `bench/client/` is a standalone cargo package (not part of ferrofire's b
 - Wire bytes are AF_PACKET frame lengths: Ethernet header (14 B) + IP + TCP/UDP + payload, no preamble or FCS.
   TSO/GSO/GRO are switched off with `ethtool` in both network namespaces so a captured frame is a real wire frame (max frame is recorded in `runs.csv`).
 - Clocks: all containers share the Docker Desktop VM kernel, so the client's wall clock stamps and the monitor's agree.
+
+## Datagram v1 matrix (ww-otj.18)
+
+`python3 bench/run_dg.py` (cells A, C, D, E, F; see its docstring) -> `docs/bench/results/raw-datagram-v1/`, then
+`python3 bench/dg_report.py` -> [docs/bench/datagram-v1-bench.md](../docs/bench/datagram-v1-bench.md). The earlier matrix above and its
+raw data are untouched (the new report only reads them for the "before" age numbers).
+
+- `ffbench dg` is the client: several streams side by side against one provider, each with the real `ferrofire::datagram::Receiver`.
+  `--whole` = one multicast stream with every tag, `--slices R --k K` = R per-RTU multicast groups (ports 41000+i), `--pull R --k K` =
+  R real `ferrofire pull-bridge` processes republishing on client-side loopback (42000+i). `--restart-at S --restart-gap S` makes
+  subscribers leave/rejoin and respawns the bridges; `--events` stores every complete-cycle arrival time (epoch ms) for post-hoc analysis.
+- `ffbench inject --rate 100 --secs S` sends seven kinds of bad datagram into the multicast group; `ffbench req REQUEST...` sends requests.
+- Cycles are assembled by `_ff.cyc` (not by finding `sim.t`), so a lost first chunk does not merge two cycles. A cycle is complete when every
+  tag of the stream has arrived. `staleness` = gap between consecutive complete cycles (with the lead-in and tail of the window); `probe_gap` =
+  arrival gaps of 8 tags spread over the chunks. `datagrams.lost` = `_ff.seq` span minus distinct seqs seen (order independent; a reordered
+  datagram is not loss, though the Receiver still drops it as stale). `transit` = arrival minus `_ff.t` (one clock: all containers share the VM).
+- `tc netem` runs in the provider container (`--cap-add NET_ADMIN`) on its `eth0` egress; the monitor counts frames before the qdisc.
+  Reply blackhole = a `prio` qdisc with a u32 filter on source port 5555 sending to a `netem loss 100%` band.
+- Fault cells run the provider as an exec'd process (PID 1 is `sleep`) so it can be killed and restarted without losing the network namespace;
+  event timestamps come from `date` inside that container, the same clock the client stamps with.

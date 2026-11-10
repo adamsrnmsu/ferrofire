@@ -1,0 +1,3 @@
+qdisc netem 8016: root refcnt 19 limit 1000 delay 2ms  1ms loss 0.1%
+ Sent 21509462 bytes 19834 pkt (dropped 9, overlimits 0 requeues 0) 
+ backlog 1396b 1p requeues 0

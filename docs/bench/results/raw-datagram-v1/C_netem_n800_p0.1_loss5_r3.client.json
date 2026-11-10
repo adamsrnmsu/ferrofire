@@ -1,0 +1,208 @@
+{
+  "host": "ffb-prov",
+  "k": 800,
+  "period_s": 0.1,
+  "phases": {
+    "publish": {
+      "end_ns": 1794294312590830669,
+      "start_ns": 1794294282589794377
+    }
+  },
+  "provider_tags": 800,
+  "restart_gap_s": 2.0459,
+  "secs": 30.0,
+  "streams": [
+    {
+      "age_above_floor": {
+        "n": 0
+      },
+      "chunks_per_cycle": 3.62,
+      "complete_cycles": 0,
+      "cycle_spread": {
+        "n": 0
+      },
+      "cycles": 300,
+      "cycles_per_s": 9.999654581265156,
+      "datagrams": {
+        "accepted": 1208,
+        "loss_pct": 4.831722759080306,
+        "lost": 290,
+        "provider_restarts": 0,
+        "seen": 5712
+      },
+      "delivered_per_s": 0.0,
+      "expected_cycles": 300.0,
+      "interarrival": {
+        "max_us": 104390.292,
+        "mean_us": 100005.65524080268,
+        "min_us": 95917.791,
+        "n": 299,
+        "p50_us": 99956.833,
+        "p95_us": 103196.25,
+        "p99_us": 104148.541,
+        "stdev_us": 1893.5744666270584
+      },
+      "kind": "whole",
+      "loss_pct": 100.0,
+      "name": "whole",
+      "payload_bytes_per_s": 44942.71420749362,
+      "probe_gap": {
+        "max_us": 6699770.92,
+        "mean_us": 390397.4559155629,
+        "min_us": 95181.25,
+        "n": 604,
+        "p50_us": 102389.5,
+        "p95_us": 1597524.375,
+        "p99_us": 2799993.918,
+        "stdev_us": 630812.9595774676
+      },
+      "rejects": {
+        "garbage": 0,
+        "stale": 4504,
+        "truncated": 0,
+        "wrong_group": 0
+      },
+      "seconds": 30.001036292,
+      "staleness": {
+        "max_us": 30001036.292,
+        "mean_us": 30001036.292,
+        "min_us": 30001036.292,
+        "n": 1,
+        "p50_us": 30001036.292,
+        "p95_us": 30001036.292,
+        "p99_us": 30001036.292,
+        "stdev_us": 0.0
+      },
+      "tags_per_cycle": 800,
+      "tags_per_s": 1504.9813466623436,
+      "tolerant": {
+        "delivered_per_s": 4.033194014443613,
+        "staleness": {
+          "max_us": 997263.251,
+          "mean_us": 245910.1335409836,
+          "min_us": 10447.375,
+          "n": 122,
+          "p50_us": 200001.416,
+          "p95_us": 599788.417,
+          "p99_us": 899641.917,
+          "stdev_us": 181887.90355324576
+        }
+      },
+      "transit": {
+        "max_us": 3378.125,
+        "mean_us": 1888.8758664825045,
+        "min_us": 1218.5,
+        "n": 1086,
+        "p50_us": 1738.625,
+        "p95_us": 2980.834,
+        "p99_us": 3201.5,
+        "stdev_us": 471.7154516757075
+      }
+    },
+    {
+      "age_above_floor": {
+        "max_us": 256461.824,
+        "mean_us": 20245.094607287447,
+        "min_us": 2654.464,
+        "n": 247,
+        "p50_us": 8656.896,
+        "p95_us": 33127.68,
+        "p99_us": 233452.288,
+        "stdev_us": 43628.490810971016
+      },
+      "bridge_log": {
+        "recovered_lines": 6,
+        "warn_lines": 6
+      },
+      "chunks_per_cycle": 18.473684210526315,
+      "complete_cycles": 247,
+      "cycle_spread": {
+        "max_us": 549.042,
+        "mean_us": 373.96713360323884,
+        "min_us": 110.541,
+        "n": 247,
+        "p50_us": 387.709,
+        "p95_us": 426.125,
+        "p99_us": 471.166,
+        "stdev_us": 64.64538487663712
+      },
+      "cycles": 247,
+      "cycles_per_s": 8.233048938574978,
+      "datagrams": {
+        "accepted": 4897,
+        "loss_pct": 0.0,
+        "lost": 0,
+        "provider_restarts": 0,
+        "seen": 4897
+      },
+      "delivered_per_s": 8.233048938574978,
+      "expected_cycles": 300.0,
+      "interarrival": {
+        "max_us": 736455.083,
+        "mean_us": 120723.24813821139,
+        "min_us": 62977.209,
+        "n": 246,
+        "p50_us": 100180.083,
+        "p95_us": 310527.084,
+        "p99_us": 592918.375,
+        "stdev_us": 83614.40867247994
+      },
+      "kind": "pull",
+      "loss_pct": 17.666666666666664,
+      "name": "pull0",
+      "payload_bytes_per_s": 203106.31741827034,
+      "probe_gap": {
+        "max_us": 736484.792,
+        "mean_us": 120556.59242105263,
+        "min_us": 62968.708,
+        "n": 1976,
+        "p50_us": 100152.333,
+        "p95_us": 310526.042,
+        "p99_us": 592854.584,
+        "stdev_us": 83479.54335787165
+      },
+      "rejects": {
+        "garbage": 0,
+        "stale": 0,
+        "truncated": 0,
+        "wrong_group": 0
+      },
+      "seconds": 30.001036292,
+      "staleness": {
+        "max_us": 736446.125,
+        "mean_us": 120971.92053225807,
+        "min_us": 24623.709,
+        "n": 248,
+        "p50_us": 100164.167,
+        "p95_us": 310489.209,
+        "p99_us": 592790.0,
+        "stdev_us": 84084.17447772666
+      },
+      "tags_per_cycle": 800,
+      "tags_per_s": 6586.439150859983,
+      "tolerant": {
+        "delivered_per_s": 8.233048938574978,
+        "staleness": {
+          "max_us": 736446.125,
+          "mean_us": 120971.92053225807,
+          "min_us": 24623.709,
+          "n": 248,
+          "p50_us": 100164.167,
+          "p95_us": 310489.209,
+          "p99_us": 592790.0,
+          "stdev_us": 84084.17447772666
+        }
+      },
+      "transit": {
+        "max_us": 653.166,
+        "mean_us": 302.7001323690555,
+        "min_us": 36.042,
+        "n": 4563,
+        "p50_us": 301.5,
+        "p95_us": 492.708,
+        "p99_us": 525.708,
+        "stdev_us": 120.37353395064378
+      }
+    }
+  ]
+}

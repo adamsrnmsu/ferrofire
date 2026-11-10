@@ -9,7 +9,9 @@ Env: NS, PERIODS, REPS, PUB_SECS, REQ_SECS, TRANSPORTS, RAWDIR.
 MODE=pull|push (ww-otj.11): N RTUs x K tags each out of 800 instead of one client; NS="8x50,8x100" (RTUs x tags), model m800, raw
 files `<mode>_<transport>_n<R>x<K>_p<period>_r<rep>`, default RAWDIR docs/bench/results/raw-pull. `ffbench pull` runs the RTUs
 (pull: one real `ferrofire pull-bridge` process per RTU; push: one SUB0 per RTU on the nng provider). The provider publishes once
-per 10 s on loopback in pull mode, so its work is the batched READs alone. Summarise with `python3 bench/pull_report.py`."""
+per 10 s on loopback in pull mode, so its work is the batched READs alone. Summarise with `python3 bench/pull_report.py`.
+
+Datagram v1 matrix (ww-otj.18): `bench/run_dg.py` (reuses build() and the constants here), report `bench/dg_report.py`."""
 import os, subprocess, sys, time, pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
