@@ -110,6 +110,25 @@ nng's default queue of 16, ww-a8n). The queue is `nng_sendbuf` messages per subs
 `nng_sendbuf:` in the model YAML, `--nng-sendbuf N` on `run` (beats the model), or `nng-sendbuf = N` in `config.ini`. It only
 matters for slow subscribers, which lose whole cycles once that many are queued; zmq/UDP ignores it.
 
+### Pull instead of push (prototype)
+
+Push sends every tag to every subscriber: nng PUB0 over TCP has no multicast, so N RTUs cost N copies of the whole tag list.
+A `READ` may name several tags, `READ=a,b,c`, and is answered with one `ACK=a:1,b:2,c:3,` (the update format, request order;
+an unknown tag fails the whole request with `ERR=Tag 'x' not found`; `READ=tag` is unchanged). `ferrofire pull-bridge` runs next to
+a field device, asks for just that device's tags once per tick, and republishes the reply on a local endpoint, so a stock
+(push-subscribing) bennu field device needs no change:
+
+```
+ferrofire pull-bridge --server tcp://provider:5555 --transport zmq --rate 100 \
+    --tags-from /etc/sceptre/config.xml --publish udp://127.0.0.1:40000
+```
+
+`--tags-from` takes the names of the `<analog>`/`<binary>` points in the config's `<input>` (or give `--tags a,b,c`); `--rate` is
+in ms; `--publish` must be the same string as the field device's `<input><endpoint>` (point the device at the loopback endpoint).
+A request that times out is retried once; if that fails too nothing is published (the field device keeps its last values, as
+when a push provider goes quiet) and one line is logged per outage. Writes are untouched: the device still `WRITE`s to the provider.
+Numbers: [docs/bench/transport-comparison.md](docs/bench/transport-comparison.md#pull-bridge-prototype-ww-otj11).
+
 Both features are on by default. `cargo build --no-default-features --features nng` links no libzmq; `--features zmq` links no
 NNG. Asking for a transport the binary was built without stops at startup, naming the cargo feature. `make variants` builds,
 lints and tests both single-transport binaries.

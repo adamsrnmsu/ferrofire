@@ -375,6 +375,55 @@ configurable (`nng_sendbuf`, default 128, 1..=8192; see the README). The zmq/UDP
 Result: at 800 tags nng went from 5-22% loss to 0 in all 6 runs, with exactly 1 message per cycle, about 27% fewer packets per cycle (fewer TCP segments than 17 small sends) and about 2% fewer bytes. The zmq control did not move.
 The one non-zero "after" cell is nng, 100 tags, 100 Hz, rep 3: 2,999 cycles received, all 2,999 complete, against 3,000 expected, i.e. a window-edge cycle (the same ±1 cycle resolution noted under Method), not a dropped message.
 
+## Pull bridge prototype (ww-otj.11)
+
+*Prototype, measured separately from everything above (new raw data in `docs/bench/results/raw-pull/`, 36 runs; nothing earlier was changed).*
+
+Push sends every tag to every subscriber, and nng PUB0 over TCP has no multicast, so N RTUs cost N copies. The prototype tests the alternative
+without touching bennu: the provider answers a batched `READ=tag1,tag2,...` with one `ACK=tag:val,...`, and a `ferrofire pull-bridge` process next to each
+field device asks for only that device's tags every tick and republishes the reply locally in the normal update format (see the README, "Pull instead of push").
+
+Setup: model with 800 tags; R RTUs, each needing K tags (`sim.t` plus K-1 others, disjoint slices), at 10 and 100 Hz, 3 reps of 30 s per cell, same Docker bridge
+and monitor as above. **pull** = R real `pull-bridge` processes (zmq or nng REQ to the provider, republishing on loopback to a local subscriber that plays the
+field device); the provider publishes once per 10 s to nobody, so its work is the batched READs alone. **push** (nng only) = R SUB0 subscribers, each
+receiving all 800 tags; zmq push is one multicast stream whatever R is, so the single-subscriber zmq numbers from the main matrix apply. "Provider link" is every
+frame (request, reply, publish, ARP; L2-L4 included) seen on the provider's interface. Staleness is `age above floor` over all RTUs, as defined in Method.
+
+| mode | transport | RTUs x tags | Hz | reps | provider link B/s | provider CPU % | loss % mean (max) | staleness p50 / p99 / max ms |
+|---|---|---|---|---|---|---|---|---|
+| pull | nng | 8x100 | 10 | 3 | 356,336 | 5.8 | 0.000 (0.000) | 2.5 / 9.2 / 11.5 |
+| pull | nng | 8x100 | 100 | 3 | 3,560,044 | 25.1 | 0.000 (0.000) | 5.8 / 10.1 / 12.5 |
+| pull | nng | 8x50 | 10 | 3 | 188,991 | 5.3 | 0.000 (0.000) | 6.9 / 8.6 / 15.0 |
+| pull | nng | 8x50 | 100 | 3 | 1,883,764 | 21.2 | 0.000 (0.000) | 4.7 / 9.0 / 15.4 |
+| pull | zmq | 8x100 | 10 | 3 | 362,898 | 5.2 | 0.000 (0.000) | 4.5 / 6.9 / 13.0 |
+| pull | zmq | 8x100 | 100 | 3 | 3,565,859 | 21.7 | 0.000 (0.000) | 4.9 / 6.5 / 9.4 |
+| pull | zmq | 8x50 | 10 | 3 | 196,121 | 4.3 | 0.000 (0.000) | 1.7 / 5.9 / 8.9 |
+| pull | zmq | 8x50 | 100 | 3 | 1,888,925 | 15.1 | 0.000 (0.000) | 2.9 / 9.8 / 13.5 |
+| push | nng | 8x100 | 10 | 3 | 1,956,140 | 4.4 | 0.000 (0.000) | 5.3 / 12.8 / 13.4 |
+| push | nng | 8x100 | 100 | 3 | 19,614,046 | 15.2 | 0.007 (0.011) | 5.3 / 13.2 / 14.9 |
+| push | nng | 8x50 | 10 | 3 | 1,956,783 | 4.1 | 0.000 (0.000) | 5.4 / 12.9 / 13.3 |
+| push | nng | 8x50 | 100 | 3 | 19,620,786 | 16.3 | 0.011 (0.011) | 4.9 / 12.5 / 16.6 |
+
+Reference, from the earlier single-subscriber runs (800 tags; zmq from `raw/`, nng from `raw-after-nng-fix/`; nng multiplied by R=8, which the measured push rows above confirm):
+
+| push reference | Hz | provider publish B/s | provider CPU % | loss % | staleness p50 / p99 ms |
+|---|---|---|---|---|---|
+| push zmq (multicast, any subscribers) | 10 | 242,295 | 3.8 | 0.000 | 9.5 / 14.5 |
+| push zmq (multicast, any subscribers) | 100 | 2,429,497 | 11.0 | 0.000 | 6.5 / 14.4 |
+| push nng (1 subscriber x8) | 10 | 1,954,283 | 3.9 | 0.000 | 7.6 / 15.0 |
+| push nng (1 subscriber x8) | 100 | 19,624,282 | 8.7 | 0.000 | 7.2 / 14.8 |
+
+What it shows:
+
+- **Loss is zero by construction and in the data**: no pull cell lost a cycle (REQ/REP flow control; a failed request is retried once, then skipped). nng push at 100 Hz showed 0.007-0.011% (one window-edge cycle, as in the earlier section).
+- **Wire**: against nng push to 8 RTUs, pull sends about 10x fewer bytes at K=50 (1.9 MB/s vs 19.6 MB/s at 100 Hz) and about 5.5x fewer at K=100. Against zmq multicast, which is one copy for any number of RTUs, pull is about 22% less at K=50 but 47% *more* at K=100 (3.6 MB/s vs 2.4 MB/s, where the 8 RTUs together ask for all 800 tags and each request also carries its tag names). Pull's cost grows with RTUs x scan rate; multicast push's does not.
+- **Provider CPU is higher for pull, not lower**: 15-25% of a core at 100 Hz (8 REQ streams at 100 Hz = 800 requests/s) against 11% for zmq push and 15-16% for nng push to 8 subscribers; at 10 Hz 4-6% vs 4%. Each request is a full round trip on the provider's single REP thread (not profiled further; the per-tag linear lookup in `READ` is one suspect).
+- **Staleness is unchanged within noise** (p50 2-7 ms, p99 6-10 ms for pull; 5 ms and 13 ms for nng push; both small against the 10 ms engine tick): the bridge pulls fresh values and republishes immediately, so pull adds no scan-rate delay on top; the value is as old as the last engine tick plus one round trip. The scan rate is what bounds freshness (a 10 Hz pull can show a value up to 100 ms old to the device if the device scans in between), which this ageing measure does not capture.
+- Writes were not exercised here (the field device still WRITEs to the provider as before).
+- Not measured: a live check on the waterway-arm64 range (rtu-1/rtu-2) and a stock bennu field device in front of the bridge; the bridge's republish format is tested against the RADIO framing and the nng subscriber in `tests/pull.rs`, not against stock bennu.
+
+Reproduce: `MODE=pull python3 bench/run.py; MODE=push TRANSPORTS=nng python3 bench/run.py; python3 bench/pull_report.py`.
+
 ## Caveats
 
 - Docker bridge inside a VM on one host: not a real network. No loss, jitter, MTU or multicast-snooping effects; absolute latencies include the VM's network stack and virtualised scheduling. Relative differences are the useful part.

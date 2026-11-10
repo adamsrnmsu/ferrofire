@@ -2,6 +2,7 @@
 //! `client`: REQ latency phases + a subscriber (zmq: UDP RADIO/DISH multicast; nng: SUB0), JSON on stdout.
 //! `mon`: AF_PACKET byte/packet counters by traffic class + provider (PID 1) CPU ticks and RSS, CSV rows.
 mod mon;
+mod pull;
 mod stats;
 
 use serde_json::{json, Value};
@@ -14,7 +15,7 @@ pub fn now_ns() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64
 }
 
-fn arg(args: &[String], flag: &str, default: &str) -> String {
+pub fn arg(args: &[String], flag: &str, default: &str) -> String {
     args.windows(2)
         .find(|w| w[0] == flag)
         .map(|w| w[1].clone())
@@ -104,9 +105,12 @@ fn ingest(log: &mut SubLog, body: &[u8], t: u64) {
     c.bytes += body.len() as u32 + 1;
 }
 
-fn sub_zmq(stop: Arc<AtomicBool>) -> SubLog {
-    let s = UdpSocket::bind("0.0.0.0:40000").unwrap();
-    s.join_multicast_v4(&Ipv4Addr::new(239, 0, 0, 1), &Ipv4Addr::UNSPECIFIED).unwrap();
+/// UDP RADIO/DISH-equivalent subscriber on `port`; `multicast` joins 239.0.0.1 (the provider's default), else plain unicast.
+fn sub_zmq(port: u16, multicast: bool, stop: Arc<AtomicBool>) -> SubLog {
+    let s = UdpSocket::bind(("0.0.0.0", port)).unwrap();
+    if multicast {
+        s.join_multicast_v4(&Ipv4Addr::new(239, 0, 0, 1), &Ipv4Addr::UNSPECIFIED).unwrap();
+    }
     s.set_read_timeout(Some(Duration::from_millis(200))).unwrap();
     let (mut log, mut buf) = (SubLog::default(), vec![0u8; 65536]);
     while !stop.load(Ordering::Relaxed) {
@@ -120,13 +124,13 @@ fn sub_zmq(stop: Arc<AtomicBool>) -> SubLog {
     log
 }
 
-fn sub_nng(host: &str, stop: Arc<AtomicBool>) -> SubLog {
+fn sub_nng(endpoint: &str, stop: Arc<AtomicBool>) -> SubLog {
     use nng::options::protocol::pubsub::Subscribe;
     use nng::options::{Options, RecvTimeout};
     let s = nng::Socket::new(nng::Protocol::Sub0).unwrap();
     s.set_opt::<Subscribe>(vec![]).unwrap();
     s.set_opt::<RecvTimeout>(Some(Duration::from_millis(200))).unwrap();
-    s.dial(&format!("tcp://{host}:5556")).unwrap();
+    s.dial_async(endpoint).unwrap(); // the publisher may start after us
     let mut log = SubLog::default();
     while !stop.load(Ordering::Relaxed) {
         if let Ok(m) = s.recv() {
@@ -227,8 +231,8 @@ fn client(args: &[String]) {
     let (st, h) = (stop.clone(), host.clone());
     let t_arg = transport.clone();
     let sub = std::thread::spawn(move || match t_arg.as_str() {
-        "zmq" => sub_zmq(st),
-        _ => sub_nng(&h, st),
+        "zmq" => sub_zmq(40000, true, st),
+        _ => sub_nng(&format!("tcp://{h}:5556"), st),
     });
     let req = Req::connect(&transport, &host);
     let tags: Vec<String> = req.call("QUERY=").trim_start_matches("ACK=").split(',').filter(|t| !t.is_empty()).map(String::from).collect();
@@ -260,8 +264,9 @@ fn main() {
     match args.first().map(String::as_str) {
         Some("client") => client(&args[1..]),
         Some("mon") => mon::run(&args[1..]),
+        Some("pull") => pull::run(&args[1..]),
         _ => {
-            eprintln!("usage: ffbench client --transport zmq|nng --host H --n N --period S | mon --out FILE");
+            eprintln!("usage: ffbench client --transport zmq|nng --host H --n N --period S | mon --out FILE | pull --mode pull|push --transport zmq|nng --host H --rtus R --k K --period S");
             std::process::exit(2)
         }
     }

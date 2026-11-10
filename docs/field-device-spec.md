@@ -539,3 +539,18 @@ Total ≈ 15-17 days without F5 (F0-F2 ≈ 6 days for the waterway). Phases F0-F
 - 104 behaviour for type ids 101-107, APCI timer values, redundancy-group behaviour on a second connection — F4.
 - `zeromq` REQ interop and `aarch64-unknown-linux-musl` daemonizing — F0/F6.
 - Step Function agreement applicability to the range — Ryan.
+
+## 13. Findings: pull vs push as the provider->RTU data path (input to ww-otj.10, from the ww-otj.11 prototype)
+
+Prototype: `READ=a,b,...` (one `ACK=a:v,b:v,`) plus `ferrofire pull-bridge` per RTU republishing locally to an unchanged push-subscribing field device. Measured with 8 RTUs x 50 and x 100 tags out of 800, at 10 and 100 Hz,
+3 reps per cell ([docs/bench/transport-comparison.md](bench/transport-comparison.md), "Pull bridge prototype"):
+
+- **Loss**: 0 in all 24 pull runs (REQ/REP flow control, one retry). nng push to 8 RTUs: 0 to 0.011% (window-edge cycle).
+- **Bytes on the provider link at 100 Hz**: pull 1.9 MB/s (K=50) / 3.6 MB/s (K=100); nng push to 8 RTUs 19.6 MB/s (pull is 5.5-10x less); zmq multicast push 2.4 MB/s regardless of RTU count (pull is 22% less at K=50, 47% more at K=100).
+  Pull scales with RTUs x scan rate x tags per RTU; push scales with RTUs x all tags (nng) or not at all (multicast).
+- **Provider CPU**: pull is *not* cheaper: 15-25% of a core at 100 Hz vs 11% (zmq push) and 15-16% (nng push x8); 4-6% vs ~4% at 10 Hz. Capacity is requests/s on the single REP thread (~9k/s measured earlier), so RTUs x scan rate must stay well under that.
+- **Staleness**: same as push within noise (p50 2-7 ms, p99 6-10 ms); the freshness bound is the scan rate, not the transport.
+
+Reading for the decision: pull is the right primary path where multicast is unavailable (nng/TCP): it removes the N-copies fan-out and the PUB0 queue-drop failure mode (loss is 0 and visible as a timeout, not silent), and needs no bennu change.
+Where zmq multicast works it is as cheap or cheaper at the provider. Keep push as the default for zmq/multicast ranges and use pull-bridge for nng ranges, and keep push as an optional change notification only if sub-scan-period latency matters.
+Not yet verified: a live run on waterway-arm64 (rtu-1/rtu-2) with the stock field device subscribing to the bridge, and writes through a pull setup. ww-otj.10 stays open for that.
