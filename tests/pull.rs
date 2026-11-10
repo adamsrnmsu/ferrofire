@@ -211,12 +211,13 @@ fn startup_validation_names_unknown_tags() {
 fn errors_are_logged_on_a_cadence_not_only_on_transition() {
     let (mut o, t) = (Outage::default(), Instant::now());
     let e = || Err::<(), String>("provider said `ERR=Tag 'x' not found`".into());
-    let first = o.log_line(e(), t).unwrap();
+    let first = o.log_line(e(), t).unwrap().1;
     assert!(first.contains("Tag 'x' not found"), "{first}");
     assert_eq!(o.log_line(e(), t + Duration::from_secs(1)), None);
     assert!(o
         .log_line(e(), t + LOG_EVERY)
         .unwrap()
+        .1
         .contains("still failing"));
     assert_eq!(
         o.log_line(e(), t + LOG_EVERY + Duration::from_secs(1)),
@@ -225,6 +226,7 @@ fn errors_are_logged_on_a_cadence_not_only_on_transition() {
     assert!(o
         .log_line(Ok(()), t + LOG_EVERY * 2)
         .unwrap()
+        .1
         .contains("recovered"));
     assert_eq!(o.log_line(Ok(()), t + LOG_EVERY * 3), None);
 }

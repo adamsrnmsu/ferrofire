@@ -14,6 +14,8 @@ zmq = "0.10"
 num-complex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde-saphyr = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "registry", "std"] }
 
 [profile.release]
 opt-level = 2

@@ -10,6 +10,7 @@ pub mod power;
 pub mod pull;
 pub mod pypower;
 pub mod simulink;
+pub mod trace;
 pub mod transport;
 
 /// The waterway lock, used by the simulink adapter when no `--model` / `./model.yaml` is given.

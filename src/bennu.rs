@@ -261,7 +261,7 @@ fn refuse(meta: &Meta, tag: &str) -> String {
     let hint = did_you_mean(tag, meta.writable.iter().map(String::as_str));
     let msg = format!("Tag '{}' is unknown or read-only{hint}", show(tag));
     if meta.warn.allow(Instant::now()) {
-        eprintln!("Warn: rejected WRITE: {msg}");
+        tracing::warn!("rejected WRITE: {msg}");
     }
     format!("ERR={msg}")
 }
@@ -273,8 +273,9 @@ pub extern "C" fn on_signal(_: libc::c_int) {
     STOP.store(true, Ordering::SeqCst);
 }
 
-/// SIGINT and SIGTERM raise `STOP`; every loop in the process polls it.
+/// Start logging; SIGINT and SIGTERM raise `STOP`, which every loop in the process polls.
 pub fn install_signals() {
+    crate::trace::init(); // every long-running subcommand starts here, so logging starts with it
     unsafe {
         libc::signal(libc::SIGINT, on_signal as *const () as usize);
         libc::signal(libc::SIGTERM, on_signal as *const () as usize);
