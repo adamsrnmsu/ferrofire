@@ -14,3 +14,5 @@ RUN uv tool install --python 3.11 "$CRAPPER" \
 # Supply chain gate: licences + advisories + bans (deny.toml), pinned.
 ARG DENY=0.20.2
 RUN curl -sSfL "https://github.com/EmbarkStudios/cargo-deny/releases/download/${DENY}/cargo-deny-${DENY}-$(uname -m)-unknown-linux-musl.tar.gz" | tar xz --strip-components=1 -C /root/.cargo/bin --wildcards '*/cargo-deny'
+# Fuzzing (make fuzz): cargo-fuzz needs a nightly toolchain for the sanitizer flags; the project itself stays on the pinned stable.
+RUN rustup toolchain install nightly --profile minimal && cargo install --locked cargo-fuzz

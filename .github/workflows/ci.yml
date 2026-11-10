@@ -24,3 +24,5 @@ jobs:
         run: make golden
       - name: Quality gates (fmt, clippy, tests, CRAP, dryer, cargo-deny)
         run: make check
+      - name: Fuzz smoke run (10 s per target)
+        run: make fuzz-smoke

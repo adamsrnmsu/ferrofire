@@ -5,3 +5,7 @@ dist/
 bench/models/
 __pycache__/
 .mutate.lock
+fuzz/target/
+fuzz/artifacts/
+fuzz/Cargo.lock
+fuzz/corpus/
