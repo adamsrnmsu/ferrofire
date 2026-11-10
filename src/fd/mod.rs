@@ -5,6 +5,8 @@ pub mod config;
 pub mod eventlog;
 pub mod input;
 pub mod logic;
+#[cfg(any(feature = "proto-iec61850", feature = "proto-iccp"))]
+pub mod mms;
 pub mod net;
 pub mod proto;
 pub mod scan;

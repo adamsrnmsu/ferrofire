@@ -11,9 +11,9 @@ proto=${1:?usage: conformance/run.sh PROTO}
 here=$(cd "$(dirname "$0")" && pwd)
 [ -f "$here/$proto/proto.env" ] || { echo "no conformance/$proto/proto.env" >&2; exit 2; }
 BENNU_DATA=${BENNU_DATA:-$HOME/git/sceptre-bennu/data/configs/ep}
-DUT=${DUT:-stock}
 # shellcheck source=/dev/null
-. "$here/$proto/proto.env"   # sets CFG (path), STOCK_CMD, WARMUP
+. "$here/$proto/proto.env"   # sets CFG (path), STOCK_CMD, WARMUP; optional DUT_DEFAULT (rust where bennu has no such server), DUT_CAPS
+DUT=${DUT:-${DUT_DEFAULT:-stock}}
 if [ "$DUT" = stock ]; then DUT_IMAGE=bennu:arm64; DUT_CMD=$STOCK_CMD; fi
 # DUT=rust: our binary (FF_BIN, default target-linux/debug/ferrofire from make test/linux) is copied into a bennu:arm64 container
 if [ "$DUT" = rust ]; then
@@ -26,7 +26,8 @@ OUT=${OUT:-$here/../target/conformance/$proto}
 rm -rf "$OUT"; mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
 cleanup() { docker rm -f ff-conf-dut ff-conf-peers >/dev/null 2>&1 || true; }
 cleanup; trap cleanup EXIT
-docker run -d --name ff-conf-dut "$DUT_IMAGE" sleep 900 >/dev/null
+# shellcheck disable=SC2086
+docker run -d --name ff-conf-dut ${DUT_CAPS:-} "$DUT_IMAGE" sleep 900 >/dev/null
 [ -z "${DUT_BIN:-}" ] || docker cp "$DUT_BIN" ff-conf-dut:/usr/local/bin/ferrofire
 docker exec -i ff-conf-dut sh -c 'cat > /tmp/cfg.xml' < "$CFG"
 docker exec -d ff-conf-dut sh -c "$DUT_CMD > /tmp/dut.out 2>&1"

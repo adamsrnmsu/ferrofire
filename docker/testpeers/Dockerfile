@@ -24,7 +24,7 @@ RUN cmake -S /src/libiec61850 -B /b/iec -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMP
 RUN mkdir -p /out/bin /out/licenses \
  && cp /b/dnp3/cpp/examples/outstation/outstation-demo /b/dnp3/cpp/examples/master/master-demo /b/dnp3/cpp/examples/ff-master/ff-dnp3-master /out/bin/ \
  && cd /b/iec/examples && for e in server_example_simple server_example_basic_io server_example_control server_example_goose \
-      iec61850_client_example1 iec61850_client_example_control iec61850_client_example_reporting goose_publisher goose_subscriber \
+      iec61850_client_example1 client_example_control iec61850_client_example_reporting goose_publisher_example goose_subscriber_example \
       goose_observer mms_utility; do cp "$(find . -name "$e" -type f -perm -u+x | head -1)" /out/bin/; done \
  && cp /src/opendnp3/LICENSE /out/licenses/opendnp3-APACHE-2.0 && cp /src/libiec61850/COPYING /out/licenses/libiec61850-GPL-3.0
 

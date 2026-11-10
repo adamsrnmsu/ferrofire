@@ -4,6 +4,8 @@
 
 #[cfg(feature = "proto-dnp3")]
 pub mod dnp3;
+#[cfg(feature = "proto-iec61850")]
+pub mod iec61850;
 
 use super::config::{ConfigError, Opts, Tags};
 use super::store::Store;
@@ -36,6 +38,8 @@ pub fn start<M: Module>(node: Node, tags: &mut Tags, opts: &Opts) -> Result<Runn
 pub static REGISTRY: &[(&str, Start)] = &[
     #[cfg(feature = "proto-dnp3")]
     ("dnp3-server", start::<dnp3::Outstation>),
+    #[cfg(feature = "proto-iec61850")]
+    ("iec61850-server", start::<iec61850::Server>),
 ];
 
 /// Every `<comms>` tag a build can have, and the Cargo feature that provides it.

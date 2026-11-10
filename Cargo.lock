@@ -237,9 +237,10 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
+ "iec61850-rs",
  "libc",
  "num-complex",
- "roxmltree",
+ "roxmltree 0.20.0",
  "serde",
  "serde-saphyr",
  "serde_json",
@@ -299,6 +300,16 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
+name = "iec61850-rs"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63b3e13b1b5a002578c647d089a772c778eb85f0f7ecc015aad709147dde61c6"
+dependencies = [
+ "rawether",
+ "roxmltree 0.21.2",
+]
 
 [[package]]
 name = "indexmap"
@@ -434,10 +445,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
+name = "rawether"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "40e09494d3edeac7e0a84ce5944aba88f889f0c64ac5106b50031e76abba4286"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "roxmltree"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
+
+[[package]]
+name = "roxmltree"
+version = "0.21.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9da7f59328b09405b181fee1018925fad50f157afb43c0c0f5c522c256dd5907"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "rustversion"

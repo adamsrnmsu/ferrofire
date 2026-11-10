@@ -1,4 +1,4 @@
-//! Shared by the DNP3 integration tests: load a sceptre config.xml's `<dnp3-server>` the way the field device does.
+//! Shared by the protocol integration tests: load a module's element of a sceptre config.xml the way the field device does.
 #![allow(dead_code)]
 
 use ferrofire::fd::config::{Opts, Tags};
@@ -18,6 +18,11 @@ pub fn kind(t: &str) -> Kind {
 
 /// Points and tags typed first (as `Config::parse` does), then the module parses its own element.
 pub fn load(xml: &str) -> (Outstation, Store) {
+    load_as::<Outstation>(xml, "dnp3-server")
+}
+
+/// The same for any module: its `<comms>` child is the element called `tag`.
+pub fn load_as<M: Module>(xml: &str, tag: &str) -> (M, Store) {
     let doc = roxmltree::Document::parse(xml).unwrap();
     let fd = doc
         .descendants()
@@ -53,11 +58,8 @@ pub fn load(xml: &str) -> (Outstation, Store) {
         layout.external.push((name.clone(), ids[&io].clone()));
         tags.add_internal(&name, k).unwrap();
     }
-    let node = fd
-        .descendants()
-        .find(|c| c.has_tag_name("dnp3-server"))
-        .unwrap();
-    let out = Outstation::parse(node, &mut tags, &Opts::default()).unwrap();
+    let node = fd.descendants().find(|c| c.has_tag_name(tag)).unwrap();
+    let out = M::parse(node, &mut tags, &Opts::default()).unwrap();
     (out, Store::new(layout))
 }
 
