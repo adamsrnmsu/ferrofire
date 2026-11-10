@@ -1,0 +1,28 @@
+8 read Bilateral_Table_ID bilateral_table_id          
+9 read Bilateral_Table_ID bilateral_table_id string BT_RANGE_01  success    BT_RANGE_01  
+10 read TASE2_Version tase2_version        BT_RANGE_01  
+11 read TASE2_Version tase2_version struct {1996;8}  success    BT_RANGE_01 {1996;8} 
+12 read Supported_Features supported_features        BT_RANGE_01 {1996;8} 
+13 read Supported_Features supported_features bitstring 11101000  success    BT_RANGE_01 {1996;8} 11101000
+14 getNameList          BT_RANGE_01 {1996;8} 11101000
+15 getNameList Bilateral_Table_ID;TASE2_Version;Supported_Features bilateral_table_id;tase2_version;supported_features        BT_RANGE_01 {1996;8} 11101000
+16 getNameList          BT_RANGE_01 {1996;8} 11101000
+17 getNameList Pt_1;Pt_2;Pt_3;DS_1;TSet1         BT_RANGE_01 {1996;8} 11101000
+18 getVariableAccessAttributes ICC1/Pt_1 data        BT_RANGE_01 {1996;8} 11101000
+19 getVariableAccessAttributes          BT_RANGE_01 {1996;8} 11101000
+20 defineNamedVariableList ICC1/Pt_1;ICC1/Pt_2 data;data        BT_RANGE_01 {1996;8} 11101000
+21 define_dataset ICC1/DS_1 dataset  ICC1/Pt_1,ICC1/Pt_2  success    BT_RANGE_01 {1996;8} 11101000
+22 read ICC1/Next_DSTransfer_Set next_dstransfer_set        BT_RANGE_01 {1996;8} 11101000
+23 read ICC1/Next_DSTransfer_Set next_dstransfer_set struct {ICC1;TSet1}  success    BT_RANGE_01 {1996;8} 11101000
+24 write ICC1/TSet1 transfer_set struct {{..};0;5;0;0;60;01010;true;false;true;false;true;0}      BT_RANGE_01 {1996;8} 11101000
+25 start_transfer_set ICC1/TSet1 transfer_set struct {{..};0;5;0;0;60;01010;true;false;true;false;true;0}  success    BT_RANGE_01 {1996;8} 11101000
+26 read ICC1/Pt_1;ICC1/Pt_2;ICC1/Pt_3;ICC1/Missing data;data;data;data        BT_RANGE_01 {1996;8} 11101000
+27 read ICC1/Pt_1;ICC1/Pt_2;ICC1/Pt_3;ICC1/Missing data;data;data;data realq;stateq;discreteq;error 50.25;10000000;42;10 VALID|TELEMETERED|NORMAL|TS_VALID;ON|VALID|TELEMETERED|NORMAL|TS_VALID;SUSPECT|TELEMETERED|NORMAL|TS_VALID success;success;success;failure    BT_RANGE_01 {1996;8} 11101000
+28 write ICC1/Dev_1 data discrete 1      BT_RANGE_01 {1996;8} 11101000
+29 write ICC1/Dev_1 data discrete 1  success    BT_RANGE_01 {1996;8} 11101000
+30 write ICC1/Dev_2 data discrete 1      BT_RANGE_01 {1996;8} 11101000
+31 write ICC1/Dev_2 data discrete 1  failure:3    BT_RANGE_01 {1996;8} 11101000
+32 read ICC1/Locked data        BT_RANGE_01 {1996;8} 11101000
+33 read ICC1/Locked data    error    BT_RANGE_01 {1996;8} 11101000
+34           BT_RANGE_01 {1996;8} 11101000
+35           BT_RANGE_01 {1996;8} 11101000

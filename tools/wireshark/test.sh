@@ -12,3 +12,4 @@ out="$(tshark -r "$tmp/v1.pcap" -X "lua_script:$here/ferrofire_datagram.lua" -T 
 want='54386972605942b sim.t,lock.height,lowervalve.open 0.1,5,0 7 3 1234567890 True'
 [ "$out" = "$want" ] || { echo "got:  $out" >&2; echo "want: $want" >&2; exit 1; }
 echo "dissector ok"
+"$here/test-iccp.sh"

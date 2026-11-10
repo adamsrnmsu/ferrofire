@@ -19,8 +19,8 @@ rev = "v2.4.3"
 
 [[repos.hooks]]
 id = "codespell"
-# edn: dryer/crapper snapshot format; mis: the PYPOWER mismatch variable; hieght: a deliberate misspelling in tests; ot: operational technology
-args = ["--ignore-words-list", "edn,mis,hieght,ot"]
+# datas, aare, pres, inout, datset: ASN.1/ACSE/Spicy/IEC 61850 identifiers in the ICCP parsers; edn: dryer/crapper snapshot format; mis: the PYPOWER mismatch variable; hieght: a deliberate misspelling in tests; ot: operational technology
+args = ["--ignore-words-list", "edn,mis,hieght,ot,datas,aare,pres,inout,datset"]
 exclude = { glob = ["Cargo.lock", "NOTICE", "tests/golden/**"] }
 priority = 4
 

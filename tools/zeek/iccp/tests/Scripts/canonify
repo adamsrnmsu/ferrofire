@@ -1,0 +1,3 @@
+#!/bin/sh
+# Zeek logs for btest-diff: drop the #open/#close lines and mask connection uids (they depend on the random seed).
+cat "$@" | grep -v '^#\(open\|close\)' | sed -E 's/(^|\t)C[A-Za-z0-9]{8,17}(\t|$)/\1UID\2/'

@@ -1,0 +1,10 @@
+[package]
+description = ICCP / TASE.2 (IEC 60870-6) over MMS: Spicy analyzer for the OSI stack on tcp/102 (TPKT, COTP, session, presentation, ACSE, MMS), logging mms.log and iccp.log
+tags = spicy, ICS, ICCP, TASE.2, MMS, IEC 60870-6
+script_dir = scripts
+plugin_dir = build
+build_command = mkdir -p build && cd build && spicyz -o iccp.hlto ../analyzer/iccp.spicy ../analyzer/iccp.evt
+test_command = cd tests && btest -d
+depends =
+    zeek >=6.0.0
+    spicy-plugin *

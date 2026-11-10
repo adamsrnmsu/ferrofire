@@ -1,0 +1,9 @@
+protocol analyzer ICCP over TCP:
+    parse originator with ICCP::Stream,
+    parse responder with ICCP::Stream,
+    port 102/tcp;
+
+import ICCP;
+
+on ICCP::Spdu::%done if ( self.kind != "" ) -> event ICCP::pdu($conn, $is_orig, self.kind, self.service, self.invoke_id,
+    self.scope, self.domain, self.target, self.detail, self.err, self.names, self.vtypes, self.values, self.quals);

@@ -5,3 +5,7 @@ dist/
 bench/models/
 __pycache__/
 .mutate.lock
+
+# zeek-iccp build output
+tools/zeek/iccp/build/
+tools/zeek/iccp/tests/.tmp/
