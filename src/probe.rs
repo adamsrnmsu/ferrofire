@@ -651,7 +651,7 @@ fn send_write(
 }
 
 /// The tags to watch: those named (checked against the provider) or all it has.
-fn watched(req: &mut dyn Requester, tags: Vec<String>) -> Result<Vec<String>, String> {
+pub(crate) fn watched(req: &mut dyn Requester, tags: Vec<String>) -> Result<Vec<String>, String> {
     if tags.is_empty() {
         return fetch_tags(req);
     }

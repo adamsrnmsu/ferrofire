@@ -39,6 +39,8 @@ enum Cmd {
     },
     /// Query, read, write and watch tags on a running provider (bennu-probe equivalent)
     Probe(ferrofire::probe::ProbeCli),
+    /// Live view of tag values, age and staleness with a log pane (local process, datagram stream or recorded CSV)
+    Top(ferrofire::top::TopArgs),
     /// Check a range's plumbing: provider reachable, multicast arriving, gaps, skew, stale tags; prints a fix per problem
     Doctor(ferrofire::doctor::DoctorArgs),
     /// Describe a tag from the model file: kind, expression, inputs, units, limits
@@ -82,8 +84,19 @@ fn offline(cmd: Cmd) -> Option<Cmd> {
     None
 }
 
+/// The subcommands that look at a running range.
+fn inspect(cmd: Cmd) -> Option<Cmd> {
+    match cmd {
+        Cmd::Probe(a) => ferrofire::probe::main(a),
+        Cmd::Doctor(a) => ferrofire::doctor::main(a),
+        Cmd::Top(a) => ferrofire::top::main(a),
+        other => return Some(other),
+    }
+    None
+}
+
 fn dispatch(cmd: Cmd) {
-    let Some(cmd) = offline(cmd) else {
+    let Some(cmd) = offline(cmd).and_then(inspect) else {
         return;
     };
     match cmd {
@@ -92,8 +105,6 @@ fn dispatch(cmd: Cmd) {
         Cmd::Pypower(a) => ferrofire::pypower::run_cli(a),
         Cmd::Simulink { args } => ferrofire::simulink::main(&args),
         Cmd::Log { args } => ferrofire::log::main(&args),
-        Cmd::Probe(a) => ferrofire::probe::main(a),
-        Cmd::Doctor(a) => ferrofire::doctor::main(a),
         _ => {}
     }
 }

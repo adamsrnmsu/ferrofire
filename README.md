@@ -168,6 +168,23 @@ for other groups reaching the socket: a switch flooding multicast, so IGMP snoop
 against the provider's `_ff.t`, warned past 1 s) and `stale tags` (the stale quality of [datagram v1](docs/datagram-v1.md), judged
 within the listening window). The provider exposes no ERR/drop counters, so none are read.
 
+## Top
+
+`ferrofire top` opens a live screen instead of log lines: a table of tags with value, age, `good`/`STALE`, and a short trend bar, over a log pane.
+A value that just changed is bold yellow for a second. Keys: `/` filter (substring, or a glob with `*` `?`), `s` sort (name, oldest first, stale first),
+`p` pause (the screen freezes, data keeps arriving), `l` log level shown, `q` quit. Three sources:
+
+- **A local process** (default): `ferrofire top [--pid N | --name run]`. It uses the control socket of `ferrofire log` (same discovery and permissions): the `top`
+  command streams the tags that changed since the last frame, at most 4 frames a second however fast the process publishes (800 tags at 100 Hz is about 4 small
+  frames a second), and a `tail` connection fills the log pane. Only `ferrofire run` holds tag values; `pull-bridge`, `pypower` and `simulink` give the log pane only.
+- **Datagrams from any host**: `ferrofire top --stream 'udp://239.0.0.1:40000' [--server tcp://provider:5555] [--tags a,b*]` joins the publish endpoint like `probe watch`
+  (tags come from `--tags` or the provider's QUERY).
+- **A recording**: `ferrofire top --replay run.csv [--speed 4]` plays back a `probe record` CSV at its recorded pace. A cell the recording marks stale is not replayed, so the tag goes
+  stale on the viewer's clock.
+
+`--stale-after SECONDS` (default 2) is how long without an update makes a tag stale, the same for every source. `--once` prints the table and exits (`tag=value age=1.2s ok|STALE`,
+or with `--json` one object per line), for scripts; with `--filter` it prints only the matches.
+
 ## Probe
 
 `ferrofire probe` is the operator's view of a provider (the bennu-probe equivalent). `--server` (default `tcp://127.0.0.1:5555`),

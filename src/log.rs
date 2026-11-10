@@ -25,7 +25,7 @@ pub enum Level {
     Debug,
 }
 
-const LEVELS: [(&str, Level); 4] = [
+pub(crate) const LEVELS: [(&str, Level); 4] = [
     ("error", Level::Error),
     ("warn", Level::Warn),
     ("info", Level::Info),
@@ -56,14 +56,14 @@ impl Level {
             Level::Debug => F::DEBUG,
         }
     }
-    fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         LEVELS
             .iter()
             .find(|(_, v)| *v == self)
             .map_or("", |(n, _)| n)
     }
     /// The level a line announces with its `Warn:` / `Info:` prefix; no prefix is info.
-    fn of_line(text: &str) -> Level {
+    pub(crate) fn of_line(text: &str) -> Level {
         let prefix = text.split_once(':').map_or("", |(p, _)| p);
         Level::parse(prefix).unwrap_or(Level::Info)
     }
@@ -240,22 +240,31 @@ impl State {
     fn command(&mut self, line: &str, peer: &UnixStream, now: Instant) -> String {
         self.expire(now);
         let words: Vec<&str> = line.trim_end_matches(['\n', '\r']).split('\t').collect();
+        match self.run_command(&words, peer, now) {
+            Ok(note) => format!("{note}{}", self.describe(now)),
+            Err(e) => format!("error: {e}"),
+        }
+    }
+
+    fn run_command(
+        &mut self,
+        words: &[&str],
+        peer: &UnixStream,
+        now: Instant,
+    ) -> Result<String, String> {
         let rest = &words[1..];
-        let reply = match words[0] {
+        match words[0] {
             "status" => Ok(String::new()),
             "on" => opts(rest, &ON_FLAGS).and_then(|o| self.on(&o)),
             "off" => Ok(self.off()),
             "level" => self.set_level(rest, now),
             "tail" => opts(rest, &["--level"]).and_then(|o| self.tail(&o, peer)),
+            "top" => crate::top::attach(peer), // streams tag frames (`ferrofire top`); not in COMMANDS, it has its own client
             c => Err(format!(
                 "unknown command `{}`{}",
                 show(c),
                 did_you_mean(c, COMMANDS)
             )),
-        };
-        match reply {
-            Ok(note) => format!("{note}{}", self.describe(now)),
-            Err(e) => format!("error: {e}"),
         }
     }
 
@@ -428,7 +437,11 @@ fn discover(dirs: &[PathBuf], pid: Option<u32>, name: Option<&str>) -> Vec<(Stri
         .collect()
 }
 
-fn pick(dirs: &[PathBuf], pid: Option<u32>, name: Option<&str>) -> Result<PathBuf, String> {
+pub(crate) fn pick(
+    dirs: &[PathBuf],
+    pid: Option<u32>,
+    name: Option<&str>,
+) -> Result<PathBuf, String> {
     let mut found = discover(dirs, pid, name);
     match found.len() {
         0 => Err(format!(

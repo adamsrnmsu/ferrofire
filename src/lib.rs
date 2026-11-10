@@ -17,8 +17,10 @@ pub mod pull;
 pub mod pypower;
 pub mod simulink;
 pub mod sys;
+pub mod top;
 pub mod trace;
 pub mod transport;
+pub mod tui;
 
 /// The waterway lock, used by the simulink adapter when no `--model` / `./model.yaml` is given.
 pub const WATERWAY_YAML: &str = include_str!("../models/waterway.yaml");

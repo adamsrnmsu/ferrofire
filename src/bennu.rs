@@ -528,6 +528,7 @@ pub fn tick_and_publish(
 ) {
     let snap = engine_tick(model, sh);
     if k.is_multiple_of(every) {
+        crate::top::publish(&snap, Instant::now());
         publish_all(targets, &snap);
     }
 }
