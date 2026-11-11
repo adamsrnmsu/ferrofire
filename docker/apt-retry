@@ -1,0 +1,12 @@
+#!/bin/sh
+# usage: apt-retry PACKAGE...   (update + install, retried; falls back to $MIRROR after two failures)
+for i in 1 2 3 4 5; do
+  if [ "$i" = 3 ]; then
+    case "$(dpkg --print-architecture)" in amd64) dir=ubuntu ;; *) dir=ubuntu-ports ;; esac
+    sed -i -E "s#https?://[a-z.]*(archive|ports|security)\.ubuntu\.com/ubuntu(-ports)?#$MIRROR/$dir#" /etc/apt/sources.list
+    echo "apt: switched to $MIRROR/$dir" >&2
+  fi
+  apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$@" >/dev/null && exit 0
+  echo "apt attempt $i failed" >&2; sleep 10
+done
+exit 1

@@ -18,6 +18,11 @@ on:
   schedule:
     - cron: "17 6 * * 1" # Mondays 06:17 UTC
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag (vX.Y.Z) to rebuild and re-upload assets for, using this workflow. Empty: nightly build (published only from main)."
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -82,13 +87,16 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           NEW_TAG: ${{ needs.release.outputs.tag }}
           SHA: ${{ github.sha }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
           kind=none tag='' ref="$SHA" version=''
-          if [ "$EVENT" = push ] && [ "$REF_TYPE" = tag ]; then
+          if [ -n "$INPUT_TAG" ]; then
+            case "$INPUT_TAG" in v[0-9]*) kind=release tag="$INPUT_TAG" ;; *) echo "tag must look like vX.Y.Z" >&2; exit 1 ;; esac
+          elif [ "$EVENT" = push ] && [ "$REF_TYPE" = tag ]; then
             kind=release tag="$REF_NAME"
           elif [ "$EVENT" = push ]; then
             if [ -n "$NEW_TAG" ]; then kind=release tag="$NEW_TAG"; fi
-          elif [ "$REF" = refs/heads/main ]; then
+          else
             kind=nightly tag=nightly version=nightly
           fi
           if [ "$kind" = release ]; then ref="refs/tags/$tag" version="${tag#v}"; fi
@@ -110,15 +118,14 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.ref }}
           persist-credentials: false
-      # ring (via rustls) compiles C and assembly; musl-gcc makes that link against musl, so the result is fully static.
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+      # ring (via rustls) compiles C and assembly for musl. cargo-zigbuild supplies zig as the C compiler and linker, so the
+      # result is fully static and nothing comes from an apt mirror (those failed from GitHub runners). Both tools are PyPI
+      # wheels pinned by hash in ci/zig-requirements.txt (pip picks the hash matching the runner's architecture).
+      - run: python3 -m venv "$RUNNER_TEMP/zig" && "$RUNNER_TEMP/zig/bin/pip" install --require-hashes -r ci/zig-requirements.txt && echo "$RUNNER_TEMP/zig/bin" >> "$GITHUB_PATH"
       # rust-toolchain.toml pins the compiler; adding the target here installs that toolchain first.
       - run: rustup target add ${{ matrix.target }}
       - name: Build
-        env:
-          CC_x86_64_unknown_linux_musl: musl-gcc
-          CC_aarch64_unknown_linux_musl: musl-gcc
-        run: cargo build --release --locked --bin ferrofire --target ${{ matrix.target }}
+        run: cargo zigbuild --release --locked --bin ferrofire --target ${{ matrix.target }}
       - name: Verify static and runnable
         run: |
           bin=target/${{ matrix.target }}/release/ferrofire
@@ -143,7 +150,8 @@ jobs:
 
   publish:
     needs: [plan, build]
-    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    # A nightly dispatched from a branch builds as a dry run: only main may replace the nightly prerelease.
+    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.plan.outputs.kind == 'release' || github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write

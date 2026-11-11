@@ -1,5 +1,11 @@
 FROM ubuntu:22.04
-RUN apt-get update -qq && apt-get install -y -qq curl gcc g++ pkg-config cmake file binutils ca-certificates git make >/dev/null && curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.99.1
+# Ubuntu's own hostnames (ports/archive/security.ubuntu.com) are flaky or unresolvable from some networks (GitHub runners).
+# apt-retry: per-file retries, a failed index fetch is an error, two attempts against the default mirrors, then
+# the sources are pointed at a third-party mirror (MIRROR) and retried.
+ARG MIRROR=http://mirror.us.leaseweb.net
+COPY apt-retry /usr/local/bin/apt-retry
+RUN printf 'Acquire::Retries "5";\nAPT::Update::Error-Mode "any";\n' > /etc/apt/apt.conf.d/80retry
+RUN apt-retry curl gcc g++ pkg-config cmake file binutils ca-certificates git make && curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.99.1
 ENV PATH=/root/.cargo/bin:/root/.local/bin:$PATH
 # Quality gates (ub-mode): rustfmt, clippy, coverage for crapper/mutator.
 RUN rustup component add rustfmt clippy llvm-tools-preview \
@@ -17,4 +23,4 @@ RUN curl -sSfL "https://github.com/EmbarkStudios/cargo-deny/releases/download/${
 # Fuzzing (make fuzz): cargo-fuzz needs a nightly toolchain for the sanitizer flags; the project itself stays on the pinned stable.
 RUN rustup toolchain install nightly --profile minimal && cargo install --locked cargo-fuzz
 # MQTT tests (tests/mqtt_net.rs) start a real Mosquitto broker as a child process; openssl makes the throwaway CA for the TLS case.
-RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends mosquitto mosquitto-clients openssl >/dev/null && rm -rf /var/lib/apt/lists/*
+RUN apt-retry --no-install-recommends mosquitto mosquitto-clients openssl && rm -rf /var/lib/apt/lists/*
