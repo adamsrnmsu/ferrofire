@@ -1,6 +1,8 @@
 //! Shared by the protocol integration tests: load a module's element of a sceptre config.xml the way the field device does.
 #![allow(dead_code)]
 
+#[cfg(feature = "elastic")]
+pub mod es;
 pub mod modbus;
 pub mod scpi;
 

@@ -9,6 +9,7 @@
 set -eu
 proto=${1:?usage: conformance/run.sh PROTO}
 here=$(cd "$(dirname "$0")" && pwd)
+[ "$proto" != elastic ] || exec "$here/elastic/run.sh"   # real Elasticsearch/OpenSearch containers: its own script
 [ -f "$here/$proto/proto.env" ] || { echo "no conformance/$proto/proto.env" >&2; exit 2; }
 BENNU_DATA=${BENNU_DATA:-$HOME/git/sceptre-bennu/data/configs/ep}
 # shellcheck source=/dev/null

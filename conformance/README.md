@@ -26,6 +26,11 @@ Output lands in `target/conformance/<PROTO>/`: the pcap, `peer.out`, `dut.out`, 
 Add a protocol: copy `conformance/dnp3/`, change the four files. Only `ff-conf-dut` and `ff-conf-peers` are created or removed.
 Files go in and out with `docker cp` (no bind mounts: the Lima docker daemon cannot see every host path).
 
+## Elasticsearch / OpenSearch
+`make conformance PROTO=elastic` is not a protocol run: `run.sh` hands over to `conformance/elastic/run.sh`, which starts real Elasticsearch 8, OpenSearch 2 and a
+secured Elasticsearch 8 and runs the provider export and `ferrofire groundtruth` against them, with the stock `groundtruth_monitor.py` as differential oracle and the
+SCORCH `providerdata` check. See [../docs/ground-truth-elastic.md](../docs/ground-truth-elastic.md) and the "Ground truth" section of [../docs/testing.md](../docs/testing.md).
+
 ## Pointing it at another device
 `DUT_IMAGE=<image> DUT_CMD='<command reading /tmp/cfg.xml>' conformance/run.sh dnp3` (the config is `CFG`, default the stock sample from
 `BENNU_DATA`, default `~/git/sceptre-bennu/data/configs/ep`; for DNP3 it is `conformance/dnp3/server.xml`, because the stock parser exits silently on an XML comment before the root element). The binary must be in `DUT_IMAGE`. With `DUT` unset the oracle is

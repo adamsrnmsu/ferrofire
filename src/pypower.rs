@@ -202,6 +202,9 @@ struct Cfg {
     publish: String,
     case: String,
     debug: bool,
+    /// The enabled `[elastic]` section: export every published tag to Elasticsearch/OpenSearch.
+    #[cfg(feature = "elastic")]
+    elastic: Option<crate::elastic::Config>,
 }
 
 /// Absolute form of `f` when it exists, else `f` as given.
@@ -239,6 +242,8 @@ fn load_cfg(path: &str, debug: bool) -> Result<Cfg, String> {
         publish: required(s, "publish-endpoint")?.replace("*;", ""),
         case: canon(&required(s, "case-file")?),
         debug,
+        #[cfg(feature = "elastic")]
+        elastic: crate::elastic::provider::from_ini(&ini)?,
     })
 }
 
@@ -334,10 +339,10 @@ pub struct Cli {
     debug: bool,
 }
 
-struct Paths {
-    pid: String,
-    out: String,
-    err: String,
+pub struct Paths {
+    pub pid: String,
+    pub out: String,
+    pub err: String,
 }
 
 fn cli(c: Cli) -> Result<(), String> {
@@ -346,14 +351,33 @@ fn cli(c: Cli) -> Result<(), String> {
         out: format!("/var/log/bennu-{}.out", c.env),
         err: format!("/var/log/bennu-{}.err", c.env),
     };
+    let daemon = c.daemon;
+    daemon_cli(
+        &c.op,
+        &paths,
+        daemon,
+        || load_service(&c),
+        |(cfg, power)| serve(cfg, power),
+    )
+}
+
+/// The daemon verbs of the pybennu executables, shared by every drop-in: `stop`, `status`, `restart`, and `start` (which loads
+/// before it forks, so a bad config reaches the terminal, then runs `serve` in the foreground or as a daemon).
+pub fn daemon_cli<T>(
+    op: &str,
+    paths: &Paths,
+    daemon: bool,
+    load: impl FnOnce() -> Result<T, String>,
+    serve: impl FnOnce(T) -> Result<(), String>,
+) -> Result<(), String> {
     let running = pid_of(&paths.pid).filter(|p| alive(*p));
-    match c.op.as_str() {
+    match op {
         "stop" => stop(&paths.pid, false),
         "status" => print_status(running),
         "restart" if running.is_none() => {
             println!("Daemon is not already running - cannot restart")
         }
-        _ => return start(&c, &paths, running),
+        _ => return start(op, paths, daemon, running, load, serve),
     }
     Ok(())
 }
@@ -366,9 +390,16 @@ fn print_status(running: Option<i32>) {
     }
 }
 
-/// `start`, or `restart` of a running daemon: load and solve before forking so errors reach the terminal.
-fn start(c: &Cli, paths: &Paths, running: Option<i32>) -> Result<(), String> {
-    if c.op == "restart" {
+/// `start`, or `restart` of a running daemon: load before forking so errors reach the terminal.
+fn start<T>(
+    op: &str,
+    paths: &Paths,
+    daemon: bool,
+    running: Option<i32>,
+    load: impl FnOnce() -> Result<T, String>,
+    serve: impl FnOnce(T) -> Result<(), String>,
+) -> Result<(), String> {
+    if op == "restart" {
         println!("Restarting daemon");
         stop(&paths.pid, true);
     } else if let Some(p) = running {
@@ -377,12 +408,12 @@ fn start(c: &Cli, paths: &Paths, running: Option<i32>) -> Result<(), String> {
             paths.pid
         ));
     }
-    let (cfg, power) = load_service(c)?;
-    let daemon = c.op == "restart" || c.daemon;
+    let loaded = load()?;
+    let daemon = op == "restart" || daemon;
     if daemon {
         daemonize(&paths.pid, &paths.out, &paths.err)?;
     }
-    let r = serve(cfg, power);
+    let r = serve(loaded);
     if daemon {
         let _ = std::fs::remove_file(&paths.pid);
     }
@@ -402,14 +433,30 @@ fn load_service(c: &Cli) -> Result<(Cfg, Power), String> {
     Ok((cfg, power))
 }
 
-/// Publish a noisy snapshot every second until `STOP`.
-fn publish_loop(p: &Mutex<Power>, out: &dyn Publisher) {
+/// Publish a noisy snapshot every second until `STOP`, to every output.
+fn publish_loop(p: &Mutex<Power>, outs: &[&dyn Publisher]) {
     let (mut rng, t0, mut k) = (Rng::seeded(), Instant::now(), 0u64);
     while !STOP.load(Ordering::SeqCst) {
-        out.publish(&pack(&p.lock().unwrap(), &mut rng));
+        let msg = pack(&p.lock().unwrap(), &mut rng);
+        outs.iter().for_each(|o| o.publish(&msg));
         k += 1;
         sleep_until(t0 + Duration::from_secs(k), Duration::from_millis(20));
     }
+}
+
+/// The Elasticsearch export when the config enables it.
+#[cfg(feature = "elastic")]
+fn elastic_out(cfg: &Cfg) -> Result<Option<Box<dyn Publisher>>, String> {
+    let Some(c) = &cfg.elastic else {
+        return Ok(None);
+    };
+    let es = crate::elastic::Publisher::start(c, &cfg.server, &cfg.publish)?;
+    Ok(Some(Box::new(es)))
+}
+
+#[cfg(not(feature = "elastic"))]
+fn elastic_out(_: &Cfg) -> Result<Option<Box<dyn Publisher>>, String> {
+    Ok(None)
 }
 
 fn serve(cfg: Cfg, power: Power) -> Result<(), String> {
@@ -419,13 +466,17 @@ fn serve(cfg: Cfg, power: Power) -> Result<(), String> {
     let (p2, debug) = (p.clone(), cfg.debug);
     let rep_t = transport::serve(&cfg.server, Box::new(move |req| handle(req, &p2, debug)))?;
     let out = transport::publisher(&cfg.publish)?;
+    let es = elastic_out(&cfg)?;
     println!(
-        "Info: pybennu-power-solver (ferrofire): case {}; REP {}; {} every 1s",
+        "Info: pybennu-power-solver (ferrofire): case {}; REP {}; {} every 1s{}",
         cfg.case,
         cfg.server,
-        out.describe()
+        out.describe(),
+        es.as_ref()
+            .map_or(String::new(), |e| format!("; {}", e.describe()))
     );
-    publish_loop(&p, out.as_ref());
+    let outs: Vec<&dyn Publisher> = std::iter::once(out.as_ref()).chain(es.as_deref()).collect();
+    publish_loop(&p, &outs);
     let _ = rep_t.join();
     crate::log::stop();
     println!("Info: stopped");

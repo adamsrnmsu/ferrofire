@@ -121,6 +121,7 @@ flowchart LR
 | Native bennu provider | `ferrofire run model.yaml` | REP on tcp + UDP RADIO/DISH multicast | any bennu provider |
 | Simulink adapter | `simulinksolver -tf inf` (or `ferrofire simulink`) | SysV shm + POSIX semaphores to stock `bennu-simulink-provider` | the Simulink solver binary |
 | PyPower drop-in | `pybennu-power-solver start -c config.ini` (or `ferrofire pypower`) | same INI, pidfile, logs and ZMQ as pybennu | `pybennu-power-solver` |
+| Ground truth monitor | `ferrofire groundtruth -c config.ini start` | the provider's UDP datagrams in, Elasticsearch/OpenSearch `bennu-YYYY.MM.DD` out | `pybennu-groundtruth-monitor` |
 
 ## Transports
 
@@ -268,6 +269,25 @@ each value against the model: a binary tag takes `true`/`false`/`0`/`1`, an anal
 the provider has (`QUERY`). Limit: it binds the publish port without `SO_REUSEADDR`, so it cannot run on a host where another
 subscriber already holds that port.
 
+## Ground truth in Elasticsearch / OpenSearch
+
+`ferrofire groundtruth` replaces pybennu's `groundtruth_monitor` (same `config.ini` section and filter, same documents, `bennu-YYYY.MM.DD`),
+and the provider can export its tags directly (`[elastic]` in `config.ini`, `ferrofire run --config`) in the document shape and with the
+index template of pybennu's `elastic.py`, so a SCORCH `providerdata` check passes unchanged. Elasticsearch 8 and OpenSearch 2, plain HTTP or
+TLS, basic auth or API key. Writes never slow the engine tick: a bounded queue drops the oldest and counts, failures retry with backoff.
+Fixes against stock: UTC index day, the alert/batch limit no longer drops the rest of a message, a failed push is retried instead of lost (up to the queue bound). See
+[docs/ground-truth-elastic.md](docs/ground-truth-elastic.md).
+
+```ini
+[power-groundtruth-monitor]
+publish-endpoint = udp://239.0.0.1:40000
+elasticsearch-ip = https://es.example:9200
+elasticsearch-api-key = <encoded key>
+elasticsearch-ca-file = /etc/ssl/es-ca.pem
+```
+
+    ferrofire groundtruth -d -c config.ini start
+
 ## Quick start
 
 - The compiler is pinned in `rust-toolchain.toml` (exact version, with `rust-version` in `Cargo.toml` and `docker/Dockerfile` kept in step; `tests/toolchain.rs` checks it). To bump: change all three, then `docker build -t ff-rust:22.04 docker`.
@@ -324,6 +344,7 @@ How each component and protocol is tested, against what, and where the gaps are:
 - Power: matches PYPOWER 5.1.19 on case9, 14, 30, 57, 118 and 300 (goldens generated at test time).
 - Properties: per-bus power balance, barrier behaviour, write latching, a tank against its closed form.
 - Conformance (in a VM with `bennu:arm64`): `ipc-test.sh`, `tests/conformance.sh`, `tests/pypower-conformance.sh`.
+- Elasticsearch/OpenSearch: `tests/elastic.rs` (fake server), and `make conformance PROTO=elastic` against real Elasticsearch 8, OpenSearch 2 and a secured Elasticsearch, the stock `groundtruth_monitor` as differential oracle and the SCORCH `providerdata` check ([notes](docs/ground-truth-elastic.md)).
 - Binaries: `tests/cli.rs` drives `ferrofire run` (REP, UDP, SIGTERM) and `check`; `tests/simulink.rs` drives `simulinksolver` against real SysV shm, POSIX semaphores and the updates FIFO.
 - `make check` runs the [ub-mode](https://github.com/unclebob/ub-mode) gates, all in the container: `cargo fmt --check`, `clippy -D warnings`, the tests, then
   - `make crap` ([crapper](https://github.com/unclebob/crapper)): every function CRAP < 10 (`--threshold 9.99`);
@@ -354,6 +375,7 @@ How each component and protocol is tested, against what, and where the gaps are:
 - After a `WRITE`, stock PyPower turns every non-slack bus into PQ; ferrofire keeps generator buses PV.
 - Load and shunt writes change the solve in ferrofire; in stock PyPower they do not.
 - Initial values match stock to 1e-10.
+- `ferrofire groundtruth` indexes in UTC, keeps the points around an alert/batch point and skips the datagram trailer; the stock monitor does none of these ([list](docs/ground-truth-elastic.md#differences-from-the-stock-script)).
 
 ## Licence
 

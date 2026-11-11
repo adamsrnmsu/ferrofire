@@ -368,6 +368,10 @@ pub struct RunArgs {
     /// Per-RTU slice 'ENDPOINT=a,b,c' or 'ENDPOINT=@config.xml', repeatable
     #[arg(long = "publish-tags", value_name = "SPEC")]
     pub slices: Vec<String>,
+    /// config.ini whose [elastic] section turns on the Elasticsearch/OpenSearch export (docs/ground-truth-elastic.md)
+    #[cfg(feature = "elastic")]
+    #[arg(long, value_name = "CONFIG.INI")]
+    pub config: Option<String>,
 }
 
 impl RunArgs {
@@ -526,8 +530,12 @@ pub fn tick_and_publish(
     k: u64,
     every: u64,
 ) {
+    #[cfg(feature = "elastic")]
+    let t = model.time;
     let snap = engine_tick(model, sh);
     if k.is_multiple_of(every) {
+        #[cfg(feature = "elastic")]
+        crate::elastic::provider::set_sim_time(t);
         crate::top::publish(&snap, Instant::now());
         publish_all(targets, &snap);
     }
@@ -558,11 +566,31 @@ fn targets_of(plan: Plan) -> Result<Vec<Target>, String> {
         .collect()
 }
 
+/// The Elasticsearch export (`--config` with an enabled `[elastic]` section), as one more publish target.
+#[cfg(feature = "elastic")]
+fn elastic_target(a: &RunArgs) -> Result<Option<Target>, String> {
+    let Some(config) = a.config.as_deref() else {
+        return Ok(None);
+    };
+    let publish = a.publish.as_deref().unwrap_or(transport::DEFAULT_PUBLISH);
+    let es = crate::elastic::provider::from_file(config, &a.server, publish)?;
+    Ok(es.map(|es| Target {
+        out: Box::new(es),
+        tags: None,
+    }))
+}
+
+#[cfg(not(feature = "elastic"))]
+fn elastic_target(_: &RunArgs) -> Result<Option<Target>, String> {
+    Ok(None)
+}
+
 fn run(a: RunArgs) -> Result<(), String> {
     let mut model = load_model(a.path())?;
     let period = publish_period(a.rate, &model)?;
     let meta = Meta::of(&model);
     let base = a.path().and_then(|p| std::path::Path::new(p).parent());
+
     let specs = model.publish_slices.iter().cloned();
     let specs: Vec<SliceSpec> = specs
         .chain(
@@ -576,7 +604,8 @@ fn run(a: RunArgs) -> Result<(), String> {
         .iter()
         .map(|s| resolve_slice(s, base))
         .collect::<Result<Vec<_>, _>>()?;
-    let targets = targets_of(plan(a.publish.as_deref(), slices, &meta.tags)?)?;
+    let mut targets = targets_of(plan(a.publish.as_deref(), slices, &meta.tags)?)?;
+    targets.extend(elastic_target(&a)?);
     let sh = Arc::new(Mutex::new(Shared {
         snap: owned_snapshot(&model),
         queue: vec![],

@@ -45,6 +45,9 @@ enum Cmd {
     Top(ferrofire::top::TopArgs),
     /// Check a range's plumbing: provider reachable, multicast arriving, gaps, skew, stale tags; prints a fix per problem
     Doctor(ferrofire::doctor::DoctorArgs),
+    /// pybennu groundtruth_monitor drop-in: provider datagrams -> Elasticsearch/OpenSearch bennu-YYYY.MM.DD
+    #[cfg(feature = "elastic")]
+    Groundtruth(ferrofire::groundtruth::Cli),
     /// Describe a tag from the model file: kind, expression, inputs, units, limits
     Explain {
         /// Model file
@@ -111,6 +114,8 @@ fn dispatch(cmd: Cmd) {
         Cmd::Simulink { args } => ferrofire::simulink::main(&args),
         Cmd::Log { args } => ferrofire::log::main(&args),
         Cmd::FieldDevice(a) => std::process::exit(ferrofire::fd::main(a)),
+        #[cfg(feature = "elastic")]
+        Cmd::Groundtruth(a) => ferrofire::groundtruth::run_cli(a),
         _ => {}
     }
 }

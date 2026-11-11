@@ -7,8 +7,12 @@ pub mod bennu;
 pub mod datagram;
 pub mod diff;
 pub mod doctor;
+#[cfg(feature = "elastic")]
+pub mod elastic;
 pub mod expr;
 pub mod fd;
+#[cfg(feature = "elastic")]
+pub mod groundtruth;
 pub mod hint;
 pub mod log;
 pub mod model;

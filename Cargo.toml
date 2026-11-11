@@ -29,11 +29,16 @@ rumqttc = { version = "0.25", default-features = false, features = ["use-rustls-
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 prost = { version = "0.14", default-features = false, features = ["derive", "std"], optional = true }
 
+# Elasticsearch / OpenSearch export (src/elastic, src/groundtruth): a small HTTP/1.1 client over rustls (ring); roots from a CA file or the OS store.
+serde_json = { version = "1", optional = true }
+rustls-native-certs = { version = "0.8", optional = true }
+base64 = { version = "0.23", optional = true }
+
 [features]
 # One feature per protocol module (docs/field-device-protocols-plan.md section 2). The parity set is default; extras are opt-in.
 # proto-mqtt is the exception: the quality gates (crap, mutate) build the default features only, and deny.toml carries advisory ignores
 # for rumqttc's unused webpki 0.102 (bead ww-otj.56 follow-up: drop both once rumqttc moves on). Build without it: --no-default-features.
-default = ["proto-modbus", "proto-dnp3", "proto-iec104", "proto-bacnet", "proto-serial", "proto-iec61850", "proto-iccp", "proto-mqtt", "proto-scpi"]
+default = ["proto-modbus", "proto-dnp3", "proto-iec104", "proto-bacnet", "proto-serial", "proto-iec61850", "proto-iccp", "proto-mqtt", "proto-scpi", "elastic"]
 proto-modbus = []
 proto-dnp3 = []
 proto-iec104 = []
@@ -44,6 +49,8 @@ proto-iccp = ["dep:iec61850-rs"]
 proto-mqtt = ["dep:rumqttc", "dep:prost", "dep:rustls"]
 # default-on like proto-mqtt: the crap and mutate gates build the default features only
 proto-scpi = []
+# default-on for the same reason: groundtruth monitor and the provider [elastic] export
+elastic = ["dep:rustls", "dep:rustls-native-certs", "dep:serde_json", "dep:base64"]
 all-protocols = ["default", "proto-iec61850", "proto-iccp"]
 
 [profile.release]

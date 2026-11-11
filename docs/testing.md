@@ -24,6 +24,7 @@ code with our own reading of a standard shows consistency, not correctness; the 
 | ICCP parsers (Zeek, Wireshark) | btest baselines and field goldens over `tests/pcaps/iccp`; the two real captures when fetched | tshark's own MMS dissector underneath; the Wireshark wiki `mms.pcap` and the chaugan capture (real ICCP) | Tested on synthetic captures and, locally, on two real ones |
 | MQTT client + Sparkplug B | Unit tests of the engine and the payload codec; integration tests against a real Mosquitto child process; conformance with mosquitto_pub/sub, Eclipse Paho, an Eclipse Tahu host, tshark and Zeek; fuzz of the NCMD decoder | Mosquitto (broker), Paho and mosquitto clients (MQTT), Tahu (Sparkplug payload codec), tshark `mqtt`, Zeek `mqtt_*` logs. No stock oracle: bennu has no MQTT | Covered for the subset in [field-device-mqtt.md](field-device-mqtt.md); Sparkplug host behaviour is only as good as one Tahu run |
 | SCPI instrument server + `ferrofire scpi` client | Unit tests of the syntax, the status model and the routes; a transcript golden (`tests/golden/scpi.transcript`); socket tests; the client binary against the server; conformance with PyVISA, lxi-tools and our client; fuzz of the line buffer and parser | PyVISA 1.16.2 + pyvisa-py 0.8.1 and lxi-tools 2.8-1 (independent clients), tshark and Zeek as TCP observers. No dissector or stock oracle: bennu has no SCPI, and the expected texts are our reading of SCPI-99 and IEEE 488.2 | Covered for the subset in [field-device-scpi.md](field-device-scpi.md); the standards are not independently executable, so the transcript is consistency with our reading, plus what two client stacks accept |
+| Ground truth to Elasticsearch/OpenSearch (`ferrofire groundtruth`, the provider `[elastic]` export) | Unit tests of every pure piece; a fake-server test file; real Elasticsearch 8, OpenSearch 2 and a secured Elasticsearch 8 in containers; a field-by-field differential against the stock `groundtruth_monitor.py`; the SCORCH `providerdata` check | Stock pybennu (monitor, mapping), the servers themselves, the SCORCH component's own code | Covered for the documented subset; see [ground-truth-elastic.md](ground-truth-elastic.md); the stock side runs with two shims (below) |
 | Whole system | Burger range boards, live range runs | Stock bennu, phēnix, OVS | Covers stock bennu fixes and ferrofire runs; see below |
 
 Everything below is in the repo and runs from `make`. Make targets that need docker run in the `ff-rust:22.04` container or
@@ -477,6 +478,65 @@ not freely executable); `scpi_net.rs` and `scpi_client.rs` use our own client on
   shares one status system across sessions.
 - Mutation runs covered only the new code, not the whole tree (`make mutate` exceeds the Docker VM on a loaded host).
 - IPv6 is untested (a `[::1]` target is parsed, not connected to).
+
+## Ground truth to Elasticsearch and OpenSearch
+
+What it is: [ground-truth-elastic.md](ground-truth-elastic.md). Beads: ww-1df.19 (monitor), ww-1df.20 (provider export).
+
+**Checked.**
+- Pure pieces, as unit tests in `src/elastic/*.rs` and `src/groundtruth.rs`: UTC date arithmetic (leap day, the millisecond either side of midnight),
+  index names, the config parse (keys, defaults, errors), the bulk body (NDJSON), reading a bulk response (which items to resend, which are refused),
+  backoff (500 ms doubling to 30 s), the bounded queue (drop-oldest and its counter, a stuck consumer never blocks the producer, close and drain),
+  the monitor's filter (substring, loose entries match everything), tag split, value-or-status, the alert/batch limiter, the provider's time fields
+  (`simulator_time`, `time_drift`), the frequency source, the template's fields and types, and the HTTP/1.1 framing (URL, request bytes, `Content-Length`,
+  chunked and close-delimited responses, size limits, an unclean TLS close).
+- `tests/elastic.rs`, a fake Elasticsearch on a local port: one authenticated bulk request (basic and API key), the template put once before any
+  document with three workers, retry with backoff on 503, a bulk response with a 201, a 429 and a 400 (only the 429 is resent; the 400 is counted
+  as refused), a dead server with 20 000 items pushed in well under 2 s and the oldest dropped, and the binaries end to end: `ferrofire run --config` with
+  the pybennu fields on every document, no export without `enabled = true`, `ferrofire groundtruth` with a filter and the stock document shape, the
+  alert limit skipping only alert points, and bad invocations.
+- `make conformance PROTO=elastic` (`conformance/elastic/`): real servers, brought up by `run.sh` on the Lima docker daemon, `ff-conf-*` names, no bind mounts.
+  - Per server (Elasticsearch 8.19.3 with security off, OpenSearch 2, Elasticsearch 8.19.3 with TLS and basic auth, the same with an API key): the
+    provider export (template installed, daily index mapping, fields, `measurement.frequency` on every document, `time_drift` in range, every tag, a
+    binary tag typed bool) and `ferrofire groundtruth` on the same stream (fields, no trailer, UTC `@timestamp`, `bennu-<UTC day>`), both
+    stopping cleanly on SIGTERM.
+  - Differential against the **stock `groundtruth_monitor.py`**, unmodified, on Elasticsearch 8 (the stock script's `elasticsearch-py` 8 client refuses OpenSearch):
+    the provider publishes the same snapshots to two endpoints, one for each monitor, into separate indices; 605 data documents compared field by field
+    (value, type, device, field, timestamps within 0.5 s). The intended differences are asserted next to it: the `_ff` trailer indexed by stock only,
+    the alert/batch limit (stock keeps `gt.before` only, ferrofire all five points of the message), UTC (stock under `TZ=NZT-13` writes `@timestamp` 13 h ahead,
+    ferrofire does not).
+  - TLS and auth are enforced: no CA file, a wrong password and no credentials each index nothing and log the failure.
+  - The SCORCH `providerdata` component (`conformance/elastic/scorch_check.py`, in a Python 3.12 container with the phenix_apps source copied in):
+    `ProviderData.start()` itself, with `elasticsearch.verify`, `min_documents`, `min_new_documents` and `expected_frequency`, against each of the four
+    servers; negative controls (a wrong frequency, too few documents, too few new documents, a stopped provider, nothing in the last 5 s) each fail
+    with the component's own message.
+
+**Oracle.** The stock script and `elastic.py` for behaviour and field names; Elasticsearch and OpenSearch for what a bulk request means (their answers, not our reading);
+the SCORCH component's own code for the queries.
+
+**Run.** `make test` (units, fake server); `make conformance PROTO=elastic` (needs the Lima VM, the images `opensearchproject/opensearch:2` and
+`docker.elastic.co/elasticsearch/elasticsearch:8.19.3`, `bennu:arm64`, `target-linux/debug/ferrofire` from `make test`, and `SCORCH_SRC`, default
+`~/git/sceptre-phenix-apps/src/python/phenix_apps`; about 6 minutes). Artefacts in `target/conformance/elastic/`: the differential report and sample documents.
+`KEEP=1` leaves the containers up between runs.
+
+**Shims on the stock side, and why.** The `bennu:arm64` image has a `_Endpoint.so` for the wrong architecture (it cannot be loaded) and a pyzmq built without
+draft support (no DISH socket). `conformance/elastic/stock_monitor.py` therefore stands in Python for the three-function Endpoint wrapper (libstdc++'s `std::hash`
+for the group, the same hash ferrofire implements) and for the `Subscriber` base class (a DISH socket on the wire is a UDP socket and RADIO framing). It also adds the
+`scheme` and an integer port to the node dict the stock script gives the `elasticsearch-py` 8 client. The stock handler, filter, rate limit, document building and
+bulk push run as shipped. What this does not prove: that the real DISH socket and the real wrapper behave as the shims do.
+
+**Gaps.**
+- Real OpenSearch has no stock-script leg (the stock client cannot talk to it); the OpenSearch checks are ferrofire's own plus the SCORCH queries over HTTP.
+  The SCORCH component's own `elasticsearch-py` client is used only against the unsecured Elasticsearch; for the other three servers the component's code runs on a client
+  that makes the same two calls (`indices.stats`, `search`) over HTTP, because the component's client cannot authenticate and refuses OpenSearch.
+- The only Elasticsearch/OpenSearch versions run are 8.19.3 and the `opensearchproject/opensearch:2` tag of 2026-11-11; Elasticsearch 7 and OpenSearch 1 are untested.
+- No test restarts or pauses a real server mid-run: retry, partial failure and drop-oldest are tested against the fake server only.
+- TLS is tested with a throwaway CA and name checks against `essec`; certificate chains with intermediates, client certificates and proxies are not.
+- Nothing was measured at a rate that fills the queue on a real server (the queue is exercised against a dead one).
+- Malcolm's own OpenSearch with its dashboards was not used.
+
+**Ideas.** Pause and unpause the container mid-run and count the documents; run both monitors against Malcolm's OpenSearch image
+already on the Lima VM; replay a recorded datagram capture through both monitors.
 
 ## Independent peers and public captures (ww-otj.55)
 
