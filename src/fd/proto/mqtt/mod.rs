@@ -11,7 +11,7 @@ use super::super::config::{number, require, text, ConfigError, Opts, Tags};
 use super::super::eventlog::EventLog;
 use super::super::store::Store;
 use super::Module;
-use crate::hint::show;
+use crate::hint::{show, RateLimit};
 use engine::{Engine, Out, Point, Scheme};
 use roxmltree::Node;
 use rumqttc::{
@@ -32,6 +32,8 @@ const MAX_PACKET: usize = 1 << 20;
 const KEEP_ALIVE: Duration = Duration::from_secs(15);
 /// How long a clean shutdown may take to flush the offline message.
 const GOODBYE: Duration = Duration::from_secs(2);
+/// The queue-full warning is logged at most this often.
+const QUEUE_WARN: Duration = Duration::from_secs(5);
 
 #[derive(Debug, PartialEq)]
 pub struct Broker {
@@ -60,6 +62,7 @@ pub struct Client {
     link: Link,
     engine: Engine,
     log: Arc<EventLog>,
+    queue_warn: RateLimit,
 }
 
 /// `tcp://host[:port]` (1883) or `ssl://host[:port]` (8883).
@@ -228,7 +231,8 @@ fn scheme(node: Node, device: &str, qos: u8) -> Result<Scheme, ConfigError> {
 }
 
 impl Link {
-    fn read(node: Node, device: &str) -> Result<Link, ConfigError> {
+    /// `points` is how many messages one birth holds: the queue must take them all, the status message and the subscription at once.
+    fn read(node: Node, device: &str, points: usize) -> Result<Link, ConfigError> {
         let broker = broker(&require(node, "endpoint")?)?;
         let client_id = text(node, "client-id").unwrap_or_else(|| format!("ferrofire-{device}"));
         if client_id.is_empty() {
@@ -237,7 +241,7 @@ impl Link {
         Ok(Link {
             login: text(node, "username").map(|u| (u, text(node, "password").unwrap_or_default())),
             tls: tls_files(node, &broker)?,
-            queue: bounded(node, "queue", 256usize, 1..=65535)?,
+            queue: bounded(node, "queue", 256.max(points + 8), points + 3..=65535)?,
             broker,
             client_id,
         })
@@ -260,12 +264,13 @@ impl Module for Client {
             )));
         }
         Ok(Client {
-            link: Link::read(node, &device)?,
+            link: Link::read(node, &device, points.len())?,
             engine: Engine::new(scheme(node, &device, qos)?, points, refresh * 1000),
             log: Arc::new(EventLog::open(
                 text(node, "event-logging").as_deref(),
                 "mqtt-client",
             )),
+            queue_warn: RateLimit::new(QUEUE_WARN),
         })
     }
 
@@ -325,6 +330,7 @@ impl Client {
         o.set_keep_alive(KEEP_ALIVE)
             .set_clean_session(true)
             .set_max_packet_size(MAX_PACKET, MAX_PACKET)
+            .set_inflight(self.link.queue.min(100) as u16)
             .set_last_will(LastWill::new(
                 will.topic,
                 will.payload,
@@ -349,17 +355,23 @@ impl Client {
         Ok(o)
     }
 
-    /// Queue `out`; a full queue means the broker is not keeping up, so the engine republishes everything as a new birth later.
-    fn send(&mut self, c: &AsyncClient, out: Out) {
-        if c.try_publish(out.topic, qos(out.qos), out.retain, out.payload)
-            .is_err()
-        {
-            self.engine.lost();
-            self.say(
-                "warn",
-                "mqtt queue",
-                "publish queue full; a new birth follows",
-            );
+    /// Queue `outs` in order. The first one that does not fit means the broker is not keeping up: stop there, and the engine
+    /// republishes everything as a new birth later. The log hears of it at most once every `QUEUE_WARN`.
+    fn send_all(&mut self, c: &AsyncClient, outs: Vec<Out>) {
+        for out in outs {
+            if c.try_publish(out.topic, qos(out.qos), out.retain, out.payload)
+                .is_err()
+            {
+                self.engine.lost();
+                if self.queue_warn.allow(Instant::now()) {
+                    self.say(
+                        "warn",
+                        "mqtt queue",
+                        "publish queue full; a new birth follows",
+                    );
+                }
+                return;
+            }
         }
     }
 
@@ -388,9 +400,8 @@ impl Client {
                 }
                 _ = tick.tick(), if up => {
                     let now = start.elapsed().as_millis() as u64;
-                    for out in self.engine.tick(store, now, unix_ms()) {
-                        self.send(&client, out);
-                    }
+                    let outs = self.engine.tick(store, now, unix_ms());
+                    self.send_all(&client, outs);
                 }
                 ev = events.poll() => match ev {
                     Ok(Event::Incoming(Incoming::ConnAck(_))) => {
@@ -400,7 +411,12 @@ impl Client {
                         }
                     }
                     Ok(Event::Incoming(Incoming::Publish(p))) => {
-                        for line in self.engine.message(&p.topic, &p.payload, store) {
+                        // a retained command was left on the broker by someone, not sent now: it would be obeyed again on every reconnect
+                        let lines = match p.retain {
+                            true => vec![format!("retained message on `{}` ignored", show(&p.topic))],
+                            false => self.engine.message(&p.topic, &p.payload, store),
+                        };
+                        for line in lines {
                             self.say("warn", "mqtt command", &line);
                         }
                     }
@@ -582,7 +598,7 @@ mod tests {
         assert!(err("<qos>x</qos>").contains("not a valid number"));
         assert!(err("<queue>0</queue>").contains("<queue> 0"));
         assert!(err("<queue>65536</queue>").contains("<queue> 65536"));
-        assert!(parse("<queue>65535</queue>").is_ok() && parse("<queue>1</queue>").is_ok());
+        assert!(parse("<queue>65535</queue>").is_ok());
         assert!(err("<retain>yes</retain>").contains("<retain> `yes` is not true or false"));
         assert!(err("<device>a/b</device>").contains("<device> `a/b` is not a topic level"));
         assert!(err("<device></device>").contains("not a topic level"));
@@ -610,6 +626,33 @@ mod tests {
             .err()
             .unwrap();
         assert!(e.0.contains("<mqtt-client> has no <endpoint>"), "{e}");
+    }
+
+    #[test]
+    fn the_queue_must_hold_one_whole_birth() {
+        // a plain birth is the status plus one message per point, and the subscription shares the queue: points + 3
+        let points = "<point><tag>lvl</tag></point><point><tag>pump</tag></point>";
+        assert!(err(&format!("{points}<queue>4</queue>"))
+            .contains("<queue> 4 is not between 5 and 65535"));
+        assert!(parse(&format!("{points}<queue>5</queue>")).is_ok());
+        assert!(err("<queue>2</queue>").contains("<queue> 2 is not between 3 and 65535"));
+        assert!(parse("<queue>3</queue>").is_ok());
+        assert_eq!(
+            parse(points).unwrap().link.queue,
+            256,
+            "the default has room"
+        );
+        let many: String = (0..300)
+            .map(|i| format!("<point><tag>t{i}</tag></point>"))
+            .collect();
+        let mut t = Tags::default();
+        for i in 0..300 {
+            t.add_internal(&format!("t{i}"), Kind::Analog).unwrap();
+        }
+        let xml = format!("<mqtt-client><endpoint>tcp://h</endpoint>{many}</mqtt-client>");
+        let doc = roxmltree::Document::parse(&xml).unwrap();
+        let c = Client::parse(doc.root_element(), &mut t, &Opts::default()).unwrap();
+        assert_eq!(c.link.queue, 308, "the default grows with the point count");
     }
 
     #[test]
@@ -698,6 +741,14 @@ mod tests {
         assert_eq!(o.keep_alive(), KEEP_ALIVE);
         assert!(o.clean_session());
         assert_eq!(o.max_packet_size(), MAX_PACKET);
+        assert_eq!(o.inflight(), 100);
+        let mut small = parse("<queue>5</queue>").unwrap();
+        let will = small.engine.begin_session();
+        assert_eq!(
+            small.options(will).unwrap().inflight(),
+            5,
+            "never more unacknowledged than the queue holds"
+        );
         let w = o.last_will().unwrap();
         assert_eq!(
             (w.topic.as_str(), &w.message[..], w.qos, w.retain),

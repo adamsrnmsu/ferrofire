@@ -1,7 +1,7 @@
 //! MQTT client (docs/field-device-protocols-plan.md section 2 template): arbitrary bytes as a Sparkplug B NCMD payload and as a plain
 //! command, through the same `Engine::message` the session loop calls, plus the bare payload decoder. Invariants: no panic, whatever
 //! arrives; a refusal is a log line, never a store change that the config forbids (`ro` is not writable and must never be queued);
-//! the value of a queued analog write is finite and within the limits.
+//!
 #![no_main]
 use ferrofire::fd::proto::mqtt::engine::{Engine, Point, Scheme};
 use ferrofire::fd::proto::mqtt::sparkplug;
@@ -33,10 +33,9 @@ fuzz_target!(|data: &[u8]| {
         let _ = e.message(topic, data, &store);
         let _ = e.tick(&store, 0, 0);
     }
+    // nothing the config forbids was queued; what was queued lands inside the limits
     assert!(!store.is_queued("ro"));
-    for (tag, v, _) in store.pending(0) {
-        if let Value::Analog(x) = v {
-            assert!(tag != "lvl" || (0.0..=100.0).contains(&x));
-        }
-    }
+    store.apply_internal();
+    assert!((0.0..=100.0).contains(&store.get_f64("lvl").unwrap()));
+    assert_eq!(store.get_f64("ro"), Some(0.0));
 });

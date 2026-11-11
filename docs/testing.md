@@ -307,7 +307,7 @@ bug in a layout. Compare the Wireshark script's output with a vendor tool's deco
 
 **Strategy.** The module is split so that most of it needs no socket: `engine.rs` (what to publish when, command validation),
 `sparkplug.rs` (payload encode and decode) and the config parser are unit tested; `tests/mqtt_net.rs` runs the real client against
-a real Mosquitto started as a child process (`mosquitto` and `openssl` are in the `ff-rust` image, so it runs under `make test` and
+a real Mosquitto started as a child process (`mosquitto` and `openssl` are in the `ff-rust` image (an image built before ww-otj.56 must be rebuilt: `docker build -t ff-rust:22.04 docker`, because `make image` only builds when the image is missing), so it runs under `make test` and
 under the mutator); `make conformance PROTO=mqtt` runs two `<mqtt-client>` elements (plain and Sparkplug) on one device against
 Mosquitto inside the `ferrofire-testpeers` image with the peers below.
 
@@ -319,6 +319,8 @@ Mosquitto inside the `ferrofire-testpeers` image with the peers below.
   `mosquitto_pub` commands reach a stand-in provider while an out-of-range one does not).
 - Will and goodbye: a clean stop publishes `offline` / NDEATH (`mqtt_net.rs`); a dropped connection makes the broker send the will
   (`mqtt_net.rs` aborts the task; the conformance run `kill -9`s the device and reads both wills).
+- Bounded queue: against a broker that accepts the connection and then acknowledges nothing, the queue fills, the rest of the tick is dropped and the
+  log hears of it once (`mqtt_net.rs`); a `<queue>` too small for one birth is refused at load.
 - Reconnect: the client starts before the broker, and the broker is killed and restarted under it (`mqtt_net.rs`); the backoff
   arithmetic is unit tested. The scan cycle is not involved: the module only reads the datastore.
 - TLS 1.2/1.3 with rustls, a client certificate and a password: `mqtt_net.rs` with a throwaway CA made by `openssl`; a wrong password
@@ -343,8 +345,7 @@ and `mqtt_net.rs` use `rumqttc` on both sides.
 - MQTT 3.1.1 only (no MQTT 5 properties); QoS 2 is passed through to the library and not specifically tested.
 - `ssl://` needs `<tls-ca>`: the system trust store is not used. TLS is tested against Mosquitto only, with RSA certificates.
 - A tag name containing `/` cannot be commanded in the plain scheme.
-- Retained commands on a broker would be replayed on every reconnect if a client published them retained; the module does not
-  guard against it.
+- Retained messages on a command topic are ignored, so a command cannot be made persistent through the broker either.
 - Network faults between device and broker (loss, delay) are not injected; only a refused connection, a restart and a kill.
 
 ## Quality gates

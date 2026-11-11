@@ -68,9 +68,10 @@ pub struct Sample<'a> {
     pub value: crate::model::Value,
 }
 
-fn bd_seq(bd: u64) -> Metric {
+fn bd_seq(bd: u64, ts: Option<u64>) -> Metric {
     Metric {
         name: Some(BDSEQ.into()),
+        timestamp: ts,
         datatype: Some(INT64),
         value: Some(Value::Long(bd)),
         ..Metric::default()
@@ -95,9 +96,10 @@ fn metric(s: &Sample, ts: u64, with_name: bool) -> Metric {
 /// NBIRTH: seq 0, `bdSeq`, the rebirth control, then every metric with its name and alias.
 pub fn birth(ts: u64, bd: u64, samples: &[Sample]) -> Vec<u8> {
     let mut metrics = vec![
-        bd_seq(bd),
+        bd_seq(bd, Some(ts)),
         Metric {
             name: Some(REBIRTH.into()),
+            timestamp: Some(ts),
             datatype: Some(BOOLEAN),
             value: Some(Value::Boolean(false)),
             ..Metric::default()
@@ -125,7 +127,7 @@ pub fn data(ts: u64, seq: u64, samples: &[Sample]) -> Vec<u8> {
 /// NDEATH (the will message): only `bdSeq`, equal to the one in the NBIRTH of the same session.
 pub fn death(bd: u64) -> Vec<u8> {
     Payload {
-        metrics: vec![bd_seq(bd)],
+        metrics: vec![bd_seq(bd, None)],
         ..Payload::default()
     }
     .encode_to_vec()
@@ -226,6 +228,11 @@ mod tests {
         let m = &p.metrics;
         assert_eq!(m.len(), 4);
         assert_eq!(m[0].name.as_deref(), Some("bdSeq"));
+        assert_eq!(
+            (m[0].timestamp, m[1].timestamp),
+            (Some(1000), Some(1000)),
+            "every NBIRTH metric has a timestamp"
+        );
         assert_eq!(m[0].datatype, Some(4));
         assert_eq!(m[0].value, Some(Value::Long(7)));
         assert_eq!(m[1].name.as_deref(), Some("Node Control/Rebirth"));

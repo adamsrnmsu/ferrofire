@@ -143,7 +143,7 @@ impl Engine {
         match self.scheme {
             // ponytail: `+` matches one level, so a tag name with a `/` in it cannot be commanded
             Scheme::Plain { .. } => vec![(self.base("+/set"), 1)],
-            Scheme::Sparkplug { .. } => vec![(self.base("NCMD"), 0)],
+            Scheme::Sparkplug { .. } => vec![(self.base("NCMD"), 1)],
         }
     }
 
@@ -660,7 +660,7 @@ mod tests {
             .seq,
             Some(1)
         );
-        assert_eq!(e.subscriptions(), [("spBv1.0/g/NCMD/e".to_string(), 0)]);
+        assert_eq!(e.subscriptions(), [("spBv1.0/g/NCMD/e".to_string(), 1)]);
     }
 
     #[test]

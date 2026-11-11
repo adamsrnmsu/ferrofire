@@ -29,7 +29,7 @@ EPL-2.0 and are used only as test peers).
 | `<qos>` | 1 | plain-scheme publish QoS (0-2). Commands are subscribed at QoS 1. Sparkplug uses 0 for NBIRTH/NDATA and 1 for the will, as the specification says |
 | `<retain>` | true | retain the plain-scheme values (the status topic is always retained) |
 | `<refresh>` | 60 | seconds between full republications of every point; 0 = only changes |
-| `<queue>` | 256 | bound of the client's request queue; when it is full a publication is dropped and a new birth (everything again) follows |
+| `<queue>` | 256, or points + 8 if more | bound of the client's request queue (and of the unacknowledged QoS 1 messages, at most 100); at least points + 3, so that a whole birth, the status message and the subscription fit. When it is full the rest of that tick is dropped, one line is logged (at most every 5 s) and a new birth (everything again) follows |
 | `<username>`, `<password>` | none | |
 | `<tls-ca>` | required for `ssl://` | PEM file that signed the broker's certificate |
 | `<tls-cert>`, `<tls-key>` | none | client certificate and key (PEM) for brokers that ask for one; both or neither |
@@ -48,7 +48,7 @@ Topic levels (`<device>`, `<group-id>`, `<edge-node-id>`) may not contain `/`, `
 
 A command goes through the same checks as a Modbus or DNP3 write: the point must be `<writable>`, the value must have the tag's
 type, an analog must be finite and within `<min-value>` / `<max-value>`, and what passes is queued in the datastore's write queue
-(it takes effect when the provider acknowledges it, exactly like any protocol's). A refused command is a line in the event log.
+(it takes effect when the provider acknowledges it, exactly like any protocol's). A refused command is a line in the event log. **A retained message on a command topic is ignored** (and logged): it was left on the broker, not sent now, and would be obeyed again on every reconnect.
 A tag name containing `/` can be published but not commanded (the subscription is `<prefix>/<device>/+/set`).
 
 ## Sparkplug B
@@ -77,5 +77,5 @@ Read it with `mosquitto_sub -h 10.1.1.60 -v -t 'waterway/#'`, command it with `m
 
 One task per element; it only reads the datastore and queues writes, so a dead broker never delays the scan cycle. A failed or lost
 connection is retried after 1 s, doubling to 30 s while the broker stays away (back to 1 s after a session that connected). Every
-session registers its will in CONNECT, subscribes the command topics, then publishes the birth. Packets above 1 MiB are refused in
+session registers its will in CONNECT, subscribes the command topics, then publishes the birth. The Sparkplug NCMD subscription is QoS 1. Packets above 1 MiB are refused in
 both directions; the client queue is bounded by `<queue>`.

@@ -148,6 +148,13 @@ impl Probe {
             .await
             .unwrap();
     }
+
+    async fn put_retained(&self, topic: &str, payload: impl Into<Vec<u8>>) {
+        self.client
+            .publish(topic, QoS::AtLeastOnce, true, payload)
+            .await
+            .unwrap();
+    }
 }
 
 fn config(port: u16, inner: &str) -> String {
@@ -288,6 +295,109 @@ async fn it_connects_when_the_broker_appears_and_again_after_the_broker_restarts
     let mut probe = Probe::on(port, &["ferrofire/rtu-1/#"]).await;
     probe.text("ferrofire/rtu-1/level", "8").await;
     d.stop.cancel();
+}
+
+#[tokio::test]
+async fn a_retained_command_is_never_obeyed_not_even_on_every_reconnect() {
+    let b = Broker::start();
+    let filters = [
+        "ferrofire/rtu-1/status",
+        "spBv1.0/waterway/NBIRTH/rtu-1",
+        "ferrofire/rtu-1/setpoint/set",
+        "spBv1.0/waterway/NCMD/rtu-1",
+    ];
+    let mut probe = Probe::on(b.port, &filters).await;
+    probe
+        .put_retained("ferrofire/rtu-1/setpoint/set", "42")
+        .await; // left on the broker by someone
+    probe
+        .put_retained("spBv1.0/waterway/NCMD/rtu-1", sp_write("setpoint", 43.0))
+        .await;
+    // the broker has stored both once the probe hears them itself; only then is the client's subscription answered with retained copies
+    probe.text("ferrofire/rtu-1/setpoint/set", "42").await;
+    probe.want("spBv1.0/waterway/NCMD/rtu-1", |_| true).await;
+    let d = start(&config(b.port, ""));
+    probe.text("ferrofire/rtu-1/status", "online").await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        !d.store.is_queued("setpoint"),
+        "the retained command must be ignored"
+    );
+    probe.put("ferrofire/rtu-1/setpoint/set", "44").await; // a live one still works
+    assert_eq!(queued(&d.store, "setpoint").await, V::Analog(44.0));
+    d.stop.cancel();
+    let d = start(&config(b.port, SPARKPLUG));
+    probe.want("spBv1.0/waterway/NBIRTH/rtu-1", is_nbirth).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(
+        !d.store.is_queued("setpoint"),
+        "a retained NCMD must be ignored too"
+    );
+    d.stop.cancel();
+}
+
+fn sp_write(name: &str, v: f64) -> Vec<u8> {
+    let m = sp::Metric {
+        name: Some(name.into()),
+        value: Some(sp::Value::Double(v)),
+        ..Default::default()
+    };
+    Payload {
+        metrics: vec![m],
+        ..Default::default()
+    }
+    .encode_to_vec()
+}
+
+/// A broker that accepts MQTT 3.1.1 connections and then never acknowledges or reads anything again.
+fn mute_broker() -> u16 {
+    use std::io::{Read, Write};
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for s in l.incoming() {
+            let mut s = s.unwrap();
+            let mut buf = [0u8; 512];
+            let _ = s.read(&mut buf); // the CONNECT
+            let _ = s.write_all(&[0x20, 2, 0, 0]); // CONNACK, accepted
+            std::thread::spawn(move || loop {
+                std::thread::sleep(Duration::from_secs(1));
+                let _ = &s;
+            });
+        }
+    });
+    port
+}
+
+#[tokio::test]
+async fn a_broker_that_stops_acknowledging_fills_the_queue_and_the_log_says_so_once_in_a_while() {
+    let port = mute_broker();
+    let log = std::env::temp_dir().join(format!("mqtt-net-queue-{}.log", std::process::id()));
+    let xml = config(port, "")
+        .replace("/dev/null", &log.display().to_string())
+        .replace(
+            "<refresh>0</refresh>",
+            "<refresh>0</refresh><queue>8</queue>",
+        );
+    let d = start(&xml);
+    // QoS 1 publishes pile up unacknowledged: 100 in flight, then the queue (8 here) is full
+    for i in 0..400 {
+        d.store.publish("plevel", f64::from(i), 1);
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        if std::fs::read_to_string(&log).is_ok_and(|t| t.contains("publish queue full")) {
+            break;
+        }
+    }
+    let text = std::fs::read_to_string(&log).unwrap_or_default();
+    assert!(text.contains("publish queue full"), "{text}");
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let n = std::fs::read_to_string(&log)
+        .unwrap()
+        .matches("publish queue full")
+        .count();
+    assert!(n <= 2, "the warning is rate limited, saw {n}");
+    d.stop.cancel();
+    let _ = std::fs::remove_file(&log);
 }
 
 const SPARKPLUG: &str =
