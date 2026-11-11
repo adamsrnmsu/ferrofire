@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SCEPTRE>
+    <field-device>
+        <name>rtu-1</name>
+        <cycle-time>1000</cycle-time>
+        <tags>
+            <external-tag><name>var_rtu-1_I30000</name><io>rtu-1_I30000</io><type>analog</type></external-tag>
+            <external-tag><name>var_rtu-1_I30001</name><io>rtu-1_I30001</io><type>analog</type></external-tag>
+            <external-tag><name>var_rtu-1_I30002</name><io>rtu-1_I30002</io><type>analog</type></external-tag>
+            <external-tag><name>var_rtu-1_O40000</name><io>rtu-1_O40000</io><type>analog</type></external-tag>
+            <external-tag><name>var_rtu-1_I30003</name><io>rtu-1_I30003</io><type>analog</type></external-tag>
+            <external-tag><name>var_rtu-1_O40001</name><io>rtu-1_O40001</io><type>analog</type></external-tag>
+            <external-tag><name>var_rtu-1_I30004</name><io>rtu-1_I30004</io><type>analog</type></external-tag>
+            <external-tag><name>var_rtu-1_I30005</name><io>rtu-1_I30005</io><type>analog</type></external-tag>
+            <external-tag><name>var_rtu-1_I30006</name><io>rtu-1_I30006</io><type>analog</type></external-tag>
+            <external-tag><name>var_rtu-1_I30007</name><io>rtu-1_I30007</io><type>analog</type></external-tag>
+            <external-tag><name>var_rtu-1_I30008</name><io>rtu-1_I30008</io><type>analog</type></external-tag>
+            <external-tag><name>var_rtu-1_I30009</name><io>rtu-1_I30009</io><type>analog</type></external-tag>
+        </tags>
+        <comms>
+            <modbus-server>
+                <endpoint>tcp://127.0.0.1:5502</endpoint>
+                <event-logging>rtu-1-modbus-tcp-server.log</event-logging>
+                <input-register><address>30000</address><max-value>1000</max-value><min-value>0</min-value><tag>var_rtu-1_I30000</tag></input-register>
+                <input-register><address>30001</address><max-value>1000</max-value><min-value>0</min-value><tag>var_rtu-1_I30001</tag></input-register>
+                <input-register><address>30002</address><max-value>1000</max-value><min-value>0</min-value><tag>var_rtu-1_I30002</tag></input-register>
+                <holding-register><address>40000</address><max-value>1000</max-value><min-value>0</min-value><tag>var_rtu-1_O40000</tag></holding-register>
+                <input-register><address>30003</address><max-value>1000</max-value><min-value>0</min-value><tag>var_rtu-1_I30003</tag></input-register>
+                <holding-register><address>40001</address><max-value>1000</max-value><min-value>0</min-value><tag>var_rtu-1_O40001</tag></holding-register>
+                <input-register><address>30004</address><max-value>1000</max-value><min-value>0</min-value><tag>var_rtu-1_I30004</tag></input-register>
+                <input-register><address>30005</address><max-value>1000</max-value><min-value>0</min-value><tag>var_rtu-1_I30005</tag></input-register>
+                <input-register><address>30006</address><max-value>1000</max-value><min-value>0</min-value><tag>var_rtu-1_I30006</tag></input-register>
+                <input-register><address>30007</address><max-value>1000</max-value><min-value>0</min-value><tag>var_rtu-1_I30007</tag></input-register>
+                <input-register><address>30008</address><max-value>1000</max-value><min-value>0</min-value><tag>var_rtu-1_I30008</tag></input-register>
+                <input-register><address>30009</address><max-value>1000</max-value><min-value>0</min-value><tag>var_rtu-1_I30009</tag></input-register>
+            </modbus-server>
+        </comms>
+        <input>
+            <endpoint>udp://*;239.0.0.1:40000</endpoint>
+            <analog><id>rtu-1_I30000</id><name>lowerwater.height</name></analog>
+            <analog><id>rtu-1_I30001</id><name>lock.height</name></analog>
+            <analog><id>rtu-1_I30002</id><name>lowergate.open</name></analog>
+            <analog><id>rtu-1_I30003</id><name>lowervalve.open</name></analog>
+            <analog><id>rtu-1_I30004</id><name>lowersensor.active</name></analog>
+            <analog><id>rtu-1_I30005</id><name>lowersensor.direction</name></analog>
+            <analog><id>rtu-1_I30006</id><name>locksensor.active</name></analog>
+            <analog><id>rtu-1_I30007</id><name>locksensor.direction</name></analog>
+            <analog><id>rtu-1_I30008</id><name>boat.location</name></analog>
+            <analog><id>rtu-1_I30009</id><name>boat.direction</name></analog>
+        </input>
+        <output>
+            <endpoint>tcp://127.0.0.1:5555</endpoint>
+            <analog><id>rtu-1_O40000</id><name>lowergate.open</name></analog>
+            <analog><id>rtu-1_O40001</id><name>lowervalve.open</name></analog>
+        </output>
+        <logic>
+            <![CDATA[
+            var_rtu-1_O40000 = 1*((var_rtu-1_I30005 == 1) && (var_rtu-1_I30004 == 1) && (var_rtu-1_I30001 >= var_rtu-1_I30000 - 0.1) && (var_rtu-1_I30001 <= var_rtu-1_I30000 + 0.1)) + 0*((var_rtu-1_I30007 == 1) && (var_rtu-1_I30006 == 1) && (var_rtu-1_I30001 >= var_rtu-1_I30000 - 0.1) && (var_rtu-1_I30001 <= var_rtu-1_I30000 + 0.1)) + 1*((var_rtu-1_I30007 == -1) && (var_rtu-1_I30006 == 1) && (var_rtu-1_I30001 >= var_rtu-1_I30000 - 0.1) && (var_rtu-1_I30001 <= var_rtu-1_I30000 + 0.1)) + 0*((var_rtu-1_I30005 == -1) && (var_rtu-1_I30004 == 1))
+            var_rtu-1_O40001 = 1*((var_rtu-1_I30005 == 1) && (var_rtu-1_I30004 == 1) && (var_rtu-1_I30001 > var_rtu-1_I30000)) + 0*((var_rtu-1_I30007 == 1) && (var_rtu-1_I30006 == 1) && (var_rtu-1_I30001 >= var_rtu-1_I30000)) + 1*((var_rtu-1_I30007 == -1) && (var_rtu-1_I30006 == 1) && (var_rtu-1_I30001 > var_rtu-1_I30000)) + 0*((var_rtu-1_I30005 == -1) && (var_rtu-1_I30004 == 1))
+            ]]>
+        </logic>
+    </field-device>
+</SCEPTRE>

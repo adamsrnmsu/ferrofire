@@ -10,15 +10,18 @@ use tokio_util::sync::CancellationToken;
 /// `(tag, point, value)`: a queued write as `Store::pending` returns it.
 type Pending = (String, String, Value);
 
-/// The `WRITE=` request for some pending points (SPEC 3.3): `point:value,...`, analog with 6 decimals, NUL-terminated.
+/// One `point:value` of a `WRITE=`: `true`/`false`, analog as C's `%f` (six decimals, `nan` in lower case).
+pub fn item(point: &str, v: &Value) -> String {
+    match v {
+        Value::Binary(b) => format!("{point}:{b}"),
+        Value::Analog(x) if x.is_nan() => format!("{point}:nan"),
+        Value::Analog(x) => format!("{point}:{x:.6}"),
+    }
+}
+
+/// The `WRITE=` request for some pending points (SPEC 3.3): `point:value,...`, NUL-terminated.
 fn request(points: &[Pending]) -> Vec<u8> {
-    let items: Vec<String> = points
-        .iter()
-        .map(|(_, p, v)| match v {
-            Value::Binary(b) => format!("{p}:{b}"),
-            Value::Analog(x) => format!("{p}:{x:.6}"),
-        })
-        .collect();
+    let items: Vec<String> = points.iter().map(|(_, p, v)| item(p, v)).collect();
     let mut r = format!("WRITE={}", items.join(",")).into_bytes();
     r.push(0);
     r
@@ -202,6 +205,15 @@ mod tests {
             b"WRITE=p.a:1.500000,p.b:false\0"
         );
         assert_eq!(request(&[p("b", Value::Binary(true))]), b"WRITE=p.b:true\0");
+    }
+
+    #[test]
+    fn items_print_like_c_printf() {
+        assert_eq!(item("p", &Value::Analog(f64::NAN)), "p:nan");
+        assert_eq!(item("p", &Value::Analog(f64::INFINITY)), "p:inf");
+        assert_eq!(item("p", &Value::Analog(f64::NEG_INFINITY)), "p:-inf");
+        assert_eq!(item("p", &Value::Analog(-0.0000004)), "p:-0.000000");
+        assert_eq!(item("p", &Value::Binary(true)), "p:true");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # ferrofire-testpeers: reference peers + blue-team tooling for the field-device acceptance harness (conformance/).
 #   docker build -t ferrofire-testpeers docker/testpeers          (arm64 and amd64: every stage is multi-arch)
-# Licence policy: opendnp3 is Apache-2.0. libiec61850 is GPL-3.0 and is built and shipped here ONLY as a separate test peer in
+# Licence policy: opendnp3 is Apache-2.0. libiec61850 (and mbpoll, from Debian) are GPL-3.0 and are shipped here ONLY as separate test peers in
 # its own binaries; ferrofire never links it, and nothing in this image is copied into a ferrofire release artefact.
 ARG ZEEK_VERSION=9.0.1
 
@@ -40,6 +40,10 @@ RUN zkg autoconfig >/dev/null 2>&1; : > /etc/ff-testpeers.zeek-packages; \
     for p in $ICSNPP; do if zkg install --force --skiptests "https://github.com/cisagov/$p" >/tmp/zkg-$p.log 2>&1; \
       then echo "$p" >> /etc/ff-testpeers.zeek-packages; else echo "zkg: $p not installed (see build log)" >&2; tail -5 /tmp/zkg-$p.log >&2; fi; done; \
     cat /etc/ff-testpeers.zeek-packages
+# Independent Modbus/TCP clients (conformance/modbus): mbpoll (libmodbus) and pymodbus. A layer of its own so that adding a peer
+# does not rebuild the Zeek packages above.
+RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends mbpoll python3-pymodbus >/dev/null \
+ && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/bin/ /usr/local/bin/
 COPY --from=build /out/licenses/ /usr/share/doc/ferrofire-testpeers/
 CMD ["bash"]

@@ -45,6 +45,8 @@ serde_json = "1"
 insta = "1"
 # libzmq (built from source) is the stock-bennu stand-in the interop tests talk to; the shipped binary has none
 zmq = { version = "0.10" }
+# an independent Modbus/TCP client for tests/modbus_clients.rs (MIT OR Apache-2.0)
+tokio-modbus = { version = "0.17", default-features = false, features = ["tcp"] }
 # the crate's own MMS client is the peer of the in-process tests (tests/iec61850_net.rs)
 iec61850-rs = { version = "=0.4.0", default-features = false, features = ["client", "server", "goose"] }
 

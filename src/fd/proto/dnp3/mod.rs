@@ -307,17 +307,9 @@ impl Sink for Commands<'_> {
     }
 }
 
-fn keepalive(stream: &TcpStream) {
-    use socket2::{SockRef, TcpKeepalive};
-    let ka = TcpKeepalive::new()
-        .with_time(Duration::from_secs(30))
-        .with_interval(Duration::from_secs(10));
-    let _ = SockRef::from(stream).set_tcp_keepalive(&ka);
-}
-
 /// Serve one master until it goes, misbehaves or the device stops. The socket closes when this returns.
 async fn serve(mut stream: TcpStream, ctx: Ctx) {
-    keepalive(&stream);
+    net::keepalive(&stream);
     let (mut conn, start) = (Conn::new(), Instant::now());
     let mut buf = [0u8; 2048];
     let mut tick = tokio::time::interval(TICK);

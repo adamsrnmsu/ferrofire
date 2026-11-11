@@ -1,6 +1,8 @@
 //! Shared by the protocol integration tests: load a module's element of a sceptre config.xml the way the field device does.
 #![allow(dead_code)]
 
+pub mod modbus;
+
 use ferrofire::fd::config::{Opts, Tags};
 use ferrofire::fd::proto::dnp3::Outstation;
 use ferrofire::fd::proto::Module;

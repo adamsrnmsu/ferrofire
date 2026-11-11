@@ -1,0 +1,25 @@
+== MBAP length below 2
+length 0, then FC3 40000 x1                00010000000300800401039c..(18 bytes)  answers
+length 1, no PDU                           000100000003018004        answers
+length 1, then FC3 40000 x1                000100000003018004039c40..(18 bytes)  answers
+== protocol id
+protocol id 1                              0001000100050103024020    answers
+protocol id 0xff00                         0001ff0000050103024020    answers
+== MBAP length over 254 (stock buffer: 1024)
+FC3 40000 x1, length 255                   000100000003018004        answers
+FC3 40000 x1, length 256                   000100000003018004        answers
+FC3 40000 x1, length 300                   000100000003018004        answers
+FC3 40000 x1, length 1000                  000100000003018004        answers
+FC3 40000 x1, length 1018                  000100000003018004        answers
+length 255 declared, 10 bytes sent, open                             answers
+length 65535 declared, 10 bytes sent, open                           answers
+== a frame cut short, then the client half-closes (bennu #81: answered from the previous request in the buffer)
+header only (7 bytes)                      000100000003018004        answers
+cut after the function code                000100000003018004        answers
+cut after the address                      000100000003018004        answers
+cut one byte short                         000100000003018004        answers
+header cut at 5 bytes                      000100000003008004        answers
+== FC15/FC16 with fewer data bytes than the byte count says (stock writes whatever follows in its buffer)
+FC16 40000 x1 bytecount 2, no data         00010000000601109c400001  answers
+FC16 40000 x1 bytecount 2, 1 data byte     00010000000601109c400001  answers
+FC15 coils 0 x2 bytecount 1, no data       000100000006010f00000002  answers

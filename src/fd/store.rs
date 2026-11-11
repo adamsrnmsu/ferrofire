@@ -228,8 +228,14 @@ impl Inner {
         }
     }
 
+    /// Erase the queue entry iff it still holds `v` (compare-and-erase, SPEC 3.2). A NaN is the same value as itself: a register of
+    /// zero span unscales to NaN, and an entry that never compares equal would be sent to the provider for ever.
     fn forget(&mut self, tag: &str, v: Value) {
-        if self.queue.get(tag) == Some(&v) {
+        let same = |a: &Value, b: &Value| match (a, b) {
+            (Value::Analog(x), Value::Analog(y)) => x == y || (x.is_nan() && y.is_nan()),
+            _ => a == b,
+        };
+        if self.queue.get(tag).is_some_and(|q| same(q, &v)) {
             self.queue.remove(tag);
         }
     }
@@ -398,5 +404,19 @@ mod tests {
         s.publish("p", 4.0, 1);
         assert_eq!(s.get_f64("o"), Some(4.0));
         assert_eq!(s.pending(5).len(), 0);
+    }
+
+    #[test]
+    fn a_nan_write_is_cleared_by_its_ack_but_a_newer_value_stays() {
+        let s = store();
+        s.write("ta", Value::Analog(f64::NAN)).unwrap();
+        s.ack("ta", Value::Analog(f64::NAN));
+        assert!(!s.is_queued("ta"));
+        s.write("ta", Value::Analog(f64::NAN)).unwrap();
+        s.write("ta", Value::Analog(1.0)).unwrap();
+        s.ack("ta", Value::Analog(f64::NAN));
+        assert!(s.is_queued("ta"));
+        s.reject("ta", Value::Analog(1.0));
+        assert!(!s.is_queued("ta"));
     }
 }

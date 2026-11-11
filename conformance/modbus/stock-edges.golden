@@ -1,0 +1,264 @@
+== initial state: everything reads as the zero of its kind
+FC4 30000 x12                      00010000001b0104180000555500007fff0000555555557fff0000000000008000
+FC3 40000 x12                      00010000001b0103180000555500007fff0000555555557fff0000000000008000
+FC1 coils 10 x10                   0001000000050101020000
+FC2 10000 x12                      0001000000050102020000
+FC4 @0                             0001000000050104020000
+FC3 @0                             0001000000050103020000
+FC1 @0                             00010000000401010100
+FC2 @0                             00010000000401020100
+FC4 @65535                         000100000003018402
+FC3 @65535                         000100000003018302
+FC1 @65535                         000100000003018102
+FC2 @65535                         000100000003018202
+== the top of the address space: where does addr + qty become an error, and which one
+FC1 @65534 x1                      000100000003018103
+FC1 @65534 x2                      000100000003018102
+FC1 @65533 x2                      000100000003018103
+FC1 @65533 x3                      000100000003018102
+FC1 @65535 x1                      000100000003018102
+FC2 @65534 x1                      000100000003018202
+FC2 @65534 x2                      000100000003018202
+FC2 @65533 x2                      000100000003018202
+FC2 @65533 x3                      000100000003018202
+FC2 @65535 x1                      000100000003018202
+FC3 @65534 x1                      000100000003018302
+FC3 @65534 x2                      000100000003018302
+FC3 @65533 x2                      000100000003018302
+FC3 @65533 x3                      000100000003018302
+FC3 @65535 x1                      000100000003018302
+FC4 @65534 x1                      000100000003018402
+FC4 @65534 x2                      000100000003018402
+FC4 @65533 x2                      000100000003018402
+FC4 @65533 x3                      000100000003018402
+FC4 @65535 x1                      000100000003018402
+== in-range values: each input register gets the same fraction f of its own range (min + f * (max - min); the zero-span one gets 100)
+FC4 x12 at f=0.00000               00010000001b010418000000000000000000000000000000000000000000000000
+FC4 @0 at f=0.00000                0001000000050104020000
+FC4 x12 at f=0.00002               00010000001b010418000000010001000000010001000100000000000100000001
+FC4 @0 at f=0.00002                0001000000050104020000
+FC4 x12 at f=0.25000               00010000001b0104183fff3fff3fff3fff3fff3fff3fff3fff00003fff3fff3fff
+FC4 @0 at f=0.25000                0001000000050104023fff
+FC4 x12 at f=0.50000               00010000001b0104187fff7fff7fff7fff7fff7fff7fff7fff00007fff7fff7fff
+FC4 @0 at f=0.50000                0001000000050104027fff
+FC4 x12 at f=0.18837               00010000001b010418303830393039303930393039303930390000303930383039
+FC4 @0 at f=0.18837                0001000000050104023038
+FC4 x12 at f=0.75000               00010000001b010418bfffbfffbfffbfffbfffbfffbfffbfff0000bfffbfffbfff
+FC4 @0 at f=0.75000                000100000005010402bfff
+FC4 x12 at f=0.99998               00010000001b010418fffefffefffefffefffefffefffefffe0000fffefffefffe
+FC4 @0 at f=0.99998                000100000005010402fffe
+FC4 x12 at f=1.00000               00010000001b010418ffffffffffffffffffffffffffffffff0000ffffffffffff
+FC4 @0 at f=1.00000                000100000005010402ffff
+== binary inputs: bit packing, LSB first, unaligned starts
+FC2 10000 x12                      0001000000050102022d09
+FC2 10000 x8                       0001000000040102012d
+FC2 10000 x9                       0001000000050102022d01
+FC2 10003 x7                       00010000000401020125
+FC2 10008 x4                       00010000000401020109
+FC2 10011 x1                       00010000000401020101
+FC2 10000 x1                       00010000000401020101
+FC2 10005 x2                       00010000000401020101
+FC2 10011 x2                       000100000003018202
+FC2 @0                             00010000000401020101
+FC2 @65535                         000100000003018202
+FC2 @65535 x2                      000100000003018202
+== holding registers: write raw values, read back, and see what the provider was sent
+FC6 40000=0                        00010000000601069c400000
+  provider saw: oa40000:0.000000
+FC6 40000=12345                    00010000000601069c403039
+  provider saw: oa40000:188.372625
+FC6 40000=65535                    00010000000601069c40ffff
+  provider saw: oa40000:1000.000000
+FC3 40000                          000100000005010302ffff
+FC6 40001=0                        00010000000601069c410000
+  provider saw: oa40001:-1000.000000
+FC6 40001=12345                    00010000000601069c413039
+  provider saw: oa40001:-434.882124
+FC6 40001=65535                    00010000000601069c41ffff
+  provider saw: oa40001:2000.000000
+FC3 40001                          000100000005010302ffff
+FC6 40002=0                        00010000000601069c420000
+  provider saw: oa40002:0.000000
+FC6 40002=12345                    00010000000601069c423039
+  provider saw: oa40002:0.188373
+FC6 40002=65535                    00010000000601069c42ffff
+  provider saw: oa40002:1.000000
+FC3 40002                          000100000005010302ffff
+FC6 40003=0                        00010000000601069c430000
+  provider saw: oa40003:-100.000000
+FC6 40003=12345                    00010000000601069c433039
+  provider saw: oa40003:-62.325475
+FC6 40003=65535                    00010000000601069c43ffff
+  provider saw: oa40003:100.000000
+FC3 40003                          000100000005010302ffff
+FC6 40004=0                        00010000000601069c440000
+  provider saw: oa40004:0.000000
+FC6 40004=12345                    00010000000601069c443039
+  provider saw: oa40004:12345.000000
+FC6 40004=65535                    00010000000601069c44ffff
+  provider saw: oa40004:65535.000000
+FC3 40004                          000100000005010302ffff
+FC6 40005=0                        00010000000601069c450000
+  provider saw: oa40005:-1000.000000
+FC6 40005=12345                    00010000000601069c453039
+  provider saw: oa40005:-434.882124
+FC6 40005=65535                    00010000000601069c45ffff
+  provider saw: oa40005:2000.000000
+FC3 40005                          000100000005010302ffff
+FC6 40006=0                        00010000000601069c460000
+  provider saw: oa40006:-1000.000000
+FC6 40006=12345                    00010000000601069c463039
+  provider saw: oa40006:-434.882124
+FC6 40006=65535                    00010000000601069c46ffff
+  provider saw: oa40006:2000.000000
+FC3 40006                          000100000005010302ffff
+FC6 40007=0                        00010000000601069c470000
+  provider saw: oa40007:50.000000
+FC6 40007=12345                    00010000000601069c473039
+  provider saw: oa40007:31.162737
+FC6 40007=65535                    00010000000601069c47ffff
+  provider saw: oa40007:-50.000000
+FC3 40007                          000100000005010302ffff
+FC6 40008=0                        00010000000601069c480000
+  provider saw: oa40008:nan
+FC6 40008=12345                    00010000000601069c483039
+  provider saw: oa40008:nan
+FC6 40008=65535                    00010000000601069c48ffff
+  provider saw: oa40008:nan
+FC3 40008                          0001000000050103020000
+FC6 40009=0                        00010000000601069c490000
+  provider saw: oa40009:0.000000
+FC6 40009=12345                    00010000000601069c493039
+  provider saw: oa40009:0.000188
+FC6 40009=65535                    00010000000601069c49ffff
+  provider saw: oa40009:0.001000
+FC3 40009                          000100000005010302ffff
+FC6 40010=0                        00010000000601069c4a0000
+  provider saw: oa40010:10.000000
+FC6 40010=12345                    00010000000601069c4a3039
+  provider saw: oa40010:10.094186
+FC6 40010=65535                    00010000000601069c4affff
+  provider saw: oa40010:10.500000
+FC3 40010                          000100000005010302ffff
+FC6 40011=0                        00010000000601069c4b0000
+  provider saw: oa40011:-32768.000000
+FC6 40011=12345                    00010000000601069c4b3039
+  provider saw: oa40011:-20423.000000
+FC6 40011=65535                    00010000000601069c4bffff
+  provider saw: oa40011:32767.000000
+FC3 40011                          000100000005010302ffff
+FC6 40000=1                        00010000000601069c400001
+  provider saw: oa40000:0.015259
+FC3 40000                          0001000000050103020001
+FC6 40000=32767                    00010000000601069c407fff
+  provider saw: oa40000:499.992370
+FC3 40000                          0001000000050103027fff
+FC6 40000=32768                    00010000000601069c408000
+  provider saw: oa40000:500.007630
+FC3 40000                          0001000000050103028000
+FC6 40000=65534                    00010000000601069c40fffe
+  provider saw: oa40000:999.984741
+FC3 40000                          000100000005010302fffe
+FC6 @0 =65535                      00010000000601060000ffff
+  provider saw: oa0:1000.000000
+FC3 @0                             000100000005010302ffff
+FC6 @65534 =1                      000100000003018602
+  provider saw: nothing
+FC16 @65535 x1                     000100000003019003
+  provider saw: nothing
+FC16 @65534 x2                     000100000003019003
+  provider saw: nothing
+FC16 @65534 x1                     000100000003019002
+  provider saw: nothing
+FC16 40000 x12 pattern             00010000000601109c40000c
+  provider saw: oa40000:0.015259,oa40001:-727.260243,oa40002:0.181811,oa40003:-45.458152,oa40004:23829.000000,oa40005:363.515679,oa40006:636.209659,oa40007:-13.630121,oa40008:nan,oa40009:0.000818,oa40010:10.454498,oa40011:32760.000000
+FC3 40000 x12                      00010000001b010318000117462e8b45d05d15745a8b9fa2e40000d16ee8b3fff8
+FC16 40010 x3 (last unmapped: first two still queue) 000100000003019002
+  provider saw: oa40010:10.031250,oa40011:-24576.000000
+FC3 40010 x2                       0001000000070103040fff2000
+FC16 65535 x2 (wraps?)             000100000003019003
+  provider saw: nothing
+FC3 @65535                         000100000003018302
+FC3 @0                             000100000005010302ffff
+FC16 tid=abcd                      abcd0000000601109c410001
+  provider saw: oa40001:500.022889
+FC3 40001                          0001000000050103028000
+== coils: what lands for each FC5 value, FC15 bit order and spill-over
+FC5 coil1 =ff00                    00010000000601050001ff00
+  provider saw: ob1:true
+FC1 coil 1                         00010000000401010101
+FC5 coil1 =0000                    000100000006010500010000
+  provider saw: ob1:false
+FC1 coil 1                         00010000000401010100
+FC5 coil1 =00ff                    0001000000060105000100ff
+  provider saw: ob1:false
+FC1 coil 1                         00010000000401010100
+FC5 coil1 =0001                    000100000006010500010001
+  provider saw: ob1:false
+FC1 coil 1                         00010000000401010100
+FC5 coil1 =ffff                    00010000000601050001ffff
+  provider saw: ob1:true
+FC1 coil 1                         00010000000401010101
+FC5 coil1 =04d2                    0001000000060105000104d2
+  provider saw: ob1:false
+FC1 coil 1                         00010000000401010100
+FC5 coil1 =8000                    000100000006010500018000
+  provider saw: ob1:false
+FC1 coil 1                         00010000000401010100
+FC5 coil1 =ff01                    00010000000601050001ff01
+  provider saw: ob1:true
+FC1 coil 1                         00010000000401010101
+FC5 coil1 =feff                    00010000000601050001feff
+  provider saw: ob1:false
+FC1 coil 1                         00010000000401010100
+FC5 coil1 =ff80                    00010000000601050001ff80
+  provider saw: ob1:true
+FC1 coil 1                         00010000000401010101
+FC5 coil 0 ON uid=7                00010000000607050000ff00
+  provider saw: ob0:true
+FC1 coils 0..3                     00010000000401010103
+FC1 @65535                         000100000003018102
+FC5 coil 7 ON                      00010000000601050007ff00
+  provider saw: ob7:true
+FC1 coil 7                         00010000000401010101
+FC5 coil 65534 (unmapped)          000100000003018502
+  provider saw: nothing
+FC15 @65535 x1                     000100000003018f03
+  provider saw: nothing
+FC15 @65534 x1                     000100000003018f02
+  provider saw: nothing
+FC15 @65534 x2                     000100000003018f03
+  provider saw: nothing
+FC15 coils 10..19 = 0b10_1100_1101 000100000006010f000a000a
+  provider saw: ob10:true,ob11:false,ob12:true,ob13:true,ob14:false,ob15:false,ob16:true,ob17:true,ob18:false,ob19:true
+FC1 coils 10..19                   000100000005010102cd02
+FC1 coils 12 x5                    00010000000401010113
+FC1 coils 10 x8                    000100000004010101cd
+FC1 coils 10 x9                    000100000005010102cd00
+FC15 coils 10..14 high bits set in the last byte 000100000006010f000a0005
+  provider saw: ob10:true,ob11:true,ob12:true,ob13:true,ob14:true
+FC1 coils 10..19                   000100000005010102df02
+FC15 coils 18..21 (20 unmapped: 18 and 19 still queue) 000100000003018f02
+  provider saw: ob18:true,ob19:true
+FC1 coils 18 x2                    00010000000401010103
+FC15 65535 x2 (wraps?)             000100000003018f03
+  provider saw: nothing
+FC1 @65535                         000100000003018102
+FC1 @0                             00010000000401010101
+FC15 coil 3 = 0 (one bit)          000100000006010f00030001
+  provider saw: ob3:false
+FC15 coil 2 = 1                    000100000006010f00020001
+  provider saw: ob2:true
+FC1 coils 0..3                     00010000000401010107
+== a write to an unmapped address queues nothing
+FC5 coil 4 (unmapped)              000100000003018502
+  provider saw: nothing
+FC6 40012 (unmapped)               000100000003018602
+  provider saw: nothing
+== two writes to one tag before the provider answers: sent in one segment the later value wins
+FC6 40002 = 100 and = 200 in one segment 00010000000601069c42006400020000000601069c4200c8
+  provider saw: oa40002:0.003052
+FC3 40002                          00010000000501030200c8
+FC6 40003 = 300                    00010000000601069c43012c
+  provider saw: oa40003:-99.084459
+FC3 40003                          000100000005010302012b

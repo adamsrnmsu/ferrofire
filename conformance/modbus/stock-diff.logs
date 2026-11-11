@@ -1,0 +1,63 @@
+0,2026-Nov-11-02:11:59,info,modbus-server,read input registers,start address for read input registers request is 30000 and read 1 input registers.
+1,2026-Nov-11-02:11:59,info,modbus-server,read input registers,start address for read input registers request is 30000 and read 1 input registers.
+2,2026-Nov-11-02:12:00,info,modbus-server,read input registers,start address for read input registers request is 30000 and read 1 input registers.
+3,2026-Nov-11-02:12:00,info,modbus-server,read holding registers,start address for read holding registers request is 40000 and read 1 holding registers.
+4,2026-Nov-11-02:12:01,info,modbus-server,read input registers,start address for read input registers request is 30000 and read 1 input registers.
+5,2026-Nov-11-02:12:01,info,modbus-server,read input registers,start address for read input registers request is 30000 and read 1 input registers.
+6,2026-Nov-11-02:12:01,info,modbus-server,read holding registers,start address for read holding registers request is 40000 and read 1 holding registers.
+7,2026-Nov-11-02:12:01,info,modbus-server,read input registers,start address for read input registers request is 30000 and read 1 input registers.
+8,2026-Nov-11-02:12:01,info,modbus-server,read input registers,start address for read input registers request is 30000 and read 1 input registers.
+9,2026-Nov-11-02:12:01,error,modbus-server,read input registers,Invalid read input registers request address: 30001
+10,2026-Nov-11-02:12:02,error,modbus-server,read input registers,Invalid read input registers request address: 29999
+11,2026-Nov-11-02:12:02,info,modbus-server,read discrete inputs,start address for read discrete inputs request is 10000 and read 2 registers.
+12,2026-Nov-11-02:12:02,error,modbus-server,read discrete inputs,Invalid read discrete inputs request address: 10002
+13,2026-Nov-11-02:12:02,info,modbus-server,read coils,start address for read coils request is 0 and read 2 coils.
+14,2026-Nov-11-02:12:02,error,modbus-server,read coils,Invalid read coils request address 5
+15,2026-Nov-11-02:12:03,info,modbus-server,read holding registers,start address for read holding registers request is 40000 and read 1 holding registers.
+16,2026-Nov-11-02:12:03,error,modbus-server,read holding registers,Invalid read holding registers request address: 40001
+17,2026-Nov-11-02:12:03,info,modbus-server,read input registers,start address for read input registers request is 30000 and read 1 input registers.
+18,2026-Nov-11-02:12:03,info,modbus-server,read input registers,start address for read input registers request is 30000 and read 1 input registers.
+19,2026-Nov-11-02:12:03,info,modbus-server,read input registers,start address for read input registers request is 30000 and read 1 input registers.
+20,2026-Nov-11-02:12:04,info,modbus-server,write coils,Data successfully written.
+21,2026-Nov-11-02:12:04,error,modbus-server,write coils,Invalid write coils request address: 9
+22,2026-Nov-11-02:12:04,info,modbus-server,write coils,Data successfully written.
+23,2026-Nov-11-02:12:04,info,modbus-server,write holding registers,Data successfully written.
+24,2026-Nov-11-02:12:04,info,modbus-server,write holding registers,Data successfully written.
+25,2026-Nov-11-02:12:05,info,modbus-server,write coils,Data successfully written.
+26,2026-Nov-11-02:12:05,info,modbus-server,write coils,Data successfully written.
+27,2026-Nov-11-02:12:06,info,modbus-server,read holding registers,start address for read holding registers request is 40000 and read 1 holding registers.
+28,2026-Nov-11-02:12:06,info,modbus-server,read coils,start address for read coils request is 0 and read 2 coils.
+29,2026-Nov-11-02:13:06,info,modbus-server,write coils,Data successfully written.
+30,2026-Nov-11-02:13:06,info,modbus-server,write holding registers,Data successfully written.
+31,2026-Nov-11-02:13:06,info,modbus-server,write holding registers,Data successfully written.
+32,2026-Nov-11-02:13:07,info,modbus-server,read coils,start address for read coils request is 0 and read 1 coils.
+33,2026-Nov-11-02:13:07,error,modbus-server,read coils,Invalid read coils request address 2
+34,2026-Nov-11-02:13:07,error,modbus-server,read discrete inputs,Invalid read discrete inputs request address: 10002
+35,2026-Nov-11-02:13:08,error,modbus-server,read discrete inputs,Invalid read discrete inputs request address: 500
+36,2026-Nov-11-02:13:09,error,modbus-server,read holding registers,Invalid read holding registers request address: 40001
+37,2026-Nov-11-02:13:09,error,modbus-server,read holding registers,Invalid read holding registers request address: 100
+38,2026-Nov-11-02:13:09,error,modbus-server,read input registers,Invalid read input registers request address: 30001
+39,2026-Nov-11-02:13:11,info,modbus-server,write coils,Data successfully written.
+40,2026-Nov-11-02:13:11,info,modbus-server,write coils,Data successfully written.
+41,2026-Nov-11-02:13:11,info,modbus-server,write coils,Data successfully written.
+42,2026-Nov-11-02:13:11,error,modbus-server,write coils,Invalid write coils request address: 2
+43,2026-Nov-11-02:13:11,info,modbus-server,write coils,Data successfully written.
+44,2026-Nov-11-02:13:11,info,modbus-server,write coils,Data successfully written.
+45,2026-Nov-11-02:13:11,error,modbus-server,write coils,Invalid write coils request address: 2
+46,2026-Nov-11-02:13:12,info,modbus-server,write coils,Data successfully written.
+47,2026-Nov-11-02:13:12,info,modbus-server,write coils,Data successfully written.
+48,2026-Nov-11-02:13:12,error,modbus-server,write coils,Invalid write coils request address: 2
+49,2026-Nov-11-02:13:12,error,modbus-server,write coils,Invalid write coils request address: 7
+50,2026-Nov-11-02:13:12,info,modbus-server,write coils,Data successfully written.
+51,2026-Nov-11-02:13:12,error,modbus-server,write coils,Invalid write coils request address: 2
+52,2026-Nov-11-02:13:13,info,modbus-server,write holding registers,Data successfully written.
+53,2026-Nov-11-02:13:13,info,modbus-server,write holding registers,Data successfully written.
+54,2026-Nov-11-02:13:13,error,modbus-server,write holding registers,Invalid write holding registers request address: 40001
+55,2026-Nov-11-02:13:13,info,modbus-server,write holding registers,Data successfully written.
+56,2026-Nov-11-02:13:13,error,modbus-server,write holding registers,Invalid write holding registers request address: 40001
+57,2026-Nov-11-02:13:14,error,modbus-server,write holding registers,Invalid write holding registers request address: 40001
+58,2026-Nov-11-02:13:14,error,modbus-server,write holding registers,Invalid write holding registers request address: 40001
+59,2026-Nov-11-02:13:14,info,modbus-server,write coils,Data successfully written.
+60,2026-Nov-11-02:13:14,error,modbus-server,write coils,Invalid write coils request address: 4
+61,2026-Nov-11-02:13:15,info,modbus-server,write coils,Data successfully written.
+62,2026-Nov-11-02:13:15,info,modbus-server,write coils,Data successfully written.

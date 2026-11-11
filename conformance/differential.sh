@@ -8,6 +8,8 @@ set -eu
 proto=${1:?usage: differential.sh PROTO stock|rust}; who=${2:?stock|rust}; set=${3:-diff}   # set: diff (probe_diff.py, diff-server.xml) or big (probe_big.py, diff-big-server.xml)
 cfg=diff-server.xml; [ "$set" = diff ] || cfg=diff-$set-server.xml
 here=$(cd "$(dirname "$0")" && pwd)
+[ -f "$here/$proto/$cfg" ] || cfg=diff-server.xml   # a set without a config of its own uses the protocol default
+[ "$proto/$set" != modbus/q4 ] || cfg=diff-edges-server.xml
 root=$(cd "$here/.." && pwd)
 DOCKER_HOST=${DOCKER_HOST:-unix://$HOME/.lima/phenix/sock/docker.sock}; export DOCKER_HOST
 cleanup() { docker rm -f ff-diff-$set-dut ff-diff-$set-peers >/dev/null 2>&1 || true; }
