@@ -664,6 +664,24 @@ fn pki(dir: &Path) {
     openssl(
         dir,
         &[
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            "other.key",
+            "-out",
+            "other.crt",
+            "-subj",
+            "/CN=otherca",
+            "-days",
+            "2",
+        ],
+    );
+    openssl(
+        dir,
+        &[
             "pkcs8", "-topk8", "-nocrypt", "-in", "cli.key", "-out", "cli8.key",
         ],
     );
@@ -720,6 +738,17 @@ async fn tls_with_a_client_certificate_and_a_password() {
     )
     .await
     .is_err());
+    d.stop.cancel();
+
+    // a broker whose certificate was not signed by our CA is not trusted: no session, and the device keeps retrying
+    let d = start(&cfg(&tls("other.crt")));
+    assert!(timeout(
+        Duration::from_secs(3),
+        probe.text("ferrofire/rtu-1/status", "online")
+    )
+    .await
+    .is_err());
+    assert!(!d.task.is_finished());
     d.stop.cancel();
     std::fs::remove_dir_all(&dir).unwrap();
 }

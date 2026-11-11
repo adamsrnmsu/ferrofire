@@ -78,4 +78,6 @@ Read it with `mosquitto_sub -h 10.1.1.60 -v -t 'waterway/#'`, command it with `m
 One task per element; it only reads the datastore and queues writes, so a dead broker never delays the scan cycle. A failed or lost
 connection is retried after 1 s, doubling to 30 s while the broker stays away (back to 1 s after a session that connected). Every
 session registers its will in CONNECT, subscribes the command topics, then publishes the birth. The Sparkplug NCMD subscription is QoS 1. Packets above 1 MiB are refused in
-both directions; the client queue is bounded by `<queue>`.
+both directions; the client queue is bounded by `<queue>`. Known limit: MQTT 3.1.1 cannot suppress retained delivery, so a retained
+message over 1 MiB left on a command topic drops the connection at every subscribe and the device stays off the air until the broker's
+copy is cleared (publish an empty retained payload to that topic).
