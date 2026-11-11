@@ -15,28 +15,28 @@ for _ in range(240):   # keep telling the device the values for the whole run
     u.sendto(bytes([len(g)]) + g + body, ("239.0.0.1", 40000)); time.sleep(0.5)
 PY
 for _ in $(seq 60); do python3 -c 'import socket; socket.create_connection(("127.0.0.1", 5025), 1)' 2>/dev/null && break; sleep 0.5; done
-for _ in $(seq 60); do [ "$(ferrofire scpi 127.0.0.1 'MEAS:ANAL:LEVEL?' 2>/dev/null)" = 250.5 ] && break; sleep 0.5; done
+for _ in $(seq 60); do [ "$(ferrofire scpi 127.0.0.1 'MEAS:SCAL:LEVEL?' 2>/dev/null)" = 250.5 ] && break; sleep 0.5; done
 echo "== PyVISA (pyvisa-py, TCPIP::127.0.0.1::5025::SOCKET)"
 /opt/pyvisa/bin/python "$d/pyvisa_client.py" /tmp/provider.log || exit 1
 echo "== lxi-tools: lxi scpi --raw"
 idn=$(lxi scpi --raw -a 127.0.0.1 -p 5025 '*IDN?') || { echo "FAIL: lxi scpi *IDN? failed"; exit 1; }
 echo "lxi *IDN? -> $idn"
 case "$idn" in ferrofire,rtu-1,CONF-0001,*) echo "PASS lxi: *IDN?" ;; *) echo "FAIL lxi: *IDN? -> $idn"; exit 1 ;; esac
-lvl=$(lxi scpi --raw -a 127.0.0.1 -p 5025 'MEAS:ANAL:LEVEL?')
-echo "lxi MEAS:ANAL:LEVEL? -> $lvl"
-case "$lvl" in 250.5*) echo "PASS lxi: MEAS:ANAL:LEVEL? = 250.5" ;; *) echo "FAIL lxi: level -> $lvl"; exit 1 ;; esac
+lvl=$(lxi scpi --raw -a 127.0.0.1 -p 5025 'MEAS:SCAL:LEVEL?')
+echo "lxi MEAS:SCAL:LEVEL? -> $lvl"
+case "$lvl" in 250.5*) echo "PASS lxi: MEAS:SCAL:LEVEL? = 250.5" ;; *) echo "FAIL lxi: level -> $lvl"; exit 1 ;; esac
 echo "== ferrofire scpi --check"
 cat > /tmp/script.scpi <<'S'
 # a script for ferrofire scpi --check
 *CLS
 *IDN?
-MEAS:ANAL:FLOW?
+MEAS:SCAL:FLOW?
 SOUR:SETPOINT 300
 SOUR:BREAKER_CMD 0
-MEAS:BIN:BRKR?;:MEAS:ANAL:LEVEL?
+MEAS:BIN:BRKR?;:MEAS:SCAL:LEVEL?
 S
 ferrofire scpi 127.0.0.1 --check --file /tmp/script.scpi && echo "PASS ferrofire scpi: --check script exit 0" || { echo "FAIL ferrofire scpi: --check script"; exit 1; }
-ferrofire scpi 127.0.0.1 --check --json '*OPC?' 'MEAS:ANAL:LEVEL?'
+ferrofire scpi 127.0.0.1 --check --json '*OPC?' 'MEAS:SCAL:LEVEL?'
 ferrofire scpi 127.0.0.1 --check --timeout 1 'SOUR:SETPOINT 99999' 2> /tmp/check-err.txt; rc=$?
 cat /tmp/check-err.txt
 { [ "$rc" = 1 ] && grep -q -- '-222,' /tmp/check-err.txt; } && echo "PASS ferrofire scpi: --check exits 1 with the -222 text" || { echo "FAIL ferrofire scpi: --check on a bad write (rc=$rc)"; exit 1; }

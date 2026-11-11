@@ -11,7 +11,7 @@ use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
     let route = |tag: &str, kind, writable, min, max| {
-        let (name, k) = (tag.to_ascii_uppercase(), if kind == Kind::Analog { "ANALog" } else { "BINary" });
+        let (name, k) = (tag.to_ascii_uppercase(), if kind == Kind::Analog { "SCALar" } else { "BINary" });
         Route {
             point: Point { tag: tag.into(), kind, writable, min, max },
             read: vec!["MEASure".into(), k.into(), name.clone()],

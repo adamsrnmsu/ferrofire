@@ -72,7 +72,7 @@ fn path_or(n: Node, key: &str, default: Vec<String>) -> Result<Vec<String>, Conf
 fn paths(n: Node, p: &Point) -> Result<(Vec<String>, Option<Vec<String>>), ConfigError> {
     let name = tag_mnemonic(&p.tag);
     let kind = match p.kind {
-        Kind::Analog => "ANALog",
+        Kind::Analog => "SCALar",
         Kind::Binary => "BINary",
     };
     let read = path_or(
@@ -382,7 +382,7 @@ mod tests {
         )
         .unwrap();
         let r = &s.instrument().routes;
-        assert_eq!(r[0].read, ["MEASure", "ANALog", "LEVEL"]);
+        assert_eq!(r[0].read, ["MEASure", "SCALar", "LEVEL"]);
         assert_eq!(r[0].write, None);
         assert_eq!(r[1].read, ["MEASure", "BINary", "PUMP_RUN"]);
         assert_eq!(
@@ -433,7 +433,7 @@ mod tests {
         );
         let e = err(&point(
             "level",
-            "<writable>true</writable><write-path>MEAS:ANAL:LEVEL</write-path>",
+            "<writable>true</writable><write-path>MEAS:SCAL:LEVEL</write-path>",
         ));
         assert!(
             e.contains("same SCPI path"),

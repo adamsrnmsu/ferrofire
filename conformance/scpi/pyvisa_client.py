@@ -21,11 +21,11 @@ dev = rm.open_resource("TCPIP::127.0.0.1::5025::SOCKET", read_termination="\n", 
 dev.write("*CLS")
 idn = dev.query("*IDN?")
 check("*IDN? names ferrofire rtu-1 CONF-0001", idn.startswith("ferrofire,rtu-1,CONF-0001,"), idn)
-for q, want in [("MEAS:ANAL:LEVEL?", 250.5), ("MEASure:ANALog:FLOW?", -12.25), ("meas:anal:level?", 250.5)]:
+for q, want in [("MEAS:SCAL:LEVEL?", 250.5), ("MEASure:SCALar:FLOW?", -12.25), ("meas:scal:level?", 250.5)]:
     got = dev.query_ascii_values(q)[0]
     check(f"{q} = {want}", got == want, got)
 check("MEAS:BIN:BRKR? = 1", dev.query("MEAS:BIN:BRKR?") == "1")
-check("compound query joins with ;", dev.query("MEAS:ANAL:LEVEL?;:MEAS:ANAL:FLOW?;*OPC?") == "250.5;-12.25;1")
+check("compound query joins with ;", dev.query("MEAS:SCAL:LEVEL?;:MEAS:SCAL:FLOW?;*OPC?") == "250.5;-12.25;1")
 check("SYST:ERR? is empty so far", dev.query("SYST:ERR?") == '0,"No error"')
 dev.write("SOUR:SETPOINT 420.5")
 dev.write("SOUR:BREAKER_CMD ON")

@@ -19,32 +19,32 @@
 > *ESR?
 < 1
 
-# Reads: the default path is MEASure:<ANALog|BINary>:<TAG>, a tag name made into a mnemonic.
-> MEAS:ANAL:LEVEL?
+# Reads: the default path is MEASure:<SCALar|BINary>:<TAG>, a tag name made into a mnemonic.
+> MEAS:SCAL:LEVEL?
 < 12.5
-> MEASure:ANALog:level?
+> MEASure:SCALar:level?
 < 12.5
-> meas:anal:load_1_bus_1_mw?
+> meas:scal:load_1_bus_1_mw?
 < -250
 > MEAS:BIN:ALARM?
 < 1
-> MEAS:ANAL:SETPOINT?
+> MEAS:SCAL:SETPOINT?
 < 400
 > MEAS:BIN:BREAKER?
 < 0
-> MEAS:ANAL:LEVEL?;:MEAS:BIN:ALARM?;*IDN?
+> MEAS:SCAL:LEVEL?;:MEAS:BIN:ALARM?;*IDN?
 < 12.5;1;ferrofire,rtu-1,0,{version}
 @ publish plevel 0.001
-> MEAS:ANAL:LEVEL?
+> MEAS:SCAL:LEVEL?
 < 0.001
 # A header without a leading colon is relative to the previous header's path.
-> MEAS:ANAL:LEVEL?;SETPOINT?;:MEAS:BIN:ALARM?
+> MEAS:SCAL:LEVEL?;SETPOINT?;:MEAS:BIN:ALARM?
 < 0.001;400;1
 
 # Writes only queue; the value changes when the provider acknowledges.
 > SOUR:SETPOINT 750.5
 @ queued setpoint
-> MEAS:ANAL:SETPOINT?
+> MEAS:SCAL:SETPOINT?
 < 400
 > SOUR:SETPOINT?
 < 400
@@ -69,11 +69,11 @@
 > SOUR:SETPOINT 1,2
 > SOUR:SETPOINT 5V
 > SOUR:SETPOINT foo
-> MEAS:ANAL:NOPE?
-> MEAS:ANAL:LEVEL 1
+> MEAS:SCAL:NOPE?
+> MEAS:SCAL:LEVEL 1
 > SOUR:LEVEL 1
-> MEAS2:ANAL:LEVEL?
-> MEAS:ANAL:LEVEL? 5
+> MEAS2:SCAL:LEVEL?
+> MEAS:SCAL:LEVEL? 5
 > *ESR?
 < 48
 > *STB?
@@ -97,13 +97,13 @@
 > SYST:ERR?
 < -224,"Illegal parameter value;FOO"
 > SYST:ERR?
-< -113,"Undefined header;MEAS:ANAL:NOPE?"
+< -113,"Undefined header;MEAS:SCAL:NOPE?"
 > SYST:ERR?
-< -113,"Undefined header;MEAS:ANAL:LEVEL"
+< -113,"Undefined header;MEAS:SCAL:LEVEL"
 > SYST:ERR?
 < -113,"Undefined header;SOUR:LEVEL"
 > SYST:ERR?
-< -114,"Header suffix out of range;MEAS2:ANAL:LEVEL?"
+< -114,"Header suffix out of range;MEAS2:SCAL:LEVEL?"
 > SYST:ERR?
 < -108,"Parameter not allowed"
 > SYST:ERR?

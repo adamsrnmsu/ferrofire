@@ -116,7 +116,7 @@ fn scpi_text_and_json() {
     let outcomes = [
         o("*IDN?", Some("ferrofire,rtu-1,0,0.1.0"), &[]),
         o("SOUR:SETPOINT 5", None, &[]),
-        o("MEAS:ANAL:LEVEL?;:MEAS:BIN:ALARM?", Some("12.5;1"), &[]),
+        o("MEAS:SCAL:LEVEL?;:MEAS:BIN:ALARM?", Some("12.5;1"), &[]),
         o(
             "SOUR:SETPOINT 9000",
             None,

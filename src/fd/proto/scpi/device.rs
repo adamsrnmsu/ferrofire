@@ -562,7 +562,7 @@ mod tests {
     fn route(tag: &str, kind: Kind, writable: bool, min: Option<f64>, max: Option<f64>) -> Route {
         let name = tag.to_ascii_uppercase();
         let k = if kind == Kind::Analog {
-            "ANALog"
+            "SCALar"
         } else {
             "BINary"
         };
@@ -820,31 +820,31 @@ mod tests {
     fn mnemonics_have_a_short_and_a_long_form_in_any_case_and_a_suffix_of_one() {
         let mut r = rig();
         for h in [
-            "MEAS:ANAL:LVL?",
-            "measure:analog:lvl?",
-            "MEASURE:ANAL:Lvl?",
-            ":MEAS1:ANAL1:LVL1?",
-            "Meas:Anal:lvl?",
+            "MEAS:SCAL:LVL?",
+            "measure:scalar:lvl?",
+            "MEASURE:SCAL:Lvl?",
+            ":MEAS1:SCAL1:LVL1?",
+            "Meas:Scal:lvl?",
         ] {
             assert_eq!(r.ask(h), "2.5\n", "{h}");
         }
         assert!(r.errors().is_empty());
         for h in [
-            "MEASU:ANAL:LVL?",
-            "MEA:ANAL:LVL?",
-            "MEAS:ANALOGUE:LVL?",
+            "MEASU:SCAL:LVL?",
+            "MEA:SCAL:LVL?",
+            "MEAS:SCALARS:LVL?",
             "MEAS:LVL?",
-            "MEAS:ANAL:LVL:X?",
-            "MEAS:ANAL:BIN:LVL?",
+            "MEAS:SCAL:LVL:X?",
+            "MEAS:SCAL:BIN:LVL?",
             "LVL?",
         ] {
             assert_eq!(r.ask(h), "", "{h}");
             assert!(r.errors()[0].starts_with("-113,"), "{h}");
         }
         for h in [
-            "MEAS2:ANAL:LVL?",
-            "MEAS:ANAL2:LVL?",
-            "MEAS:ANAL:LVL0?",
+            "MEAS2:SCAL:LVL?",
+            "MEAS:SCAL2:LVL?",
+            "MEAS:SCAL:LVL0?",
             "SOUR2:LVL 1",
             "SYST2:ERR?",
             "SYST:ERR2?",
@@ -855,11 +855,11 @@ mod tests {
             assert!(e[0].starts_with("-114,"), "{h}: {e:?}");
         }
         assert_eq!(
-            r.ask("MEAS:ANAL:BUS1?"),
+            r.ask("MEAS:SCAL:BUS1?"),
             "9.9E+37\n",
             "a tag that ends in a digit is its own mnemonic"
         );
-        r.ask("MEAS:ANAL:BUS2?");
+        r.ask("MEAS:SCAL:BUS2?");
         assert!(
             r.errors()[0].starts_with("-113,"),
             "BUS2 is not BUS1 with a suffix"
@@ -869,20 +869,20 @@ mod tests {
     #[test]
     fn a_header_without_a_colon_is_relative_to_the_previous_one() {
         let mut r = rig();
-        assert_eq!(r.ask("MEAS:ANAL:LVL?;FREE?;RO?"), "2.5;-1000;9.91E+37\n");
+        assert_eq!(r.ask("MEAS:SCAL:LVL?;FREE?;RO?"), "2.5;-1000;9.91E+37\n");
         assert_eq!(
-            r.ask("MEAS:ANAL:LVL?;*IDN?;FREE?"),
+            r.ask("MEAS:SCAL:LVL?;*IDN?;FREE?"),
             "2.5;ferrofire,rtu,0,1;-1000\n",
             "a common command leaves the path alone"
         );
         assert_eq!(
-            r.ask("MEAS:ANAL:LVL?;:SYST:VERS?;ERR:COUN?"),
+            r.ask("MEAS:SCAL:LVL?;:SYST:VERS?;ERR:COUN?"),
             "2.5;1999.0;0\n"
         );
         assert_eq!(r.ask("SYST:ERR?;VERS?"), "0,\"No error\";1999.0\n");
         assert_eq!(r.ask("VERS?"), "", "the first unit has no previous path");
         assert!(r.errors()[0].starts_with("-113,"));
-        assert_eq!(r.ask("MEAS:ANAL:LVL?;:FREE?"), "2.5\n");
+        assert_eq!(r.ask("MEAS:SCAL:LVL?;:FREE?"), "2.5\n");
         assert!(
             r.errors()[0].starts_with("-113,"),
             "a leading colon restarts at the root"
@@ -908,17 +908,17 @@ mod tests {
     #[test]
     fn values_are_numbers_flags_and_the_scpi_sentinels() {
         let mut r = rig();
-        assert_eq!(r.ask("MEAS:ANAL:LVL?"), "2.5\n");
+        assert_eq!(r.ask("MEAS:SCAL:LVL?"), "2.5\n");
         assert_eq!(r.ask("MEAS:BIN:SW?"), "1\n");
-        assert_eq!(r.ask("MEAS:ANAL:FREE?"), "-1000\n");
-        assert_eq!(r.ask("MEAS:ANAL:RO?"), "9.91E+37\n", "not a number");
-        assert_eq!(r.ask("MEAS:ANAL:BUS1?"), "9.9E+37\n", "infinity");
+        assert_eq!(r.ask("MEAS:SCAL:FREE?"), "-1000\n");
+        assert_eq!(r.ask("MEAS:SCAL:RO?"), "9.91E+37\n", "not a number");
+        assert_eq!(r.ask("MEAS:SCAL:BUS1?"), "9.9E+37\n", "infinity");
         assert_eq!(value_text(Value::Analog(f64::NEG_INFINITY)), "-9.9E+37");
         assert_eq!(value_text(Value::Binary(false)), "0");
         assert_eq!(value_text(Value::Analog(-0.125)), "-0.125");
-        r.ask("MEAS:ANAL:LVL? 5");
-        r.ask("MEAS:ANAL:LVL 5");
-        r.ask("MEAS:ANAL:LVL");
+        r.ask("MEAS:SCAL:LVL? 5");
+        r.ask("MEAS:SCAL:LVL 5");
+        r.ask("MEAS:SCAL:LVL");
         let e = r.errors();
         assert!(
             e[0].starts_with("-108,") && e[1].starts_with("-113,") && e[2].starts_with("-113,"),
@@ -1043,7 +1043,7 @@ mod tests {
             .routes
             .push(route("gone", Kind::Analog, true, None, None));
         r.ask("SOUR:GONE 1");
-        r.ask("MEAS:ANAL:GONE?");
+        r.ask("MEAS:SCAL:GONE?");
         let e = r.errors();
         assert!(
             e[0].starts_with("-200,") && e[1].starts_with("-200,"),

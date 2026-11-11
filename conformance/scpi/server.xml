@@ -11,7 +11,7 @@
             <external-tag><name>setpoint</name><io>O3</io><type>analog</type></external-tag>
         </tags>
         <comms>
-            <!-- default paths: MEASure:ANALog:LEVEL?, MEASure:BINary:BRKR?, SOURce:SETPOINT <v>, SOURce:BREAKER_CMD <0|1|ON|OFF> -->
+            <!-- default paths: MEASure:SCALar:LEVEL?, MEASure:BINary:BRKR?, SOURce:SETPOINT <v>, SOURce:BREAKER_CMD <0|1|ON|OFF> -->
             <scpi-server>
                 <endpoint>tcp://0.0.0.0:5025</endpoint>
                 <event-logging>rtu-1-scpi.log</event-logging>

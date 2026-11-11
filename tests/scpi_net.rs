@@ -83,7 +83,7 @@ async fn a_client_reads_and_sets_and_sees_the_error_queue_over_tcp() {
     let d = start("");
     let mut s = connect(d.port).await;
     assert_eq!(ask(&mut s, "*IDN?").await, IDN);
-    assert_eq!(ask(&mut s, "MEAS:ANAL:LEVEL?").await, "12.5\n");
+    assert_eq!(ask(&mut s, "MEAS:SCAL:LEVEL?").await, "12.5\n");
     s.write_all(b"SOUR:SETPOINT 700\n").await.unwrap();
     assert_eq!(ask(&mut s, "SYST:ERR?").await, "0,\"No error\"\n");
     assert!(d.store.is_queued("setpoint"));

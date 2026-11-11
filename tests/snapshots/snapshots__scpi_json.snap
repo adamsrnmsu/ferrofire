@@ -4,6 +4,6 @@ expression: "json.join(\"\\n\")"
 ---
 {"command":"*IDN?","response":"ferrofire,rtu-1,0,0.1.0","errors":[]}
 {"command":"SOUR:SETPOINT 5","response":null,"errors":[]}
-{"command":"MEAS:ANAL:LEVEL?;:MEAS:BIN:ALARM?","response":"12.5;1","errors":[]}
+{"command":"MEAS:SCAL:LEVEL?;:MEAS:BIN:ALARM?","response":"12.5;1","errors":[]}
 {"command":"SOUR:SETPOINT 9000","response":null,"errors":[{"code":-222,"message":"Data out of range;setpoint: 9000 is outside the limits"}]}
 {"command":"DISP:TEXT \"hi\"?","response":"a \"quoted\" reply","errors":[{"code":-113,"message":"Undefined header"},{"code":-102,"message":"Syntax error"}]}

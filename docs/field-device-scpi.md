@@ -32,9 +32,9 @@ VXI-11 are not implemented (`lxi scpi` needs `--raw`, PyVISA needs a `::SOCKET` 
 
 ### Tags as commands
 
-A tag is read with `MEASure:<KIND>:<TAG>?` where `<KIND>` is `ANALog` or `BINary`, and a writable tag is set with `SOURce:<TAG> <value>`
+A tag is read with `MEASure:<KIND>:<TAG>?` where `<KIND>` is `SCALar` for an analog tag (the SCPI-99 `MEASure:SCALar` form) or `BINary` for a binary tag, and a writable tag is set with `SOURce:<TAG> <value>`
 and read back with `SOURce:<TAG>?`. `<TAG>` is the tag name made into a mnemonic: letters and digits are upper-cased, anything else
-becomes `_`, and a name that would not start with a letter gets a leading `T`. So `load-1_bus-1.mw` is `MEAS:ANAL:LOAD_1_BUS_1_MW?`, and
+becomes `_`, and a name that would not start with a letter gets a leading `T`. So `load-1_bus-1.mw` is `MEAS:SCAL:LOAD_1_BUS_1_MW?`, and
 `1st` is `T1ST`. Two tags that end up with the same path are a config error, as is a path starting with `SYSTem`. A tag name that ends in
 digits is its own mnemonic: `BUS1` is not `BUS` with suffix 1.
 
@@ -44,7 +44,7 @@ joined with `:`; the upper-case part of a mnemonic is its short form, a mnemonic
 
 | Command | Meaning |
 |---|---|
-| `MEAS:ANAL:LEVEL?` | the live value: a number (NR1 / NR2, never an exponent), a binary tag as `1` or `0`. A value that is not a number is `9.91E+37`, infinity `+-9.9E+37` (the SCPI sentinels) |
+| `MEAS:SCAL:LEVEL?` | the live value: a number (NR1 / NR2, never an exponent), a binary tag as `1` or `0`. A value that is not a number is `9.91E+37`, infinity `+-9.9E+37` (the SCPI sentinels) |
 | `SOUR:SETPOINT 12.5` | set a writable tag: an analog takes a number, `MIN`, `MAX` or `DEF`; a binary takes `0`, `1`, `ON` or `OFF` |
 | `SOUR:SETPOINT?` | the value the store holds, which is the old one until the provider has acknowledged the write |
 | `SOUR:SETPOINT? MIN` / `MAX` / `DEF` | the configured limit or `<default-value>` |
@@ -112,7 +112,7 @@ ferrofire scpi HOST[:PORT] [COMMAND...] [--file SCRIPT|-] [--timeout SECONDS] [-
 
 | | |
 |---|---|
-| `ferrofire scpi lab '*IDN?' 'MEAS:ANAL:LEVEL?'` | one message per argument; the response of each query is printed |
+| `ferrofire scpi lab '*IDN?' 'MEAS:SCAL:LEVEL?'` | one message per argument; the response of each query is printed |
 | `--file script.scpi` / `--file -` | commands from a file or stdin, one per line; blank lines and lines starting `#` are skipped; added after the arguments |
 | no commands, stdin a terminal | a prompt (`scpi> ` on stderr); `quit`, `exit` or end of input leaves. No commands and stdin not a terminal sends nothing |
 | `--timeout 5` | seconds to connect and to wait for each response |

@@ -84,7 +84,7 @@ async fn one_shot_commands_print_the_responses_of_the_queries() {
             &[
                 "*IDN?",
                 "SOUR:SETPOINT 700",
-                "MEAS:ANAL:LEVEL?;:MEAS:BIN:ALARM?",
+                "MEAS:SCAL:LEVEL?;:MEAS:BIN:ALARM?",
             ],
         ),
         "",
@@ -110,7 +110,7 @@ async fn check_fails_with_the_instruments_error_text_and_still_runs_the_rest() {
                 "--timeout",
                 "0.5",
                 "SOUR:SETPOINT 9000",
-                "MEAS:ANAL:NOPE?",
+                "MEAS:SCAL:NOPE?",
                 "*OPC?",
             ],
         ),
@@ -122,7 +122,7 @@ async fn check_fails_with_the_instruments_error_text_and_still_runs_the_rest() {
     let e = err(&o);
     assert!(e.contains("error: SOUR:SETPOINT 9000: -222,Data out of range;setpoint: 9000 is outside the limits"), "{e}");
     assert!(
-        e.contains("error: MEAS:ANAL:NOPE?: -113,Undefined header;MEAS:ANAL:NOPE?"),
+        e.contains("error: MEAS:SCAL:NOPE?: -113,Undefined header;MEAS:SCAL:NOPE?"),
         "{e}"
     );
     let ok = scpi(args(&d, &["--check", "*CLS", "SOUR:SETPOINT 10"]), "").await;
@@ -150,7 +150,7 @@ async fn json_prints_one_object_per_command() {
 async fn a_script_comes_from_a_file_or_from_stdin() {
     let d = dut().await;
     let path = std::env::temp_dir().join(format!("scpi-script-{}.txt", std::process::id()));
-    std::fs::write(&path, "# a script\n*CLS\n\n  MEAS:ANAL:LEVEL?  \n").unwrap();
+    std::fs::write(&path, "# a script\n*CLS\n\n  MEAS:SCAL:LEVEL?  \n").unwrap();
     let o = scpi(args(&d, &["--check", "--file", path.to_str().unwrap()]), "").await;
     assert_eq!(
         (o.status.code(), out(&o)),
