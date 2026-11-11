@@ -34,7 +34,8 @@ docker exec -d ff-conf-dut sh -c "$DUT_CMD > /tmp/dut.out 2>&1"
 sleep "${WARMUP:-4}"
 rc=0
 # No bind mounts: the docker daemon (a Lima VM on the Mac) cannot see every host path, so files go in and out with docker cp.
-docker create --name ff-conf-peers --network container:ff-conf-dut --cap-add NET_RAW --cap-add NET_ADMIN \
+# shellcheck disable=SC2086
+docker create --name ff-conf-peers --network container:ff-conf-dut ${PEER_FLAGS:-} --cap-add NET_RAW --cap-add NET_ADMIN \
   -e ZEEK_REQUIRED="${ZEEK_REQUIRED:-0}" -e SELFTEST="${SELFTEST:-0}" "$TESTPEERS" /conformance/inside.sh "$proto" >/dev/null
 docker cp "$here/." ff-conf-peers:/conformance
 # proto.env may name a repo-relative binary the peers need (PEER_BIN: our own thin test client, for protocols with no open peer)

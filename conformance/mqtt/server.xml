@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SCEPTRE>
+    <field-device>
+        <name>rtu-1</name>
+        <cycle-time>500</cycle-time>
+        <tags>
+            <external-tag><name>level</name><io>I1</io><type>analog</type></external-tag>
+            <external-tag><name>brkr</name><io>I3</io><type>binary</type></external-tag>
+            <external-tag><name>breaker-cmd</name><io>O0</io><type>binary</type></external-tag>
+            <external-tag><name>setpoint</name><io>O3</io><type>analog</type></external-tag>
+        </tags>
+        <comms>
+            <!-- plain topics: ferrofire/rtu-1/<tag>, commands on ferrofire/rtu-1/<tag>/set -->
+            <mqtt-client>
+                <endpoint>tcp://127.0.0.1:1883</endpoint>
+                <client-id>ff-plain</client-id>
+                <event-logging>rtu-1-mqtt.log</event-logging>
+                <refresh>3</refresh>
+                <point><tag>level</tag></point>
+                <point><tag>brkr</tag></point>
+                <point><tag>breaker-cmd</tag><writable>true</writable></point>
+                <point><tag>setpoint</tag><writable>true</writable><min-value>0</min-value><max-value>1000</max-value></point>
+            </mqtt-client>
+            <!-- the same tags as a Sparkplug B edge node -->
+            <mqtt-client>
+                <endpoint>tcp://127.0.0.1:1883</endpoint>
+                <client-id>ff-spb</client-id>
+                <event-logging>rtu-1-sparkplug.log</event-logging>
+                <refresh>3</refresh>
+                <sparkplug><group-id>waterway</group-id><edge-node-id>rtu-1</edge-node-id></sparkplug>
+                <point><tag>level</tag></point>
+                <point><tag>brkr</tag></point>
+                <point><tag>breaker-cmd</tag><writable>true</writable></point>
+                <point><tag>setpoint</tag><writable>true</writable><min-value>0</min-value><max-value>1000</max-value></point>
+            </mqtt-client>
+        </comms>
+        <input>
+            <endpoint>udp://239.0.0.1:40000</endpoint>
+            <analog><id>I1</id><name>load-1_bus-1.mw</name></analog>
+            <binary><id>I3</id><name>generator-1_bus-1.active</name></binary>
+        </input>
+        <output>
+            <endpoint>tcp://127.0.0.1:5555</endpoint>
+            <binary><id>O0</id><name>load-breaker-toggle</name></binary>
+            <analog><id>O3</id><name>load-mw-setpoint</name></analog>
+        </output>
+    </field-device>
+</SCEPTRE>
