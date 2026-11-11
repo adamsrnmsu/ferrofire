@@ -280,7 +280,7 @@ fn run_publishes_per_rtu_slices_to_their_own_endpoints_with_a_counter_each() {
 
 #[test]
 fn every_subcommand_has_help_and_typos_get_a_suggestion() {
-    for sub in ["run", "pull-bridge", "pypower", "check"] {
+    for sub in ["run", "pull-bridge", "pypower", "check", "scpi"] {
         let o = ff(&[sub, "--help"]);
         assert!(o.status.success(), "{sub}");
         assert!(

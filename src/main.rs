@@ -39,6 +39,8 @@ enum Cmd {
     },
     /// Query, read, write and watch tags on a running provider (bennu-probe equivalent)
     Probe(ferrofire::probe::ProbeCli),
+    /// Talk SCPI to an instrument (the field device's <scpi-server> or a real one): send commands, read responses, check the error queue
+    Scpi(ferrofire::scpi::client::ScpiArgs),
     /// Live view of tag values, age and staleness with a log pane (local process, datagram stream or recorded CSV)
     Top(ferrofire::top::TopArgs),
     /// Check a range's plumbing: provider reachable, multicast arriving, gaps, skew, stale tags; prints a fix per problem
@@ -90,6 +92,7 @@ fn offline(cmd: Cmd) -> Option<Cmd> {
 fn inspect(cmd: Cmd) -> Option<Cmd> {
     match cmd {
         Cmd::Probe(a) => ferrofire::probe::main(a),
+        Cmd::Scpi(a) => ferrofire::scpi::client::main(a),
         Cmd::Doctor(a) => ferrofire::doctor::main(a),
         Cmd::Top(a) => ferrofire::top::main(a),
         other => return Some(other),
