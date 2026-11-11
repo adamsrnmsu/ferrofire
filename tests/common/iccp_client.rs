@@ -52,20 +52,55 @@ fn text(v: &Value) -> String {
 }
 
 fn parse_report(pdu: &[u8]) -> Option<Report> {
-    let Ok(Mms::Unconfirmed(Unconfirmed::InformationReport {
-        access: VariableAccess::ListOfVariable(items),
-        results,
-    })) = Mms::parse(pdu, &Limits::DEFAULT)
+    let Ok(Mms::Unconfirmed(Unconfirmed::InformationReport { access, results })) =
+        Mms::parse(pdu, &Limits::DEFAULT)
     else {
         return None;
     };
     let values: Vec<Result<Value, i64>> = results.iter().map(owned).collect();
-    let (name, time, cond) = (
-        values.first()?.as_ref().ok()?,
-        values.get(1)?.as_ref().ok()?,
-        values.get(2)?.as_ref().ok()?,
-    );
-    let transfer_set = text(name.members()?.get(2)?);
+    let items = match access {
+        VariableAccess::ListOfVariable(items) => items,
+        // another vendor's report (igstase2-server): the data set named, its values only (no Transfer_Set_Name, time or conditions)
+        VariableAccess::VariableListName(ObjectName::DomainSpecific { item, .. }) => {
+            return Some(Report {
+                transfer_set: item.to_string(),
+                time: 0,
+                conditions: 0,
+                values: values
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(i, v)| Some((format!("#{i}"), v.ok()?)))
+                    .collect(),
+            });
+        }
+        VariableAccess::VariableListName(_) => return None,
+    };
+    let generic = || {
+        // the members only, named as the report names them (igstase2-server's report by exception)
+        let named = items
+            .iter()
+            .zip(&values)
+            .filter_map(|(spec, v)| match spec.name()? {
+                ObjectName::DomainSpecific { item, .. } => {
+                    Some(((*item).to_string(), v.clone().ok()?))
+                }
+                _ => None,
+            });
+        Report {
+            transfer_set: String::new(),
+            time: 0,
+            conditions: 0,
+            values: named.collect(),
+        }
+    };
+    let (Some(Ok(name)), Some(Ok(time)), Some(Ok(cond))) =
+        (values.first(), values.get(1), values.get(2))
+    else {
+        return Some(generic());
+    };
+    let Some(transfer_set) = name.members().and_then(|m| m.get(2)).map(text) else {
+        return Some(generic());
+    };
     let time = match time {
         Value::Integer(t) => *t,
         _ => return None,
@@ -372,8 +407,9 @@ impl Iccp {
             .remove(0)
             .map_err(|c| format!("data access error {c}"))?;
         Ok(text(
+            // {scope, domain, name} in the field and in ours; telcon-tase2 sends {domain, name}: the name is the last member either way
             v.members()
-                .and_then(|m| m.get(2))
+                .and_then(<[Value]>::last)
                 .ok_or("not a transfer set name")?,
         ))
     }

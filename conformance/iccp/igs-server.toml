@@ -1,0 +1,80 @@
+# igstase2-server (aklira/igs-iec-tase2, Apache-2.0) as the peer SERVER of our thin client (examples/iccp-client). One Bilateral Table:
+# the client calls with AP-title 1.3.9999.1 (ICCP_CALLING_AP_TITLE) and sees domain EMS1.
+[[domain]]
+name = "EMS1"
+
+[[point]]
+domain = "EMS1"
+name = "LOAD_MW"
+type = "float"
+value = 42.5
+writable = true
+
+[[point]]
+domain = "EMS1"
+name = "BRKR_1"
+type = "boolean"
+value = true
+
+[[point]]
+domain = "EMS1"
+name = "BUS_KV"
+type = "integer"
+bits = 16
+value = 230
+
+[[point]]
+domain = "EMS1"
+name = "SETPOINT"
+type = "float"
+value = 1.0
+writable = true
+
+[[transfer-set]]
+domain = "EMS1"
+name = "TS1"
+
+[[simulate]]
+domain = "EMS1"
+name = "LOAD_MW"
+kind = "ramp"
+period_ms = 300
+min = 40.0
+max = 60.0
+step = 1.0
+
+[[table]]
+designation = "1.3.9999.1"
+table_id = "BLT_RANGE_EMS1"
+domain = "EMS1"
+application_references = ["1.3.9999.1"]
+data_set_creation = true
+
+[[table.access]]
+kind = "data-value"
+name = "LOAD_MW"
+permissions = ["visibility", "get-data-value", "get-data-value-type"]
+interval_ms = 100
+
+[[table.access]]
+kind = "data-value"
+name = "BRKR_1"
+permissions = ["visibility", "get-data-value"]
+interval_ms = 100
+
+[[table.access]]
+kind = "data-value"
+name = "BUS_KV"
+permissions = ["visibility", "get-data-value"]
+interval_ms = 100
+
+[[table.access]]
+kind = "data-value"
+name = "SETPOINT"
+permissions = ["visibility", "get-data-value", "set-data-value"]
+interval_ms = 100
+
+[[table.access]]
+kind = "transfer-set"
+name = "TS1"
+permissions = ["visibility", "start-transfer", "stop-transfer"]

@@ -18,6 +18,14 @@ fn main() {
         );
         std::process::exit(2);
     }
+    // ICCP_STEPS=1: against another vendor's server, run each check on its own and report `step NAME: ok|FAIL detail` instead of
+    // stopping at the first failure; conformance/iccp/check.sh decides which of them that peer is expected to pass.
+    if std::env::var("ICCP_STEPS").is_ok() {
+        if let Err(e) = steps(&a) {
+            println!("step associate: FAIL {e}");
+        }
+        return;
+    }
     if let Err(e) = run(&a) {
         println!("FAILED: {e}");
         std::process::exit(1);
@@ -97,5 +105,95 @@ fn run(a: &[String]) -> Result<(), String> {
         .map_err(|e| format!("disarm {e}"))?;
     c.release()?;
     println!("released");
+    Ok(())
+}
+
+/// One check: `step NAME: ok DETAIL` or `step NAME: FAIL DETAIL`.
+fn step<T: std::fmt::Debug>(name: &str, r: Result<T, String>) -> Option<T> {
+    match r {
+        Ok(v) => {
+            println!("step {name}: ok {v:?}");
+            Some(v)
+        }
+        Err(e) => {
+            println!("step {name}: FAIL {e}");
+            None
+        }
+    }
+}
+
+/// A DataAccessError inside a successful service answer is a failed check.
+fn access<T>(r: Result<Result<T, i64>, String>) -> Result<T, String> {
+    r?.map_err(|code| format!("data access error {code}"))
+}
+
+fn all_ok<T>(r: Result<Vec<Result<T, i64>>, String>) -> Result<Vec<T>, String> {
+    r?.into_iter()
+        .map(|x| x.map_err(|code| format!("data access error {code}")))
+        .collect()
+}
+
+fn steps(a: &[String]) -> Result<(), String> {
+    let (domain, items): (&str, Vec<&str>) = (&a[2], a[3].split(',').collect());
+    let members: Vec<&str> = a.get(5).map_or(items.clone(), |m| m.split(',').collect());
+    let ap_title = std::env::var("ICCP_CALLING_AP_TITLE")
+        .ok()
+        .map(|t| t.split('.').filter_map(|n| n.parse::<u32>().ok()).collect());
+    let mut c = Iccp::connect_as(&a[1], ap_title)?;
+    println!("step associate: ok");
+    step("identify", c.identify());
+    step("domains", c.domains());
+    step("variables", c.variables(domain));
+    // Bilateral_Table_ID is domain-scoped in the field (both real captures, igs); TASE2_Version and Supported_Features are VMD-scoped
+    for (scope, n) in [
+        (Some(domain), "Bilateral_Table_ID"),
+        (None, "TASE2_Version"),
+        (None, "Supported_Features"),
+    ] {
+        step(
+            &format!("read {n}"),
+            access(c.read(scope, &[n]).map(|mut v| v.remove(0))),
+        );
+    }
+    step("read data values", all_ok(c.read(Some(domain), &items)));
+    let w = a[4].as_str();
+    let write = access(c.read(Some(domain), &[w]).map(|mut v| v.remove(0)))
+        .map(|now| commanded(&now))
+        .and_then(|v| access(c.write(domain, w, &v)));
+    step(&format!("write {w}"), write);
+    step(
+        "define data set",
+        c.define_set(domain, "DS_PROBE", &members),
+    );
+    step("data set members", c.set_members(domain, "DS_PROBE"));
+    step("read data set", all_ok(c.read_set(domain, "DS_PROBE")));
+    let ts = step("next transfer set", c.next_transfer_set(domain));
+    if let Some(ts) = ts {
+        // interval 1 s plus object change; then the same set with report-by-exception
+        for (label, rbe) in [("interval", false), ("rbe", true)] {
+            while matches!(c.next_report(Duration::from_millis(400)), Ok(Some(_))) {} // reports of the previous arming
+            let armed = access(c.arm(domain, &ts, "DS_PROBE", (1, 0xA0, rbe, true)));
+            if step(&format!("arm {label}"), armed).is_some() {
+                let got = c.next_report(Duration::from_secs(4)).and_then(|r| {
+                    r.map(|r| {
+                        format!(
+                            "{} conditions {:#04x} values {}",
+                            r.transfer_set,
+                            r.conditions,
+                            r.values.len()
+                        )
+                    })
+                    .ok_or_else(|| "no report within 4 s".to_string())
+                });
+                step(&format!("report {label}"), got);
+                step(
+                    &format!("disarm {label}"),
+                    access(c.arm(domain, &ts, "DS_PROBE", (1, 0xA0, rbe, false))),
+                );
+            }
+        }
+    }
+    step("delete data set", c.delete_set(domain, "DS_PROBE"));
+    step("conclude", c.release());
     Ok(())
 }

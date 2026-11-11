@@ -19,10 +19,10 @@
                 <data-real><tag>load-power</tag><name>LOAD_MW</name><variant>QTimeTag</variant></data-real>
                 <data-real><tag>bus-voltage</tag><name>BUS_KV</name></data-real>
                 <data-state><tag>cmd1</tag><name>CMD_1</name><variant>plain</variant></data-state>
-                <data-real><tag>load-mw-setpoint</tag><name>SETPOINT</name><variant>Q</variant></data-real>
+                <data-real><tag>load-mw-setpoint</tag><name>SETPOINT</name><variant>plain</variant></data-real>
                 <peer>
                     <name>EMS1</name>
-                    <read>BRKR_1 LOAD_MW CMD_1 SETPOINT</read>
+                    <read>BRKR_1 LOAD_MW CMD_1 SETPOINT BUS_KV</read>
                     <write>CMD_1 SETPOINT</write>
                 </peer>
             </iccp-server>

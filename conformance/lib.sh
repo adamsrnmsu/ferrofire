@@ -1,6 +1,8 @@
 # shellcheck shell=bash disable=SC2154
 # Helpers for conformance/<proto>/check.sh and zeek.sh (sourced inside the testpeers container).
 FAILS=0
+# proto.env may name extra tshark options (TSHARK_EXTRA), e.g. -d tcp.port==10102,tpkt for peers that cannot listen on 102
+tshark() { command tshark ${TSHARK_EXTRA:-} "$@"; }
 fail() { echo "FAIL: $*" >&2; FAILS=$((FAILS+1)); }
 pass() { echo "ok:   $*"; }
 # tshark field dump of a display filter, one line per packet

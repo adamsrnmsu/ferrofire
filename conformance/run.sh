@@ -39,6 +39,10 @@ docker create --name ff-conf-peers --network container:ff-conf-dut --cap-add NET
 docker cp "$here/." ff-conf-peers:/conformance
 # proto.env may name a repo-relative binary the peers need (PEER_BIN: our own thin test client, for protocols with no open peer)
 [ -z "${PEER_BIN:-}" ] || docker cp "$here/../$PEER_BIN" "ff-conf-peers:/usr/local/bin/$(basename "$PEER_BIN")"
+# ... and PEER_EXTRA="repo/path:/dest ...": more files or directories
+for pair in ${PEER_EXTRA:-}; do docker cp "$here/../${pair%%:*}" "ff-conf-peers:${pair#*:}"; done
+# captures fetched by tests/pcaps/iccp/fetch-real.sh (never committed) go to /real; the ICCP check uses them when present
+[ ! -d "$here/../tests/pcaps/iccp/real" ] || docker cp "$here/../tests/pcaps/iccp/real" ff-conf-peers:/real
 docker start -a ff-conf-peers || rc=$?
 docker cp ff-conf-peers:/out/. "$OUT" 2>/dev/null || true
 docker exec ff-conf-dut cat /tmp/dut.out > "$OUT/dut.out" 2>/dev/null || true

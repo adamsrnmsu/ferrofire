@@ -13,3 +13,4 @@ fuzz/corpus/
 # zeek-iccp build output
 tools/zeek/iccp/build/
 tools/zeek/iccp/tests/.tmp/
+tests/pcaps/iccp/real/
