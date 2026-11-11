@@ -16,6 +16,7 @@ pub mod power;
 pub mod probe;
 pub mod pull;
 pub mod pypower;
+pub mod scpi;
 pub mod simulink;
 pub mod sys;
 pub mod top;

@@ -80,7 +80,10 @@ pub fn params(rest: &str) -> Result<Vec<Param>, i32> {
     if rest.is_empty() {
         return Ok(vec![]);
     }
-    split(rest, ',').into_iter().map(|t| param(t.trim())).collect()
+    split(rest, ',')
+        .into_iter()
+        .map(|t| param(t.trim()))
+        .collect()
 }
 
 fn param(t: &str) -> Result<Param, i32> {
@@ -148,15 +151,11 @@ fn number_len(b: &[u8]) -> usize {
 /// -121 invalid character in number, -131 invalid suffix (`5V`), -123 exponent too large.
 fn number(t: &str) -> Result<f64, i32> {
     let n = number_len(t.as_bytes());
-    match t[n..].chars().next() {
+    match t[n..].trim_start().chars().next() {
         _ if n == 0 => Err(-121),
         Some(c) if c.is_ascii_alphabetic() => Err(-131),
         Some(_) => Err(-121),
-        None => t
-            .parse::<f64>()
-            .ok()
-            .filter(|x| x.is_finite())
-            .ok_or(-123),
+        None => t.parse::<f64>().ok().filter(|x| x.is_finite()).ok_or(-123),
     }
 }
 
@@ -168,7 +167,7 @@ mod tests {
     fn units_split_at_semicolons_outside_quotes() {
         assert_eq!(split("A;B", ';'), ["A", "B"]);
         assert_eq!(split("A \"x;y\";B 'p;q'", ';'), ["A \"x;y\"", "B 'p;q'"]);
-        assert_eq!(split("A \"x\"\";\"y\";B", ';'), ["A \"x\"\";\"y\"", "B"]);
+        assert_eq!(split("A \"x\"\";\"y;B", ';'), ["A \"x\"\";\"y", "B"]);
         assert_eq!(split("A \"x;B", ';'), ["A \"x;B"]);
         assert_eq!(split("", ';'), [""]);
         assert_eq!(split(";", ';'), ["", ""]);
@@ -207,8 +206,13 @@ mod tests {
         assert_eq!(header("*idn?"), h(&["IDN"], true, false, true));
         assert_eq!(header("*ESE"), h(&["ESE"], true, false, false));
         assert_eq!(header(":syst:err?"), h(&["SYST", "ERR"], false, true, true));
-        assert_eq!(header("Meas2:a_b"), h(&["MEAS2", "A_B"], false, false, false));
-        for bad in ["", "?", ":", "A::B", "A:", "1A", "*", "*A:B", ":*A", "A-B", "A.B", "É"] {
+        assert_eq!(
+            header("Meas2:a_b"),
+            h(&["MEAS2", "A_B"], false, false, false)
+        );
+        for bad in [
+            "", "?", ":", "A::B", "A:", "1A", "*", "*A:B", ":*A", "A-B", "A.B", "É",
+        ] {
             assert_eq!(header(bad), None, "{bad:?}");
         }
     }
@@ -233,7 +237,10 @@ mod tests {
                 Str("it's".into())
             ])
         );
-        assert_eq!(params("\"say \"\"hi\"\"\""), Ok(vec![Str("say \"hi\"".into())]));
+        assert_eq!(
+            params("\"say \"\"hi\"\"\""),
+            Ok(vec![Str("say \"hi\"".into())])
+        );
     }
 
     #[test]
