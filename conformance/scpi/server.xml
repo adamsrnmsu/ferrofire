@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SCEPTRE>
+    <field-device>
+        <name>rtu-1</name>
+        <cycle-time>500</cycle-time>
+        <tags>
+            <external-tag><name>level</name><io>I1</io><type>analog</type></external-tag>
+            <external-tag><name>flow</name><io>I2</io><type>analog</type></external-tag>
+            <external-tag><name>brkr</name><io>I3</io><type>binary</type></external-tag>
+            <external-tag><name>breaker-cmd</name><io>O0</io><type>binary</type></external-tag>
+            <external-tag><name>setpoint</name><io>O3</io><type>analog</type></external-tag>
+        </tags>
+        <comms>
+            <!-- default paths: MEASure:ANALog:LEVEL?, MEASure:BINary:BRKR?, SOURce:SETPOINT <v>, SOURce:BREAKER_CMD <0|1|ON|OFF> -->
+            <scpi-server>
+                <endpoint>tcp://0.0.0.0:5025</endpoint>
+                <event-logging>rtu-1-scpi.log</event-logging>
+                <manufacturer>ferrofire</manufacturer>
+                <model>rtu-1</model>
+                <serial>CONF-0001</serial>
+                <max-connections>64</max-connections>
+                <max-line>1024</max-line>
+                <point><tag>level</tag></point>
+                <point><tag>flow</tag></point>
+                <point><tag>brkr</tag></point>
+                <point><tag>breaker-cmd</tag><writable>true</writable></point>
+                <point><tag>setpoint</tag><writable>true</writable><min-value>0</min-value><max-value>1000</max-value><default-value>500</default-value></point>
+            </scpi-server>
+        </comms>
+        <input>
+            <endpoint>udp://239.0.0.1:40000</endpoint>
+            <analog><id>I1</id><name>load-1_bus-1.mw</name></analog>
+            <analog><id>I2</id><name>line-1.mw</name></analog>
+            <binary><id>I3</id><name>generator-1_bus-1.active</name></binary>
+        </input>
+        <output>
+            <endpoint>tcp://127.0.0.1:5555</endpoint>
+            <binary><id>O0</id><name>load-breaker-toggle</name></binary>
+            <analog><id>O3</id><name>load-mw-setpoint</name></analog>
+        </output>
+    </field-device>
+</SCEPTRE>

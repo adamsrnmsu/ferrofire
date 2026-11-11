@@ -98,6 +98,12 @@ RUN set -e; mkdir -p /opt/iec61850bean && cd /opt/iec61850bean; M=https://repo1.
     get org/slf4j/slf4j-simple/1.7.25/slf4j-simple-1.7.25.jar 0966e86fffa5be52d3d9e7b89dd674d98a03eed0a454fbaf7c1bd9493bd9d874
 RUN python3 -m venv /opt/dnp3py && /opt/dnp3py/bin/pip install -q --no-cache-dir dnp3py==0.6.0 \
  && /opt/dnp3py/bin/python -c "import dnp3.master"
+# SCPI peers (conformance/scpi), both independent of ferrofire's own `ferrofire scpi` client, which the harness runs as well:
+#  - PyVISA 1.16.2 with the pure-Python backend pyvisa-py 0.8.1 (both MIT; TCPIP::host::5025::SOCKET resources), in a venv.
+#  - lxi-tools 2.8-1 from Debian (BSD-3-Clause, with liblxi): `lxi scpi --raw` speaks the raw socket protocol on 5025.
+RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends lxi-tools=2.8-1 >/dev/null && rm -rf /var/lib/apt/lists/* \
+ && python3 -m venv /opt/pyvisa && /opt/pyvisa/bin/pip install -q --no-cache-dir pyvisa==1.16.2 pyvisa-py==0.8.1 \
+ && /opt/pyvisa/bin/python -c "import pyvisa, pyvisa_py; print(pyvisa.__version__)" && lxi --version
 COPY --from=gopeers /out/bin/ /usr/local/bin/
 COPY --from=gopeers /out/licenses/ /usr/share/doc/ferrofire-testpeers/
 COPY --from=build /out/bin/ /usr/local/bin/
