@@ -96,7 +96,8 @@ jobs:
 
   build:
     needs: [plan]
-    if: needs.plan.outputs.kind != 'none'
+    # !cancelled(): `release` is skipped on non-push runs, and a skipped ancestor would otherwise skip this job too.
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.kind != 'none' }}
     strategy:
       fail-fast: false
       matrix:
@@ -142,6 +143,7 @@ jobs:
 
   publish:
     needs: [plan, build]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
