@@ -302,6 +302,10 @@ def assoc():
     c.rpc(10, read_req(dom(ICC, "Pt_1"), dom(ICC, "Pt_2"), dom(ICC, "Pt_3"), dom(ICC, "Missing")),
           read_resp(struct_(real(50.25), bits(8, FLAGS_OK)), bits(8, 0b10000000), struct_(integer(42, 0x85), bits(8, FLAGS_SUSPECT)),
                     fail(10)))
+    # a peer that refuses the special variables later on (telcon-tase2's test server serves none of them): the association keeps what it learned
+    c.rpc(14, read_req(vmd("TASE2_Version")), read_resp(fail(10)))
+    c.rpc(15, read_req(vmd("Supported_Features")), read_resp(fail(10)))
+    c.rpc(16, read_req(dom(ICC, "Bilateral_Table_ID")), read_resp(fail(10)))
     c.rpc(11, write_req([dom(ICC, "Dev_1")], integer(1, 0x85)), write_resp(True))
     c.rpc(12, write_req([dom(ICC, "Dev_2")], integer(1, 0x85)), write_resp(False))
     c.req(13, read_req(dom(ICC, "Locked")))

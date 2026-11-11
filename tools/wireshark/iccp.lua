@@ -362,7 +362,7 @@ local function process(stream, r)
         out.op = "read"
         for i, v in ipairs(r.values) do
           local nm = req.names[i] or ""
-          if r.kind == "confirmed_resp" then learn(st, nm, v) end
+          if r.kind == "confirmed_resp" and r.vtypes[i] ~= "error" then learn(st, nm, v) end  -- a refused read teaches nothing (its value is the error code)
           out.items[#out.items + 1] = item(st, nm, r.vtypes[i], v, r.quals[i], r.vtypes[i] == "error" and "failure" or "success", req.scope, req.domain)
         end
         if r.kind == "confirmed_err" then

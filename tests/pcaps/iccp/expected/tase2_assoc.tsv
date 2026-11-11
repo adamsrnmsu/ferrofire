@@ -18,11 +18,17 @@
 25 start_transfer_set ICC1/TSet1 transfer_set struct {{..};0;5;0;0;60;01010;true;false;true;false;true;0}  success    BT_RANGE_01 {2000;8} 110110100000
 26 read ICC1/Pt_1;ICC1/Pt_2;ICC1/Pt_3;ICC1/Missing data;data;data;data        BT_RANGE_01 {2000;8} 110110100000
 27 read ICC1/Pt_1;ICC1/Pt_2;ICC1/Pt_3;ICC1/Missing data;data;data;data realq;stateq;discreteq;error 50.25;10000000;42;10 VALID|TELEMETERED|NORMAL|TS_VALID;ON|VALID|TELEMETERED|NORMAL|TS_VALID;SUSPECT|TELEMETERED|NORMAL|TS_VALID success;success;success;failure    BT_RANGE_01 {2000;8} 110110100000
-28 write ICC1/Dev_1 data discrete 1      BT_RANGE_01 {2000;8} 110110100000
-29 write ICC1/Dev_1 data discrete 1  success    BT_RANGE_01 {2000;8} 110110100000
-30 write ICC1/Dev_2 data discrete 1      BT_RANGE_01 {2000;8} 110110100000
-31 write ICC1/Dev_2 data discrete 1  failure:3    BT_RANGE_01 {2000;8} 110110100000
-32 read ICC1/Locked data        BT_RANGE_01 {2000;8} 110110100000
-33 read ICC1/Locked data    error    BT_RANGE_01 {2000;8} 110110100000
-34           BT_RANGE_01 {2000;8} 110110100000
-35           BT_RANGE_01 {2000;8} 110110100000
+28 read TASE2_Version tase2_version        BT_RANGE_01 {2000;8} 110110100000
+29 read TASE2_Version tase2_version error 10  failure    BT_RANGE_01 {2000;8} 110110100000
+30 read Supported_Features supported_features        BT_RANGE_01 {2000;8} 110110100000
+31 read Supported_Features supported_features error 10  failure    BT_RANGE_01 {2000;8} 110110100000
+32 read ICC1/Bilateral_Table_ID bilateral_table_id        BT_RANGE_01 {2000;8} 110110100000
+33 read ICC1/Bilateral_Table_ID bilateral_table_id error 10  failure    BT_RANGE_01 {2000;8} 110110100000
+34 write ICC1/Dev_1 data discrete 1      BT_RANGE_01 {2000;8} 110110100000
+35 write ICC1/Dev_1 data discrete 1  success    BT_RANGE_01 {2000;8} 110110100000
+36 write ICC1/Dev_2 data discrete 1      BT_RANGE_01 {2000;8} 110110100000
+37 write ICC1/Dev_2 data discrete 1  failure:3    BT_RANGE_01 {2000;8} 110110100000
+38 read ICC1/Locked data        BT_RANGE_01 {2000;8} 110110100000
+39 read ICC1/Locked data    error    BT_RANGE_01 {2000;8} 110110100000
+40           BT_RANGE_01 {2000;8} 110110100000
+41           BT_RANGE_01 {2000;8} 110110100000

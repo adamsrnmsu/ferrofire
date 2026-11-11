@@ -28,11 +28,17 @@
 1700000000.024998	UID	10.0.0.1	50001	10.0.0.2	102	F	confirmed_resp	write	9	domain	ICC1	-	ICC1/TSet1	result=success	success	-	0.001000	-
 1700000000.025998	UID	10.0.0.1	50001	10.0.0.2	102	T	confirmed_req	read	10	domain	ICC1	-	ICC1/Pt_1,ICC1/Pt_2,ICC1/Pt_3,ICC1/Missing	-	-	-	-	-
 1700000000.026998	UID	10.0.0.1	50001	10.0.0.2	102	F	confirmed_resp	read	10	domain	ICC1	-	ICC1/Pt_1,ICC1/Pt_2,ICC1/Pt_3,ICC1/Missing	realq=50.25[VALID|TELEMETERED|NORMAL|TS_VALID],stateq=10000000[ON|VALID|TELEMETERED|NORMAL|TS_VALID],discreteq=42[SUSPECT|TELEMETERED|NORMAL|TS_VALID],error=10	success	-	0.001000	-
-1700000000.027997	UID	10.0.0.1	50001	10.0.0.2	102	T	confirmed_req	write	11	domain	ICC1	-	ICC1/Dev_1	discrete=1	-	-	-	-
-1700000000.028997	UID	10.0.0.1	50001	10.0.0.2	102	F	confirmed_resp	write	11	domain	ICC1	-	ICC1/Dev_1	result=success	success	-	0.001000	-
-1700000000.029997	UID	10.0.0.1	50001	10.0.0.2	102	T	confirmed_req	write	12	domain	ICC1	-	ICC1/Dev_2	discrete=1	-	-	-	-
-1700000000.030997	UID	10.0.0.1	50001	10.0.0.2	102	F	confirmed_resp	write	12	domain	ICC1	-	ICC1/Dev_2	result=failure:3	success	-	0.001000	-
-1700000000.031997	UID	10.0.0.1	50001	10.0.0.2	102	T	confirmed_req	read	13	domain	ICC1	-	ICC1/Locked	-	-	-	-	-
-1700000000.032997	UID	10.0.0.1	50001	10.0.0.2	102	F	confirmed_err	read	13	domain	ICC1	-	ICC1/Locked	-	error	class=7 code=2	0.001000	-
-1700000000.033997	UID	10.0.0.1	50001	10.0.0.2	102	T	conclude_req	conclude	-	-	-	-	-	-	-	-	-	-
-1700000000.034997	UID	10.0.0.1	50001	10.0.0.2	102	F	conclude_resp	conclude	-	-	-	-	-	-	-	-	-	-
+1700000000.027997	UID	10.0.0.1	50001	10.0.0.2	102	T	confirmed_req	read	14	vmd	-	-	TASE2_Version	-	-	-	-	-
+1700000000.028997	UID	10.0.0.1	50001	10.0.0.2	102	F	confirmed_resp	read	14	vmd	-	-	TASE2_Version	error=10	success	-	0.001000	-
+1700000000.029997	UID	10.0.0.1	50001	10.0.0.2	102	T	confirmed_req	read	15	vmd	-	-	Supported_Features	-	-	-	-	-
+1700000000.030997	UID	10.0.0.1	50001	10.0.0.2	102	F	confirmed_resp	read	15	vmd	-	-	Supported_Features	error=10	success	-	0.001000	-
+1700000000.031997	UID	10.0.0.1	50001	10.0.0.2	102	T	confirmed_req	read	16	domain	ICC1	-	ICC1/Bilateral_Table_ID	-	-	-	-	-
+1700000000.032997	UID	10.0.0.1	50001	10.0.0.2	102	F	confirmed_resp	read	16	domain	ICC1	-	ICC1/Bilateral_Table_ID	error=10	success	-	0.001000	-
+1700000000.033997	UID	10.0.0.1	50001	10.0.0.2	102	T	confirmed_req	write	11	domain	ICC1	-	ICC1/Dev_1	discrete=1	-	-	-	-
+1700000000.034997	UID	10.0.0.1	50001	10.0.0.2	102	F	confirmed_resp	write	11	domain	ICC1	-	ICC1/Dev_1	result=success	success	-	0.001000	-
+1700000000.035997	UID	10.0.0.1	50001	10.0.0.2	102	T	confirmed_req	write	12	domain	ICC1	-	ICC1/Dev_2	discrete=1	-	-	-	-
+1700000000.036997	UID	10.0.0.1	50001	10.0.0.2	102	F	confirmed_resp	write	12	domain	ICC1	-	ICC1/Dev_2	result=failure:3	success	-	0.001000	-
+1700000000.037997	UID	10.0.0.1	50001	10.0.0.2	102	T	confirmed_req	read	13	domain	ICC1	-	ICC1/Locked	-	-	-	-	-
+1700000000.038997	UID	10.0.0.1	50001	10.0.0.2	102	F	confirmed_err	read	13	domain	ICC1	-	ICC1/Locked	-	error	class=7 code=2	0.001000	-
+1700000000.039997	UID	10.0.0.1	50001	10.0.0.2	102	T	conclude_req	conclude	-	-	-	-	-	-	-	-	-	-
+1700000000.040997	UID	10.0.0.1	50001	10.0.0.2	102	F	conclude_resp	conclude	-	-	-	-	-	-	-	-	-	-

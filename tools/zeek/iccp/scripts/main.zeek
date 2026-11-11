@@ -5,6 +5,14 @@
 
 module ICCP;
 
+# A GetNameList or a report of a real EMS can list thousands of names: the default of 500 elements per log field container made Zeek
+# raise log_container_field_truncated (a weird.log row) on the chaugan capture (conformance/iccp).
+redef Log::default_max_field_container_elements = 10000;
+# ... and the same for a long string (a structure value in iccp.log): log_string_field_truncated
+redef Log::default_max_field_string_bytes = 100000;
+redef Log::default_max_total_container_elements = 100000;
+redef Log::default_max_total_string_bytes = 1000000;
+
 export {
 	redef enum Log::ID += { MMS_LOG, LOG };
 
@@ -255,7 +263,8 @@ event ICCP::pdu(c: connection, is_orig: bool, kind: string, service: string, inv
 				for ( i in values )
 					{
 					local nm = i < |req$names| ? req$names[i] : "";
-					if ( kind == "confirmed_resp" )
+					# a refused read teaches nothing (its value is the error code)
+					if ( kind == "confirmed_resp" && vtypes[i] != "error" )
 						learn(st, nm, values[i]);
 					rows += row(c, st, inv, "read", req$scope, req$domain, nm, vtypes[i], values[i], quals[i],
 					            vtypes[i] == "error" ? "failure" : "success");
