@@ -1,0 +1,19 @@
+---
+source: tests/snapshots.rs
+expression: "text.join(\"\\n--\\n\")"
+---
+ferrofire,rtu-1,0,0.1.0
+
+--
+(no response)
+
+--
+12.5;1
+
+--
+(no response)
+error: SOUR:SETPOINT 9000: -222,Data out of range;setpoint: 9000 is outside the limits
+--
+a "quoted" reply
+error: DISP:TEXT "hi"?: -113,Undefined header
+error: DISP:TEXT "hi"?: -102,Syntax error

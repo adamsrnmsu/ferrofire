@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 
 pub mod modbus;
+pub mod scpi;
 
 use ferrofire::fd::config::{Opts, Tags};
 use ferrofire::fd::proto::dnp3::Outstation;

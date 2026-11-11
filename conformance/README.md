@@ -189,3 +189,23 @@ and finally `kill -9`s the device to see the wills. `provider.py` is a stand-in 
 "the command reached the write queue" is observed. `check.sh` asserts the tshark `mqtt` fields and the peers' results, `zeek.sh` the
 `mqtt_connect` / `mqtt_subscribe` / `mqtt_publish` logs (Zeek's built-in analyzer, no package). `proto.env` sets `PEER_FLAGS` so that the
 peers container shares the device's process namespace (needed for the `kill`). Tahu and Paho are EPL-2.0 test peers; ferrofire links none of it.
+
+## SCPI (raw socket 5025)
+
+    make conformance PROTO=scpi         # DUT=rust is the default: bennu has no SCPI, so there is no stock side
+    make testpeers                      # first, once: the image needs pyvisa and lxi-tools (docker/testpeers/Dockerfile)
+
+`conformance/scpi/server.xml` serves five tags (`level`, `flow`, `brkr`, `breaker-cmd`, `setpoint`) on 127.0.0.1:5025; `provider.py` is
+a stand-in provider that logs every `WRITE=`, and one datagram loop gives the tags their values. `peer.sh` then runs, in order:
+`pyvisa_client.py` (PyVISA 1.16.2 with pyvisa-py 0.8.1, a `TCPIP::127.0.0.1::5025::SOCKET` resource: `*IDN?`, reads of several tags, a
+compound query, a write that must reach the provider, an out-of-range write that must give -222 in `SYST:ERR?` and the right `*STB?` /
+`*ESR?` before and after), `lxi scpi --raw` (lxi-tools 2.8-1: `*IDN?` and a read), `ferrofire scpi --check` (our own client, the same
+binary as the device, via `PEER_BIN`: a script that must exit 0, a bad write that must exit 1 with the -222 text), a churn of 2000
+connections (completed, half-sent, aborted with a RST, half-closed) with the device's descriptor count read from `/proc/<pid>/fd` before and
+after, and an overlong line and random bytes on one connection that must still answer afterwards. `proto.env` shares the device's process
+namespace for the descriptor count.
+
+There is no SCPI dissector in tshark and no Zeek analyzer, so `check.sh` asserts what a capture of plain text can show: at least 2000
+handshakes to 5025, payload both ways, the requests and the responses as bytes found in the packets (`*IDN?` and its answer, the -222
+and -363 responses, the `;`-joined answer of a compound query), 0 malformed frames and no expert errors (`expert_clean`), and Zeek's
+`conn.log` rows for port 5025. PyVISA and lxi-tools are MIT / BSD-3-Clause test peers; ferrofire links none of it.

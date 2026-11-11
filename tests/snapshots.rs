@@ -3,6 +3,7 @@
 use ferrofire::diff::Finding;
 use ferrofire::doctor::{diagnose, Heard, Obs};
 use ferrofire::probe::{audit_line, Row};
+use ferrofire::scpi::client::{Outcome, Reported};
 use ferrofire::top::{once_text, Table};
 use std::process::Command;
 
@@ -97,4 +98,47 @@ fn top_once_text_and_json() {
     let rows = t.rows(4.0);
     insta::assert_snapshot!("top_once_text", once_text(&rows, false));
     insta::assert_snapshot!("top_once_json", once_text(&rows, true));
+}
+
+#[test]
+fn scpi_text_and_json() {
+    let o = |command: &str, response: Option<&str>, errors: &[(i32, &str)]| Outcome {
+        command: command.into(),
+        response: response.map(str::to_string),
+        errors: errors
+            .iter()
+            .map(|(code, message)| Reported {
+                code: *code,
+                message: message.to_string(),
+            })
+            .collect(),
+    };
+    let outcomes = [
+        o("*IDN?", Some("ferrofire,rtu-1,0,0.1.0"), &[]),
+        o("SOUR:SETPOINT 5", None, &[]),
+        o("MEAS:ANAL:LEVEL?;:MEAS:BIN:ALARM?", Some("12.5;1"), &[]),
+        o(
+            "SOUR:SETPOINT 9000",
+            None,
+            &[(
+                -222,
+                "Data out of range;setpoint: 9000 is outside the limits",
+            )],
+        ),
+        o(
+            "DISP:TEXT \"hi\"?",
+            Some("a \"quoted\" reply"),
+            &[(-113, "Undefined header"), (-102, "Syntax error")],
+        ),
+    ];
+    let text: Vec<_> = outcomes
+        .iter()
+        .map(|o| {
+            let out = o.text().unwrap_or("(no response)");
+            format!("{out}\n{}", o.problems().join("\n"))
+        })
+        .collect();
+    let json: Vec<_> = outcomes.iter().map(Outcome::json).collect();
+    insta::assert_snapshot!("scpi_text", text.join("\n--\n"));
+    insta::assert_snapshot!("scpi_json", json.join("\n"));
 }

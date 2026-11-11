@@ -4,8 +4,9 @@
 //! Plain scheme: `<prefix>/<device>/<tag>` carries the value as text, `<prefix>/<device>/<tag>/set` takes a command,
 //! `<prefix>/<device>/status` is `online` / `offline` (the will). Sparkplug B scheme: NBIRTH / NDATA / NDEATH out, NCMD in.
 
-use super::sparkplug::{self as sp, Command, Key, Num, Sample};
+use super::sparkplug::{self as sp, Command, Key, Sample};
 use crate::bennu::fmt_value;
+pub use crate::fd::proto::point::{Num, Point};
 use crate::fd::store::Store;
 use crate::hint::show;
 use crate::model::{Kind, Value};
@@ -31,16 +32,6 @@ pub enum Scheme {
         group: String,
         edge: String,
     },
-}
-
-/// One published tag. `min`/`max` bound the analog commands it accepts; a tag that is not `writable` accepts none.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Point {
-    pub tag: String,
-    pub kind: Kind,
-    pub writable: bool,
-    pub min: Option<f64>,
-    pub max: Option<f64>,
 }
 
 pub struct Engine {
@@ -321,34 +312,12 @@ impl Engine {
         }
     }
 
-    /// The checks every protocol's write passes: the tag is writable, the value has the tag's type and, for an analog, is finite and
-    /// within the limits. `Err` is the line to log.
+    /// The checks every protocol's write passes (`Point::check`). `Err` is the line to log.
     fn write(&self, i: usize, n: Num, store: &Store) -> Result<(), String> {
         let p = &self.points[i];
-        let why = |m: &str| format!("write to `{}` refused: {m}", show(&p.tag));
-        if !p.writable {
-            return Err(why("not writable"));
-        }
-        let v = p.convert(n).map_err(|m| why(&m))?;
+        let why = |m: &dyn std::fmt::Display| format!("write to `{}` refused: {m}", show(&p.tag));
+        let v = p.check(n).map_err(|r| why(&r))?;
         store.write(&p.tag, v).map_err(|e| why(&format!("{e:?}")))
-    }
-}
-
-impl Point {
-    /// A command value as this point's own type, within its limits.
-    fn convert(&self, n: Num) -> Result<Value, String> {
-        match (self.kind, n) {
-            (Kind::Binary, Num::Bool(b)) => Ok(Value::Binary(b)),
-            (Kind::Binary, Num::Number(x)) if x == 0.0 || x == 1.0 => Ok(Value::Binary(x == 1.0)),
-            (Kind::Analog, Num::Number(x)) if !x.is_finite() => Err("not a finite number".into()),
-            (Kind::Analog, Num::Number(x))
-                if self.min.is_some_and(|m| x < m) || self.max.is_some_and(|m| x > m) =>
-            {
-                Err(format!("{x} is outside the limits"))
-            }
-            (Kind::Analog, Num::Number(x)) => Ok(Value::Analog(x)),
-            _ => Err("wrong type for the tag".into()),
-        }
     }
 }
 
