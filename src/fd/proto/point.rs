@@ -54,14 +54,19 @@ impl Point {
         match (self.kind, n) {
             (Kind::Binary, Num::Bool(b)) => Ok(Value::Binary(b)),
             (Kind::Binary, Num::Number(x)) if x == 0.0 || x == 1.0 => Ok(Value::Binary(x == 1.0)),
-            (Kind::Analog, Num::Number(x)) if !x.is_finite() => Err(Refusal::NotFinite),
-            (Kind::Analog, Num::Number(x))
-                if self.min.is_some_and(|m| x < m) || self.max.is_some_and(|m| x > m) =>
-            {
-                Err(Refusal::OutOfRange(x))
-            }
-            (Kind::Analog, Num::Number(x)) => Ok(Value::Analog(x)),
+            (Kind::Analog, Num::Number(x)) => self.analog(x),
             _ => Err(Refusal::WrongType),
+        }
+    }
+
+    fn analog(&self, x: f64) -> Result<Value, Refusal> {
+        match (
+            x.is_finite(),
+            self.min.is_some_and(|m| x < m) || self.max.is_some_and(|m| x > m),
+        ) {
+            (false, _) => Err(Refusal::NotFinite),
+            (true, true) => Err(Refusal::OutOfRange(x)),
+            (true, false) => Ok(Value::Analog(x)),
         }
     }
 }

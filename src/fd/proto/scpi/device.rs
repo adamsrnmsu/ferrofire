@@ -53,29 +53,33 @@ fn fault(code: i32) -> Fault {
 
 type Reply = Result<Option<String>, Fault>;
 
+const TEXTS: &[(i32, &str)] = &[
+    (-100, "Command error"),
+    (-102, "Syntax error"),
+    (-104, "Data type error"),
+    (-108, "Parameter not allowed"),
+    (-109, "Missing parameter"),
+    (-113, "Undefined header"),
+    (-114, "Header suffix out of range"),
+    (-121, "Invalid character in number"),
+    (-123, "Exponent too large"),
+    (-131, "Invalid suffix"),
+    (-200, "Execution error"),
+    (-221, "Settings conflict"),
+    (-222, "Data out of range"),
+    (-224, "Illegal parameter value"),
+    (-350, "Queue overflow"),
+    (-363, "Input buffer overrun"),
+    (-410, "Query INTERRUPTED"),
+    (-420, "Query UNTERMINATED"),
+];
+
 /// The standard text of an error number.
 pub fn text(code: i32) -> &'static str {
-    match code {
-        -100 => "Command error",
-        -102 => "Syntax error",
-        -104 => "Data type error",
-        -108 => "Parameter not allowed",
-        -109 => "Missing parameter",
-        -113 => "Undefined header",
-        -114 => "Header suffix out of range",
-        -121 => "Invalid character in number",
-        -123 => "Exponent too large",
-        -131 => "Invalid suffix",
-        -200 => "Execution error",
-        -221 => "Settings conflict",
-        -222 => "Data out of range",
-        -224 => "Illegal parameter value",
-        -350 => "Queue overflow",
-        -363 => "Input buffer overrun",
-        -410 => "Query INTERRUPTED",
-        -420 => "Query UNTERMINATED",
-        _ => "Unknown error",
-    }
+    TEXTS
+        .iter()
+        .find(|(c, _)| *c == code)
+        .map_or("Unknown error", |(_, t)| t)
 }
 
 /// The SESR bit an error sets: command (-1xx), execution (-2xx), device-specific (-3xx) or query (-4xx).
@@ -117,10 +121,10 @@ enum Match {
 /// long form (`MEASure`: `MEAS` or `MEASURE`, never `MEASU`); a numeric suffix is allowed but only 1 exists.
 fn keyword(pattern: &str, t: &str) -> Match {
     let long = pattern;
-    let short = match pattern.find(|c: char| c.is_ascii_lowercase()) {
-        Some(i) if i > 0 => &pattern[..i],
-        _ => pattern,
-    };
+    // no lower-case letter: the one form; a lower-case first letter: an empty short form, which no mnemonic equals
+    let short = pattern
+        .find(|c: char| c.is_ascii_lowercase())
+        .map_or(pattern, |i| &pattern[..i]);
     let is = |m: &str| m.eq_ignore_ascii_case(short) || m.eq_ignore_ascii_case(long);
     let base = t.trim_end_matches(|c: char| c.is_ascii_digit());
     match (is(t), is(base), &t[base.len()..]) {
@@ -167,17 +171,12 @@ struct Entry {
     common: bool,
     query: bool,
     path: &'static [&'static str],
-    /// Fewest and most parameters.
-    args: (usize, usize),
+    /// How many parameters it takes.
+    args: usize,
     run: Handler,
 }
 
-const fn common(
-    name: &'static [&'static str],
-    query: bool,
-    args: (usize, usize),
-    run: Handler,
-) -> Entry {
+const fn common(name: &'static [&'static str], query: bool, args: usize, run: Handler) -> Entry {
     Entry {
         common: true,
         query,
@@ -192,52 +191,46 @@ const fn system(path: &'static [&'static str], run: Handler) -> Entry {
         common: false,
         query: true,
         path,
-        args: (0, 0),
+        args: 0,
         run,
     }
 }
 
 static FIXED: &[Entry] = &[
-    common(&["IDN"], true, (0, 0), |_, e, _| {
-        Ok(Some(e.ins.idn.clone()))
-    }),
-    common(&["RST"], false, (0, 0), |_, _, _| Ok(None)),
-    common(&["CLS"], false, (0, 0), |s, _, _| {
+    common(&["IDN"], true, 0, |_, e, _| Ok(Some(e.ins.idn.clone()))),
+    common(&["RST"], false, 0, |_, _, _| Ok(None)),
+    common(&["CLS"], false, 0, |s, _, _| {
         s.esr = 0;
         s.errors.clear();
         Ok(None)
     }),
-    common(&["ESE"], false, (1, 1), |s, _, a| {
+    common(&["ESE"], false, 1, |s, _, a| {
         byte(a).map(|b| {
             s.ese = b;
             None
         })
     }),
-    common(&["ESE"], true, (0, 0), |s, _, _| {
-        Ok(Some(s.ese.to_string()))
-    }),
-    common(&["ESR"], true, (0, 0), |s, _, _| {
+    common(&["ESE"], true, 0, |s, _, _| Ok(Some(s.ese.to_string()))),
+    common(&["ESR"], true, 0, |s, _, _| {
         Ok(Some(std::mem::take(&mut s.esr).to_string()))
     }),
-    common(&["OPC"], false, (0, 0), |s, _, _| {
+    common(&["OPC"], false, 0, |s, _, _| {
         s.esr |= OPC;
         Ok(None)
     }),
-    common(&["OPC"], true, (0, 0), |_, _, _| Ok(Some("1".into()))),
-    common(&["SRE"], false, (1, 1), |s, _, a| {
+    common(&["OPC"], true, 0, |_, _, _| Ok(Some("1".into()))),
+    common(&["SRE"], false, 1, |s, _, a| {
         byte(a).map(|b| {
             s.sre = b & !MSS;
             None
         })
     }),
-    common(&["SRE"], true, (0, 0), |s, _, _| {
-        Ok(Some(s.sre.to_string()))
-    }),
-    common(&["STB"], true, (0, 0), |s, e, _| {
+    common(&["SRE"], true, 0, |s, _, _| Ok(Some(s.sre.to_string()))),
+    common(&["STB"], true, 0, |s, e, _| {
         Ok(Some(s.stb(e.mav).to_string()))
     }),
-    common(&["TST"], true, (0, 0), |_, _, _| Ok(Some("0".into()))),
-    common(&["WAI"], false, (0, 0), |_, _, _| Ok(None)),
+    common(&["TST"], true, 0, |_, _, _| Ok(Some("0".into()))),
+    common(&["WAI"], false, 0, |_, _, _| Ok(None)),
     system(&["SYSTem", "ERRor"], |s, _, _| Ok(Some(s.next_error()))),
     system(&["SYSTem", "ERRor", "NEXT"], |s, _, _| {
         Ok(Some(s.next_error()))
@@ -325,7 +318,7 @@ impl Session {
         };
         if self.errors.len() < ERR_CAP {
             self.errors.push_back((code, msg));
-        } else if let Some(last) = self.errors.back_mut().filter(|l| l.0 != -350) {
+        } else if let Some(last) = self.errors.back_mut() {
             *last = (-350, text(-350).into());
             self.esr |= class_bit(-350);
         }
@@ -353,7 +346,8 @@ impl Session {
     /// -420, the response having no terminator to answer).
     pub fn eof(&mut self, ins: &Instrument, store: &Store) -> Vec<u8> {
         let mut out = vec![];
-        if !std::mem::take(&mut self.skipping) && !self.buf.is_empty() {
+        // skipping an overlong line means the buffer was given up, so what is left of it is not a message
+        if !self.buf.is_empty() {
             let line = line_text(&std::mem::take(&mut self.buf));
             self.message(ins, store, &line, &mut out);
             if syntax::is_query(&line) {
@@ -478,8 +472,8 @@ fn entry_match(e: &Entry, h: &syntax::Header, path: &[String]) -> Match {
 
 fn run_fixed(e: &Entry, s: &mut Session, env: &Env, params: &[Param]) -> Reply {
     match params.len() {
-        n if n < e.args.0 => Err(fault(-109)),
-        n if n > e.args.1 => Err(fault(-108)),
+        n if n < e.args => Err(fault(-109)),
+        n if n > e.args => Err(fault(-108)),
         _ => (e.run)(s, env, params),
     }
 }
@@ -650,6 +644,8 @@ mod tests {
         let mut r = rig();
         assert_eq!(r.ask("*IDN?"), "ferrofire,rtu,0,1\n");
         assert_eq!(r.ask("*idn?"), "ferrofire,rtu,0,1\n");
+        assert_eq!(r.ask("*ESE?"), "0\n", "a new connection enables nothing");
+        assert_eq!(r.ask("*SRE?"), "0\n");
         assert_eq!(r.ask("*TST?"), "0\n");
         assert_eq!(r.ask("*OPC?"), "1\n");
         assert_eq!(r.ask("SYST:VERS?"), "1999.0\n");
@@ -1133,6 +1129,7 @@ mod tests {
             r.s.eof(&r.ins, &r.store).is_empty(),
             "the tail of an overlong line is not a message"
         );
+        r.raw(b"\n");
         assert_eq!(r.errors().len(), 1);
     }
 
@@ -1152,6 +1149,19 @@ mod tests {
             "under the cap everything is sent"
         );
         assert!(r.errors().is_empty());
+    }
+
+    #[test]
+    fn exactly_the_output_cap_is_sent_one_byte_more_is_not() {
+        let mut r = rig();
+        r.ins.idn = "x".repeat(15); // 16 bytes with the newline: the cap holds exactly 16384 of them
+        let n = OUT_CAP / 16;
+        assert_eq!(OUT_CAP % 16, 0);
+        let line = b"*IDN?\n";
+        assert_eq!(r.raw(&line.repeat(n)).len(), OUT_CAP);
+        assert!(r.errors().is_empty(), "the cap itself is allowed");
+        assert_eq!(r.raw(&line.repeat(n + 1)).len(), 16);
+        assert_eq!(r.errors().len(), 1);
     }
 
     #[test]

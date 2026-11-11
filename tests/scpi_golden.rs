@@ -6,7 +6,6 @@
 mod common;
 
 use ferrofire::fd::proto::scpi::device::Session;
-use ferrofire::fd::proto::Module;
 
 const TRANSCRIPT: &str = include_str!("golden/scpi.transcript");
 

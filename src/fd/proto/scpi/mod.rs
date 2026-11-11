@@ -5,11 +5,11 @@
 
 pub mod device;
 
-use super::super::config::{bounded, number, text, ConfigError, Opts, Tags};
+use super::super::config::{bounded, child, number, text, ConfigError, Opts, Tags};
 use super::super::eventlog::EventLog;
 use super::super::net;
 use super::super::store::Store;
-use super::point::points;
+use super::point::{points, Point};
 use super::{device_name, Module};
 use crate::hint::show;
 use crate::model::Kind;
@@ -64,31 +64,33 @@ fn path_of(key: &str, t: &str) -> Result<Vec<String>, ConfigError> {
     }
 }
 
-fn paths(
-    n: Node,
-    p: &crate::fd::proto::point::Point,
-) -> Result<(Vec<String>, Option<Vec<String>>), ConfigError> {
+/// The path text of `<key>` when the point has it, else `default`.
+fn path_or(n: Node, key: &str, default: Vec<String>) -> Result<Vec<String>, ConfigError> {
+    text(n, key).map_or(Ok(default), |t| path_of(key, &t))
+}
+
+fn paths(n: Node, p: &Point) -> Result<(Vec<String>, Option<Vec<String>>), ConfigError> {
     let name = tag_mnemonic(&p.tag);
     let kind = match p.kind {
         Kind::Analog => "ANALog",
         Kind::Binary => "BINary",
     };
-    let read = match text(n, "read-path") {
-        Some(t) => path_of("read-path", &t)?,
-        None => vec!["MEASure".into(), kind.into(), name.clone()],
-    };
-    let write = match (p.writable, text(n, "write-path")) {
-        (true, Some(t)) => Some(path_of("write-path", &t)?),
-        (true, None) => Some(vec!["SOURce".into(), name]),
-        (false, None) => None,
-        (false, Some(_)) => {
-            return Err(ConfigError(format!(
-                "<point> `{}` has a <write-path> but is not <writable>",
-                show(&p.tag)
-            )))
-        }
-    };
-    Ok((read, write))
+    let read = path_or(
+        n,
+        "read-path",
+        vec!["MEASure".into(), kind.into(), name.clone()],
+    )?;
+    match (p.writable, child(n, "write-path").is_some()) {
+        (true, _) => Ok((
+            read,
+            Some(path_or(n, "write-path", vec!["SOURce".into(), name])?),
+        )),
+        (false, false) => Ok((read, None)),
+        (false, true) => Err(ConfigError(format!(
+            "<point> `{}` has a <write-path> but is not <writable>",
+            show(&p.tag)
+        ))),
+    }
 }
 
 /// Every route's paths must differ from every other's (as the mnemonics a client may send) and stay out of SYSTem.
@@ -141,28 +143,43 @@ impl Server {
     }
 }
 
+/// The routes of the `<point>` elements, checked against each other.
+fn routes(node: Node, tags: &Tags, opts: &Opts) -> Result<Vec<Route>, ConfigError> {
+    let routes = points(node, tags, opts)?
+        .into_iter()
+        .map(|(n, point)| {
+            let (read, write) = paths(n, &point)?;
+            let default = number::<f64>(n, "default-value")?;
+            Ok(Route {
+                point,
+                read,
+                write,
+                default,
+            })
+        })
+        .collect::<Result<Vec<_>, ConfigError>>()?;
+    distinct(&routes)?;
+    Ok(routes)
+}
+
+/// The `*IDN?` response: manufacturer, model, serial and the ferrofire version.
+fn idn(node: Node) -> Result<String, ConfigError> {
+    Ok([
+        idn_field(node, "manufacturer", "ferrofire".into())?,
+        idn_field(node, "model", device_name(node))?,
+        idn_field(node, "serial", "0".into())?,
+        env!("CARGO_PKG_VERSION").to_string(),
+    ]
+    .join(","))
+}
+
 impl Module for Server {
     fn parse(node: Node, tags: &mut Tags, opts: &Opts) -> Result<Self, ConfigError> {
-        let routes = points(node, tags, opts)?
-            .into_iter()
-            .map(|(n, point)| {
-                let (read, write) = paths(n, &point)?;
-                let default = number::<f64>(n, "default-value")?;
-                Ok(Route {
-                    point,
-                    read,
-                    write,
-                    default,
-                })
-            })
-            .collect::<Result<Vec<_>, ConfigError>>()?;
-        distinct(&routes)?;
-        let idn = [
-            idn_field(node, "manufacturer", "ferrofire".into())?,
-            idn_field(node, "model", device_name(node))?,
-            idn_field(node, "serial", "0".into())?,
-            env!("CARGO_PKG_VERSION").to_string(),
-        ];
+        let ins = Instrument {
+            idn: idn(node)?,
+            routes: routes(node, tags, opts)?,
+            max_line: bounded(node, "max-line", 1024usize, 64..=65536)?,
+        };
         let idle = bounded(node, "idle-timeout", 300u64, 0..=86400)?;
         Ok(Server {
             endpoint: text(node, "endpoint").unwrap_or_else(|| DEFAULT_ENDPOINT.into()),
@@ -171,16 +188,11 @@ impl Module for Server {
                 "scpi-server",
             )),
             max_connections: bounded(node, "max-connections", 16usize, 1..=4096)?,
-            idle: if idle == 0 {
-                Duration::MAX
-            } else {
-                Duration::from_secs(idle)
+            idle: match idle {
+                0 => Duration::MAX,
+                s => Duration::from_secs(s),
             },
-            ins: Instrument {
-                idn: idn.join(","),
-                routes,
-                max_line: bounded(node, "max-line", 1024usize, 64..=65536)?,
-            },
+            ins,
         })
     }
 

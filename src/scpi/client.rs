@@ -100,22 +100,25 @@ pub fn parse_reported(line: &str) -> Result<Reported, String> {
     Ok(Reported { code, message })
 }
 
-/// `HOST[:PORT]`, `[V6]:PORT`, `[V6]` or a bare IPv6 address.
+/// The host and the port text of `HOST[:PORT]`, `[V6]:PORT`, `[V6]` or a bare IPv6 address (more than one `:`, so no port).
+fn host_port(t: &str) -> Option<(&str, Option<&str>)> {
+    if let Some(v6) = t.strip_prefix('[') {
+        let (host, rest) = v6.split_once(']')?;
+        return match rest {
+            "" => Some((host, None)),
+            r => Some((host, Some(r.strip_prefix(':')?))),
+        };
+    }
+    match t.split_once(':') {
+        Some((host, port)) if !port.contains(':') => Some((host, Some(port))),
+        _ => Some((t, None)),
+    }
+}
+
 pub fn split_target(t: &str) -> Result<(String, u16), String> {
     let bad = || format!("`{t}`: expected HOST[:PORT]");
-    let port = |p: &str| p.parse::<u16>().map_err(|_| bad());
-    let (host, port) = match (t.strip_prefix('['), t.matches(':').count()) {
-        (Some(v6), _) => match v6.split_once(']').ok_or_else(bad)? {
-            (h, "") => (h, DEFAULT_PORT),
-            (h, rest) => (h, port(rest.strip_prefix(':').ok_or_else(bad)?)?),
-        },
-        (None, 0) => (t, DEFAULT_PORT),
-        (None, 1) => {
-            let (h, p) = t.split_once(':').ok_or_else(bad)?;
-            (h, port(p)?)
-        }
-        (None, _) => (t, DEFAULT_PORT),
-    };
+    let (host, port) = host_port(t).ok_or_else(bad)?;
+    let port = port.map_or(Ok(DEFAULT_PORT), |p| p.parse().map_err(|_| bad()))?;
     match host.is_empty() {
         true => Err(bad()),
         false => Ok((host.to_string(), port)),
@@ -286,8 +289,8 @@ fn repl<R: BufRead, W: Write>(
     }
 }
 
-fn run(a: &ScpiArgs) -> Result<bool, String> {
-    let wait = Duration::try_from_secs_f64(a.timeout)
+fn wait_of(a: &ScpiArgs) -> Result<Duration, String> {
+    Duration::try_from_secs_f64(a.timeout)
         .ok()
         .filter(|d| !d.is_zero())
         .ok_or_else(|| {
@@ -295,20 +298,33 @@ fn run(a: &ScpiArgs) -> Result<bool, String> {
                 "--timeout {}: expected a positive number of seconds",
                 a.timeout
             )
-        })?;
-    let cmds = commands(a)?;
+        })
+}
+
+type Tcp = Link<std::io::BufReader<TcpStream>, TcpStream>;
+
+fn open(a: &ScpiArgs, wait: Duration) -> Result<Tcp, String> {
     let stream = connect(&a.target, wait)?;
     let rd = std::io::BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
-    let mut link = Link::new(rd, stream, wait);
-    if cmds.is_empty() && a.file.is_none() && std::io::stdin().is_terminal() {
+    Ok(Link::new(rd, stream, wait))
+}
+
+/// Nothing to send and a person at the keyboard.
+fn interactive(a: &ScpiArgs, cmds: &[String]) -> bool {
+    cmds.is_empty() && a.file.is_none() && std::io::stdin().is_terminal()
+}
+
+fn run(a: &ScpiArgs) -> Result<bool, String> {
+    let wait = wait_of(a)?;
+    let cmds = commands(a)?;
+    let mut link = open(a, wait)?;
+    if interactive(a, &cmds) {
         let (mut stdin, mut stderr) = (std::io::stdin().lock(), std::io::stderr());
         return repl(&mut link, &mut stdin, &mut stderr, (a.check, a.json));
     }
-    let mut ok = true;
-    for cmd in &cmds {
-        ok &= show(&link.run(cmd, a.check)?, a.json);
-    }
-    Ok(ok)
+    cmds.iter().try_fold(true, |ok, cmd| {
+        Ok(show(&link.run(cmd, a.check)?, a.json) && ok)
+    })
 }
 
 /// Exit 0 when every command ran (and, with `--check`, left no error), 1 when the instrument reported errors, 2 when the run itself
@@ -386,6 +402,29 @@ mod tests {
             .run("Z", true)
             .unwrap_err()
             .contains("not an SCPI error response"));
+    }
+
+    #[test]
+    fn a_connection_that_fails_for_another_reason_is_not_waited_on_under_check() {
+        let e = link("").run("*IDN?", true).unwrap_err();
+        assert_eq!(
+            e,
+            "the instrument closed the connection before answering `*IDN?`"
+        );
+    }
+
+    #[test]
+    fn a_connection_has_the_timeouts_and_nodelay_set() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let target = listener.local_addr().unwrap().to_string();
+        let wait = Duration::from_millis(1234);
+        let s = connect(&target, wait).unwrap();
+        assert_eq!(s.read_timeout().unwrap(), Some(wait));
+        assert_eq!(s.write_timeout().unwrap(), Some(wait));
+        assert!(s.nodelay().unwrap());
+        assert!(connect("127.0.0.1:1", wait)
+            .unwrap_err()
+            .contains("connect 127.0.0.1:1"));
     }
 
     #[test]
