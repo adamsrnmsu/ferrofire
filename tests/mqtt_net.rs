@@ -349,8 +349,8 @@ fn sp_write(name: &str, v: f64) -> Vec<u8> {
     .encode_to_vec()
 }
 
-/// A broker that accepts MQTT 3.1.1 connections and then never acknowledges or reads anything again.
-fn mute_broker() -> u16 {
+/// A broker that accepts connections, answers the CONNECT with a CONNACK or not, and then never acknowledges or reads anything again.
+fn mute_broker(connack: bool) -> u16 {
     use std::io::{Read, Write};
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = l.local_addr().unwrap().port();
@@ -359,7 +359,9 @@ fn mute_broker() -> u16 {
             let mut s = s.unwrap();
             let mut buf = [0u8; 512];
             let _ = s.read(&mut buf); // the CONNECT
-            let _ = s.write_all(&[0x20, 2, 0, 0]); // CONNACK, accepted
+            if connack {
+                let _ = s.write_all(&[0x20, 2, 0, 0]); // CONNACK, accepted
+            }
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(1));
                 let _ = &s;
@@ -371,7 +373,7 @@ fn mute_broker() -> u16 {
 
 #[tokio::test]
 async fn a_broker_that_stops_acknowledging_fills_the_queue_and_the_log_says_so_once_in_a_while() {
-    let port = mute_broker();
+    let port = mute_broker(true);
     let log = std::env::temp_dir().join(format!("mqtt-net-queue-{}.log", std::process::id()));
     let xml = config(port, "")
         .replace("/dev/null", &log.display().to_string())
@@ -397,6 +399,69 @@ async fn a_broker_that_stops_acknowledging_fills_the_queue_and_the_log_says_so_o
         .count();
     assert!(n <= 2, "the warning is rate limited, saw {n}");
     d.stop.cancel();
+    let _ = std::fs::remove_file(&log);
+}
+
+#[tokio::test]
+async fn commands_sent_while_the_device_was_away_are_not_replayed_when_it_returns() {
+    let b = Broker::start();
+    let mut probe = Probe::on(
+        b.port,
+        &["ferrofire/rtu-1/status", "ferrofire/rtu-1/setpoint/set"],
+    )
+    .await;
+    let d = start(&config(b.port, ""));
+    probe.text("ferrofire/rtu-1/status", "online").await;
+    d.stop.cancel();
+    d.task.await.unwrap();
+    probe.text("ferrofire/rtu-1/status", "offline").await;
+    probe.put("ferrofire/rtu-1/setpoint/set", "77").await;
+    probe.text("ferrofire/rtu-1/setpoint/set", "77").await; // the broker has had it
+    let d = start(&config(b.port, ""));
+    probe.text("ferrofire/rtu-1/status", "online").await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        !d.store.is_queued("setpoint"),
+        "a clean session keeps nothing for a client that is away"
+    );
+    d.stop.cancel();
+}
+
+#[tokio::test]
+async fn it_stops_at_once_when_the_broker_never_answers_the_connect() {
+    let d = start(&config(mute_broker(false), ""));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    d.stop.cancel();
+    timeout(Duration::from_millis(500), d.task)
+        .await
+        .expect("stopped promptly")
+        .unwrap();
+}
+
+#[tokio::test]
+async fn unreadable_tls_files_are_logged_and_retried_and_do_not_stop_the_device() {
+    let log = std::env::temp_dir().join(format!("mqtt-net-tls-{}.log", std::process::id()));
+    let xml = config(free_port(), "<tls-ca>/nonexistent/ca.pem</tls-ca>")
+        .replace("tcp://", "ssl://")
+        .replace("/dev/null", &log.display().to_string());
+    let d = start(&xml);
+    for _ in 0..100 {
+        if std::fs::read_to_string(&log).is_ok_and(|t| t.contains("cannot read the TLS files")) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let text = std::fs::read_to_string(&log).unwrap_or_default();
+    assert!(
+        text.contains("cannot read the TLS files") && text.contains("/nonexistent/ca.pem"),
+        "{text}"
+    );
+    assert!(d.store.get_f64("level").is_some());
+    d.stop.cancel();
+    timeout(Duration::from_secs(5), d.task)
+        .await
+        .expect("stopped")
+        .unwrap();
     let _ = std::fs::remove_file(&log);
 }
 

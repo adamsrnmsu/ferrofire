@@ -315,7 +315,8 @@ fn qos(q: u8) -> QoS {
 fn unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as u64)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 impl Client {
@@ -412,9 +413,10 @@ impl Client {
                     }
                     Ok(Event::Incoming(Incoming::Publish(p))) => {
                         // a retained command was left on the broker by someone, not sent now: it would be obeyed again on every reconnect
-                        let lines = match p.retain {
-                            true => vec![format!("retained message on `{}` ignored", show(&p.topic))],
-                            false => self.engine.message(&p.topic, &p.payload, store),
+                        let lines = if p.retain {
+                            vec![format!("retained message on `{}` ignored", show(&p.topic))]
+                        } else {
+                            self.engine.message(&p.topic, &p.payload, store)
                         };
                         for line in lines {
                             self.say("warn", "mqtt command", &line);
@@ -715,6 +717,11 @@ mod tests {
             .err()
             .unwrap();
         assert!(e.0.contains("cannot be a topic level"), "{e}");
+    }
+
+    #[test]
+    fn the_clock_is_unix_milliseconds() {
+        assert!(unix_ms() > 1_700_000_000_000, "{}", unix_ms());
     }
 
     #[test]
