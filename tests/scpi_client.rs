@@ -222,3 +222,28 @@ async fn a_run_that_cannot_complete_exits_2_with_a_message() {
     );
     d.stop.cancel();
 }
+
+/// Any instrument that offers the socket service, not only ours: this stub answers with CRLF, has its own `SYST:ERR?` text, and
+/// shows the client needs nothing from ferrofire beyond lines of ASCII.
+#[tokio::test(flavor = "multi_thread")]
+async fn it_works_against_a_foreign_responder_that_ends_lines_with_crlf() {
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let target = l.local_addr().unwrap().to_string();
+    std::thread::spawn(move || {
+        use std::io::{BufRead, BufReader};
+        let (s, _) = l.accept().unwrap();
+        let mut w = s.try_clone().unwrap();
+        for line in BufReader::new(s).lines() {
+            let reply: &[u8] = match line.unwrap().trim() {
+                "*IDN?" => b"ACME,STUB,1,1.0\r\n",
+                "SYST:ERR?" => b"-113,\"Undefined header\"\r\n",
+                "BAD?" => b"",
+                _ => b"+1.234E+00\r\n",
+            };
+            w.write_all(reply).unwrap();
+        }
+    });
+    let o = scpi(vec![target, "*IDN?".into(), "MEAS:X?".into()], "").await;
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    assert_eq!(out(&o), "ACME,STUB,1,1.0\n+1.234E+00\n");
+}
