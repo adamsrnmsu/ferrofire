@@ -1254,24 +1254,28 @@ mod tests {
     fn the_negotiated_nesting_level_does_not_exceed_the_proposed_one() {
         let nesting = |n: u8| [0x83, 0x01, n];
         let find = |hay: &[u8], needle: [u8; 3]| hay.windows(3).position(|w| w == needle);
-        let (mut c, mut s) = pair();
-        c.start(Instant::ZERO).unwrap();
-        let cr = c.poll_transmit().map(<[u8]>::to_vec).unwrap();
-        s.on_bytes(Instant::ZERO, &cr);
-        let cc = s.poll_transmit().map(<[u8]>::to_vec).unwrap();
-        c.on_bytes(Instant::ZERO, &cc);
-        let mut connect = c.poll_transmit().map(<[u8]>::to_vec).unwrap();
-        let at = find(&connect, nesting(5)).expect("the client proposes nesting 5");
-        connect[at + 2] = 2; // same length: a client that proposes 2
         let cbb = |b: u8| [0x81, 0x03, 0x05, b, 0x00];
-        let at = connect.windows(5).position(|w| w == cbb(0xF1)).expect("the client proposes parameterCBB f1 00");
-        connect[at + 3] = 0xE0; // ... and fewer parameter CBB bits than this server has
-        s.on_bytes(Instant::ZERO, &connect);
-        let accept = s.poll_transmit().map(<[u8]>::to_vec).unwrap();
-        assert!(find(&accept, nesting(2)).is_some(), "answers 2");
-        assert!(find(&accept, nesting(5)).is_none(), "never more than proposed");
-        let has = |b: u8| accept.windows(5).any(|w| w == cbb(b));
-        assert!(has(0xE0) && !has(0xF1), "negotiated CBB is the intersection of the proposal and the server's");
+        // proposals below, at and above this server's 5: the answer is min(proposal, 5)
+        for proposed in [1u8, 2, 4, 5, 6, 10, 127] {
+            let (mut c, mut s) = pair();
+            c.start(Instant::ZERO).unwrap();
+            let cr = c.poll_transmit().map(<[u8]>::to_vec).unwrap();
+            s.on_bytes(Instant::ZERO, &cr);
+            let cc = s.poll_transmit().map(<[u8]>::to_vec).unwrap();
+            c.on_bytes(Instant::ZERO, &cc);
+            let mut connect = c.poll_transmit().map(<[u8]>::to_vec).unwrap();
+            let at = find(&connect, nesting(5)).expect("the client proposes nesting 5");
+            connect[at + 2] = proposed; // same length: a client that proposes something else
+            let at = connect.windows(5).position(|w| w == cbb(0xF1)).expect("the client proposes parameterCBB f1 00");
+            connect[at + 3] = 0xE0; // ... and fewer parameter CBB bits than this server has
+            s.on_bytes(Instant::ZERO, &connect);
+            let accept = s.poll_transmit().map(<[u8]>::to_vec).unwrap();
+            let want = proposed.min(5);
+            assert!(find(&accept, nesting(want)).is_some(), "proposal {proposed} is answered {want}");
+            assert!(want == 5 || find(&accept, nesting(5)).is_none(), "proposal {proposed}: never more than proposed");
+            let has = |b: u8| accept.windows(5).any(|w| w == cbb(b));
+            assert!(has(0xE0) && !has(0xF1), "negotiated CBB is the intersection of the proposal and the server's");
+        }
     }
 
     fn connect() -> (Association, Association) {
