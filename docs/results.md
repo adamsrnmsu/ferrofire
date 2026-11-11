@@ -91,3 +91,5 @@ NNG was evaluated and dropped: no multicast (N RTUs = N copies, 19.6 MB/s vs 2.4
 
 Every function CRAP < 10, no duplicate code above 0.8 similarity, mutation testing with 0 surviving mutants
 ([quality.md](quality.md)).
+
+What each result is checked against, and what is not covered: [testing.md](testing.md).

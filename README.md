@@ -317,6 +317,8 @@ outputs:
 
 ## Testing
 
+How each component and protocol is tested, against what, and where the gaps are: [docs/testing.md](docs/testing.md).
+
 - Unit tests: expression parser, model loading, shm contract, wire framing, group hash.
 - Waterway: trace-equality golden (`tests/golden/waterway_trace.csv`) and a full boat transit with the RTU logic.
 - Power: matches PYPOWER 5.1.19 on case9, 14, 30, 57, 118 and 300 (goldens generated at test time).
