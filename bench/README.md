@@ -12,6 +12,7 @@ Needs only Docker (Docker Desktop, arm64), `python3` and `uv` on the host; cargo
 
 ```
 make bench          # builds, then runs the whole matrix: 2 transports x 4 N x 2 rates x 3 reps = 48 runs, ~70 s each (~1 h)
+make charts         # every comparison chart (docs/img/charts/*.svg + CSV) and docs/results.md, from the committed raw data
 make bench-report   # raw -> CSV, PNG charts, docs/bench/transport-comparison.md
 ```
 
@@ -36,6 +37,7 @@ uv run --with matplotlib python bench/report.py                              # w
 | `ffbench client` | third container on the same bridge | One REQ client (zmq REQ or NNG REQ0) and one subscriber (UDP multicast DISH-equivalent, or NNG SUB0). Prints one JSON document. |
 | `run.py` | host | Orchestrates the matrix; reps are the outer loop so drift hits every cell alike. |
 | `report.py` | host (uv, matplotlib) | Aggregates, tables, charts, report. |
+| `charts.py` | host (uv, matplotlib) | The comparison charts of [docs/results.md](../docs/results.md): reads `docs/bench/results/` (bench, live captures, OVS counters, `burger/burger.csv`), writes `docs/img/charts/*.svg` + one CSV per chart, fills `results.md.in`. Light surface baked into each SVG so it reads on GitHub light and dark. Colours: dataviz reference palette (blue `#2a78d6`, orange `#eb6834`, aqua `#1baf7a`, violet `#6250d6`, red `#e34948`, grey `#898781` for before/stock), checked with `validate_palette.js --mode light` per chart pairing: all pass except the grey, which is the de-emphasis colour and fails the chroma floor by design (it passes the contrast and neighbour-distance checks). |
 
 Source: `bench/client/` is a standalone cargo package (not part of ferrofire's build, tests or `make check`); `bench/` touches nothing in `src/`.
 

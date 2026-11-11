@@ -1,0 +1,4 @@
+capture point,datagrams,_ff.seq range,missing,inter-arrival p50 ms,p99 ms,max ms
+provider,35993,2454..38446,0,100.0,100.3,105.3
+rtu-1,35993,2454..38446,0,100.0,101.3,109.7
+rtu-2,35994,2453..38446,0,100.0,101.4,109.9

@@ -1,0 +1,4 @@
+"cell (0 % loss, delay 2ms 1ms)",complete % before ww-d4a,complete % after ww-d4a
+"100 tags, 10 Hz",17.3,100.0
+"100 tags, 100 Hz",17.0,100.0
+"800 tags, 10 Hz",0.0,100.0

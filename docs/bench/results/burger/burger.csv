@@ -1,0 +1,21 @@
+item,build,metric,value,source
+modbus-churn,stock,conns_at_stop,1006,PR comment sandialabs/sceptre-bennu#79 (no raw file kept: the stock fdleak run's results were not retained)
+modbus-churn,stock,sockets_before,6,PR comment sandialabs/sceptre-bennu#79
+modbus-churn,stock,sockets_after,1011,PR comment sandialabs/sceptre-bennu#79
+modbus-churn,stock,verdict,fail,PR comment sandialabs/sceptre-bennu#79 (stopped answering at connection 1006; stderr log +240 MB)
+modbus-churn,fixed,conns_done,1500,fdleak-fixed-burger-churn.json
+modbus-churn,fixed,sockets_before,5,fdleak-fixed-burger-churn.json
+modbus-churn,fixed,sockets_after,5,fdleak-fixed-burger-churn.json
+modbus-churn,fixed,verdict,pass,fdleak-fixed-report.md
+modbus-badframes,stock,verdict,fail,robust-stock-report.md
+modbus-badframes,fixed,verdict,pass,robust-fixed-report.md
+iec104-masters,stock,verdict,fail,robust-stock-report.md
+iec104-masters,fixed,verdict,pass,robust-fixed-report.md
+dnp3-accept,stock,verdict,fail,robust-stock-report.md
+dnp3-accept,fixed,verdict,pass,robust-fixed-report.md
+watcher-quiet,stock,verdict,fail,watcher-stock-report.md
+watcher-quiet,fixed,verdict,pass,watcher-fixed-report.md
+watcher-quiet,stock,rtu-1_Bpm,57780,watcher-stock-report.md
+watcher-quiet,stock,rtu-2_Bpm,57723,watcher-stock-report.md
+watcher-quiet,fixed,rtu-1_Bpm,0,watcher-fixed-report.md
+watcher-quiet,fixed,rtu-2_Bpm,0,watcher-fixed-report.md

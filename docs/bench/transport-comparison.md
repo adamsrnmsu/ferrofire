@@ -80,6 +80,10 @@ receives crosses `eth0` and is counted there, classified by port: tcp 5555 = req
 
 ![request latency](img/latency.png)
 
+![READ latency p50 per run, ZeroMQ vs NNG](../img/charts/05b-nng-latency.svg)
+
+*Charts: plotted numbers and the same charts with context in [results.md](../results.md).*
+
 All times in microseconds; mean ± sd of the per-run percentile over 3 runs. Top row of each table is publishing at 10 Hz, bottom 100 Hz.
 **Caution: nng READ/QUERY latency is bimodal, so a mean ± sd over 3 runs describes neither mode** (an nng "mean" of 137 µs is one slow-mode run
 averaged with fast ones; no run is near it). The per-run view comes first.
@@ -205,6 +209,10 @@ Reading the tables:
 
 ![publish delivery](img/publish_delivery.png)
 
+![Publish cycles lost at 800 tags, ZeroMQ vs NNG](../img/charts/05a-nng-loss.svg)
+
+*Charts: plotted numbers and the same charts with context in [results.md](../results.md).*
+
 | Hz | N | cycles/s zmq | cycles/s nng | chunks/cycle zmq | chunks/cycle nng | loss % zmq | loss % nng | spread p50 µs zmq | spread p50 µs nng | spread p99 µs zmq | spread p99 µs nng |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | 10 | 10 | 10.00 ± 0.000 | 10.00 ± 0.000 | 1.00 ± 0.000 | 1.00 ± 0.000 | 0.000 ± 0.000 | 0.000 ± 0.000 | 0.000 ± 0.000 | 0.000 ± 0.000 | 0.000 ± 0.000 | 0.000 ± 0.000 |
@@ -240,6 +248,10 @@ Reading the tables:
 ## 3. Network traffic
 
 ![publish traffic](img/traffic_publish.png)
+
+![Packets per publish cycle, ZeroMQ vs NNG](../img/charts/05c-nng-packets.svg)
+
+*Charts: plotted numbers and the same charts with context in [results.md](../results.md).*
 
 ### Publish only (30 s window, no requests)
 

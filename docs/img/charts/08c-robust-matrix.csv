@@ -1,0 +1,6 @@
+check,what it requires,stock,fixed
+modbus-churn,"1 500 connections, fds stay flat (#79)",FAIL,pass
+modbus-badframes,"bad Modbus frames dropped, device survives (#81)",FAIL,pass
+iec104-masters,IEC-104 second master does not starve the first (#81),FAIL,pass
+dnp3-accept,DNP3 outstation accepts again after accept() error (#81),FAIL,pass
+watcher-quiet,watcher stderr log quiet (#82),FAIL,pass

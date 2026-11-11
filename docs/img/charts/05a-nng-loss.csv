@@ -1,0 +1,5 @@
+metric,transport,rate,"each rep, %","mean, %"
+"publish cycles lost, 800 tags",zmq,10 Hz,"0.0, 0.0, 0.0",0.0
+"publish cycles lost, 800 tags",zmq,100 Hz,"0.0, 0.0, 0.0",0.0
+"publish cycles lost, 800 tags",nng,10 Hz,"12.7, 22.0, 14.7",16.4
+"publish cycles lost, 800 tags",nng,100 Hz,"6.7, 5.5, 3.5",5.3

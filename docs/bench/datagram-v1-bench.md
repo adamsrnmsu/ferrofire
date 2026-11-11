@@ -67,6 +67,10 @@ This is a separate report: the zmq-vs-NNG report ([transport-comparison.md](tran
 Age = last-chunk receipt minus (`sim.t` + a constant chosen so the smallest age in the run is 0), i.e. freshness variation; `transit` = receipt minus `_ff.t`
 (provider's send time), only available after this change.
 
+![Value age at 800 tags, before vs after](../img/charts/01-age.svg)
+
+*Charts: plotted numbers and the same charts with context in [results.md](../results.md).*
+
 | Hz | build | reps | age p50 ms | age p99 ms | age max ms | cycle spread p50 ms | transit p50 ms | transit p99 ms |
 |---|---|---|---|---|---|---|---|---|
 | 10 | before (raw/, original build) | 3 | 9.5 ± 2.3 | 14.5 ± 0.7 | 14.8 ± 0.4 | 0.4 ± 0.0 | - | - |
@@ -82,6 +86,14 @@ Age = last-chunk receipt minus (`sim.t` + a constant chosen so the smallest age 
 **complete %** = complete cycles / cycles the provider published in the window; **stale** = gap between consecutive complete cycles (what a reader of
 "the latest complete state" sees; its floor is the period); **8-tag gap** = arrival gap of 8 probe tags spread over the chunks (what a reader of one point sees);
 **chunks/cycle** = datagrams per cycle; expected complete % = (1 - loss)^chunks if each datagram were lost independently.
+
+![Complete cycles vs injected loss, multicast vs pull-bridge](../img/charts/02-complete-vs-loss.svg)
+
+![Per-tag staleness p99 vs injected loss](../img/charts/03-tag-staleness.svg)
+
+![Complete cycles at zero loss, receiver before vs after ww-d4a](../img/charts/02b-reorder-fix.svg)
+
+*Charts: plotted numbers and the same charts with context in [results.md](../results.md).*
 
 ### 100 tags, 10 Hz
 
@@ -137,6 +149,12 @@ the same run, which must agree.
 
 800-tag model. `slice`: R multicast groups of K tags each (`publish_slices`); `whole`: one group of all 800 tags (every RTU would receive all of it);
 `pull`: R real `ferrofire pull-bridge` processes with K tags each. The provider columns are the monitor's, over the 30 s window.
+
+![Provider wire traffic, 32 RTUs x 100 tags](../img/charts/04a-fanout-wire.svg)
+
+![Provider CPU, 32 RTUs x 100 tags](../img/charts/04b-fanout-cpu.svg)
+
+*Charts: plotted numbers and the same charts with context in [results.md](../results.md).*
 
 | mode | RTUs | tags/RTU | Hz | provider wire kB/s (req+pub) | kB/s per RTU | pkts/s | provider CPU % of a core | RSS MB | complete % per RTU | datagram loss % | worst-RTU stale p99 ms | stale max ms | reps |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -234,6 +252,12 @@ usage: ferrofire run [model.yaml | --model model.yaml] [--server tcp://0.0.0.0:5
 
 `dg1h`, 3 600 s, 10 Hz, 08:39 UTC. Sequence numbers counted at each end:
 
+![Datagrams sent and received in one hour](../img/charts/06a-live-datagrams.svg)
+
+![Inter-arrival p50 and p99](../img/charts/06b-live-interarrival.svg)
+
+*Charts: plotted numbers and the same charts with context in [results.md](../results.md).*
+
 | capture point | datagrams | `_ff.seq` range | missing | duplicate / reordered | restarts | inter-arrival p50 / p99 / max (ms) | udp B/s (frames) | tcp 5555 B/s |
 |---|---|---|---|---|---|---|---|---|
 | provider NIC (sent) | 35 993 | 2454 .. 38446 | **0** | 0 | 0 | 100.0 / 100.3 / 105.3 | 4 154 | 24 |
@@ -258,6 +282,10 @@ Each RTU's `<input><endpoint>` was repointed on a copy of its `config.xml` (`rtu
 ### G3. OVS multicast snooping off and on
 
 Snooping is off by default on this bridge. For "on": `ovs-vsctl set Bridge phenix mcast_snooping_enable=true other_config:mcast-snooping-aging-time=7200 other_config:mcast-snooping-disable-flood-unregistered=true`, then the RTU devices were restarted so that they sent their IGMP joins. There is no IGMP querier on the range, so joins are not refreshed; the aging time was raised above the run length so entries survive without one (a real network needs a querier). `mdb/show` after the joins lists exactly the RTU ports: per-RTU run, port of rtu-1 in `239.0.1.1`, port of rtu-2 in `239.0.1.2`; whole-model run, both in `239.0.0.1`. Bytes transmitted by the bridge toward each NIC (`ovs-ofctl dump-ports` deltas divided by the run length; the "after" snapshot was taken up to a minute after the capture ended, so treat the 5-minute column as up to 20 % high):
+
+![OVS snooping off vs on, bytes per NIC](../img/charts/07-ovs-snooping.svg)
+
+*Charts: plotted numbers and the same charts with context in [results.md](../results.md).*
 
 | NIC (tx from the bridge, B/s) | whole stream, snooping **off**, 1 h | per-RTU groups, **off**, 10 min | per-RTU groups, **on**, 10 min | whole stream, **on**, 5 min |
 |---|---|---|---|---|

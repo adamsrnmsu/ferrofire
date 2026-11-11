@@ -1,0 +1,7 @@
+stream,NIC,snooping off B/s,snooping on B/s,window off / on
+whole stream,bystander NIC (mean of 5),"4,330",36,3600 s / 300 s
+whole stream,rtu-1,"4,328","4,962",3600 s / 300 s
+whole stream,rtu-2,"4,328","4,962",3600 s / 300 s
+per-RTU groups,bystander NIC (mean of 5),"6,850",74,600 s / 600 s
+per-RTU groups,rtu-1,"6,848","3,470",600 s / 600 s
+per-RTU groups,rtu-2,"6,848","3,065",600 s / 600 s

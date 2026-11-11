@@ -10,7 +10,7 @@ DRY_MIN := 0.8
 # ponytail: pid lock; a kill -9 of make leaves a stale file that src-free ignores because the pid is gone.
 MUTATE_LOCK := .mutate.lock
 
-.PHONY: differential diff-dnp3 testpeers conformance conformance-selftest src-free help wireshark zeek-iccp bench bench-report bench-dg bench-dg-report image fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
+.PHONY: differential diff-dnp3 testpeers conformance conformance-selftest src-free help wireshark zeek-iccp bench bench-report bench-dg bench-dg-report charts image fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
 help:    # list targets
 	@grep -E '^[a-z-]+:.*#' $(MAKEFILE_LIST) | sed -E 's/^([a-z-]+):[^#]*#/\1\t/'
 src-free:   # fail fast while make mutate is rewriting src/
@@ -46,6 +46,8 @@ bench: image   # historical zmq vs nng benchmark matrix (NNG dropped 2026-11-09;
 	python3 bench/run.py
 bench-report:   # tables, charts and docs/bench/transport-comparison.md from the raw results (needs uv)
 	uv run --with matplotlib python bench/report.py
+charts:   # docs/img/charts/*.svg (+ CSVs) and docs/results.md from the committed raw results (needs uv)
+	uv run --with matplotlib python bench/charts.py
 bench-dg: image   # datagram v1 matrix (age, netem loss, per-RTU fan-out, restarts, faults; about 1.5 h) -> docs/bench/results/raw-datagram-v1
 	python3 bench/run_dg.py
 bench-dg-report:   # docs/bench/datagram-v1-bench.md from the datagram v1 raw results
