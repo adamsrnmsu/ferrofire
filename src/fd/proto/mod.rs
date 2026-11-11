@@ -12,6 +12,7 @@ pub mod iec61850;
 pub mod modbus;
 #[cfg(feature = "proto-mqtt")]
 pub mod mqtt;
+pub mod point;
 
 use super::config::{ConfigError, Opts, Tags};
 use super::store::Store;

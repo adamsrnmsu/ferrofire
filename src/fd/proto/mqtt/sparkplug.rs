@@ -146,11 +146,7 @@ pub enum Key {
     Alias(u64),
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum Num {
-    Bool(bool),
-    Number(f64),
-}
+pub use crate::fd::proto::point::Num;
 
 /// An integer from the 32-bit field, signed or not as the data type says: Int8/16/32 are stored sign-extended.
 fn int32(x: u32, datatype: Option<u32>) -> f64 {

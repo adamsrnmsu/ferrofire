@@ -117,6 +117,37 @@ pub fn number<T: std::str::FromStr>(n: Node, name: &str) -> Result<Option<T>, Co
         .transpose()
 }
 
+/// A `true` / `false` key, `default` when absent.
+pub fn flag(n: Node, key: &str, default: bool) -> Result<bool, ConfigError> {
+    match text(n, key).as_deref() {
+        None => Ok(default),
+        Some("true") => Ok(true),
+        Some("false") => Ok(false),
+        Some(v) => Err(ConfigError(format!(
+            "<{key}> `{}` is not true or false",
+            show(v)
+        ))),
+    }
+}
+
+/// A number key that must lie in `range`.
+pub fn bounded<T: std::str::FromStr + PartialOrd + std::fmt::Display + Copy>(
+    n: Node,
+    key: &str,
+    default: T,
+    range: std::ops::RangeInclusive<T>,
+) -> Result<T, ConfigError> {
+    let v = number::<T>(n, key)?.unwrap_or(default);
+    match range.contains(&v) {
+        true => Ok(v),
+        false => Err(ConfigError(format!(
+            "<{key}> {v} is not between {} and {}",
+            range.start(),
+            range.end()
+        ))),
+    }
+}
+
 // ---- the device ----------------------------------------------------------------------------------------------
 
 /// One `<input>` element: a DISH subscription to the provider.

@@ -7,12 +7,13 @@
 pub mod engine;
 pub mod sparkplug;
 
-use super::super::config::{number, require, text, ConfigError, Opts, Tags};
+use super::super::config::{bounded, flag, number, require, text, ConfigError, Opts, Tags};
 use super::super::eventlog::EventLog;
 use super::super::store::Store;
+use super::point::{points, Point};
 use super::Module;
 use crate::hint::{show, RateLimit};
-use engine::{Engine, Out, Point, Scheme};
+use engine::{Engine, Out, Scheme};
 use roxmltree::Node;
 use rumqttc::{
     AsyncClient, Event, EventLoop, Incoming, LastWill, MqttOptions, QoS, TlsConfiguration,
@@ -110,18 +111,6 @@ fn level(what: &str, v: String) -> Result<String, ConfigError> {
     Ok(v)
 }
 
-fn flag(n: Node, key: &str, default: bool) -> Result<bool, ConfigError> {
-    match text(n, key).as_deref() {
-        None => Ok(default),
-        Some("true") => Ok(true),
-        Some("false") => Ok(false),
-        Some(v) => Err(ConfigError(format!(
-            "<{key}> `{}` is not true or false",
-            show(v)
-        ))),
-    }
-}
-
 /// The name of the `<field-device>` this element sits in, the default topic level for the device.
 fn device_name(n: Node) -> String {
     n.ancestors()
@@ -129,60 +118,6 @@ fn device_name(n: Node) -> String {
         .and_then(|d| text(d, "name"))
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "ferrofire".into())
-}
-
-fn points(node: Node, tags: &Tags, opts: &Opts) -> Result<Vec<Point>, ConfigError> {
-    let mut out: Vec<Point> = vec![];
-    for n in node.children().filter(|c| c.has_tag_name("point")) {
-        let tag = require(n, "tag")?;
-        let Some(kind) = tags.kind(&tag) else {
-            opts.warn(format!("mapping for unknown tag `{}` skipped", show(&tag)))?;
-            continue;
-        };
-        if out.iter().any(|p| p.tag == tag) {
-            return Err(ConfigError(format!(
-                "<point> tag `{}` is listed twice",
-                show(&tag)
-            )));
-        }
-        let (min, max) = (
-            number::<f64>(n, "min-value")?,
-            number::<f64>(n, "max-value")?,
-        );
-        if min.zip(max).is_some_and(|(a, b)| a > b) {
-            return Err(ConfigError(format!(
-                "<point> `{}`: <min-value> is above <max-value>",
-                show(&tag)
-            )));
-        }
-        let writable = flag(n, "writable", false)?;
-        out.push(Point {
-            tag,
-            kind,
-            writable,
-            min,
-            max,
-        });
-    }
-    Ok(out)
-}
-
-/// A number key that must lie in `range`.
-fn bounded<T: std::str::FromStr + PartialOrd + std::fmt::Display + Copy>(
-    n: Node,
-    key: &str,
-    default: T,
-    range: std::ops::RangeInclusive<T>,
-) -> Result<T, ConfigError> {
-    let v = number::<T>(n, key)?.unwrap_or(default);
-    match range.contains(&v) {
-        true => Ok(v),
-        false => Err(ConfigError(format!(
-            "<{key}> {v} is not between {} and {}",
-            range.start(),
-            range.end()
-        ))),
-    }
 }
 
 fn tls_files(node: Node, broker: &Broker) -> Result<Tls, ConfigError> {
@@ -256,7 +191,10 @@ impl Module for Client {
         )?;
         let qos = bounded(node, "qos", 1u8, 0..=2)?;
         let refresh = number::<u64>(node, "refresh")?.unwrap_or(60);
-        let points = points(node, tags, opts)?;
+        let points: Vec<Point> = points(node, tags, opts)?
+            .into_iter()
+            .map(|(_, p)| p)
+            .collect();
         if let Some(p) = points.iter().find(|p| p.tag.contains(['+', '#'])) {
             return Err(ConfigError(format!(
                 "tag `{}` cannot be a topic level",
