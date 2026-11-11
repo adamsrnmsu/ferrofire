@@ -1,0 +1,5 @@
+# Releasaurus (https://releasaurus.rgon.io) opens the release PR on pushes to main; merging it tags vX.Y.Z and
+# publishes the GitHub Release (.github/workflows/release.yml). `rust` bumps Cargo.toml and Cargo.lock.
+[[package]]
+path = "."
+release_type = "rust"

@@ -334,6 +334,15 @@ How each component and protocol is tested, against what, and where the gaps are:
 - `make fuzz-smoke` ([cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz), `fuzz/`, nightly toolchain in the container): four libFuzzer targets, `request` (the REP handler), `datagram` (`Receiver::accept`), `expr` (the expression parser) and `model` (YAML load), 10 s each (`FUZZ_SECS=60` for longer). CI runs it after `make check`. `make fuzz T=expr` runs one until stopped. A crash is written to `fuzz/artifacts/<target>/`; turn each into a regression test in `tests/robust.rs` before fixing it.
 - Numbers before and after the quality pass: [docs/quality.md](docs/quality.md). CI runs `make check` on every push.
 
+## Releases
+
+- **Cutting a version:** [Releasaurus](https://releasaurus.rgon.io) keeps a release PR open on `main` (next version from the conventional commits, changelog, `Cargo.toml` bump). Merging it tags `vX.Y.Z`, publishes the GitHub Release and attaches the binaries. Nothing else cuts a version.
+- **Binaries:** the [Releases page](https://github.com/adamsrnmsu/ferrofire/releases) has `ferrofire-<version>-x86_64-linux-musl.tar.gz` and `ferrofire-<version>-aarch64-linux-musl.tar.gz` (the binary, README, LICENSE, NOTICE) plus `SHA256SUMS`. They are fully static (musl), so no glibc or other library is needed.
+- **`nightly`:** a prerelease rebuilt every Monday (or by hand) from `main` HEAD. It is an **untested** build of that commit, not a version; the release title names the commit. Use a `vX.Y.Z` release for anything that matters.
+- **Verify:** download the archive and `SHA256SUMS` into one directory and run `sha256sum --ignore-missing -c SHA256SUMS`.
+- **Runs on:** any Linux kernel with the matching CPU (no libc needed). aarch64 was run (`--version`, `check --help`) on CentOS 7 (glibc 2.17), Debian 9, Ubuntu 16.04, Alpine and BusyBox. x86_64 is built and smoke-tested (`--version`) on every release run by CI, but has not been run on old distros.
+- **Not shipped:** `simulinksolver` is `ferrofire` run under that name (`ln -s ferrofire simulinksolver`), but musl's POSIX semaphores do not share with the glibc bennu simulink provider, so for `simulink` mode on a range use `make linux` (glibc) instead.
+
 ## Status
 
 - Done: phase 0 (engine, waterway model), 1 (power flow), 2 (native provider), 3 (PyPower drop-in).

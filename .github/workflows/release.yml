@@ -1,0 +1,176 @@
+name: Release
+
+# Versioning is Releasaurus: a push to main opens/updates the release PR (next version from conventional commits, plus the
+# changelog); merging that PR tags vX.Y.Z and publishes the GitHub Release. Then the static musl binaries are built and attached.
+#
+# Why the build lives in this same workflow run: tags and releases created with the default GITHUB_TOKEN do NOT trigger other
+# workflows, so an `on: push: tags` / `on: release` workflow would never fire for a Releasaurus release. `release` therefore
+# reports the tag it created and `build` runs right after it. A v* tag pushed by hand with a real user token does trigger the
+# `push: tags` path below. No PAT or App secret is used.
+#
+# Also weekly (and by hand): the same build as one rolling `nightly` prerelease, recreated at main HEAD each time.
+# Only `ferrofire` is shipped. `simulinksolver` is the same binary run under that argv[0] name, and the musl build cannot
+# share POSIX semaphores with the glibc bennu provider, so use `make linux` (glibc) for simulink mode on a range.
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One at a time: the nightly release is deleted and recreated, and Releasaurus must not race itself.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # Releasaurus: publish a merged release PR first, then open/update the next one (the order its docs require).
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      tag: ${{ steps.after.outputs.tag }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - id: before
+        run: echo "tags=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --paginate --jq '.[].ref' | sort | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+      - uses: robgonnella/releasaurus/action@9843e67bc1fdd96c0cf033c9b5b24a1e2fc91c77 # v1.3.0
+        with:
+          command: release
+          command_args: --forge github --repo ${{ github.server_url }}/${{ github.repository }}
+      - id: after
+        env:
+          BEFORE: ${{ steps.before.outputs.tags }}
+        run: |
+          tag=''
+          for ref in $(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --paginate --jq '.[].ref'); do
+            case " $BEFORE" in *" $ref "*) ;; *) tag="${ref#refs/tags/}" ;; esac
+          done
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "new release tag: ${tag:-none}"
+      - uses: robgonnella/releasaurus/action@9843e67bc1fdd96c0cf033c9b5b24a1e2fc91c77 # v1.3.0
+        with:
+          command: release-pr
+          command_args: --forge github --repo ${{ github.server_url }}/${{ github.repository }}
+
+  plan:
+    # Decides what (if anything) to build: kind=release for a tag Releasaurus just made or a v* tag push, kind=nightly for
+    # schedule/dispatch on main, otherwise none.
+    needs: [release]
+    if: ${{ !cancelled() && (needs.release.result == 'success' || needs.release.result == 'skipped') }}
+    runs-on: ubuntu-24.04
+    outputs:
+      kind: ${{ steps.p.outputs.kind }}
+      tag: ${{ steps.p.outputs.tag }}
+      ref: ${{ steps.p.outputs.ref }}
+      version: ${{ steps.p.outputs.version }}
+    steps:
+      - id: p
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          NEW_TAG: ${{ needs.release.outputs.tag }}
+          SHA: ${{ github.sha }}
+        run: |
+          kind=none tag='' ref="$SHA" version=''
+          if [ "$EVENT" = push ] && [ "$REF_TYPE" = tag ]; then
+            kind=release tag="$REF_NAME"
+          elif [ "$EVENT" = push ]; then
+            if [ -n "$NEW_TAG" ]; then kind=release tag="$NEW_TAG"; fi
+          elif [ "$REF" = refs/heads/main ]; then
+            kind=nightly tag=nightly version=nightly
+          fi
+          if [ "$kind" = release ]; then ref="refs/tags/$tag" version="${tag#v}"; fi
+          printf 'kind=%s\ntag=%s\nref=%s\nversion=%s\n' "$kind" "$tag" "$ref" "$version" | tee -a "$GITHUB_OUTPUT"
+
+  build:
+    needs: [plan]
+    if: needs.plan.outputs.kind != 'none'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, target: x86_64-unknown-linux-musl, short: x86_64-linux-musl }
+          - { runner: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, short: aarch64-linux-musl }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+          persist-credentials: false
+      # ring (via rustls) compiles C and assembly; musl-gcc makes that link against musl, so the result is fully static.
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+      # rust-toolchain.toml pins the compiler; adding the target here installs that toolchain first.
+      - run: rustup target add ${{ matrix.target }}
+      - name: Build
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          CC_aarch64_unknown_linux_musl: musl-gcc
+        run: cargo build --release --locked --bin ferrofire --target ${{ matrix.target }}
+      - name: Verify static and runnable
+        run: |
+          bin=target/${{ matrix.target }}/release/ferrofire
+          file "$bin" | tee /dev/stderr | grep -E 'statically linked|static-pie linked'
+          out=$(ldd "$bin" 2>&1 || true)
+          echo "$out"
+          echo "$out" | grep -q -E 'not a dynamic executable|statically linked'
+          "$bin" --version
+      - name: Package
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          name="ferrofire-$VERSION-${{ matrix.short }}"
+          mkdir "$name"
+          cp target/${{ matrix.target }}/release/ferrofire README.md LICENSE NOTICE "$name/"
+          tar -czf "$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ferrofire-${{ matrix.short }}
+          path: ferrofire-*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: [plan, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      KIND: ${{ needs.plan.outputs.kind }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: ferrofire-*
+          merge-multiple: true
+      - run: sha256sum ferrofire-*.tar.gz | tee SHA256SUMS
+      - name: Attach to the release
+        if: env.KIND == 'release'
+        run: |
+          # Releasaurus already made the release; a hand-pushed tag has none yet (a tag with "-" is a prerelease).
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            case "$TAG" in *-*) pre=--prerelease ;; *) pre= ;; esac
+            gh release create "$TAG" --verify-tag --generate-notes $pre
+          fi
+          gh release upload "$TAG" --clobber ferrofire-*.tar.gz SHA256SUMS
+      - name: Recreate the nightly prerelease
+        if: env.KIND == 'nightly'
+        run: |
+          gh release delete nightly --cleanup-tag --yes || true
+          gh release create nightly --target "$SHA" --prerelease --latest=false \
+            --title "nightly: untested weekly build of ${SHA::7}" \
+            --notes "Untested weekly build of commit $SHA from main. Not a version: no tests ran on these binaries beyond a --version smoke test. Use a vX.Y.Z release for anything that matters." \
+            ferrofire-*.tar.gz SHA256SUMS
