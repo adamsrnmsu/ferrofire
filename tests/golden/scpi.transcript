@@ -1,0 +1,213 @@
+# Identity and the status system start clean on a new connection.
+> *IDN?
+< ferrofire,rtu-1,0,{version}
+> *ESR?
+< 0
+> *STB?
+< 0
+> SYST:ERR?
+< 0,"No error"
+> SYST:ERR:COUN?
+< 0
+> SYST:VERS?
+< 1999.0
+> *TST?
+< 0
+> *OPC?
+< 1
+> *OPC
+> *ESR?
+< 1
+
+# Reads: the default path is MEASure:<ANALog|BINary>:<TAG>, a tag name made into a mnemonic.
+> MEAS:ANAL:LEVEL?
+< 12.5
+> MEASure:ANALog:level?
+< 12.5
+> meas:anal:load_1_bus_1_mw?
+< -250
+> MEAS:BIN:ALARM?
+< 1
+> MEAS:ANAL:SETPOINT?
+< 400
+> MEAS:BIN:BREAKER?
+< 0
+> MEAS:ANAL:LEVEL?;:MEAS:BIN:ALARM?;*IDN?
+< 12.5;1;ferrofire,rtu-1,0,{version}
+@ publish plevel 0.001
+> MEAS:ANAL:LEVEL?
+< 0.001
+# A header without a leading colon is relative to the previous header's path.
+> MEAS:ANAL:LEVEL?;SETPOINT?;:MEAS:BIN:ALARM?
+< 0.001;400;1
+
+# Writes only queue; the value changes when the provider acknowledges.
+> SOUR:SETPOINT 750.5
+@ queued setpoint
+> MEAS:ANAL:SETPOINT?
+< 400
+> SOUR:SETPOINT?
+< 400
+> SOUR:SETPOINT? MAX
+< 1000
+> SOUR:SETPOINT? MIN
+< 0
+> SOUR:SETPOINT? DEF
+< 500
+> SOUR:BREAKER ON
+@ queued breaker
+> SOUR:BREAKER 0;:SOUR:SETPOINT MAX
+> SYST:ERR?
+< 0,"No error"
+
+# Errors: each lands in the queue and sets its class bit in the standard event status register.
+> SOUR:SETPOINT 1000.5
+> SOUR:SETPOINT -1
+> SOUR:BREAKER 2
+> SOUR:SETPOINT ON
+> SOUR:SETPOINT
+> SOUR:SETPOINT 1,2
+> SOUR:SETPOINT 5V
+> SOUR:SETPOINT foo
+> MEAS:ANAL:NOPE?
+> MEAS:ANAL:LEVEL 1
+> SOUR:LEVEL 1
+> MEAS2:ANAL:LEVEL?
+> MEAS:ANAL:LEVEL? 5
+> *ESR?
+< 48
+> *STB?
+< 4
+> SYST:ERR:COUN?
+< 13
+> SYST:ERR?
+< -222,"Data out of range;setpoint: 1000.5 is outside the limits"
+> SYST:ERR?
+< -222,"Data out of range;setpoint: -1 is outside the limits"
+> SYSTem:ERRor:NEXT?
+< -224,"Illegal parameter value;breaker: wrong type for the tag"
+> SYST:ERR?
+< -104,"Data type error;setpoint: wrong type for the tag"
+> SYST:ERR?
+< -109,"Missing parameter"
+> SYST:ERR?
+< -108,"Parameter not allowed"
+> SYST:ERR?
+< -131,"Invalid suffix"
+> SYST:ERR?
+< -224,"Illegal parameter value;FOO"
+> SYST:ERR?
+< -113,"Undefined header;MEAS:ANAL:NOPE?"
+> SYST:ERR?
+< -113,"Undefined header;MEAS:ANAL:LEVEL"
+> SYST:ERR?
+< -113,"Undefined header;SOUR:LEVEL"
+> SYST:ERR?
+< -114,"Header suffix out of range;MEAS2:ANAL:LEVEL?"
+> SYST:ERR?
+< -108,"Parameter not allowed"
+> SYST:ERR?
+< 0,"No error"
+> *ESR?
+< 0
+> *STB?
+< 0
+
+# Status byte and enable registers.
+> *ESE 32
+> *ESE?
+< 32
+> *SRE 32
+> *SRE?
+< 32
+> FOO:BAR
+> *ESR?
+< 32
+> FOO:BAR
+> *STB?
+< 100
+> *IDN?;*STB?
+< ferrofire,rtu-1,0,{version};116
+> SYST:ERR?
+< -113,"Undefined header;FOO:BAR"
+> SYST:ERR?
+< -113,"Undefined header;FOO:BAR"
+> *CLS
+> *STB?
+< 0
+> *SRE 255
+> *SRE?
+< 191
+> *ESE 256
+> *ESE -1
+> *ESE
+> *ESE?  1
+> *CLS?
+> SYST:ERR:COUN?
+< 5
+
+# Syntax: units, quotes, case, tolerated white space, and what is not a message.
+> *CLS
+> *IDN? ; *OPC?
+< ferrofire,rtu-1,0,{version};1
+> *idn?
+< ferrofire,rtu-1,0,{version}
+> *IDN?;;*OPC?
+< ferrofire,rtu-1,0,{version};1
+> SYST:ERR?
+< -102,"Syntax error"
+> :SYST:ERR?
+< 0,"No error"
+> SOUR:SETPOINT "5
+> SOUR:SETPOINT 1,
+> SOUR:SETPOINT #H10
+> SOUR:SETPOINT 1E999
+> SOUR:SETPOINT 1.2.3
+> SYST:ERR:COUN?
+< 5
+> *CLS
+> @@@
+> SYST:ERR?
+< -102,"Syntax error;@@@"
+
+# The error queue is bounded: the oldest 15 stay and the sixteenth becomes -350, later errors are lost.
+> *CLS
+> A1
+> A2
+> A3
+> A4
+> A5
+> A6
+> A7
+> A8
+> A9
+> A10
+> A11
+> A12
+> A13
+> A14
+> A15
+> A16
+> A17
+> A18
+> SYST:ERR:COUN?
+< 16
+> *ESR?
+< 40
+> SYST:ERR?
+< -113,"Undefined header;A1"
+> SYST:ERR?
+< -113,"Undefined header;A2"
+> SYST:ERR:COUN?
+< 14
+> *CLS
+> SYST:ERR:COUN?
+< 0
+
+# State is per connection.
+> FOO
+@ connect
+> SYST:ERR?
+< 0,"No error"
+> *ESR?
+< 0

@@ -287,6 +287,16 @@ impl Session {
         }
     }
 
+    /// Bytes of the unfinished line held (never more than `Instrument::max_line`).
+    pub fn buffered(&self) -> usize {
+        self.buf.len()
+    }
+
+    /// Entries in the error queue (never more than `ERR_CAP`).
+    pub fn queued_errors(&self) -> usize {
+        self.errors.len()
+    }
+
     /// The status byte. `mav`: a response of this message is waiting. Bit 6 is MSS; bits 3 and 7 (questionable, operation) have no
     /// register behind them here.
     fn stb(&self, mav: bool) -> u8 {
@@ -789,6 +799,7 @@ mod tests {
             r.ask(&format!("*X{i}"));
         }
         assert_eq!(r.ask("SYST:ERR:COUN?"), "16\n");
+        assert_eq!(r.s.queued_errors(), 16);
         let e = r.errors();
         assert_eq!(e.len(), 16);
         assert!(e[0].contains("*X0"), "{}", e[0]);
@@ -805,7 +816,7 @@ mod tests {
             s.push_error(-350, "");
         }
         s.push_error(-102, "");
-        assert_eq!(s.errors.len(), ERR_CAP);
+        assert_eq!(s.queued_errors(), ERR_CAP);
         assert_eq!(s.errors.back().map(|e| e.0), Some(-350));
     }
 
@@ -1075,7 +1086,9 @@ mod tests {
         let mut r = rig();
         let ok = [b'A'; 64];
         let long = vec![b'A'; 65];
-        assert_eq!(r.raw(&[&ok[..], b"\n"].concat()), "");
+        r.raw(&ok);
+        assert_eq!(r.s.buffered(), 64);
+        assert_eq!(r.raw(b"\n"), "");
         assert!(r.errors()[0].starts_with("-113,"), "64 bytes is allowed");
         r.raw(&[&long[..], b"\n*IDN?\n"].concat());
         assert_eq!(
@@ -1095,7 +1108,7 @@ mod tests {
         assert_eq!(r.errors().len(), 1);
         r.raw(&[b'B'; 40]);
         r.raw(&[b'B'; 40]);
-        assert!(r.s.buf.is_empty(), "the buffer was given up");
+        assert_eq!(r.s.buffered(), 0, "the buffer was given up");
         assert!(r.s.skipping);
         assert_eq!(r.raw(b"x\n"), "");
         assert!(!r.s.skipping);

@@ -85,3 +85,9 @@ name = "fd_mqtt"
 path = "fuzz_targets/fd_mqtt.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "fd_scpi"
+path = "fuzz_targets/fd_scpi.rs"
+test = false
+doc = false
