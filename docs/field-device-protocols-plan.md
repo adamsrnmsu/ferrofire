@@ -21,7 +21,7 @@ removed upstream), **IEC 101** (no `CS101_*` call under `MOD:iec60870-5`). The E
 
 | # | Protocol / role | Parity means (config keys, behaviour) | Proven by (SPEC §8 method) | Days |
 |---|---|---|---|---|
-| 1 | Modbus/TCP server | SPEC §4.1 unchanged (FC 1-6/15/16, scaling, Q1-Q4, Q9 fix, event log) | 24-row golden `run-stock.sh modbus`, fuzz | 1.5 (F1) |
+| 1 | Modbus/TCP server | SPEC §4.1 unchanged (FC 1-6/15/16, scaling, Q1-Q4, Q9 fix, event log). **Built (ww-otj.57, 2026-11-10)**: byte-equal to stock on five recorded sets, divergences listed in `conformance/README.md` | 24-row golden `run-stock.sh modbus`, fuzz | 1.5 (F1) |
 | 2 | Modbus serial server + client | `<endpoint>` without `tcp://` = device path. **MBAP framing on the port, no CRC, no slave byte** (`MOD:modbus/module/SerialChannel.cpp:100-122`: reads the MBAP length at bytes 4-5 and hands `len+6` to the same stack). 9600 8N1 is stored but never applied (`:17-29`), so the port runs at OS defaults; no baud/parity keys exist. Client timeout 1000 ms (`B:src/bennu/distributed/SerialClient.hpp:18`). The generator also emits an ignored `<ip>` (`fd_server.mako:56-60`) | pty pair (`socat pty,raw pty,raw`): stock client ↔ our server and our client ↔ stock server, bytes equal | 0.5 (F6) |
 | 3 | DNP3 outstation (TCP) | SPEC §4.2 unchanged | golden `run-stock.sh dnp3` + `R:images/bennu-smoke.sh` (stock client) | 5-6 (F3) |
 | 4 | DNP3 serial server + client | opendnp3 `SerialSettings` defaults: 9600 8N1, no flow, 500 ms open delay (`B:.../dnp3/protocol/.../channel/SerialSettings.h:37-44`); link address = last IP octet for `dnp3-serial` (`fd_server.mako:47-51`), client address 1; no baud keys. Link/transport/app layers identical to TCP | pty pair, both directions | 1 (F6) |
@@ -149,7 +149,7 @@ a substation scenario or a Caldera MMS exercise; re-check crate maturity then.
 | # | Phase | Deliverable | Depends on | Acceptance | Days |
 |---|---|---|---|---|---|
 | F0 | Core + module registry | SPEC F0 plus `Module`/`REGISTRY`/features, loader pre-normalise, `EventLog`, `transport::open` | ww-otj.35 (cargo-deny); ww-otj.34 (zeromq) is related, shares the ZMTP code, not a blocker | SPEC §8.1; logic corpus; `--list-protocols`; generated fd-client XML loads | 2.5-3 |
-| F1 | Modbus/TCP server | SPEC F1 | F0 | 24-row golden, fuzz, waterway RTU config | 1.5 |
+| F1 | Modbus/TCP server | SPEC F1. **Done** (`src/fd/proto/modbus`, `conformance/modbus`, `tests/modbus_*.rs`, fuzz `fd_modbus`) | F0 | 24-row golden, fuzz, waterway RTU config | 1.5 |
 | F2 | Daemon, watcher, firmware | SPEC F2 | F1 | SPEC §6 tests; **waterway RTUs on Rust** (milestone 1) | 2 |
 | F3 | DNP3 outstation | SPEC F3 (link/transport/app shared with the master) | F0 | golden + `bennu-smoke.sh` | 5-6 |
 | F4 | IEC 104 server | SPEC F4 | F0 | golden + stock client | 2-3 |

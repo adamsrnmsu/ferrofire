@@ -10,7 +10,7 @@ DRY_MIN := 0.8
 # ponytail: pid lock; a kill -9 of make leaves a stale file that src-free ignores because the pid is gone.
 MUTATE_LOCK := .mutate.lock
 
-.PHONY: differential diff-dnp3 testpeers conformance conformance-selftest src-free help wireshark zeek-iccp bench bench-report bench-dg bench-dg-report charts image fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
+.PHONY: differential diff-dnp3 diff-modbus testpeers conformance conformance-selftest src-free help wireshark zeek-iccp bench bench-report bench-dg bench-dg-report charts image fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
 help:    # list targets
 	@grep -E '^[a-z-]+:.*#' $(MAKEFILE_LIST) | sed -E 's/^([a-z-]+):[^#]*#/\1\t/'
 src-free:   # fail fast while make mutate is rewriting src/
@@ -52,7 +52,7 @@ bench-dg: image   # datagram v1 matrix (age, netem loss, per-RTU fan-out, restar
 	python3 bench/run_dg.py
 bench-dg-report:   # docs/bench/datagram-v1-bench.md from the datagram v1 raw results
 	python3 bench/dg_report.py
-FUZZ_TARGETS := request datagram expr model fd_datagram fd_config fd_dnp3 fd_iec61850 fd_iccp
+FUZZ_TARGETS := request datagram expr model fd_datagram fd_config fd_modbus fd_dnp3 fd_iec61850 fd_iccp
 FUZZ_SECS ?= 10
 fuzz-smoke: image   # every fuzz target for $(FUZZ_SECS)s each (CI); crashes land in fuzz/artifacts, turn each into a test
 	$(IN) bash -c 'cd fuzz && for t in $(FUZZ_TARGETS); do cargo +nightly fuzz run $$t -- -max_total_time=$(FUZZ_SECS) -max_len=4096 || exit 1; done'
@@ -80,6 +80,9 @@ differential:   # one differential probe against the stock oracle or our binary:
 diff-dnp3: export DOCKER_HOST := $(TP_DOCKER_HOST)
 diff-dnp3:   # our DNP3 outstation vs the recorded stock transcripts, live in containers (build target-linux/debug/ferrofire first: make test)
 	@for s in diff big; do conformance/differential.sh dnp3 rust $$s | diff conformance/dnp3/stock-$$s.golden - && echo "dnp3 $$s: byte-equal to stock" || exit 1; done
+diff-modbus: export DOCKER_HOST := $(TP_DOCKER_HOST)
+diff-modbus:   # our Modbus server vs the recorded stock transcripts, live in containers (build target-linux/debug/ferrofire first: make test)
+	@for s in diff waterway edges; do conformance/differential.sh modbus rust $$s | diff conformance/modbus/stock-$$s.golden - && echo "modbus $$s: byte-equal to stock" || exit 1; done
 
 clean:   # remove build output and metrics
 	rm -rf target target-linux dist .metrics

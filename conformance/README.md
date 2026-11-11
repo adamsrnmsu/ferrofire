@@ -52,6 +52,62 @@ publishes land on the other device (this contaminated the first goldens).
 
 To re-record the stock side: `TRACE=conformance/dnp3/stock-diff.trace LOGS=conformance/dnp3/stock-diff.logs conformance/differential.sh dnp3 stock diff > conformance/dnp3/stock-diff.golden` (and `big`).
 
+## Modbus/TCP
+
+Judged three ways, all against the same server: byte for byte against stock, by independent clients, and by what a blue team sees.
+
+    make diff-modbus                    # our binary vs the recorded stock transcripts, live in containers (build with make test first)
+    make differential PROTO=modbus WHO=stock SET=edges   # re-record one set from bennu:arm64 (also: diff, waterway, q4, divergent)
+    make conformance PROTO=modbus       # pymodbus, mbpoll and nmap modbus-discover vs the stock oracle; DUT=rust for ours
+    cargo test --test modbus_golden --test modbus_net --test modbus_clients --test modbus_emfile
+
+**Differential sets** (`conformance/modbus/`, helpers in `modbusprobe.py`; every request is one `#T` trace record, replayed with no sockets by
+`tests/modbus_golden.rs`, which also compares the provider payloads and the event log, and whether the connection was closed):
+
+| Set | Config | What it covers | Stock side |
+|---|---|---|---|
+| `diff` | bennu's own `modbus-server.xml`, provider down | the 24 rows of SPEC 4.1, every function code 0-255, a body of 0-3 bytes for twelve of them, extra bytes, quantity limits and check order, FC15/16 byte counts, unit/transaction ids, two requests in one segment | `stock-diff.{golden,trace,logs}` |
+| `waterway` | the waterway `rtu-1` as `fd_server.mako` renders it (`gen_waterway.py`), provider down | the real register map, published values like the simulation's, writes that do not land | `stock-waterway.*` |
+| `edges` | logic-free, all four tables, 12 scaling ranges (`gen_edges.py`), a stand-in provider (ZMTP REP that ACKs and reports each `WRITE=`) | in-range scaling to the last bit, bit packing, the top of the address space, FC5 values, FC15/16 spill-over, what the provider is sent (`%f`, `nan`) | `stock-edges.*` |
+| `q4` | the `edges` config, no provider | 23 values outside every range (SPEC Q4); not byte-equal by design, see below | `stock-q4.*` |
+| `divergent` | the `diff` config | frames that we refuse and stock does not (below); a record, not a golden | `stock-divergent.golden` |
+
+`make diff-modbus` runs `diff`, `waterway` and `edges`; `q4` and `divergent` are asserted in `tests/modbus_golden.rs` instead.
+Runs of `differential.sh` must not overlap, for the reason given under DNP3. Stock applies a write the provider never acknowledged about
+15 s after the REQ client gives up, which changes what a read returns: the provider-down probes read before they write and finish within 15 s.
+
+**What stock does (recorded, and in places not what SPEC 4.1 said):**
+- Any function reads address and quantity first: a body under 4 bytes is exception code 4 under function byte 0x80 (`80 04`), whatever the function. With 4
+  bytes or more an unserved function gets the header-only frame (SPEC Q2); FC43 `0e 01 00` is `80 04` for the same reason, not because FC43 is special.
+- Limits: quantity 0 or over 2000 (FC1/2) or 125 (FC3/4) is exception 3, checked before addresses. A read whose `addr + qty` ends past 65535 is exception 2,
+  for coils too (unmapped coil: 3). FC15/16 have no quantity limit beyond the byte count (which must be `ceil(qty/8)` / `2 * qty`: else 3); a frame is at most 254 long anyway.
+- FC5: ON is any value whose high byte is 0xFF (0xFF00, 0xFFFF, 0xFF80 ...), everything else is OFF. FC5 and FC6 echo the whole request PDU, extra bytes included.
+- Writes validate and queue address by address: those before an unmapped one are already queued when exception 2 goes back. Scaling is
+  `slope = 65535 / (max - min)` in doubles with one fused multiply-add; `<max-value>`/`<min-value>` count only together, else `[-1000, 2000]`. A range of no width reads 0
+  and writes `nan`.
+- The event log: one `info` line per read (after the checks) naming address and count, one `Data successfully written.` per coil/register written, an `error` line
+  naming the first unmapped address; nothing for a refused quantity or byte count (`stock-*.logs`).
+
+**Where we differ on purpose** (each row asserted in `tests/modbus_golden.rs` or `tests/modbus_net.rs`):
+| Stock | Ours | Why |
+|---|---|---|
+| MBAP length over 254: `80 04` up to ~1018 bytes, dies on a 3 KB frame (Q9) | close the connection | a PDU is at most 253 bytes; never a buffer overflow |
+| length under 2: `80 04` and garbage from the leftover bytes | close | not Modbus |
+| protocol id other than 0 is echoed and served | close | not Modbus/TCP |
+| a frame cut short and the client half-closes: answered `80 04` from the previous request's buffer (bennu #81) | no answer, close | a frame is answered only when whole |
+| FC15/16 whose data is shorter than the byte count says: writes what its buffer holds | exception 3 | never act on bytes the client did not send |
+| value outside the range: `(u32)(slope*v + intercept)`, low 16 bits kept on arm64 (1000.5 over `[0,1000]` reads 31, 1e10 reads 0xFFFF) | clamp to 0 / 65535, NaN reads 0 (SPEC Q4) | a wrapped reading is noise; the rule is tested against stock's words |
+| FC5/FC6 at address 65535: exception 2 *after* queueing the write and garbage writes to the wrapped addresses 0.. | exception 2, nothing queued | stock writes out of bounds |
+| with the provider down, a write (and a logic-driven output) the provider never acknowledged is applied to the datastore about 15 s later (a coil or a discrete input sharing its name then flips; seen with `diff-server.xml`, no write sent) | never applied: with no provider the read-back never changes (SPEC 3.2) | the abandoned-write apply is a side effect of stock's retry timeout; with a provider that answers the two agree |
+| a second write to a tag during the first one's round trip with the provider can be lost (the ACK erases it) | compare-and-erase: the newer write survives | a race, not a behaviour |
+
+**Independent clients.** `tests/modbus_clients.rs`: tokio-modbus 0.17 (dev-dependency). `make conformance PROTO=modbus`: pymodbus and libmodbus' `mbpoll` read and write
+over port 502, nmap's `modbus-discover` runs, tshark must find 0 malformed frames and 0 expert warnings in the capture (`mbtcp`), and Zeek's icsnpp-modbus must log the
+function codes. **Hostile input and descriptors**: `tests/modbus_net.rs` (2000 connect/close cycles with answered, cut-short, refused and silent connections:
+`/proc/self/fd` must not grow; 300 concurrent clients; bad frames get no answer and the next client is served), `tests/modbus_emfile.rs` (descriptor limit lowered: the
+accept loop reports once, backs off and serves again when descriptors are free), `fuzz/fuzz_targets/fd_modbus.rs`. These are the bennu #79/#81 shapes (everything-burger's
+`modbus-churn` and `modbus-badframes`).
+
 ## IEC 61850 (no oracle)
 Bennu never loads an IEC 61850 server, so `conformance/iec61850/` has only the acceptance half, and `proto.env` sets `DUT_DEFAULT=rust`:
 
@@ -68,6 +124,7 @@ The image built before 2026-11-10 lacks the control client and the GOOSE subscri
 ## Test peers (docker/testpeers)
 | Peer | Source | Licence | Use |
 |---|---|---|---|
+| `mbpoll` (libmodbus), `python3-pymodbus` | Debian | GPL-3 (`mbpoll`: test peer only, never linked) / BSD-3 | independent Modbus/TCP clients |
 | `outstation-demo`, `master-demo` | opendnp3 3.1.2 examples | Apache-2.0 | stock DNP3 peers (interactive master) |
 | `ff-dnp3-master HOST PORT LOCAL REMOTE [wait_s] [crob IDX CODE\|select-crob IDX CODE\|ao IDX VALUE]...` | ours, on opendnp3 | MIT / Apache-2.0 | scriptable master: integrity poll, commands, poll |
 | `server_example_*`, `iec61850_client_example1`, `client_example_control`, `iec61850_client_example_reporting`, `goose_publisher_example`, `goose_subscriber_example`, `goose_observer` | libiec61850 v1.6.2 | **GPL-3.0, test peers only, never linked** | IEC 61850 server/client/GOOSE |

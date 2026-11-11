@@ -8,6 +8,8 @@ pub mod dnp3;
 pub mod iccp;
 #[cfg(feature = "proto-iec61850")]
 pub mod iec61850;
+#[cfg(feature = "proto-modbus")]
+pub mod modbus;
 
 use super::config::{ConfigError, Opts, Tags};
 use super::store::Store;
@@ -59,6 +61,8 @@ pub fn start<M: Module>(node: Node, tags: &mut Tags, opts: &Opts) -> Result<Runn
 pub static REGISTRY: &[(&str, Start)] = &[
     #[cfg(feature = "proto-dnp3")]
     ("dnp3-server", start::<dnp3::Outstation>),
+    #[cfg(feature = "proto-modbus")]
+    ("modbus-server", start::<modbus::Server>),
     #[cfg(feature = "proto-iec61850")]
     ("iec61850-server", start::<iec61850::Server>),
     #[cfg(feature = "proto-iccp")]
