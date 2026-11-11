@@ -13,6 +13,8 @@ pub mod modbus;
 #[cfg(feature = "proto-mqtt")]
 pub mod mqtt;
 pub mod point;
+#[cfg(feature = "proto-scpi")]
+pub mod scpi;
 
 use super::config::{ConfigError, Opts, Tags};
 use super::store::Store;
@@ -49,6 +51,15 @@ pub fn name_in(
     }
 }
 
+/// The name of the `<field-device>` this element sits in, the default topic level for the device.
+pub fn device_name(n: Node) -> String {
+    n.ancestors()
+        .find(|a| a.has_tag_name("field-device"))
+        .and_then(|d| super::config::text(d, "name"))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "ferrofire".into())
+}
+
 pub type Task = Pin<Box<dyn Future<Output = ()> + Send>>;
 /// A parsed module, ready to be spawned on the runtime.
 pub type Runner = Box<dyn FnOnce(Store, CancellationToken) -> Task + Send>;
@@ -72,6 +83,8 @@ pub static REGISTRY: &[(&str, Start)] = &[
     ("iccp-server", start::<iccp::Server>),
     #[cfg(feature = "proto-mqtt")]
     ("mqtt-client", start::<mqtt::Client>),
+    #[cfg(feature = "proto-scpi")]
+    ("scpi-server", start::<scpi::Server>),
 ];
 
 /// Every `<comms>` tag a build can have, and the Cargo feature that provides it.
@@ -87,6 +100,7 @@ pub const KNOWN: &[(&str, &str)] = &[
     ("iec61850-server", "proto-iec61850"),
     ("iccp-server", "proto-iccp"),
     ("mqtt-client", "proto-mqtt"),
+    ("scpi-server", "proto-scpi"),
 ];
 
 /// Start the module a `<comms>` child names. `Ok(None)`: a tag nothing knows is warned about and skipped; a tag whose feature is

@@ -47,7 +47,8 @@ pub struct Header {
     pub path: Vec<String>,
 }
 
-fn mnemonic(m: &str) -> bool {
+/// A mnemonic: a letter, then letters, digits and `_`.
+pub fn is_mnemonic(m: &str) -> bool {
     m.starts_with(|c: char| c.is_ascii_alphabetic())
         && m.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
@@ -58,7 +59,7 @@ pub fn header(h: &str) -> Option<Header> {
     let (rooted, h) = h.strip_prefix(':').map_or((false, h), |r| (true, r));
     let (common, h) = h.strip_prefix('*').map_or((false, h), |r| (true, r));
     let path: Vec<String> = h.split(':').map(str::to_ascii_uppercase).collect();
-    let ok = path.iter().all(|m| mnemonic(m)) && (!common || (path.len() == 1 && !rooted));
+    let ok = path.iter().all(|m| is_mnemonic(m)) && (!common || (path.len() == 1 && !rooted));
     ok.then_some(Header {
         common,
         rooted,

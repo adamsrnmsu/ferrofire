@@ -33,7 +33,7 @@ prost = { version = "0.14", default-features = false, features = ["derive", "std
 # One feature per protocol module (docs/field-device-protocols-plan.md section 2). The parity set is default; extras are opt-in.
 # proto-mqtt is the exception: the quality gates (crap, mutate) build the default features only, and deny.toml carries advisory ignores
 # for rumqttc's unused webpki 0.102 (bead ww-otj.56 follow-up: drop both once rumqttc moves on). Build without it: --no-default-features.
-default = ["proto-modbus", "proto-dnp3", "proto-iec104", "proto-bacnet", "proto-serial", "proto-iec61850", "proto-iccp", "proto-mqtt"]
+default = ["proto-modbus", "proto-dnp3", "proto-iec104", "proto-bacnet", "proto-serial", "proto-iec61850", "proto-iccp", "proto-mqtt", "proto-scpi"]
 proto-modbus = []
 proto-dnp3 = []
 proto-iec104 = []
@@ -42,6 +42,8 @@ proto-serial = []
 proto-iec61850 = ["dep:iec61850-rs"]
 proto-iccp = ["dep:iec61850-rs"]
 proto-mqtt = ["dep:rumqttc", "dep:prost", "dep:rustls"]
+# default-on like proto-mqtt: the crap and mutate gates build the default features only
+proto-scpi = []
 all-protocols = ["default", "proto-iec61850", "proto-iccp"]
 
 [profile.release]

@@ -10,6 +10,7 @@ pub mod sparkplug;
 use super::super::config::{bounded, flag, number, require, text, ConfigError, Opts, Tags};
 use super::super::eventlog::EventLog;
 use super::super::store::Store;
+use super::device_name;
 use super::point::{points, Point};
 use super::Module;
 use crate::hint::{show, RateLimit};
@@ -109,15 +110,6 @@ fn level(what: &str, v: String) -> Result<String, ConfigError> {
         )));
     }
     Ok(v)
-}
-
-/// The name of the `<field-device>` this element sits in, the default topic level for the device.
-fn device_name(n: Node) -> String {
-    n.ancestors()
-        .find(|a| a.has_tag_name("field-device"))
-        .and_then(|d| text(d, "name"))
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "ferrofire".into())
 }
 
 fn tls_files(node: Node, broker: &Broker) -> Result<Tls, ConfigError> {
