@@ -1,0 +1,708 @@
+//! A blocking IEC 61850 server over TCP — the mirror of [`crate::client`].
+//!
+//! [`crate::proto::mms::association::Association`] is the same state machine the client
+//! drives, in the server role; this is the socket and the accept loop around it. One thread
+//! per association, one model behind one lock, and no runtime and no dependency — the same
+//! trade the client makes, for the same reason: the sans-IO core is what an async wrapper
+//! would be written against, so a runtime here would buy nothing and cost every caller.
+//!
+//! ```no_run
+//! use iec61850_rs::server::{Ied, Server};
+//!
+//! # fn main() -> iec61850_rs::Result<()> {
+//! let ied = Ied::from_scl(&std::fs::read_to_string("relay.cid")?, None)?;
+//! let server = Server::bind("0.0.0.0:102", ied)?;
+//!
+//! // The application updates the model through a transaction; the commit is what makes the
+//! // change visible to every client at once.
+//! let updates = server.handle();
+//! std::thread::spawn(move || {
+//!     use iec61850_rs::proto::data::Value;
+//!     updates.txn().set("IED1LD0/PTRC1$ST$Tr$general", Value::Boolean(true)).commit();
+//! });
+//!
+//! server.run()?;
+//! # Ok(()) }
+//! ```
+
+use std::collections::BTreeMap;
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, TrySendError, sync_channel};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::time::Duration;
+
+use super::acsi::{Acsi, AcsiConfig, AssocId};
+use super::ied::Ied;
+use crate::common::{Error, Instant, Result};
+use crate::proto::data::Value;
+use crate::proto::mms::Mms;
+use crate::proto::mms::association::{Association, AssociationConfig, AssociationEvent, PORT};
+
+/// How the server behaves.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ServerConfig {
+    /// Association parameters — selectors, sizes, timeouts.
+    pub association: AssociationConfig,
+    /// ACSI parameters — what `Identify` answers, page budgets.
+    pub acsi: AcsiConfig,
+    /// Associations the server will hold open at once. Beyond this an accepted socket is
+    /// closed immediately: an IED has a small, fixed number of association slots, and
+    /// pretending otherwise is how one runs out of memory instead of refusing a connection.
+    pub max_associations: usize,
+    /// How long a connection thread waits on the socket before it looks at its outbound
+    /// queue. It bounds how late a report can be, not how fast a response is.
+    pub poll_interval: Duration,
+    /// PDUs queued for one client before the server gives up on it.
+    ///
+    /// Reports and command terminations are produced by whichever thread committed the change
+    /// and drained by the connection thread, so a client that stops reading its socket makes
+    /// that queue grow, and an unbounded one is a remote memory exhaustion. When the queue
+    /// fills, the **association is closed**: a buffered report control
+    /// block keeps its entries and the client resumes from its `EntryID` when it comes back,
+    /// which is precisely what `BR` is for, and dropping reports silently instead would leave
+    /// a SCADA client believing it had seen everything.
+    pub outbound_queue: usize,
+}
+
+impl Default for ServerConfig {
+    fn default() -> ServerConfig {
+        ServerConfig {
+            association: AssociationConfig::default(),
+            acsi: AcsiConfig::default(),
+            max_associations: 16,
+            poll_interval: Duration::from_millis(20),
+            outbound_queue: 256,
+        }
+    }
+}
+
+/// What the connections and the application share: the model, and a way to reach each client.
+#[derive(Debug)]
+struct Shared {
+    acsi: Acsi,
+    /// One outbound queue per open association, for the PDUs the server sends unasked —
+    /// reports and command terminations. Bounded; see [`ServerConfig::outbound_queue`].
+    outbound: BTreeMap<AssocId, Outbound>,
+    next_assoc: AssocId,
+    /// Wakes the process-bus publisher thread when a commit may have produced a frame.
+    wake: Option<Arc<Wake>>,
+}
+
+/// A flag and the condition variable the publisher thread sleeps on.
+#[derive(Debug, Default)]
+struct Wake {
+    pending: Mutex<bool>,
+    cv: Condvar,
+}
+
+impl Wake {
+    fn notify(&self) {
+        *self.pending.lock().unwrap_or_else(PoisonError::into_inner) = true;
+        self.cv.notify_one();
+    }
+
+    /// Sleep until notified or until `timeout` (`None`: until notified) has passed.
+    fn wait(&self, timeout: Option<Duration>) {
+        let mut pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
+        if !*pending {
+            pending = match timeout {
+                Some(t) if t.is_zero() => pending,
+                Some(t) => self.cv.wait_timeout(pending, t).unwrap_or_else(PoisonError::into_inner).0,
+                None => self.cv.wait(pending).unwrap_or_else(PoisonError::into_inner),
+            };
+        }
+        *pending = false;
+    }
+}
+
+/// One association's outbound queue, and the flag that says it overflowed.
+#[derive(Clone, Debug)]
+struct Outbound {
+    tx: SyncSender<Vec<u8>>,
+    /// Set when a PDU could not be queued. The connection thread reads it and closes, which
+    /// is the only honest answer: the client is not reading, and pretending it saw a report
+    /// it never received is worse than telling it the association is gone.
+    stalled: Arc<AtomicBool>,
+}
+
+impl Outbound {
+    /// Queue one PDU, or record that the client is not keeping up.
+    fn send(&self, pdu: Vec<u8>) {
+        match self.tx.try_send(pdu) {
+            Ok(()) => {}
+            Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => self.stalled.store(true, Ordering::Relaxed),
+        }
+    }
+}
+
+/// Nanoseconds on a monotonic origin shared by every association of this process, so that a
+/// report's gathering window means the same thing whichever thread closes it.
+fn now_nanos() -> u64 {
+    crate::common::monotonic_now().0
+}
+
+/// A blocking IEC 61850 server.
+#[derive(Debug)]
+pub struct Server {
+    listener: TcpListener,
+    shared: Arc<Mutex<Shared>>,
+    cfg: ServerConfig,
+    /// A process-bus sink registered with [`Server::publish_to`], waiting for the server to
+    /// start serving: its thread is spawned then, not when it is registered.
+    process_bus: Mutex<Option<ProcessBusStart>>,
+}
+
+/// Where the process-bus thread hands its frames.
+type FrameSink = Box<dyn FnMut(&[u8]) + Send>;
+
+/// What the process-bus thread needs, held until [`Server::run`] or [`Server::accept_one`].
+struct ProcessBusStart {
+    sink: FrameSink,
+}
+
+impl core::fmt::Debug for ProcessBusStart {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("ProcessBusStart")
+    }
+}
+
+/// A handle the application updates the model through, and asks what the server is doing.
+///
+/// Cloneable and `Send`: an application usually has one thread reading its process interface
+/// and another serving clients, and this is the seam between them.
+#[derive(Clone, Debug)]
+pub struct ServerHandle {
+    shared: Arc<Mutex<Shared>>,
+}
+
+impl Server {
+    /// Bind and serve `ied`, with the defaults.
+    ///
+    /// `addr` may omit the port, in which case 102 is used — which needs privileges on most
+    /// systems, so a test or a simulator usually asks for `127.0.0.1:0` and reads
+    /// [`Server::local_addr`] back.
+    pub fn bind(addr: &str, ied: Ied) -> Result<Server> {
+        Server::bind_with(addr, ied, &ServerConfig::default())
+    }
+
+    /// Bind and serve `ied` with an explicit configuration.
+    pub fn bind_with(addr: &str, ied: Ied, cfg: &ServerConfig) -> Result<Server> {
+        let with_port = if addr.rfind(':').is_some_and(|i| addr[i + 1..].chars().all(|c| c.is_ascii_digit()) && i + 1 < addr.len()) {
+            String::from(addr)
+        } else {
+            format!("{addr}:{PORT}")
+        };
+        let target =
+            with_port.to_socket_addrs().map_err(|e| Error::Io(format!("{addr}: {e}")))?.next().ok_or_else(|| Error::Io(format!("{addr}: no address")))?;
+        let listener = TcpListener::bind(target).map_err(|e| Error::Io(format!("{addr}: {e}")))?;
+        let mut acsi = Acsi::with_config(ied, cfg.acsi.clone());
+        acsi.set_max_pdu(cfg.association.max_pdu as usize);
+        Ok(Server {
+            listener,
+            shared: Arc::new(Mutex::new(Shared { acsi, outbound: BTreeMap::new(), next_assoc: 1, wake: None })),
+            cfg: cfg.clone(),
+            process_bus: Mutex::new(None),
+        })
+    }
+
+    /// The address the server is listening on, which is how a caller learns the port it got
+    /// when it asked for zero.
+    pub fn local_addr(&self) -> Result<SocketAddr> {
+        self.listener.local_addr().map_err(|e| Error::Io(e.to_string()))
+    }
+
+    /// A handle for the application to update the model through.
+    pub fn handle(&self) -> ServerHandle {
+        ServerHandle { shared: Arc::clone(&self.shared) }
+    }
+
+    /// Ask `hook` before every select, operate and cancel.
+    ///
+    /// Without one every command is accepted and applied to the object's status, which is
+    /// what a simulator wants; a device installs a hook that drives the switchgear and
+    /// refuses with the `AddCause` that says why.
+    pub fn on_control(&mut self, hook: super::control::ControlHook) {
+        self.shared.lock().unwrap_or_else(PoisonError::into_inner).acsi.on_control(hook);
+    }
+
+    /// How long a select-before-operate selection is held before it expires.
+    pub fn set_sbo_timeout_ms(&mut self, ms: u64) {
+        self.shared.lock().unwrap_or_else(PoisonError::into_inner).acsi.set_sbo_timeout_ms(ms);
+    }
+
+    /// Serve files from `store` — a [`DirectoryStore`](super::DirectoryStore) over a
+    /// directory, or an application's own. Without one the server has no files.
+    pub fn set_file_store(&mut self, store: Box<dyn super::files::FileStore>) {
+        self.shared.lock().unwrap_or_else(PoisonError::into_inner).acsi.set_file_store(store);
+    }
+
+    /// Keep the log entries in `store` instead of the default bounded in-memory one — e.g. a
+    /// `RedbLog` (feature `log-redb`) to survive a restart. What the store already holds is
+    /// published in the log control blocks at once.
+    pub fn set_log_store(&mut self, store: Box<dyn super::LogStore>) {
+        self.shared.lock().unwrap_or_else(PoisonError::into_inner).acsi.set_log_store(store);
+    }
+
+    /// The logs the model declares, as full references — the list a store is opened for.
+    pub fn log_references(&self) -> Vec<String> {
+        self.shared.lock().unwrap_or_else(PoisonError::into_inner).acsi.log_references().to_vec()
+    }
+
+    /// Replace the wall clock every absolute timestamp is read from.
+    ///
+    /// The default is [`SystemClock`](crate::common::SystemClock). A report's `TimeOfEntry`,
+    /// a log entry's time and an `SGCB`'s `LActTm` come from here; a test pins it, and a
+    /// device with a PTP- or SNTP-disciplined source supplies one whose readings carry the
+    /// real time quality.
+    pub fn set_clock(&mut self, clock: Box<dyn crate::common::Clock + Send + Sync>) {
+        self.shared.lock().unwrap_or_else(PoisonError::into_inner).acsi.set_clock(clock);
+    }
+
+    /// Publish this IED's GOOSE and sampled values on `link` (feature `net`).
+    ///
+    /// The `GoCB`s and `MSVCB`s the file declares publish once a client — or the application, with
+    /// [`Txn::set`] — writes `GoEna`/`SvEna`. Frames go out from one thread that wakes on the
+    /// publishers' deadlines and whenever a frame is queued, so a state change is on the wire
+    /// without waiting for a timer. The source address is the link's.
+    ///
+    /// No thread is started here: the process-bus thread starts with [`Server::run`] (or the
+    /// first [`Server::accept_one`]). Open every link, register it, call
+    /// [`crate::net::drop_capabilities`], then serve — Linux capabilities are per thread, and a
+    /// thread spawned before the drop would keep them.
+    #[cfg(feature = "net")]
+    pub fn publish_on(&mut self, link: crate::net::Link) -> Result<()> {
+        self.shared.lock().unwrap_or_else(PoisonError::into_inner).acsi.set_source_mac(link.mac());
+        self.publish_to(move |frame| {
+            let _ = link.send(frame);
+        })
+    }
+
+    /// Hand this IED's GOOSE and sampled-value frames to `sink` as they become due, from one
+    /// thread — the same seam [`Server::publish_on`] uses for a live interface, for anything
+    /// else that takes frames: a capture file, a test, another transport. Frames carry the
+    /// source address set with [`Server::set_source_mac`] (all zeros by default).
+    ///
+    /// Like [`Server::publish_on`], the thread starts when the server starts serving.
+    pub fn publish_to(&mut self, sink: impl FnMut(&[u8]) + Send + 'static) -> Result<()> {
+        *self.process_bus.lock().unwrap_or_else(PoisonError::into_inner) = Some(ProcessBusStart { sink: Box::new(sink) });
+        Ok(())
+    }
+
+    /// Start the process-bus thread for a registered sink, once.
+    fn start_process_bus(&self) -> Result<()> {
+        let Some(ProcessBusStart { mut sink }) = self.process_bus.lock().unwrap_or_else(PoisonError::into_inner).take() else { return Ok(()) };
+        let wake = Arc::new(Wake::default());
+        let bus = {
+            let mut guard = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
+            guard.wake = Some(Arc::clone(&wake));
+            guard.acsi.process_bus()
+        };
+        {
+            let notify = Arc::clone(&wake);
+            bus.lock().unwrap_or_else(PoisonError::into_inner).set_notify(super::process_bus::Notify(Arc::new(move || notify.notify())));
+        }
+        std::thread::Builder::new()
+            .name(String::from("process-bus"))
+            .spawn(move || publish_loop(&bus, &wake, &mut *sink))
+            .map_err(|e| Error::Io(e.to_string()))?;
+        Ok(())
+    }
+
+    /// GOOSE and sampled-value frames lost because the publishing thread could not keep up —
+    /// zero on a healthy server.
+    pub fn frames_dropped(&self) -> u64 {
+        self.shared.lock().unwrap_or_else(PoisonError::into_inner).acsi.frames_dropped()
+    }
+
+    /// The source address of published GOOSE and sampled-value frames.
+    pub fn set_source_mac(&mut self, mac: crate::common::MacAddr) {
+        self.shared.lock().unwrap_or_else(PoisonError::into_inner).acsi.set_source_mac(mac);
+    }
+
+    /// The system frequency for sampled-value blocks whose `smpRate` counts samples per period.
+    pub fn set_nominal_hz(&mut self, hz: u32) {
+        self.shared.lock().unwrap_or_else(PoisonError::into_inner).acsi.set_nominal_hz(hz);
+    }
+
+    /// Accept associations for ever, one thread each.
+    pub fn run(&self) -> Result<()> {
+        self.start_process_bus()?;
+        loop {
+            self.accept_one()?;
+        }
+    }
+
+    /// Accept one association and serve it on a new thread.
+    ///
+    /// Returns as soon as the connection is handed over, so a test can accept a known number
+    /// of clients without a background accept loop it then has to stop.
+    pub fn accept_one(&self) -> Result<()> {
+        self.start_process_bus()?;
+        let (stream, _) = self.listener.accept().map_err(|e| Error::Io(e.to_string()))?;
+        let shared = Arc::clone(&self.shared);
+        let cfg = self.cfg.clone();
+        let mut guard = shared.lock().unwrap_or_else(PoisonError::into_inner);
+        if guard.outbound.len() >= cfg.max_associations {
+            // Closing the socket is the honest answer: the association slots are full, and
+            // accepting one we cannot serve would be worse than refusing it.
+            drop(guard);
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+            return Ok(());
+        }
+        let id = guard.next_assoc;
+        guard.next_assoc += 1;
+        let (tx, rx) = sync_channel(cfg.outbound_queue.max(1));
+        let stalled = Arc::new(AtomicBool::new(false));
+        guard.outbound.insert(id, Outbound { tx, stalled: Arc::clone(&stalled) });
+        // What a report control block's `Owner` will say while this client holds one. The
+        // peer's address is what the transport knows and the ACSI layer cannot invent.
+        guard.acsi.on_association_opened(id, peer_identity(&stream));
+        drop(guard);
+
+        std::thread::spawn(move || {
+            let _ = serve(id, stream, &shared, &cfg, &rx, &stalled);
+            let mut guard = shared.lock().unwrap_or_else(PoisonError::into_inner);
+            guard.outbound.remove(&id);
+            guard.acsi.on_association_closed(id, Instant(now_nanos()));
+        });
+        Ok(())
+    }
+}
+
+impl ServerHandle {
+    /// GOOSE and sampled-value frames lost because the publishing thread could not keep up —
+    /// zero on a healthy server.
+    pub fn frames_dropped(&self) -> u64 {
+        self.shared.lock().unwrap_or_else(PoisonError::into_inner).acsi.frames_dropped()
+    }
+
+    /// Begin a transaction. Nothing is visible to a client until [`Txn::commit`].
+    pub fn txn(&self) -> Txn<'_> {
+        Txn { handle: self, writes: Vec::new() }
+    }
+
+    /// Read a value out of the model, as a client would see it.
+    pub fn read(&self, reference: &str) -> Option<Value> {
+        let guard = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
+        let (domain, item) = reference.split_once('/')?;
+        guard.acsi.ied.read(domain, item)
+    }
+
+    /// Associations currently open.
+    pub fn associations(&self) -> usize {
+        self.shared.lock().unwrap_or_else(PoisonError::into_inner).outbound.len()
+    }
+
+    /// Apply a batch of writes and publish what they trigger.
+    fn commit(&self, writes: Vec<(String, Value)>) -> Vec<core::result::Result<(), i64>> {
+        let mut guard = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut out = Vec::with_capacity(writes.len());
+        for (reference, value) in writes {
+            out.push(guard.acsi.ied.write_leaf(&reference, value));
+        }
+        publish(&mut guard, Instant(now_nanos()));
+        out
+    }
+
+    /// Keep only the supervision writes that would actually *change* something, and give each
+    /// changed data object its `q` and `t`.
+    ///
+    /// One lock for the whole set. Two things are decided here and both matter for a call
+    /// that runs in a loop: an attribute the model does not declare is dropped rather than
+    /// failed, because the SCL file decides which supervision objects exist; and a value that
+    /// has not moved is dropped too, so a supervision poll is not a data change once a second
+    /// on every report control block watching the logical node.
+    fn supervision_writes(&self, candidates: Vec<(String, Value)>) -> Vec<(String, Value)> {
+        let guard = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
+        let ied = &guard.acsi.ied;
+        let now = guard.acsi.wall_clock();
+        let mut out = Vec::with_capacity(candidates.len() * 3);
+        for (reference, value) in candidates {
+            match ied.value(&reference) {
+                Some(current) if *current == value => {}
+                Some(_) => {
+                    for pair in super::supervision::quality_and_time(&reference, now) {
+                        if ied.value(&pair.0).is_some() {
+                            out.push(pair);
+                        }
+                    }
+                    out.push((reference, value));
+                }
+                // Not in the model: this logical node's type does not declare the object.
+                None => {}
+            }
+        }
+        out
+    }
+}
+
+/// A batch of model updates that becomes visible all at once.
+///
+/// The application never locks anything: writes are collected here and [`Txn::commit`]
+/// publishes them to reporting and logging together, so a report never straddles two states
+/// of the model — which a lock-and-unlock discipline allows the moment a caller forgets it.
+#[derive(Debug)]
+pub struct Txn<'a> {
+    handle: &'a ServerHandle,
+    writes: Vec<(String, Value)>,
+}
+
+impl Txn<'_> {
+    /// Stage a write of a data attribute, by full MMS reference.
+    pub fn set(&mut self, reference: &str, value: Value) -> &mut Self {
+        self.writes.push((String::from(reference), value));
+        self
+    }
+
+    /// Stage the status of one subscription into its supervision logical node.
+    ///
+    /// `node` is the `LGOS` or `LSVS` — `IED1LD0/LGOS1`. This is how the numbers a GOOSE or
+    /// sampled-value subscriber already holds become something a SCADA client can read and a
+    /// report control block can carry ([`SubscriptionStatus`](super::SubscriptionStatus)).
+    ///
+    /// It is safe to call in a loop. Only the objects this IED's own `LGOS`/`LSVS` type
+    /// declares are written, and only when a value has actually changed — with `q` and `t`
+    /// beside it, `t` stamped at the change rather than at the poll.
+    ///
+    /// ```no_run
+    /// # // Gated: `supervise` is a `server` feature and the subscriber it takes is a `goose` one.
+    /// # #[cfg(feature = "goose")]
+    /// # mod example {
+    /// # use iec61850_rs::server::{ServerHandle, SubscriptionStatus};
+    /// # pub fn run(updates: &ServerHandle, sub: &iec61850_rs::proto::goose::Subscriber) {
+    /// updates.txn().supervise("IED1LD0/LGOS1", &SubscriptionStatus::from_goose(sub)).commit();
+    /// # }
+    /// # }
+    /// ```
+    pub fn supervise(&mut self, node: &str, status: &super::SubscriptionStatus) -> &mut Self {
+        self.writes.extend(self.handle.supervision_writes(status.writes(node)));
+        self
+    }
+
+    /// Apply everything staged. The result is one entry per write, in order.
+    pub fn commit(&mut self) -> Vec<core::result::Result<(), i64>> {
+        let writes = core::mem::take(&mut self.writes);
+        if writes.is_empty() {
+            return Vec::new();
+        }
+        self.handle.commit(writes)
+    }
+}
+
+/// The octets a report control block's `Owner` carries for this connection: the peer's IP
+/// address, four octets for IPv4 and sixteen for IPv6.
+///
+/// Empty when the socket will not say, which is honest — an `Owner` of no octets means "not
+/// held", and inventing an identity would be worse than admitting the transport was quiet.
+fn peer_identity(stream: &TcpStream) -> Vec<u8> {
+    match stream.peer_addr() {
+        Ok(SocketAddr::V4(a)) => a.ip().octets().to_vec(),
+        Ok(SocketAddr::V6(a)) => a.ip().octets().to_vec(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Turn whatever is dirty into reports and hand each to the association that asked for it.
+fn publish(shared: &mut Shared, now: Instant) {
+    let due = shared.acsi.commit(now);
+    dispatch(shared, due);
+    if let Some(w) = &shared.wake {
+        w.notify();
+    }
+}
+
+/// The process-bus thread: run the publishers' timers, hand what they produced to `sink`
+/// outside the lock, and sleep until the next deadline or until a commit queues a frame.
+///
+/// It takes only the publishers' own lock, never the server's: a commit that is appending to
+/// a durable log (an `fsync`) cannot delay a sampled value that is due.
+fn publish_loop(bus: &Arc<Mutex<super::process_bus::Publishers>>, wake: &Wake, sink: &mut dyn FnMut(&[u8])) {
+    // One reusable buffer per frame of a tick: after the first ticks nothing is allocated.
+    let mut frames: Vec<Vec<u8>> = Vec::new();
+    loop {
+        let (count, next) = {
+            let mut pubs = bus.lock().unwrap_or_else(PoisonError::into_inner);
+            pubs.on_timeout(Instant(now_nanos()));
+            let mut count = 0;
+            pubs.drain(|f| {
+                if let Some(buf) = frames.get_mut(count) {
+                    buf.clear();
+                    buf.extend_from_slice(f);
+                } else {
+                    frames.push(f.to_vec());
+                }
+                count += 1;
+            });
+            (count, pubs.next_timeout())
+        };
+        for frame in frames.iter().take(count) {
+            sink(frame);
+        }
+        let wait = next.map(|t| Duration::from_nanos(t.0.saturating_sub(now_nanos())));
+        wake.wait(wait);
+    }
+}
+
+/// Hand each PDU to the association it belongs to.
+fn dispatch(shared: &Shared, due: Vec<(AssocId, Vec<u8>)>) {
+    for (assoc, pdu) in due {
+        if let Some(out) = shared.outbound.get(&assoc) {
+            out.send(pdu);
+        }
+    }
+}
+
+/// Issue the next request of a transfer toward the client (an `ObtainFile`'s `FileOpen`,
+/// `FileRead` or `FileClose`), if one is due. It is issued and the loop goes on: the answer
+/// arrives as an event like any other, so a client that answers slowly holds its own transfer
+/// and nothing else.
+fn issue_transfer_calls(shared: &Arc<Mutex<Shared>>, assoc: &mut Association, id: AssocId, now: Instant) {
+    let mut guard = shared.lock().unwrap_or_else(PoisonError::into_inner);
+    loop {
+        let issued = match guard.acsi.obtain_call(id) {
+            None => return,
+            Some(call) => assoc.call(now, &call),
+        };
+        if let Ok(invoke) = issued {
+            guard.acsi.obtain_issued(id, invoke);
+        } else {
+            if let Some(bytes) = guard.acsi.obtain_failed(id, None) {
+                let _ = assoc.send_encoded(&bytes);
+            }
+            return;
+        }
+    }
+}
+
+/// One association, from the COTP connection request to the release.
+fn serve(
+    id: AssocId,
+    mut stream: TcpStream,
+    shared: &Arc<Mutex<Shared>>,
+    cfg: &ServerConfig,
+    outbound: &Receiver<Vec<u8>>,
+    stalled: &AtomicBool,
+) -> Result<()> {
+    stream.set_nodelay(true).map_err(|e| Error::Io(e.to_string()))?;
+    stream.set_read_timeout(Some(cfg.poll_interval)).map_err(|e| Error::Io(e.to_string()))?;
+    let mut assoc = Association::server(cfg.association.clone());
+    let mut buf = vec![0u8; 8192];
+    let limits = cfg.association.limits;
+
+    loop {
+        let now = Instant(now_nanos());
+        match stream.read(&mut buf) {
+            Ok(0) => return Ok(()),
+            Ok(n) => assoc.on_bytes(now, buf.get(..n).unwrap_or(&[])),
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => assoc.on_timeout(now),
+            Err(e) => return Err(Error::Io(e.to_string())),
+        }
+
+        {
+            // A gathering window or an integrity period may have come due while this thread
+            // was in the socket read, and nothing else will notice.
+            let mut guard = shared.lock().unwrap_or_else(PoisonError::into_inner);
+            let due = guard.acsi.on_timeout(now);
+            dispatch(&guard, due);
+        }
+
+        let mut requests: Vec<(i64, Vec<u8>)> = Vec::new();
+        let mut closed = false;
+        while let Some(event) = assoc.poll_event() {
+            match event {
+                AssociationEvent::Request { invoke_id, pdu } => requests.push((invoke_id, pdu)),
+                AssociationEvent::Closed(_) => closed = true,
+                // The answers to the requests this server issued toward the client — the
+                // `FileOpen`/`FileRead`/`FileClose` of an `ObtainFile`. The last one ends the
+                // transfer and answers the client's `ObtainFile`.
+                AssociationEvent::Response { invoke_id, pdu } => {
+                    let mut guard = shared.lock().unwrap_or_else(PoisonError::into_inner);
+                    let answer = match Mms::parse(&pdu, &limits) {
+                        Ok(mms) => guard.acsi.obtain_response(id, invoke_id, &mms),
+                        Err(_) => guard.acsi.obtain_failed(id, Some(invoke_id)),
+                    };
+                    drop(guard);
+                    if let Some(bytes) = answer {
+                        let _ = assoc.send_encoded(&bytes);
+                    }
+                }
+                AssociationEvent::Timeout { invoke_id } | AssociationEvent::Malformed { invoke_id: Some(invoke_id), .. } => {
+                    let answer = shared.lock().unwrap_or_else(PoisonError::into_inner).acsi.obtain_failed(id, Some(invoke_id));
+                    if let Some(bytes) = answer {
+                        let _ = assoc.send_encoded(&bytes);
+                    }
+                }
+                // What the peer agreed to accept sizes two things the ACSI layer would
+                // otherwise guess at: a `GetNameList` page and a report. ISO 9506 negotiates
+                // *down*, so the server's own configured size is an upper bound, not an
+                // agreement, and a report larger than this is segmented rather than dropped.
+                AssociationEvent::Established(n) => {
+                    let mut guard = shared.lock().unwrap_or_else(PoisonError::into_inner);
+                    guard.acsi.set_association_max_pdu(id, n.max_pdu);
+                    guard.acsi.set_authenticated(id, n.authenticated);
+                }
+                // A response, a timeout or an undecodable PDU on a server association: none
+                // of them is a request, and none of them is a reason to drop the client.
+                _ => {}
+            }
+        }
+
+        for (invoke_id, pdu) in requests {
+            let answer = {
+                let mut guard = shared.lock().unwrap_or_else(PoisonError::into_inner);
+                let answer = match Mms::parse(&pdu, &limits) {
+                    Ok(Mms::ConfirmedRequest { service, .. }) => guard.acsi.request(id, now, &service),
+                    // Not a confirmed request, or not a PDU at all — which ISO 9506 answers
+                    // with a reject naming the *PDU*, not with a service error naming a
+                    // service that was never called.
+                    _ => super::acsi::Answer::INVALID_PDU,
+                };
+                // An `ObtainFile` is answered when the file has arrived, not now.
+                if matches!(answer, super::acsi::Answer::Deferred) {
+                    guard.acsi.obtain_bind(id, invoke_id);
+                }
+                answer
+            };
+            if let Ok(bytes) = answer.encode(invoke_id)
+                && !bytes.is_empty()
+            {
+                let _ = assoc.send_encoded(&bytes);
+            }
+            // A commit may have happened inside the request — a control that changed a
+            // position, a `GI` that asked for a report — so the queues are drained below.
+            let mut guard = shared.lock().unwrap_or_else(PoisonError::into_inner);
+            publish(&mut guard, now);
+        }
+
+        issue_transfer_calls(shared, &mut assoc, id, now);
+
+        loop {
+            match outbound.try_recv() {
+                Ok(pdu) => {
+                    let _ = assoc.send_encoded(&pdu);
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => return Ok(()),
+            }
+        }
+
+        while let Some(packet) = assoc.poll_transmit() {
+            let packet = packet.to_vec();
+            if stream.write_all(&packet).is_err() {
+                return Ok(());
+            }
+        }
+        let _ = stream.flush();
+        if closed {
+            return Ok(());
+        }
+        // The client is not draining its socket and its queue has filled. Closing is what
+        // bounds the server's memory; a buffered control block keeps its entries, so the
+        // client resumes from its `EntryID` rather than losing them.
+        if stalled.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+    }
+}

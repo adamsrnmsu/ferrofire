@@ -53,3 +53,7 @@ iec61850-rs = { version = "=0.4.0", default-features = false, features = ["clien
 # the golden power-flow tests solve 300-bus cases with a dense LU; keep them quick in debug builds
 [profile.dev]
 opt-level = 2
+
+# iec61850-rs 0.4.0 plus one fix (Initiate nesting level negotiated up); see third_party/iec61850-rs/PATCHES.md. Remove when upstream releases it.
+[patch.crates-io]
+iec61850-rs = { path = "third_party/iec61850-rs" }

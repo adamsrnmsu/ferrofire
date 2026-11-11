@@ -12,6 +12,7 @@ use iec61850_rs::common::{monotonic_now, Instant};
 use iec61850_rs::proto::mms::association::{
     Association, AssociationConfig, AssociationEvent, Negotiated,
 };
+use iec61850_rs::server::{error_class, Answer};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -31,6 +32,29 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 /// The association checks its own deadlines (handshake, request timeouts) at this pace; the handler's tick runs at `TICK` (1 ms: GOOSE retransmits at T1, a few ms, and a coarser tick lumps frames together).
 const POLL: Duration = Duration::from_millis(100);
 const TICK: Duration = Duration::from_millis(1);
+
+/// ServiceError `access` value for object-non-existent (ISO 9506-2: other 0, unsupported 1, non-existent 2, denied 3).
+const ACCESS_NON_EXISTENT: i64 = 2;
+/// What `iec61850-rs` 0.4.0 puts in `access` for it: the *DataAccessError* code (10), a different enumeration. igs-iec-tase2 aborts the
+/// association on it and tshark shows `access: Unknown (10)`; a read result keeps DataAccessError 10, only the service error is fixed.
+const DATA_ACCESS_NON_EXISTENT: i64 = 10;
+
+/// An answer as the PDU to send (empty: none), with the library's `access` service error corrected (ww-otj.61, F7).
+pub fn encode(answer: &Answer, invoke_id: i64) -> Vec<u8> {
+    match answer {
+        Answer::Error { class, code }
+            if *class == error_class::ACCESS && *code == DATA_ACCESS_NON_EXISTENT =>
+        {
+            Answer::Error {
+                class: *class,
+                code: ACCESS_NON_EXISTENT,
+            }
+            .encode(invoke_id)
+        }
+        a => a.encode(invoke_id),
+    }
+    .unwrap_or_default()
+}
 
 pub trait Handler: Send + 'static {
     /// May this remote IP (octets) hold an association at all? `false` closes the socket before a slot is taken (ICCP: a peer not
@@ -297,6 +321,42 @@ async fn connection<H: Handler>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use iec61850_rs::common::Limits;
+    use iec61850_rs::proto::mms::{Mms as Pdu, ServiceError};
+
+    fn service_error(pdu: &[u8]) -> (i64, ServiceError) {
+        let Ok(Pdu::ConfirmedError {
+            invoke_id, error, ..
+        }) = Pdu::parse(pdu, &Limits::DEFAULT)
+        else {
+            panic!("not a confirmed error: {pdu:02x?}");
+        };
+        (invoke_id, ServiceError::parse(&error).unwrap())
+    }
+
+    #[test]
+    fn object_non_existent_is_service_error_access_2_not_the_data_access_code_10() {
+        let (id, e) = service_error(&encode(&Answer::NOT_FOUND, 7));
+        assert_eq!((id, e.class, e.code), (7, error_class::ACCESS, 2));
+        let (_, e) = service_error(&encode(&Answer::DENIED, 8));
+        assert_eq!(
+            (e.class, e.code),
+            (error_class::ACCESS, 3),
+            "denied is 3 in both"
+        );
+        let (_, e) = service_error(&encode(
+            &Answer::Error {
+                class: error_class::DEFINITION,
+                code: 1,
+            },
+            9,
+        ));
+        assert_eq!(
+            (e.class, e.code),
+            (error_class::DEFINITION, 1),
+            "others untouched"
+        );
+    }
 
     /// Counts what the glue tells it.
     #[derive(Default)]

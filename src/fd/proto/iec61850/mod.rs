@@ -395,7 +395,7 @@ impl Handler for Device {
             },
             _ => Answer::INVALID_PDU,
         };
-        let bytes = answer.encode(invoke_id).unwrap_or_default();
+        let bytes = mms::encode(&answer, invoke_id);
         (bytes, self.acsi.commit(now))
     }
     fn tick(&mut self, now: Instant) -> Due {
