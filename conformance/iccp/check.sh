@@ -95,15 +95,15 @@ for s in associate identify "read Bilateral_Table_ID" "read data values" "write 
          "next transfer set" "arm interval" "report interval" "disarm interval" "arm rbe" "report rbe" "disarm rbe" "delete data set" conclude; do step_ok $B "$s"; done
 step_ok $B "read TASE2_Version" 'Integer\(2000\), Integer\(8\)'
 step_ok $B "read Supported_Features" 'unused: 4, bytes: \[[0-9]+, 0\]'
-step_xfail $B domains "igstase2-server does not serve GetNameList (its docs: 'Not served'): a peer limit"
-step_xfail $B variables "same"
+step_xfail $B domains "igstase2-server does not serve GetNameList (its docs: 'Not served'): a peer limit, ww-c43"
+step_xfail $B variables "ww-c43: same"
 
 echo "-- our thin client -> telcon tase2-server (10103)"
 B=ours-to-telcon
 for s in associate domains variables "read data values" "write Real_002" "define data set" "read data set" "next transfer set" "delete data set" conclude; do step_ok $B "$s"; done
-step_xfail $B identify "tase2-server answers Identify with service error 12: a peer limit"
-for s in Bilateral_Table_ID TASE2_Version Supported_Features; do step_xfail $B "read $s" "the tase2-server test daemon does not serve it (its own blt-id fails with DataAccessError 10): a peer limit"; done
-step_xfail $B "data set members" "tase2-server does not implement GetNamedVariableListAttributes: a peer limit"
+step_xfail $B identify "tase2-server answers Identify with service error 12: a peer limit, ww-c43"
+for s in Bilateral_Table_ID TASE2_Version Supported_Features; do step_xfail $B "read $s" "the tase2-server test daemon does not serve it (its own blt-id fails with DataAccessError 10): a peer limit, ww-c43"; done
+step_xfail $B "data set members" "tase2-server does not implement GetNamedVariableListAttributes: a peer limit, ww-c43"
 step_xfail $B "arm interval" "ww-otj.70: DSTransferSet write with a 3-member Transfer_Set_Name is refused (DataAccessError 7)"
 step_xfail $B "arm rbe" "ww-otj.70"
 

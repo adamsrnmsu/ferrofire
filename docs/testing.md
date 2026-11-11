@@ -255,8 +255,8 @@ bits and `TASE2_Version` {2000;8} on every read.
 | igs `start` of a transfer set (interval, RBE) against our server | igs | igs neither defines the data set nor reads `Next_DSTransfer_Set`, and each CLI call is its own association; ours has no preconfigured data sets or transfer-set names | ww-otj.71 |
 | telcon `read --kind real_q_time_tag` / `state_q_time_tag` | telcon | telcon decodes the QTimeTag structures as {value, flags, time}; ours and igs's are {time, value, flags}; no real capture holds one | ww-otj.69 |
 | telcon `transfer-set` against our server; our `arm` against telcon's server | telcon | telcon wants a 2-member `Transfer_Set_Name`; both real captures and ours have 3 (scope, domain, name) | ww-otj.70 |
-| our GetNameList / variables against igs's server | igs | the server does not serve GetNameList (its docs) | peer limit |
-| our Identify, `Bilateral_Table_ID`, `TASE2_Version`, `Supported_Features`, data set members against telcon's server | telcon | the test daemon does not serve them (its own `blt-id` fails) | peer limit |
+| our GetNameList / variables against igs's server | igs | the server does not serve GetNameList (its docs) | peer limit, ww-c43 |
+| our Identify, `Bilateral_Table_ID`, `TASE2_Version`, `Supported_Features`, data set members against telcon's server | telcon | the test daemon does not serve them (its own `blt-id` fails) | peer limit, ww-c43 |
 
 Skipped with a reason: igs writing a `Data_State` (its CLI sends a boolean), telcon reading `TASE2_Version` / `Supported_Features` (no
 command). Smoke findings not fixed here and not exercised by a passing check: the Transfer_Set_Name scope as `unsigned` (ww-otj.64), a
