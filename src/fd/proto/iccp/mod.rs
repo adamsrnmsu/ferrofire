@@ -89,6 +89,10 @@ struct Peer {
     write: Access,
     max_sets: usize,
     max_transfer_sets: usize,
+    /// Data sets every association of this partner starts with (a client that does not define its own, e.g. igstase2-client `start`).
+    preset: Vec<(String, Vec<String>)>,
+    /// Transfer sets (`DSTrans_1`...) that exist from the start, so a client need not read Next_DSTransfer_Set first.
+    preallocated: usize,
 }
 
 impl Peer {
@@ -194,15 +198,86 @@ fn peer(
     skipped: &BTreeSet<String>,
 ) -> Result<Peer, ConfigError> {
     let name = name_or(n, "name", "")?;
+    let read = access(n, "read", known, skipped, Access::All)?;
+    let sets = Sets::parse(n, known, &read, &name)?;
     Ok(Peer {
         domain: name_or(n, "domain", &name)?,
         address: address_of(n)?,
-        read: access(n, "read", known, skipped, Access::All)?,
+        read,
         write: access(n, "write", known, skipped, Access::Only(BTreeSet::new()))?,
-        max_sets: number(n, "max-data-sets")?.unwrap_or(16),
-        max_transfer_sets: number(n, "max-transfer-sets")?.unwrap_or(8),
+        max_sets: sets.max_sets,
+        max_transfer_sets: sets.max_transfer_sets,
+        preset: sets.preset,
+        preallocated: sets.preallocated,
         name,
     })
+}
+
+/// A row's data set and transfer set limits and what it presets.
+struct Sets {
+    max_sets: usize,
+    max_transfer_sets: usize,
+    preset: Vec<(String, Vec<String>)>,
+    preallocated: usize,
+}
+
+impl Sets {
+    fn parse(
+        n: Node,
+        known: &BTreeSet<String>,
+        read: &Access,
+        peer: &str,
+    ) -> Result<Sets, ConfigError> {
+        let sets = Sets {
+            max_sets: number(n, "max-data-sets")?.unwrap_or(16),
+            max_transfer_sets: number(n, "max-transfer-sets")?.unwrap_or(8),
+            preset: preset_sets(n, known, read)?,
+            preallocated: number(n, "preallocated-transfer-sets")?.unwrap_or(0),
+        };
+        if sets.preset.len() > sets.max_sets || sets.preallocated > sets.max_transfer_sets {
+            return Err(ConfigError(format!(
+                "<peer> `{}` presets more <data-set>s or <preallocated-transfer-sets> than <max-data-sets> or <max-transfer-sets> allow",
+                show(peer)
+            )));
+        }
+        Ok(sets)
+    }
+}
+
+/// `<data-set><name>DS1</name><members>MW bi</members></data-set>` under a `<peer>`: members are data objects (or the report's own).
+fn preset_sets(
+    n: Node,
+    known: &BTreeSet<String>,
+    read: &Access,
+) -> Result<Vec<(String, Vec<String>)>, ConfigError> {
+    let mut out: Vec<(String, Vec<String>)> = vec![];
+    for d in n.children().filter(|c| c.has_tag_name("data-set")) {
+        let name = name_or(d, "name", "")?;
+        let members: Vec<String> = text(d, "members")
+            .unwrap_or_default()
+            .split([',', ' ', '\n', '\t', '\r'])
+            .filter(|w| !w.is_empty())
+            .map(String::from)
+            .collect();
+        if name.is_empty() || known.contains(&name) || out.iter().any(|(o, _)| *o == name) {
+            return Err(ConfigError(format!(
+                "<data-set> `{}` needs a name that no data object or other <data-set> uses",
+                show(&name)
+            )));
+        }
+        if let Some(w) = members
+            .iter()
+            .find(|w| !is_report_member(w) && !(known.contains(*w) && read.allows(w)))
+        {
+            return Err(ConfigError(format!(
+                "<data-set> `{}` lists `{}`, which is not a data object this <peer> may read",
+                show(&name),
+                show(w)
+            )));
+        }
+        out.push((name, members));
+    }
+    Ok(out)
 }
 
 type Objects = (BTreeMap<String, Object>, BTreeSet<String>);
@@ -1077,12 +1152,17 @@ impl Handler for Device {
     }
     fn opened(&mut self, id: AssocId, peer: Vec<u8>) {
         if let Some(p) = self.peer_for(&peer) {
+            let peer = &self.peers[p];
+            let transfer = (1..=peer.preallocated)
+                .map(|i| (format!("{TS_PREFIX}{i}"), Ts::default()))
+                .collect();
+            let sets = peer.preset.iter().cloned().collect();
             self.sessions.insert(
                 id,
                 Session {
                     peer: p,
-                    sets: BTreeMap::new(),
-                    transfer: BTreeMap::new(),
+                    sets,
+                    transfer,
                 },
             );
             self.log.log(
@@ -1767,6 +1847,58 @@ mod tests {
             ],
             "frame 86: the set's own members domain-scoped, then the changed point"
         );
+    }
+
+    #[test]
+    fn a_partner_row_can_preset_data_sets_and_transfer_sets_for_every_association() {
+        let row =
+            "<peer><name>EMS</name><preallocated-transfer-sets>2</preallocated-transfer-sets>\
+            <data-set><name>PRE</name><members>MW Transfer_Set_Name bi</members></data-set></peer>";
+        let mut d = device(row);
+        d.opened(1, vec![1, 2, 3, 4]);
+        d.opened(2, vec![1, 2, 3, 4]);
+        let name = |i| ObjectName::DomainSpecific {
+            domain: "EMS",
+            item: i,
+        };
+        for id in [1, 2] {
+            let Answer::DataSetAttributes { members, .. } = d.serve(
+                id,
+                0,
+                &ConfirmedRequest::GetNamedVariableListAttributes(name("PRE")),
+            ) else {
+                panic!("PRE exists on every association")
+            };
+            assert_eq!(members, ["EMS/MW", "EMS/Transfer_Set_Name", "EMS/bi"]);
+            assert_eq!(d.next_ts(id).as_deref(), Ok("DSTrans_1"));
+            assert_eq!(d.next_ts(id).as_deref(), Ok("DSTrans_1"), "not yet written");
+        }
+        // one association's changes stay its own
+        d.delete(
+            1,
+            iec61850_rs::proto::mms::delete_scope::SPECIFIC,
+            &[name("PRE")],
+            None,
+        );
+        assert!(d.set_members(1, &name("PRE")).is_none());
+        assert!(d.set_members(2, &name("PRE")).is_some());
+        for (bad, why) in [
+            ("<data-set><name>MW</name></data-set>", "a data object's name"),
+            ("<data-set><name>A</name><members>nope</members></data-set>", "an unknown member"),
+            ("<read>MW</read><data-set><name>A</name><members>bi</members></data-set>", "a member the row may not read"),
+            ("<max-data-sets>0</max-data-sets><data-set><name>A</name></data-set>", "more data sets than the maximum"),
+            ("<data-set><name>A</name></data-set><data-set><name>A</name></data-set>", "twice"),
+            ("<max-transfer-sets>1</max-transfer-sets><preallocated-transfer-sets>2</preallocated-transfer-sets>", "more than the maximum"),
+        ] {
+            let e = parse(&format!("{OBJ}<peer><name>X</name>{bad}</peer>"), &Opts::default());
+            assert!(e.is_err(), "{why}");
+        }
+        let edge = "<max-data-sets>1</max-data-sets><max-transfer-sets>1</max-transfer-sets><preallocated-transfer-sets>1</preallocated-transfer-sets><data-set><name>A</name></data-set>";
+        assert!(parse(
+            &format!("{OBJ}<peer><name>X</name>{edge}</peer>"),
+            &Opts::default()
+        )
+        .is_ok());
     }
 
     #[test]

@@ -32,8 +32,8 @@ op igs-type $IGS type LOAD_MW
 op igs-set $IGS set SETPOINT=12.5
 op igs-create $IGS create DS1 LOAD_MW BRKR_1 SETPOINT
 op igs-members-new-association $IGS members DS1
-op igs-start $IGS start DSTrans_1 DS1 --interval-s 1 --reports 2
-op igs-start-rbe $IGS start DSTrans_1 DS1 --rbe --interval-s 1 --reports 2
+op igs-start $IGS start DSTrans_1 PRESET_DS --interval-s 1 --reports 2
+op igs-start-rbe $IGS start DSTrans_1 PRESET_DS --rbe --interval-s 1 --reports 2
 op igs-delete $IGS delete DS1
 op igs-wrong-table $IGS0 --table-id OTHER_TABLE get LOAD_MW
 

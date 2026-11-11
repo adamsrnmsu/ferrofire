@@ -291,14 +291,14 @@ bits and `TASE2_Version` {2000;8} on every read.
 
 | Check | Peer | Why | Bead |
 |---|---|---|---|
-| igs `start` of a transfer set (interval, RBE) against our server | igs | igs neither defines the data set nor reads `Next_DSTransfer_Set`, and each CLI call is its own association; ours has no preconfigured data sets or transfer-set names | ww-otj.71 |
 | telcon `read --kind real_q_time_tag` / `state_q_time_tag` | telcon | telcon decodes the QTimeTag structures as {value, flags, time}; ours and igs's are {time, value, flags}; no real capture holds one | ww-otj.69 |
 | telcon `transfer-set` against our server; our `arm` against telcon's server | telcon | telcon wants a 2-member `Transfer_Set_Name`; both real captures and ours have 3 (scope, domain, name) | ww-otj.70 |
 | our GetNameList / variables against igs's server | igs | the server does not serve GetNameList (its docs) | peer limit, ww-c43 |
 | our Identify, `Bilateral_Table_ID`, `TASE2_Version`, `Supported_Features`, data set members against telcon's server | telcon | the test daemon does not serve them (its own `blt-id` fails) | peer limit, ww-c43 |
 
 Skipped with a reason: igs writing a `Data_State` (its CLI sends a boolean), telcon reading `TASE2_Version` / `Supported_Features` (no
-command). The Transfer_Set_Name
+command). igs `start` (interval and RBE) now passes: igs neither defines a data set nor reads `Next_DSTransfer_Set` and each CLI call is its own
+association, so `conformance/iccp/server.xml` presets `PRESET_DS` and two transfer sets in the partner row (ww-otj.71). The Transfer_Set_Name
 scope is `unsigned` on our side now (ww-otj.64; igstase2-server still refuses an unsigned scope in a *write*, DataAccessError 7, so our thin
 client writes an integer; our server takes both). The 12- and 13-member DSTransferSet, Buffer_Time and data sets that list
 `Transfer_Set_Name` / `DSConditions_Detected` with `variableListName` reports (ww-otj.65) are proved by two unit tests in
@@ -562,7 +562,7 @@ code and not libiec61850, then ran the ones that built. Dates, licences and acti
 **ICCP smoke findings** (filed and tracked in the ICCP section, not repeated here): F1 and F7 nesting level and service-error access code,
 ww-otj.61 (fixed); F2 12-bit `Supported_Features`, ww-otj.62 (fixed); F3 `TASE2_Version` 2000.8, ww-otj.63 (fixed); F4 Transfer_Set_Name
 scope as `unsigned`, ww-otj.64 (fixed); F5 and F6 12- and 13-member `DSTransferSet`, Buffer_Time, data sets with `Transfer_Set_Name` members and
-`variableListName` reports, ww-otj.65 (fixed); F8 calling AP-title, ww-otj.66 (fixed). Related and open: ww-otj.69 (QTimeTag order), .70, .71, .73.
+`variableListName` reports, ww-otj.65 (fixed); F8 calling AP-title, ww-otj.66 (fixed). Related: ww-otj.71 (preset data sets, fixed); open: ww-otj.69 (QTimeTag order), .70, .73.
 
 **Gaps this closed.** DNP3 had one master family (opendnp3); IEC 61850 had one client stack (libiec61850) under a server built on one young
 library; both now have independent clients that agree. ICCP's recalled layouts now meet two independent stacks and two real captures (the

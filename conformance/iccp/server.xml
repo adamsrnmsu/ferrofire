@@ -24,6 +24,9 @@
                     <name>EMS1</name>
                     <read>BRKR_1 LOAD_MW CMD_1 SETPOINT BUS_KV</read>
                     <write>CMD_1 SETPOINT</write>
+                    <!-- what igstase2-client 'start' needs: it neither defines a data set nor reads Next_DSTransfer_Set (ww-otj.71) -->
+                    <preallocated-transfer-sets>2</preallocated-transfer-sets>
+                    <data-set><name>PRESET_DS</name><members>LOAD_MW BRKR_1</members></data-set>
                 </peer>
             </iccp-server>
         </comms>

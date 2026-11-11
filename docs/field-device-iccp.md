@@ -32,6 +32,10 @@ disagrees. First thing to do with a real peer: capture its Initiate and one Info
     <read>BRKR_1 LOAD_MW</read>       <!-- names, space or comma separated, or *; default * -->
     <write>CMD_1</write>              <!-- default: nothing -->
     <max-data-sets>16</max-data-sets> <max-transfer-sets>8</max-transfer-sets>
+    <!-- optional, for clients that neither define a data set nor read Next_DSTransfer_Set (igstase2-client `start`): every
+         association of this partner starts with these data sets and with DSTrans_1..N already allocated -->
+    <preallocated-transfer-sets>2</preallocated-transfer-sets>
+    <data-set><name>PRESET_DS</name><members>BRKR_1 LOAD_MW</members></data-set>
   </peer>
 </iccp-server>
 ```
@@ -75,7 +79,7 @@ provider's last update of the point (the clock for tags with none). Not built: t
 | GetVariableAccessAttributes | the type of every object, special variable and the DSTransfer_Set |
 | Read | named variables (objects, specials) and a named data set (one result per member, denied members fail individually) |
 | Write | objects the table lets the partner write: becomes `Store::write` (queued, effective when the provider ACKs, like every protocol); wrong type is type-inconsistent (7), state `invalid`/`between` is object-value-invalid (11); quality and time a client sends are ignored. DSTransfer_Sets. Writing a whole data set by name is refused (9) |
-| DefineNamedVariableList / DeleteNamedVariableList / GetNamedVariableListAttributes | data sets in the partner's domain, members must be readable objects of that domain, or the report's own `Transfer_Set_Name`, `Transfer_Set_Time_Stamp`, `DSConditions_Detected` (real clients list them first, domain-scoped), max 256 members and `max-data-sets` per association; **they live and die with the association** (a real peer redefines them at each association; persistence is not built). A data set a running transfer set reports cannot be deleted (matched, not deleted) |
+| DefineNamedVariableList / DeleteNamedVariableList / GetNamedVariableListAttributes | data sets in the partner's domain, members must be readable objects of that domain, or the report's own `Transfer_Set_Name`, `Transfer_Set_Time_Stamp`, `DSConditions_Detected` (real clients list them first, domain-scoped), max 256 members and `max-data-sets` per association; **they live and die with the association** (a real peer redefines them at each association; persistence is not built) unless the partner row presets them (`<data-set>`, ww-otj.71). A data set a running transfer set reports cannot be deleted (matched, not deleted) |
 | anything else (file services, journals, ...) | MMS reject (unrecognised service) |
 
 ### Transfer sets and reports

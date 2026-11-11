@@ -69,8 +69,8 @@ op_ok igs-create 'created DS1'
 op_ok igs-delete 'deleted'
 op_fails_with igs-members-new-association 'OBJECT-NON-EXISTENT \(code 2\)' "a data set belongs to its association; ww-otj.61: ServiceError access 2, not DataAccessError 10"
 op_fails_with igs-wrong-table 'Bilateral_Table_ID|table|refus|agreement|mismatch' "a client whose table id differs must not carry on"
-op_xfail igs-start "ww-otj.71: igs neither defines the set nor reads Next_DSTransfer_Set, ours has no preconfigured ones"
-op_xfail igs-start-rbe "ww-otj.71"
+op_ok igs-start    # a preconfigured data set and transfer set (<data-set>, <preallocated-transfer-sets>): igs neither defines one nor reads Next_DSTransfer_Set
+op_ok igs-start-rbe
 skip "igs write of Data_State" "igstase2-client set writes true/false as a boolean; Data_State is a 2-bit bit string (802 6.2): a limit of its CLI, not a disagreement"
 
 echo "-- telcon tase2-client -> our server"
