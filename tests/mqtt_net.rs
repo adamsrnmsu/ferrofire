@@ -59,9 +59,10 @@ impl Broker {
             .stderr(Stdio::null())
             .spawn()
             .expect("mosquitto on PATH (it is in the ff-rust image)");
+        let broker = Broker { child, port, dir };
         for _ in 0..100 {
             if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
-                return Broker { child, port, dir };
+                return broker;
             }
             std::thread::sleep(Duration::from_millis(50));
         }

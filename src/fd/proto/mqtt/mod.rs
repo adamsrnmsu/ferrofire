@@ -217,7 +217,7 @@ impl Module for Client {
             }
         };
         let points = points(node, tags, opts)?;
-        for p in points.iter().filter(|p| p.tag.contains(['+', '#'])) {
+        if let Some(p) = points.iter().find(|p| p.tag.contains(['+', '#'])) {
             return Err(ConfigError(format!(
                 "tag `{}` cannot be a topic level",
                 show(&p.tag)
