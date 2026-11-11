@@ -1103,7 +1103,7 @@ z
      <use xlink:href="#DejaVuSans-47" transform="translate(413.21875 0)"/>
      <use xlink:href="#DejaVuSans-48" transform="translate(476.703125 0)"/>
     </g>
-    <!-- 145-162 µs -->
+    <!-- 144-162 µs -->
     <g style="fill: #52514e" transform="translate(424.08512 97.304019) scale(0.08 -0.08)">
      <defs>
       <path id="DejaVuSans-17" d="M 2419 4116 
@@ -1158,7 +1158,7 @@ z
      </defs>
      <use xlink:href="#DejaVuSans-14"/>
      <use xlink:href="#DejaVuSans-17" transform="translate(63.625 0)"/>
-     <use xlink:href="#DejaVuSans-18" transform="translate(127.25 0)"/>
+     <use xlink:href="#DejaVuSans-17" transform="translate(127.25 0)"/>
      <use xlink:href="#DejaVuSans-10" transform="translate(190.875 0)"/>
      <use xlink:href="#DejaVuSans-14" transform="translate(226.953125 0)"/>
      <use xlink:href="#DejaVuSans-19" transform="translate(290.578125 0)"/>

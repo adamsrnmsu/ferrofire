@@ -219,6 +219,7 @@ def chart_nng():
         for k, hz in enumerate((10, 100)):
             x = k + (i - 0.5) * 0.20
             ax.scatter([x] * 3, rep[t, hz], s=14, color=INK, zorder=3, lw=0)
+    ax.set_ylim(0, max(max(v) for v in rep.values()) * 1.12)
     for k in (0, 1):
         ax.text(k - 0.10, 0.6, "0 in\nall 3", ha="center", fontsize=7.5, color=INK2)
     for t in ("zmq", "nng"):
@@ -236,7 +237,7 @@ def chart_nng():
             ax.scatter([i + (k % 6 - 2.5) * 0.045], [y], s=34, color=C[t], ec=SURFACE, lw=1.2, zorder=3)
             rows.append((t, n, hz, rp, f"{y:.1f}"))
     ax.text(1.28, 100, "fast mode\n88-105 µs (2 runs\nbetween: 115, 128)", fontsize=8, color=INK2, va="center")
-    ax.text(1.28, 153, "slow mode\n145-162 µs", fontsize=8, color=INK2, va="center")
+    ax.text(1.28, 153, "slow mode\n144-162 µs", fontsize=8, color=INK2, va="center")
     ax.set_xticks([0, 1], ["ZeroMQ", "NNG"])
     ax.set_xlim(-0.5, 1.75)
     ax.set_ylim(0, 180)
@@ -289,7 +290,7 @@ def chart_live():
     cats = ["provider", "rtu-1", "rtu-2"]
     gbars(ax, cats, [("p50", "#9ec5f4", [d[p]["p50"] for p in pts]), ("p99", C["mcast"], [d[p]["p99"] for p in pts])], fmt="{:.1f}", w=0.17, ylim_pad=1.25)
     finish(fig, "06b-live-interarrival", rows, head, "Live hour: time between consecutive datagrams at each capture point", "inter-arrival, ms (period 100 ms)", ax,
-           [swatch("p50", "#9ec5f4"), swatch("p99", C["mcast"])], note="Same captures as above; the 10 ms excess at p99 is VM scheduling at the capture point, not loss.")
+           [swatch("p50", "#9ec5f4"), swatch("p99", C["mcast"])], note="Same captures as above; the up-to-1.4 ms excess at p99 is VM scheduling at the capture point, not loss.")
 
 
 # --- 7. OVS snooping ------------------------------------------------------------------------------------------------------
