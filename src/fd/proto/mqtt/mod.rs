@@ -47,43 +47,53 @@ pub struct Tls {
     pub key: Option<String>,
 }
 
-pub struct Client {
+/// How to reach the broker.
+pub struct Link {
     broker: Broker,
     client_id: String,
     login: Option<(String, String)>,
     tls: Tls,
     queue: usize,
+}
+
+pub struct Client {
+    link: Link,
     engine: Engine,
     log: Arc<EventLog>,
 }
 
 /// `tcp://host[:port]` (1883) or `ssl://host[:port]` (8883).
 fn broker(ep: &str) -> Result<Broker, ConfigError> {
-    let bad = || {
+    parse_broker(ep).ok_or_else(|| {
         ConfigError(format!(
             "<endpoint> `{}`: expected tcp://host:port or ssl://host:port",
             show(ep)
         ))
-    };
-    let (scheme, rest) = ep.split_once("://").ok_or_else(bad)?;
+    })
+}
+
+fn parse_broker(ep: &str) -> Option<Broker> {
+    let (scheme, rest) = ep.split_once("://")?;
     let tls = match scheme {
         "tcp" => false,
         "ssl" => true,
-        _ => return Err(bad()),
+        _ => return None,
     };
-    let default = if tls { 8883 } else { 1883 };
-    let (host, port) = match rest.rsplit_once(':') {
-        Some((h, p)) => (h, p.parse().map_err(|_| bad())?),
-        None => (rest, default),
+    let (host, port) = host_port(rest, if tls { 8883 } else { 1883 })?;
+    Some(Broker {
+        host: host.into(),
+        port,
+        tls,
+    })
+}
+
+/// `host[:port]`, the host not empty and not a path.
+fn host_port(s: &str, default: u16) -> Option<(&str, u16)> {
+    let (host, port) = match s.rsplit_once(':') {
+        Some((h, p)) => (h, p.parse().ok()?),
+        None => (s, default),
     };
-    match host.is_empty() || host.contains('/') {
-        true => Err(bad()),
-        false => Ok(Broker {
-            host: host.into(),
-            port,
-            tls,
-        }),
-    }
+    (!host.is_empty() && !host.contains('/')).then_some((host, port))
 }
 
 /// A topic level: not empty, and nothing MQTT gives a meaning to.
@@ -217,20 +227,30 @@ fn scheme(node: Node, device: &str, qos: u8) -> Result<Scheme, ConfigError> {
     })
 }
 
-impl Module for Client {
-    fn parse(node: Node, tags: &mut Tags, opts: &Opts) -> Result<Self, ConfigError> {
+impl Link {
+    fn read(node: Node, device: &str) -> Result<Link, ConfigError> {
         let broker = broker(&require(node, "endpoint")?)?;
-        let device = level(
-            "<device>",
-            text(node, "device").unwrap_or_else(|| device_name(node)),
-        )?;
         let client_id = text(node, "client-id").unwrap_or_else(|| format!("ferrofire-{device}"));
         if client_id.is_empty() {
             return Err(ConfigError("<client-id> is empty".into()));
         }
-        let tls = tls_files(node, &broker)?;
+        Ok(Link {
+            login: text(node, "username").map(|u| (u, text(node, "password").unwrap_or_default())),
+            tls: tls_files(node, &broker)?,
+            queue: bounded(node, "queue", 256usize, 1..=65535)?,
+            broker,
+            client_id,
+        })
+    }
+}
+
+impl Module for Client {
+    fn parse(node: Node, tags: &mut Tags, opts: &Opts) -> Result<Self, ConfigError> {
+        let device = level(
+            "<device>",
+            text(node, "device").unwrap_or_else(|| device_name(node)),
+        )?;
         let qos = bounded(node, "qos", 1u8, 0..=2)?;
-        let queue = bounded(node, "queue", 256usize, 1..=65535)?;
         let refresh = number::<u64>(node, "refresh")?.unwrap_or(60);
         let points = points(node, tags, opts)?;
         if let Some(p) = points.iter().find(|p| p.tag.contains(['+', '#'])) {
@@ -240,16 +260,12 @@ impl Module for Client {
             )));
         }
         Ok(Client {
-            login: text(node, "username").map(|u| (u, text(node, "password").unwrap_or_default())),
+            link: Link::read(node, &device)?,
             engine: Engine::new(scheme(node, &device, qos)?, points, refresh * 1000),
             log: Arc::new(EventLog::open(
                 text(node, "event-logging").as_deref(),
                 "mqtt-client",
             )),
-            broker,
-            client_id,
-            tls,
-            queue,
         })
     }
 
@@ -304,8 +320,8 @@ impl Client {
     }
 
     fn options(&self, will: Out) -> Result<MqttOptions, String> {
-        let b = &self.broker;
-        let mut o = MqttOptions::new(&self.client_id, &b.host, b.port);
+        let b = &self.link.broker;
+        let mut o = MqttOptions::new(&self.link.client_id, &b.host, b.port);
         o.set_keep_alive(KEEP_ALIVE)
             .set_clean_session(true)
             .set_max_packet_size(MAX_PACKET, MAX_PACKET)
@@ -315,12 +331,12 @@ impl Client {
                 qos(will.qos),
                 will.retain,
             ));
-        if let Some((u, p)) = &self.login {
+        if let Some((u, p)) = &self.link.login {
             o.set_credentials(u, p);
         }
-        if let (true, Some(ca)) = (b.tls, &self.tls.ca) {
+        if let (true, Some(ca)) = (b.tls, &self.link.tls.ca) {
             let read = |p: &str| std::fs::read(p).map_err(|e| format!("{p}: {e}"));
-            let client_auth = match (&self.tls.cert, &self.tls.key) {
+            let client_auth = match (&self.link.tls.cert, &self.link.tls.key) {
                 (Some(c), Some(k)) => Some((read(c)?, read(k)?)),
                 _ => None,
             };
@@ -360,7 +376,7 @@ impl Client {
                 return Ended::Lost { was_up: false };
             }
         };
-        let (client, mut events) = AsyncClient::new(opts, self.queue);
+        let (client, mut events) = AsyncClient::new(opts, self.link.queue);
         let mut tick = tokio::time::interval(TICK);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut up = false;
@@ -496,7 +512,7 @@ mod tests {
     fn defaults_follow_the_device() {
         let mut c = parse("<point><tag>lvl</tag></point>").unwrap();
         assert_eq!(
-            c.broker,
+            c.link.broker,
             Broker {
                 host: "127.0.0.1".into(),
                 port: 1883,
@@ -504,14 +520,14 @@ mod tests {
             }
         );
         assert_eq!(
-            (c.client_id.as_str(), c.queue, &c.login),
+            (c.link.client_id.as_str(), c.link.queue, &c.link.login),
             ("ferrofire-rtu-1", 256, &None)
         );
-        assert_eq!(c.tls, Tls::default());
+        assert_eq!(c.link.tls, Tls::default());
         let will = c.engine.begin_session();
         assert_eq!(will.topic, "ferrofire/rtu-1/status");
         let no_device = parse_in("", "", &Opts::default()).unwrap();
-        assert_eq!(no_device.client_id, "ferrofire-ferrofire");
+        assert_eq!(no_device.link.client_id, "ferrofire-ferrofire");
     }
 
     #[test]
@@ -522,8 +538,8 @@ mod tests {
              <point><tag>pump</tag><writable>true</writable></point>",
         )
         .unwrap();
-        assert_eq!((c.client_id.as_str(), c.queue), ("cid", 10));
-        assert_eq!(c.login, Some(("u".into(), "p".into())));
+        assert_eq!((c.link.client_id.as_str(), c.link.queue), ("cid", 10));
+        assert_eq!(c.link.login, Some(("u".into(), "p".into())));
         assert_eq!(c.engine.begin_session().topic, "site/a/d/status");
         let s = Store::new(crate::fd::store::Layout {
             points: vec![],
@@ -539,7 +555,7 @@ mod tests {
         assert_eq!(c.engine.tick(&s, 4999, 0), []);
         assert_eq!(c.engine.tick(&s, 5000, 0).len(), 1, "refresh is in seconds");
         let user_only = parse("<username>u</username>").unwrap();
-        assert_eq!(user_only.login, Some(("u".into(), String::new())));
+        assert_eq!(user_only.link.login, Some(("u".into(), String::new())));
     }
 
     #[test]
