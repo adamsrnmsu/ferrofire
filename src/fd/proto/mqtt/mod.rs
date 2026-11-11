@@ -88,9 +88,9 @@ fn broker(ep: &str) -> Result<Broker, ConfigError> {
 
 /// A topic level: not empty, and nothing MQTT gives a meaning to.
 fn level(what: &str, v: String) -> Result<String, ConfigError> {
-    if v.is_empty() || v.contains(['/', '+', '#', '\0']) {
+    if v.is_empty() || v.contains(['/', '+', '#']) {
         return Err(ConfigError(format!(
-            "{what} `{}` is not a topic level (non-empty, no / + # NUL)",
+            "{what} `{}` is not a topic level (non-empty, no / + #)",
             show(&v)
         )));
     }
@@ -199,7 +199,7 @@ impl Module for Client {
             None => {
                 let prefix = text(node, "topic-prefix").unwrap_or_else(|| "ferrofire".into());
                 if prefix.is_empty()
-                    || prefix.contains(['+', '#', '\0'])
+                    || prefix.contains(['+', '#'])
                     || prefix.starts_with('/')
                     || prefix.ends_with('/')
                 {
@@ -217,7 +217,7 @@ impl Module for Client {
             }
         };
         let points = points(node, tags, opts)?;
-        for p in points.iter().filter(|p| p.tag.contains(['+', '#', '\0'])) {
+        for p in points.iter().filter(|p| p.tag.contains(['+', '#'])) {
             return Err(ConfigError(format!(
                 "tag `{}` cannot be a topic level",
                 show(&p.tag)
@@ -399,5 +399,303 @@ impl Client {
             }
         })
         .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::Kind;
+
+    fn tags() -> Tags {
+        let mut t = Tags::default();
+        t.add_internal("lvl", Kind::Analog).unwrap();
+        t.add_internal("pump", Kind::Binary).unwrap();
+        t
+    }
+
+    fn parse_in(device: &str, inner: &str, opts: &Opts) -> Result<Client, ConfigError> {
+        let xml = format!(
+            "<field-device>{device}<comms><mqtt-client><endpoint>tcp://127.0.0.1:1883</endpoint><event-logging>/dev/null</event-logging>{inner}</mqtt-client></comms></field-device>"
+        );
+        let doc = roxmltree::Document::parse(&xml).unwrap();
+        let node = doc
+            .descendants()
+            .find(|n| n.has_tag_name("mqtt-client"))
+            .unwrap();
+        Client::parse(node, &mut tags(), opts)
+    }
+
+    fn parse(inner: &str) -> Result<Client, ConfigError> {
+        parse_in("<name>rtu-1</name>", inner, &Opts::default())
+    }
+
+    fn err(inner: &str) -> String {
+        parse(inner).err().expect("an error").0
+    }
+
+    #[test]
+    fn endpoints_are_tcp_or_ssl_with_default_ports() {
+        let b = |h: &str, port, tls| Broker {
+            host: h.into(),
+            port,
+            tls,
+        };
+        assert_eq!(
+            broker("tcp://10.1.1.60").unwrap(),
+            b("10.1.1.60", 1883, false)
+        );
+        assert_eq!(
+            broker("tcp://10.1.1.60:1884").unwrap(),
+            b("10.1.1.60", 1884, false)
+        );
+        assert_eq!(
+            broker("ssl://broker.lab").unwrap(),
+            b("broker.lab", 8883, true)
+        );
+        assert_eq!(
+            broker("ssl://broker.lab:9").unwrap(),
+            b("broker.lab", 9, true)
+        );
+        for bad in [
+            "10.1.1.60",
+            "http://h",
+            "tcp://",
+            "tcp://:1883",
+            "tcp://h:x",
+            "tcp://h:70000",
+            "tcp://h/x",
+            "mqtt://h",
+        ] {
+            assert!(
+                broker(bad)
+                    .unwrap_err()
+                    .0
+                    .contains("expected tcp://host:port or ssl://host:port"),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn defaults_follow_the_device() {
+        let mut c = parse("<point><tag>lvl</tag></point>").unwrap();
+        assert_eq!(
+            c.broker,
+            Broker {
+                host: "127.0.0.1".into(),
+                port: 1883,
+                tls: false
+            }
+        );
+        assert_eq!(
+            (c.client_id.as_str(), c.queue, &c.login),
+            ("ferrofire-rtu-1", 256, &None)
+        );
+        assert_eq!(c.tls, Tls::default());
+        let will = c.engine.begin_session();
+        assert_eq!(will.topic, "ferrofire/rtu-1/status");
+        let no_device = parse_in("", "", &Opts::default()).unwrap();
+        assert_eq!(no_device.client_id, "ferrofire-ferrofire");
+    }
+
+    #[test]
+    fn every_key_is_read() {
+        let mut c = parse(
+            "<device>d</device><client-id>cid</client-id><topic-prefix>site/a</topic-prefix><qos>2</qos><retain>false</retain>
+             <refresh>5</refresh><queue>10</queue><username>u</username><password>p</password>
+             <point><tag>pump</tag><writable>true</writable></point>",
+        )
+        .unwrap();
+        assert_eq!((c.client_id.as_str(), c.queue), ("cid", 10));
+        assert_eq!(c.login, Some(("u".into(), "p".into())));
+        assert_eq!(c.engine.begin_session().topic, "site/a/d/status");
+        let s = Store::new(crate::fd::store::Layout {
+            points: vec![],
+            external: vec![],
+            internal: vec![
+                ("lvl".into(), crate::model::Value::Analog(1.0)),
+                ("pump".into(), crate::model::Value::Binary(true)),
+            ],
+        });
+        let out = c.engine.tick(&s, 0, 0);
+        assert_eq!(out[1].topic, "site/a/d/pump");
+        assert_eq!((out[1].qos, out[1].retain), (2, false));
+        assert_eq!(c.engine.tick(&s, 4999, 0), []);
+        assert_eq!(c.engine.tick(&s, 5000, 0).len(), 1, "refresh is in seconds");
+        let user_only = parse("<username>u</username>").unwrap();
+        assert_eq!(user_only.login, Some(("u".into(), String::new())));
+    }
+
+    #[test]
+    fn sparkplug_is_chosen_by_its_element_and_needs_a_group() {
+        let mut c = parse("<sparkplug><group-id>g</group-id></sparkplug>").unwrap();
+        assert_eq!(c.engine.begin_session().topic, "spBv1.0/g/NDEATH/rtu-1");
+        let mut c =
+            parse("<sparkplug><group-id>g</group-id><edge-node-id>e</edge-node-id></sparkplug>")
+                .unwrap();
+        assert_eq!(c.engine.begin_session().topic, "spBv1.0/g/NDEATH/e");
+        assert!(err("<sparkplug/>").contains("<sparkplug> has no <group-id>"));
+        assert!(
+            err("<sparkplug><group-id>a/b</group-id></sparkplug>").contains("not a topic level")
+        );
+        assert!(
+            err("<sparkplug><group-id>g</group-id><edge-node-id>#</edge-node-id></sparkplug>")
+                .contains("<edge-node-id>")
+        );
+    }
+
+    #[test]
+    fn bad_values_are_named() {
+        assert!(err("<qos>3</qos>").contains("<qos> 3 is not 0, 1 or 2"));
+        assert!(err("<qos>x</qos>").contains("not a valid number"));
+        assert!(err("<queue>0</queue>").contains("<queue> 0"));
+        assert!(err("<queue>65536</queue>").contains("<queue> 65536"));
+        assert!(parse("<queue>65535</queue>").is_ok() && parse("<queue>1</queue>").is_ok());
+        assert!(err("<retain>yes</retain>").contains("<retain> `yes` is not true or false"));
+        assert!(err("<device>a/b</device>").contains("<device> `a/b` is not a topic level"));
+        assert!(err("<device></device>").contains("not a topic level"));
+        assert!(err("<client-id></client-id>").contains("<client-id> is empty"));
+        for p in ["", "/x", "x/", "a+b", "a#"] {
+            assert!(
+                err(&format!("<topic-prefix>{p}</topic-prefix>")).contains("not a topic prefix"),
+                "{p:?}"
+            );
+        }
+        assert!(err("<tls-cert>c</tls-cert>").contains("go together"));
+        assert!(err("<tls-key>k</tls-key>").contains("go together"));
+        assert!(parse("<tls-cert>c</tls-cert><tls-key>k</tls-key>").is_ok());
+        let e = parse_in("<name>d</name>", "", &Opts::default());
+        assert!(e.is_ok());
+        let doc =
+            roxmltree::Document::parse("<mqtt-client><endpoint>ssl://h</endpoint></mqtt-client>")
+                .unwrap();
+        let e = Client::parse(doc.root_element(), &mut tags(), &Opts::default())
+            .err()
+            .unwrap();
+        assert!(e.0.contains("ssl:// <endpoint> needs <tls-ca>"), "{e}");
+        let doc = roxmltree::Document::parse("<mqtt-client/>").unwrap();
+        let e = Client::parse(doc.root_element(), &mut tags(), &Opts::default())
+            .err()
+            .unwrap();
+        assert!(e.0.contains("<mqtt-client> has no <endpoint>"), "{e}");
+    }
+
+    #[test]
+    fn points_are_checked_against_the_tags() {
+        let c = parse(
+            "<point><tag>lvl</tag><min-value>-1</min-value><max-value>5</max-value></point><point><tag>pump</tag><writable>true</writable></point>",
+        )
+        .unwrap();
+        let mut c = c;
+        let s = Store::new(crate::fd::store::Layout {
+            points: vec![],
+            external: vec![],
+            internal: vec![
+                ("lvl".into(), crate::model::Value::Analog(1.0)),
+                ("pump".into(), crate::model::Value::Binary(true)),
+            ],
+        });
+        assert!(c
+            .engine
+            .message("ferrofire/rtu-1/lvl/set", b"1", &s)
+            .join("")
+            .contains("not writable"));
+        assert!(c
+            .engine
+            .message("ferrofire/rtu-1/pump/set", b"0", &s)
+            .is_empty());
+        assert!(err(
+            "<point><tag>lvl</tag><min-value>5</min-value><max-value>-1</max-value></point>"
+        )
+        .contains("<min-value> is above"));
+        assert!(parse(
+            "<point><tag>lvl</tag><min-value>5</min-value><max-value>5</max-value></point>"
+        )
+        .is_ok());
+        assert!(
+            err("<point><tag>lvl</tag></point><point><tag>lvl</tag></point>")
+                .contains("listed twice")
+        );
+        assert!(err("<point><tag>lvl</tag><writable>1</writable></point>").contains("<writable>"));
+        assert!(err("<point/>").contains("<point> has no <tag>"));
+        let skipped = parse("<point><tag>nope</tag></point>").unwrap();
+        assert!(skipped.engine.subscriptions().len() == 1);
+        let strict = parse_in(
+            "<name>d</name>",
+            "<point><tag>nope</tag></point>",
+            &Opts { strict: true },
+        );
+        assert!(strict.err().unwrap().0.contains("unknown tag `nope`"));
+    }
+
+    #[test]
+    fn a_tag_that_cannot_be_a_topic_level_is_refused() {
+        let mut t = tags();
+        t.add_internal("a+b", Kind::Analog).unwrap();
+        let doc = roxmltree::Document::parse(
+            "<mqtt-client><endpoint>tcp://h</endpoint><point><tag>a+b</tag></point></mqtt-client>",
+        )
+        .unwrap();
+        let e = Client::parse(doc.root_element(), &mut t, &Opts::default())
+            .err()
+            .unwrap();
+        assert!(e.0.contains("cannot be a topic level"), "{e}");
+    }
+
+    #[test]
+    fn the_pause_doubles_to_a_cap_and_resets_after_a_good_session() {
+        let s = Duration::from_secs;
+        assert_eq!(backoff(s(1), false), s(2));
+        assert_eq!(backoff(s(2), false), s(4));
+        assert_eq!(backoff(s(16), false), s(30));
+        assert_eq!(backoff(s(30), false), s(30));
+        assert_eq!(backoff(s(30), true), s(1));
+        assert_eq!(qos(0), QoS::AtMostOnce);
+        assert_eq!(qos(1), QoS::AtLeastOnce);
+        assert_eq!(qos(2), QoS::ExactlyOnce);
+    }
+
+    #[test]
+    fn connect_options_carry_the_will_login_and_limits() {
+        let mut c = parse("<username>u</username><password>p</password><client-id>cid</client-id>")
+            .unwrap();
+        let will = c.engine.begin_session();
+        let o = c.options(will).unwrap();
+        assert_eq!(o.client_id(), "cid");
+        assert_eq!(o.broker_address(), ("127.0.0.1".to_string(), 1883));
+        assert_eq!(o.keep_alive(), KEEP_ALIVE);
+        assert!(o.clean_session());
+        assert_eq!(o.max_packet_size(), MAX_PACKET);
+        let w = o.last_will().unwrap();
+        assert_eq!(
+            (w.topic.as_str(), &w.message[..], w.qos, w.retain),
+            (
+                "ferrofire/rtu-1/status",
+                &b"offline"[..],
+                QoS::AtLeastOnce,
+                true
+            )
+        );
+        assert_eq!(
+            o.credentials().map(|l| (l.username, l.password)),
+            Some(("u".into(), "p".into()))
+        );
+    }
+
+    #[test]
+    fn unreadable_tls_files_are_an_error_naming_the_file() {
+        let doc = roxmltree::Document::parse("<mqtt-client><endpoint>ssl://h</endpoint><tls-ca>/nonexistent/ca.pem</tls-ca></mqtt-client>").unwrap();
+        let mut c = Client::parse(doc.root_element(), &mut tags(), &Opts::default()).unwrap();
+        let will = c.engine.begin_session();
+        assert!(c
+            .options(will)
+            .err()
+            .unwrap()
+            .contains("/nonexistent/ca.pem"));
+        let doc = roxmltree::Document::parse("<mqtt-client><endpoint>ssl://h</endpoint><tls-ca>/etc/hostname</tls-ca><tls-cert>/nonexistent/c</tls-cert><tls-key>/etc/hostname</tls-key></mqtt-client>").unwrap();
+        let mut c = Client::parse(doc.root_element(), &mut tags(), &Opts::default()).unwrap();
+        let will = c.engine.begin_session();
+        assert!(c.options(will).err().unwrap().contains("/nonexistent/c"));
     }
 }

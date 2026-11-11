@@ -16,3 +16,5 @@ ARG DENY=0.20.2
 RUN curl -sSfL "https://github.com/EmbarkStudios/cargo-deny/releases/download/${DENY}/cargo-deny-${DENY}-$(uname -m)-unknown-linux-musl.tar.gz" | tar xz --strip-components=1 -C /root/.cargo/bin --wildcards '*/cargo-deny'
 # Fuzzing (make fuzz): cargo-fuzz needs a nightly toolchain for the sanitizer flags; the project itself stays on the pinned stable.
 RUN rustup toolchain install nightly --profile minimal && cargo install --locked cargo-fuzz
+# MQTT tests (tests/mqtt_net.rs) start a real Mosquitto broker as a child process; openssl makes the throwaway CA for the TLS case.
+RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends mosquitto mosquitto-clients openssl >/dev/null && rm -rf /var/lib/apt/lists/*
