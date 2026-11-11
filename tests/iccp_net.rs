@@ -156,14 +156,14 @@ async fn reads_come_from_the_datastore_and_the_table_decides_what_is_readable() 
         assert_eq!(
             v[0],
             Ok(Value::BitString {
-                unused: 7,
+                unused: 4,
                 bytes: vec![0xC0, 0]
             })
         );
         assert_eq!(
             v[1],
             Ok(Value::Structure(vec![
-                Value::Integer(1996),
+                Value::Integer(2000),
                 Value::Integer(8)
             ]))
         );
@@ -381,4 +381,44 @@ async fn rbe_reports_only_what_changed() {
     })
     .await;
     stop.cancel();
+}
+
+/// What a client puts on the wire in its association request, against a listener that runs the OSI stack and keeps every byte.
+fn bytes_of_the_association_request(ap_title: Option<Vec<u32>>) -> Vec<u8> {
+    use iec61850_rs::common::Instant;
+    use iec61850_rs::proto::mms::association::{Association, AssociationConfig};
+    use std::io::{Read, Write};
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap().to_string();
+    let spy = std::thread::spawn(move || {
+        let (mut s, _) = l.accept().unwrap();
+        s.set_read_timeout(Some(Duration::from_millis(500)))
+            .unwrap();
+        let (mut server, mut seen, mut buf) = (
+            Association::server(AssociationConfig::default()),
+            vec![],
+            [0u8; 4096],
+        );
+        while let Ok(n @ 1..) = s.read(&mut buf) {
+            seen.extend_from_slice(&buf[..n]);
+            server.on_bytes(Instant::ZERO, &buf[..n]);
+            while let Some(p) = server.poll_transmit() {
+                s.write_all(p).unwrap();
+            }
+        }
+        seen
+    });
+    Iccp::connect_as(&addr, ap_title).unwrap();
+    spy.join().unwrap()
+}
+
+#[test]
+fn the_thin_client_can_call_with_an_ap_title() {
+    // 1.3.9999.1 as an OBJECT IDENTIFIER: 2B CE 0F 01
+    let oid = [0x06, 0x04, 0x2B, 0xCE, 0x0F, 0x01];
+    let has = |b: &[u8]| b.windows(oid.len()).any(|w| w == oid);
+    assert!(has(&bytes_of_the_association_request(Some(vec![
+        1, 3, 9999, 1
+    ]))));
+    assert!(!has(&bytes_of_the_association_request(None)));
 }

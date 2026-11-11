@@ -92,11 +92,19 @@ fn parse_report(pdu: &[u8]) -> Option<Report> {
 impl Iccp {
     /// Connect and associate. Fails with the reason if the server refuses (a peer not in its bilateral table).
     pub fn connect(addr: &str) -> Result<Iccp, String> {
+        Iccp::connect_as(addr, None)
+    }
+
+    /// As `connect`, calling with this AP-title (arcs, e.g. `[1, 3, 9999, 1]`): servers whose bilateral table is keyed by it refuse
+    /// an association without one (igstase2-server: REFUSE reason 2, ww-otj.66).
+    pub fn connect_as(addr: &str, ap_title: Option<Vec<u32>>) -> Result<Iccp, String> {
+        let mut cfg = AssociationConfig::default();
+        cfg.local.ap_title = ap_title;
         let stream = TcpStream::connect(addr).map_err(|e| format!("{addr}: {e}"))?;
         stream.set_nodelay(true).ok();
         let mut c = Iccp {
             stream,
-            assoc: Association::client(AssociationConfig::default()),
+            assoc: Association::client(cfg),
             epoch: Clock::now(),
             reports: VecDeque::new(),
             limits: Limits::DEFAULT,

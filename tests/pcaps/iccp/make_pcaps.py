@@ -288,8 +288,8 @@ def assoc():
     c = Conn(p, 50001)
     c.associate()
     c.rpc(1, read_req(vmd("Bilateral_Table_ID")), read_resp(vstr("BT_RANGE_01", 0x8A)))
-    c.rpc(2, read_req(vmd("TASE2_Version")), read_resp(struct_(integer(1996, 0x85), integer(8, 0x85))))
-    c.rpc(3, read_req(vmd("Supported_Features")), read_resp(bits(8, 0b11101000)))
+    c.rpc(2, read_req(vmd("TASE2_Version")), read_resp(struct_(integer(2000, 0x85), integer(8, 0x85))))
+    c.rpc(3, read_req(vmd("Supported_Features")), read_resp(bits(12, 0b110110100000)))  # 12 bits (503 8.2.9); a real peer: blocks 1, 2, 4, 5, 7
     c.rpc(4, getnames_req(tlv(0x80)), getnames_resp(["Bilateral_Table_ID", "TASE2_Version", "Supported_Features"]))
     c.rpc(5, getnames_req(tlv(0x81, ICC.encode())), getnames_resp(["Pt_1", "Pt_2", "Pt_3", "DS_1", "TSet1"]))
     c.rpc(6, tlv(0xA6, tlv(0xA0, dom(ICC, "Pt_1"))), tlv(0xA6, tlv(0x80, b"\0") + tlv(0xA2, tlv(0xA1, b""))))

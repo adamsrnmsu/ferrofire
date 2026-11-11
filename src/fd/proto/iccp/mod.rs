@@ -98,6 +98,7 @@ pub struct Server {
     endpoint: String,
     log: Arc<EventLog>,
     table_id: String,
+    version: (i64, i64),
     objects: BTreeMap<String, Object>,
     peers: Vec<Peer>,
 }
@@ -117,6 +118,24 @@ fn name_or(n: Node, key: &str, default: &str) -> Result<String, ConfigError> {
         valid_name,
         "letters, digits, _ and -; at most 32",
     )
+}
+
+/// `<tase2-version>`: `year.month` of the IEC 60870-6-503 edition TASE2_Version reports. Field peers use 2000.8 (the default);
+/// a 1996.8 peer is selected here. A peer that checks the version ends the association on a mismatch (503 5.3.3.3).
+fn version_of(n: Node) -> Result<(i64, i64), ConfigError> {
+    let Some(t) = text(n, "tase2-version") else {
+        return Ok((2000, 8));
+    };
+    let parsed = t.split_once('.').and_then(|(y, m)| {
+        let (y, m) = (y.parse::<i64>().ok()?, m.parse::<i64>().ok()?);
+        ((1990..=2099).contains(&y) && (1..=12).contains(&m)).then_some((y, m))
+    });
+    parsed.ok_or_else(|| {
+        ConfigError(format!(
+            "<tase2-version> `{}` is not year.month, e.g. 2000.8 or 1996.8",
+            show(&t)
+        ))
+    })
 }
 
 fn access(
@@ -258,6 +277,7 @@ impl Module for Server {
             "id",
             "BLT_1",
         )?;
+        let version = version_of(node)?;
         let objects = found.0;
         log.log(
             "info",
@@ -268,6 +288,7 @@ impl Module for Server {
             endpoint: require(node, "endpoint")?,
             log,
             table_id,
+            version,
             objects,
             peers,
         })
@@ -308,6 +329,7 @@ impl Server {
             store: store.clone(),
             log: self.log,
             table_id: self.table_id,
+            version: self.version,
             objects: self.objects,
             peers: self.peers,
             sessions: BTreeMap::new(),
@@ -337,6 +359,7 @@ pub struct Device {
     store: Store,
     log: Arc<EventLog>,
     table_id: String,
+    version: (i64, i64),
     objects: BTreeMap<String, Object>,
     peers: Vec<Peer>,
     sessions: BTreeMap<AssocId, Session>,
@@ -436,12 +459,12 @@ impl Device {
         match t {
             Target::Bilateral => Some(Value::VisibleString(self.table_id.clone())),
             Target::Version => Some(Value::Structure(vec![
-                Value::Integer(1996),
-                Value::Integer(8),
+                Value::Integer(self.version.0),
+                Value::Integer(self.version.1),
             ])),
-            // blocks 1 and 2, as a 9-bit string
+            // blocks 1 and 2 of the 12 bits of IEC 60870-6-503 8.2.9 (bit 0 = Block 1)
             Target::Features => Some(Value::BitString {
-                unused: 7,
+                unused: 4,
                 bytes: vec![0xC0, 0x00],
             }),
             _ => None,
@@ -784,7 +807,7 @@ impl Device {
     fn special_type(t: &Target) -> TypeSpec {
         match t {
             Target::Bilateral => TypeSpec::VisibleString(-32),
-            Target::Features => TypeSpec::BitString(9),
+            Target::Features => TypeSpec::BitString(12),
             Target::Version => {
                 transfer::structure(vec![TypeSpec::Integer(16), TypeSpec::Integer(16)])
             }
@@ -976,7 +999,7 @@ impl Handler for Device {
             }
             _ => Answer::INVALID_PDU,
         };
-        (answer.encode(invoke_id).unwrap_or_default(), vec![])
+        (mms::encode(&answer, invoke_id), vec![])
     }
     fn tick(&mut self, _: Instant) -> Due {
         vec![]
@@ -1031,6 +1054,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(s.table_id, "BLT_1");
+        assert_eq!(s.version, (2000, 8), "field peers use 2000.8");
         assert_eq!(
             s.objects["bi"].variant,
             Variant::Q,
@@ -1062,6 +1086,35 @@ mod tests {
         );
         assert_eq!(p.write, Access::All);
         assert!(p.read.allows("MW") && p.read.allows("bi") && !p.read.allows("x"));
+    }
+
+    #[test]
+    fn the_tase2_version_is_configurable_year_dot_month() {
+        let p = "<peer><name>A</name></peer>";
+        let s = parse(
+            &format!("{OBJ}<tase2-version>1996.8</tase2-version>{p}"),
+            &Opts::default(),
+        )
+        .unwrap();
+        assert_eq!(s.version, (1996, 8));
+        let mut d = s.device(&Store::new(crate::fd::store::Layout::default()));
+        d.opened(1, vec![1, 2, 3, 4]);
+        assert_eq!(
+            d.read_one(1, &ObjectName::VmdSpecific(VERSION)),
+            Ok(Value::Structure(vec![
+                Value::Integer(1996),
+                Value::Integer(8)
+            ]))
+        );
+        for bad in [
+            "2000", "2000.", "x.8", "2000.13", "2000.0", "1899.8", "2000.8.1",
+        ] {
+            assert!(
+                err(&format!("{OBJ}<tase2-version>{bad}</tase2-version>{p}"))
+                    .contains("<tase2-version>"),
+                "{bad}"
+            );
+        }
     }
 
     #[test]
@@ -1474,7 +1527,7 @@ mod tests {
         assert_eq!(ty(&d, name(BILATERAL)), TypeSpec::VisibleString(-32));
         assert_eq!(
             ty(&d, ObjectName::VmdSpecific(FEATURES)),
-            TypeSpec::BitString(9)
+            TypeSpec::BitString(12)
         );
         assert_eq!(ty(&d, name(NEXT_TS)), transfer::name_type());
         assert!(matches!(
@@ -1502,9 +1555,17 @@ mod tests {
         assert_eq!(
             d.read_one(1, &ObjectName::VmdSpecific(VERSION)),
             Ok(Value::Structure(vec![
-                Value::Integer(1996),
+                Value::Integer(2000),
                 Value::Integer(8)
             ]))
+        );
+        assert_eq!(
+            d.read_one(1, &ObjectName::VmdSpecific(FEATURES)),
+            Ok(Value::BitString {
+                unused: 4,
+                bytes: vec![0xC0, 0x00]
+            }),
+            "IEC 60870-6-503 8.2.9: 12 bits, blocks 1 and 2"
         );
         assert_eq!(
             d.read_one(1, &name(NEXT_TS)),

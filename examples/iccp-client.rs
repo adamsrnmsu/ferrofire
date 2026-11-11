@@ -1,5 +1,5 @@
 //! The thin ICCP test client as a command, for the acceptance harness (conformance/iccp/peer.sh): no open ICCP peer exists.
-//!   iccp-client HOST:PORT DOMAIN READ_ITEM,... WRITE_ITEM [DATA_SET_MEMBER,...]
+//!   [ICCP_CALLING_AP_TITLE=1.3.9999.1] iccp-client HOST:PORT DOMAIN READ_ITEM,... WRITE_ITEM [DATA_SET_MEMBER,...]
 //! Associates, browses, reads, writes WRITE_ITEM (Data_Real 1.0, Data_State on, Data_Discrete as read), defines a data set of
 //! the members (default: the read items), arms a transfer set (interval 1 s + object change) and prints the first reports.
 //! Every result is one `key: value` line; exit 1 if anything failed.
@@ -41,7 +41,19 @@ fn commanded(v: &Value) -> Value {
 fn run(a: &[String]) -> Result<(), String> {
     let (domain, items): (&str, Vec<&str>) = (&a[2], a[3].split(',').collect());
     let members: Vec<&str> = a.get(5).map_or(items.clone(), |m| m.split(',').collect());
-    let mut c = Iccp::connect(&a[1])?;
+    // ICCP_CALLING_AP_TITLE=1.3.9999.1: the AP-title a bilateral table keyed by it (igstase2-server) expects
+    let ap_title = match std::env::var("ICCP_CALLING_AP_TITLE") {
+        Ok(t) => Some(
+            t.split('.')
+                .map(|n| {
+                    n.parse::<u32>()
+                        .map_err(|e| format!("ICCP_CALLING_AP_TITLE: {e}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        Err(_) => None,
+    };
+    let mut c = Iccp::connect_as(&a[1], ap_title)?;
     println!("identify: {}", c.identify()?);
     println!("domains: {:?}", c.domains()?);
     println!("variables: {:?}", c.variables(domain)?);

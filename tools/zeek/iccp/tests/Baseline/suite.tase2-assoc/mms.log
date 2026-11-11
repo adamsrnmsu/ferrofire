@@ -11,9 +11,9 @@
 1700000000.007999	UID	10.0.0.1	50001	10.0.0.2	102	T	confirmed_req	read	1	vmd	-	-	Bilateral_Table_ID	-	-	-	-	-
 1700000000.008999	UID	10.0.0.1	50001	10.0.0.2	102	F	confirmed_resp	read	1	vmd	-	-	Bilateral_Table_ID	string=BT_RANGE_01	success	-	0.001000	-
 1700000000.009999	UID	10.0.0.1	50001	10.0.0.2	102	T	confirmed_req	read	2	vmd	-	-	TASE2_Version	-	-	-	-	-
-1700000000.010999	UID	10.0.0.1	50001	10.0.0.2	102	F	confirmed_resp	read	2	vmd	-	-	TASE2_Version	struct={1996;8}	success	-	0.001000	-
+1700000000.010999	UID	10.0.0.1	50001	10.0.0.2	102	F	confirmed_resp	read	2	vmd	-	-	TASE2_Version	struct={2000;8}	success	-	0.001000	-
 1700000000.011999	UID	10.0.0.1	50001	10.0.0.2	102	T	confirmed_req	read	3	vmd	-	-	Supported_Features	-	-	-	-	-
-1700000000.012999	UID	10.0.0.1	50001	10.0.0.2	102	F	confirmed_resp	read	3	vmd	-	-	Supported_Features	stateq=11101000[INVALID|SUSPECT|ENTERED|NORMAL|TS_VALID]	success	-	0.001000	-
+1700000000.012999	UID	10.0.0.1	50001	10.0.0.2	102	F	confirmed_resp	read	3	vmd	-	-	Supported_Features	bitstring=110110100000	success	-	0.001000	-
 1700000000.013998	UID	10.0.0.1	50001	10.0.0.2	102	T	confirmed_req	getNameList	4	vmd	-	-	(empty)	-	-	-	-	class=0;
 1700000000.014998	UID	10.0.0.1	50001	10.0.0.2	102	F	confirmed_resp	getNameList	4	vmd	-	-	Bilateral_Table_ID,TASE2_Version,Supported_Features	-	success	-	0.001000	moreFollows=false;
 1700000000.015998	UID	10.0.0.1	50001	10.0.0.2	102	T	confirmed_req	getNameList	5	domain	ICC1	-	(empty)	-	-	-	-	class=0;
