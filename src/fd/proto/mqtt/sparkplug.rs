@@ -150,18 +150,21 @@ pub enum Num {
     Number(f64),
 }
 
-/// A metric's value as a number, honouring the signedness the data type names: Int8/16/32 are stored sign-extended in the 32-bit
-/// field, Int64 as two's complement in the 64-bit one.
-fn num(m: &Metric) -> Option<Num> {
-    let sign = |x: u32, dt: Option<u32>| match dt {
+/// An integer from the 32-bit field, signed or not as the data type says: Int8/16/32 are stored sign-extended.
+fn int32(x: u32, datatype: Option<u32>) -> f64 {
+    match datatype {
         Some(1) => f64::from(x as u8 as i8),
         Some(2) => f64::from(x as u16 as i16),
         Some(3) => f64::from(x as i32),
         _ => f64::from(x),
-    };
+    }
+}
+
+/// A metric's value as a number, honouring the signedness the data type names; Int64 is two's complement in the 64-bit field.
+fn num(m: &Metric) -> Option<Num> {
     Some(match m.value.as_ref()? {
         Value::Boolean(b) => Num::Bool(*b),
-        Value::Int(x) => Num::Number(sign(*x, m.datatype)),
+        Value::Int(x) => Num::Number(int32(*x, m.datatype)),
         Value::Long(x) if m.datatype == Some(INT64) => Num::Number(*x as i64 as f64),
         Value::Long(x) => Num::Number(*x as f64),
         Value::Float(x) => Num::Number(f64::from(*x)),

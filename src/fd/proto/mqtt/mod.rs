@@ -76,14 +76,14 @@ fn broker(ep: &str) -> Result<Broker, ConfigError> {
         Some((h, p)) => (h, p.parse().map_err(|_| bad())?),
         None => (rest, default),
     };
-    if host.is_empty() || host.contains('/') {
-        return Err(bad());
+    match host.is_empty() || host.contains('/') {
+        true => Err(bad()),
+        false => Ok(Broker {
+            host: host.into(),
+            port,
+            tls,
+        }),
     }
-    Ok(Broker {
-        host: host.into(),
-        port,
-        tls,
-    })
 }
 
 /// A topic level: not empty, and nothing MQTT gives a meaning to.
@@ -154,6 +154,69 @@ fn points(node: Node, tags: &Tags, opts: &Opts) -> Result<Vec<Point>, ConfigErro
     Ok(out)
 }
 
+/// A number key that must lie in `range`.
+fn bounded<T: std::str::FromStr + PartialOrd + std::fmt::Display + Copy>(
+    n: Node,
+    key: &str,
+    default: T,
+    range: std::ops::RangeInclusive<T>,
+) -> Result<T, ConfigError> {
+    let v = number::<T>(n, key)?.unwrap_or(default);
+    match range.contains(&v) {
+        true => Ok(v),
+        false => Err(ConfigError(format!(
+            "<{key}> {v} is not between {} and {}",
+            range.start(),
+            range.end()
+        ))),
+    }
+}
+
+fn tls_files(node: Node, broker: &Broker) -> Result<Tls, ConfigError> {
+    let tls = Tls {
+        ca: text(node, "tls-ca"),
+        cert: text(node, "tls-cert"),
+        key: text(node, "tls-key"),
+    };
+    if tls.cert.is_some() != tls.key.is_some() {
+        return Err(ConfigError("<tls-cert> and <tls-key> go together".into()));
+    }
+    match broker.tls && tls.ca.is_none() {
+        true => Err(ConfigError("an ssl:// <endpoint> needs <tls-ca> (the CA file that signed the broker's certificate)".into())),
+        false => Ok(tls),
+    }
+}
+
+/// Sparkplug B when `<sparkplug>` is present, else the plain topic scheme.
+fn scheme(node: Node, device: &str, qos: u8) -> Result<Scheme, ConfigError> {
+    let Some(sp) = crate::fd::config::child(node, "sparkplug") else {
+        let prefix = text(node, "topic-prefix").unwrap_or_else(|| "ferrofire".into());
+        if prefix.is_empty()
+            || prefix.contains(['+', '#'])
+            || prefix.starts_with('/')
+            || prefix.ends_with('/')
+        {
+            return Err(ConfigError(format!(
+                "<topic-prefix> `{}` is not a topic prefix",
+                show(&prefix)
+            )));
+        }
+        return Ok(Scheme::Plain {
+            prefix,
+            device: device.into(),
+            qos,
+            retain: flag(node, "retain", true)?,
+        });
+    };
+    Ok(Scheme::Sparkplug {
+        group: level("<group-id>", require(sp, "group-id")?)?,
+        edge: level(
+            "<edge-node-id>",
+            text(sp, "edge-node-id").unwrap_or_else(|| device.into()),
+        )?,
+    })
+}
+
 impl Module for Client {
     fn parse(node: Node, tags: &mut Tags, opts: &Opts) -> Result<Self, ConfigError> {
         let broker = broker(&require(node, "endpoint")?)?;
@@ -165,57 +228,10 @@ impl Module for Client {
         if client_id.is_empty() {
             return Err(ConfigError("<client-id> is empty".into()));
         }
-        let login = text(node, "username").map(|u| (u, text(node, "password").unwrap_or_default()));
-        let tls = Tls {
-            ca: text(node, "tls-ca"),
-            cert: text(node, "tls-cert"),
-            key: text(node, "tls-key"),
-        };
-        if tls.cert.is_some() != tls.key.is_some() {
-            return Err(ConfigError("<tls-cert> and <tls-key> go together".into()));
-        }
-        if broker.tls && tls.ca.is_none() {
-            return Err(ConfigError("an ssl:// <endpoint> needs <tls-ca> (the CA file that signed the broker's certificate)".into()));
-        }
-        let qos = number::<u8>(node, "qos")?.unwrap_or(1);
-        if qos > 2 {
-            return Err(ConfigError(format!("<qos> {qos} is not 0, 1 or 2")));
-        }
-        let queue = number::<usize>(node, "queue")?.unwrap_or(256);
-        if !(1..=65535).contains(&queue) {
-            return Err(ConfigError(format!(
-                "<queue> {queue} is not between 1 and 65535"
-            )));
-        }
+        let tls = tls_files(node, &broker)?;
+        let qos = bounded(node, "qos", 1u8, 0..=2)?;
+        let queue = bounded(node, "queue", 256usize, 1..=65535)?;
         let refresh = number::<u64>(node, "refresh")?.unwrap_or(60);
-        let scheme = match crate::fd::config::child(node, "sparkplug") {
-            Some(sp) => Scheme::Sparkplug {
-                group: level("<group-id>", require(sp, "group-id")?)?,
-                edge: level(
-                    "<edge-node-id>",
-                    text(sp, "edge-node-id").unwrap_or_else(|| device.clone()),
-                )?,
-            },
-            None => {
-                let prefix = text(node, "topic-prefix").unwrap_or_else(|| "ferrofire".into());
-                if prefix.is_empty()
-                    || prefix.contains(['+', '#'])
-                    || prefix.starts_with('/')
-                    || prefix.ends_with('/')
-                {
-                    return Err(ConfigError(format!(
-                        "<topic-prefix> `{}` is not a topic prefix",
-                        show(&prefix)
-                    )));
-                }
-                Scheme::Plain {
-                    prefix,
-                    device,
-                    qos,
-                    retain: flag(node, "retain", true)?,
-                }
-            }
-        };
         let points = points(node, tags, opts)?;
         if let Some(p) = points.iter().find(|p| p.tag.contains(['+', '#'])) {
             return Err(ConfigError(format!(
@@ -223,18 +239,17 @@ impl Module for Client {
                 show(&p.tag)
             )));
         }
-        let log = Arc::new(EventLog::open(
-            text(node, "event-logging").as_deref(),
-            "mqtt-client",
-        ));
         Ok(Client {
+            login: text(node, "username").map(|u| (u, text(node, "password").unwrap_or_default())),
+            engine: Engine::new(scheme(node, &device, qos)?, points, refresh * 1000),
+            log: Arc::new(EventLog::open(
+                text(node, "event-logging").as_deref(),
+                "mqtt-client",
+            )),
             broker,
             client_id,
-            login,
             tls,
             queue,
-            engine: Engine::new(scheme, points, refresh * 1000),
-            log,
         })
     }
 
@@ -547,7 +562,7 @@ mod tests {
 
     #[test]
     fn bad_values_are_named() {
-        assert!(err("<qos>3</qos>").contains("<qos> 3 is not 0, 1 or 2"));
+        assert!(err("<qos>3</qos>").contains("<qos> 3 is not between 0 and 2"));
         assert!(err("<qos>x</qos>").contains("not a valid number"));
         assert!(err("<queue>0</queue>").contains("<queue> 0"));
         assert!(err("<queue>65536</queue>").contains("<queue> 65536"));

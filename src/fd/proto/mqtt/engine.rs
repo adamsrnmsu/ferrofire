@@ -5,6 +5,7 @@
 //! `<prefix>/<device>/status` is `online` / `offline` (the will). Sparkplug B scheme: NBIRTH / NDATA / NDEATH out, NCMD in.
 
 use super::sparkplug::{self as sp, Command, Key, Num, Sample};
+use crate::bennu::fmt_value;
 use crate::fd::store::Store;
 use crate::hint::show;
 use crate::model::{Kind, Value};
@@ -64,14 +65,6 @@ fn same(a: &Option<Value>, b: &Option<Value>) -> bool {
     match (a, b) {
         (Some(Value::Analog(x)), Some(Value::Analog(y))) => x == y || (x.is_nan() && y.is_nan()),
         _ => a == b,
-    }
-}
-
-/// A plain-scheme payload: `true` / `false`, or the number as Rust prints it (`250.5`, `3`, `NaN`).
-fn text(v: Value) -> String {
-    match v {
-        Value::Binary(b) => b.to_string(),
-        Value::Analog(x) => x.to_string(),
     }
 }
 
@@ -215,7 +208,7 @@ impl Engine {
             .filter_map(|(i, p)| {
                 Some(Out {
                     topic: self.base(&p.tag),
-                    payload: text(now[i]?).into_bytes(),
+                    payload: fmt_value(now[i]?).into_bytes(),
                     qos,
                     retain,
                 })
@@ -296,30 +289,36 @@ impl Engine {
         if topic != self.base("NCMD") {
             return vec![];
         }
-        let cmds = match sp::decode_command(payload) {
-            Ok(c) => c,
-            Err(e) => return vec![format!("undecodable NCMD payload: {e}")],
-        };
-        let mut refused = vec![];
-        for c in cmds {
-            match c {
-                Command::Rebirth => self.need_birth = true,
-                Command::Write { key, value } => {
-                    let i = match &key {
-                        Key::Name(n) => self.by_name.get(n).copied(),
-                        Key::Alias(a) => usize::try_from(*a)
-                            .ok()
-                            .and_then(|a| a.checked_sub(1))
-                            .filter(|&i| i < self.points.len()),
-                    };
-                    match i {
-                        Some(i) => refused.extend(self.write(i, value, store).err()),
-                        None => refused.push(format!("NCMD metric {key:?} is unknown, skipped")),
-                    }
-                }
-            }
+        match sp::decode_command(payload) {
+            Ok(cmds) => cmds
+                .into_iter()
+                .filter_map(|c| self.apply(c, store))
+                .collect(),
+            Err(e) => vec![format!("undecodable NCMD payload: {e}")],
         }
-        refused
+    }
+
+    /// The point an NCMD metric addresses: by name, or by alias (1-based position in the point list).
+    fn lookup(&self, key: &Key) -> Option<usize> {
+        match key {
+            Key::Name(n) => self.by_name.get(n).copied(),
+            Key::Alias(a) => usize::try_from(*a)
+                .ok()
+                .and_then(|a| a.checked_sub(1))
+                .filter(|&i| i < self.points.len()),
+        }
+    }
+
+    /// One NCMD command; `Some` is the line to log when it was refused.
+    fn apply(&mut self, c: Command, store: &Store) -> Option<String> {
+        let Command::Write { key, value } = c else {
+            self.need_birth = true;
+            return None;
+        };
+        match self.lookup(&key) {
+            Some(i) => self.write(i, value, store).err(),
+            None => Some(format!("NCMD metric {key:?} is unknown, skipped")),
+        }
     }
 
     /// The checks every protocol's write passes: the tag is writable, the value has the tag's type and, for an analog, is finite and
@@ -330,21 +329,26 @@ impl Engine {
         if !p.writable {
             return Err(why("not writable"));
         }
-        let v = match (p.kind, n) {
-            (Kind::Binary, Num::Bool(b)) => Value::Binary(b),
-            (Kind::Binary, Num::Number(x)) if x == 0.0 || x == 1.0 => Value::Binary(x == 1.0),
-            (Kind::Analog, Num::Number(x)) => {
-                if !x.is_finite() {
-                    return Err(why("not a finite number"));
-                }
-                if p.min.is_some_and(|m| x < m) || p.max.is_some_and(|m| x > m) {
-                    return Err(why(&format!("{x} is outside the limits")));
-                }
-                Value::Analog(x)
-            }
-            _ => return Err(why("wrong type for the tag")),
-        };
+        let v = p.convert(n).map_err(|m| why(&m))?;
         store.write(&p.tag, v).map_err(|e| why(&format!("{e:?}")))
+    }
+}
+
+impl Point {
+    /// A command value as this point's own type, within its limits.
+    fn convert(&self, n: Num) -> Result<Value, String> {
+        match (self.kind, n) {
+            (Kind::Binary, Num::Bool(b)) => Ok(Value::Binary(b)),
+            (Kind::Binary, Num::Number(x)) if x == 0.0 || x == 1.0 => Ok(Value::Binary(x == 1.0)),
+            (Kind::Analog, Num::Number(x)) if !x.is_finite() => Err("not a finite number".into()),
+            (Kind::Analog, Num::Number(x))
+                if self.min.is_some_and(|m| x < m) || self.max.is_some_and(|m| x > m) =>
+            {
+                Err(format!("{x} is outside the limits"))
+            }
+            (Kind::Analog, Num::Number(x)) => Ok(Value::Analog(x)),
+            _ => Err("wrong type for the tag".into()),
+        }
     }
 }
 
