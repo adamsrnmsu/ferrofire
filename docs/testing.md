@@ -329,8 +329,9 @@ Mosquitto inside the `ferrofire-testpeers` image with the peers below.
   writes by name and alias: unit tests and `mqtt_net.rs`; in the conformance run an **Eclipse Tahu 1.0.21** payload decoder (our small
   `TahuHost.java`, jars from Maven Central, EPL-2.0, test peer only) decodes our NBIRTH and NDATA, its Rebirth NCMD produces a new
   NBIRTH and its NCMD write reaches the provider.
-- Wire: tshark finds 152 MQTT packets and 0 malformed, `expert,warn` empty; Zeek's built-in analyzer writes `mqtt_connect.log`
+- Wire: tshark finds 158 MQTT packets and 0 malformed, `expert,warn` empty; Zeek's built-in analyzer writes `mqtt_connect.log`
   (client ids, will topic), `mqtt_subscribe.log` and `mqtt_publish.log` rows for our topics.
+- Mutation: `mutator --test-command 'cargo test --lib --test mqtt_net' src/fd/proto/mqtt` (not the whole `make mutate`): 101 sites, 101 killed, 0 survivors. The test command must not contain `&&`: the mutator does not run it through a shell, and the first run silently skipped the integration tests.
 - Fuzz: `fd_mqtt` feeds arbitrary bytes as an NCMD and as a plain command through `Engine::message` and the decoder; invariants: no panic,
   a read-only point is never queued, a queued analog is within its limits.
 
