@@ -414,6 +414,7 @@ impl Iccp {
         ))
     }
 
+    /// (The scope goes out as an integer: igstase2-server refuses the unsigned the field sends, DataAccessError 7; ours accepts both.)
     /// Write a DSTransfer_Set: report `data_set` every `interval` seconds and on change, starting now when `status`.
     pub fn arm(
         &mut self,

@@ -75,26 +75,33 @@ provider's last update of the point (the clock for tags with none). Not built: t
 | GetVariableAccessAttributes | the type of every object, special variable and the DSTransfer_Set |
 | Read | named variables (objects, specials) and a named data set (one result per member, denied members fail individually) |
 | Write | objects the table lets the partner write: becomes `Store::write` (queued, effective when the provider ACKs, like every protocol); wrong type is type-inconsistent (7), state `invalid`/`between` is object-value-invalid (11); quality and time a client sends are ignored. DSTransfer_Sets. Writing a whole data set by name is refused (9) |
-| DefineNamedVariableList / DeleteNamedVariableList / GetNamedVariableListAttributes | data sets in the partner's domain, members must be readable objects of that domain, max 256 members and `max-data-sets` per association; **they live and die with the association** (a real peer redefines them at each association; persistence is not built). A data set a running transfer set reports cannot be deleted (matched, not deleted) |
+| DefineNamedVariableList / DeleteNamedVariableList / GetNamedVariableListAttributes | data sets in the partner's domain, members must be readable objects of that domain, or the report's own `Transfer_Set_Name`, `Transfer_Set_Time_Stamp`, `DSConditions_Detected` (real clients list them first, domain-scoped), max 256 members and `max-data-sets` per association; **they live and die with the association** (a real peer redefines them at each association; persistence is not built). A data set a running transfer set reports cannot be deleted (matched, not deleted) |
 | anything else (file services, journals, ...) | MMS reject (unrecognised service) |
 
 ### Transfer sets and reports
 
-Client reads `Next_DSTransfer_Set` (domain scope): the answer is the name `{scope 1, domain, name}` of an allocated, not yet configured
+Client reads `Next_DSTransfer_Set` (domain scope): the answer is the name `{scope 1, domain, name}` (scope **unsigned**, as both real
+captures and their vendors send it; an integer scope is accepted on input too, ww-otj.64) of an allocated, not yet configured
 set (`DSTrans_1`, `DSTrans_2`, ... up to `max-transfer-sets`, then temporarily-unavailable). It writes that variable with the
 DSTransfer_Set structure (recall): Data_Set_Name, Start_Time, Interval, TLE, Buffer_Time, Integrity_Check, DSConditions_Requested
 (5 bits: interval timeout, integrity timeout, object change, operator request, other external event), Block_Data, Critical, RBE,
-All_Changes_Reported, Status, Event_Code_Requested. `Status = true` arms it (the current values become the change baseline, the
+All_Changes_Reported, Status, Event_Code_Requested: 13 members (2000 edition); the 1996 edition has no All_Changes_Reported (12 members, as in the 2005
+capture, where the flag before Event_Code is true in all four writes: Status; that reading is from the captures, not the standard). Both layouts are accepted whatever `<tase2-version>` says; a read-back uses the layout of the
+configured version (ww-otj.65). `Status = true` arms it (the current values become the change baseline, the
 timers start); `false` stops it. It can be read back.
 
-Reports are one unconfirmed InformationReport per due condition set, checked every 100 ms: `listOfVariable` =
+Reports are one unconfirmed InformationReport per due condition set, checked every 100 ms. A data set whose members include the report's
+own (`Transfer_Set_Name`, ...) is reported whole **by its name** (`variableListName`, domain-scoped), one result per member in the data
+set's order, with the report members filled in: the layout of both real captures. An RBE report of the changed members only is a
+`listOfVariable` of the report members the data set lists (domain-scoped, as mms.pcap frame 86) and then the changed members; a data
+set that lists none gets the plain `listOfVariable` =
 `Transfer_Set_Name` (VMD scope, the `{scope, domain, name}` structure), `Transfer_Set_Time_Stamp` (integer unix seconds),
 `DSConditions_Detected` (bit string 5), then each reported member by its domain-scoped name. The names are plain MMS text, so
 Wireshark shows them (see "Why no Lua dissector"). The item order is recall.
 
 | Covered | Not covered (refused with object-value-invalid where a client could ask) |
 |---|---|
-| DSConditions interval timeout, integrity timeout (the whole data set), object change (value change of any member), RBE (change-only reports) | operator request and other external event conditions; Buffer_Time (non-zero refused); Critical (refused; so no Transfer_Report acknowledgement); Block_Data (refused); Start_Time, TLE, All_Changes_Reported, Event_Code (accepted, stored, no effect) |
+| DSConditions interval timeout, integrity timeout (the whole data set), object change (value change of any member, held back for Buffer_Time seconds after the first change so that changes gather into one report), RBE (change-only reports) | operator request and other external event conditions; Critical (refused; so no Transfer_Report acknowledgement); Block_Data (refused); Start_Time, TLE, All_Changes_Reported, Event_Code (accepted, stored, no effect) |
 
 ### Conformance blocks, stated plainly
 
@@ -102,12 +109,12 @@ Block numbers are recall too (1 basic services, 2 extended condition monitoring,
 device control, 6 programs, 7 events, 8 additional events, 9 time series). `Supported_Features` reports **blocks 1 and 2** (the first two
 bits of a **12-bit** string, IEC 60870-6-503 8.2.9: bit n is block n+1; ferrofire sent 9 bits before ww-otj.62, which igs-iec-tase2 rejects).
 `TASE2_Version` is `{2000, 8}` by default (field peers; igs requires it, 503 5.3.3.3 ends the association on a mismatch) and
-`<tase2-version>1996.8</tase2-version>` selects the edition of the 2005 capture. The Initiate response never negotiates a nesting level
+`<tase2-version>1996.8</tase2-version>` selects the edition of the 2005 capture (and the 12-member DSTransfer_Set read-back). The Initiate response never negotiates a nesting level
 above the client's proposal (ww-otj.61), and object-non-existent as a service error is `access` 2. What that means here:
 
 - **Block 1**: association, domain/VMD browse, Read and Write of Data_Real/State/Discrete (+Q, +QTimeTag), data sets, transfer sets with
   interval and integrity timers. Complete except what is in the table above.
-- **Block 2**: object-change and RBE reporting only. Not the operator-request/external-event conditions, buffering, or critical
+- **Block 2**: object-change and RBE reporting only. Not the operator-request/external-event conditions or critical
   reports with acknowledgement.
 - **Not built, ever, unless asked**: blocks 3 to 9. In particular no Block 5 device control (select-before-operate `Command` /
   `Device` objects with check-back names): a partner that must operate a breaker writes a `data-state` object that is in its

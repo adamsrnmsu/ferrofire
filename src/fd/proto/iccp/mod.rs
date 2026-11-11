@@ -36,6 +36,16 @@ use transfer::{name_value, Cfg, Ts};
 const BILATERAL: &str = "Bilateral_Table_ID";
 const FEATURES: &str = "Supported_Features";
 const VERSION: &str = "TASE2_Version";
+/// The members of a transfer report: a data set may list them (real clients do), and then a report fills them in.
+const REPORT_MEMBERS: [&str; 3] = [
+    "Transfer_Set_Name",
+    "Transfer_Set_Time_Stamp",
+    "DSConditions_Detected",
+];
+
+fn is_report_member(s: &str) -> bool {
+    REPORT_MEMBERS.contains(&s)
+}
 const NEXT_TS: &str = "Next_DSTransfer_Set";
 const TS_PREFIX: &str = "DSTrans_";
 /// Names per GetNameList page, members per data set, and the refresh pace (transfer set conditions are checked this often).
@@ -471,11 +481,16 @@ impl Device {
         }
     }
 
+    /// The 1996 edition's DSTransfer_Set has no Status member.
+    fn v1996(&self) -> bool {
+        self.version.0 < 2000
+    }
+
     fn read_ts(&self, id: AssocId, t: &str) -> Result<Value, i64> {
         self.sessions
             .get(&id)
             .and_then(|s| s.transfer.get(t)?.cfg.as_ref())
-            .map(Cfg::to_value)
+            .map(|c| c.to_value(self.v1996()))
             .ok_or(TEMP_UNAVAILABLE)
     }
 
@@ -641,7 +656,9 @@ impl Device {
                         .map(|m| match self.objects.get(m) {
                             Some(o) if self.allowed(id, m, false) => Ok(self.value_of(o)),
                             Some(_) => Err(DENIED),
-                            None => Err(NON_EXISTENT),
+                            None => self
+                                .report_member(id, m, &self.reporting(id, name), u8::MIN) // nothing detected: a plain read, not a report
+                                .ok_or(NON_EXISTENT),
                         })
                         .collect(),
                 )
@@ -697,6 +714,11 @@ impl Device {
         let list: Vec<String> = members
             .iter()
             .map(|m| match m {
+                VariableSpecification::Name(ObjectName::DomainSpecific { domain: d, item })
+                    if *d == domain && is_report_member(item) =>
+                {
+                    Some((*item).to_string())
+                }
                 VariableSpecification::Name(ObjectName::DomainSpecific { domain: d, item })
                     if *d == domain && self.allowed(id, item, false) =>
                 {
@@ -804,7 +826,7 @@ impl Device {
     }
 
     /// The type of a name that is not a data object.
-    fn special_type(t: &Target) -> TypeSpec {
+    fn special_type(&self, t: &Target) -> TypeSpec {
         match t {
             Target::Bilateral => TypeSpec::VisibleString(-32),
             Target::Features => TypeSpec::BitString(12),
@@ -812,14 +834,14 @@ impl Device {
                 transfer::structure(vec![TypeSpec::Integer(16), TypeSpec::Integer(16)])
             }
             Target::NextTs => transfer::name_type(),
-            _ => transfer::type_spec(),
+            _ => transfer::type_spec(self.v1996()),
         }
     }
 
     fn attributes(&self, id: AssocId, name: &ObjectName) -> Answer {
         let spec = match self.resolve(id, name) {
             Ok(Target::Object(o)) => self.objects.get(&o).map(Object::type_spec),
-            Ok(t) => Some(Self::special_type(&t)),
+            Ok(t) => Some(self.special_type(&t)),
             Err(_) => None,
         };
         spec.map_or(Answer::NOT_FOUND, |spec| Answer::VariableType {
@@ -923,44 +945,122 @@ impl Device {
         due
     }
 
-    /// The InformationReport: Transfer_Set_Name, Transfer_Set_Time_Stamp, DSConditions_Detected, then the listed members.
+    /// The transfer set of this association that reports data set `name` ("" if none).
+    fn reporting(&self, id: AssocId, name: &ObjectName) -> String {
+        let ObjectName::DomainSpecific { item, .. } = name else {
+            return String::new();
+        };
+        self.sessions
+            .get(&id)
+            .and_then(|s| {
+                s.transfer
+                    .iter()
+                    .find(|(_, t)| t.cfg.as_ref().is_some_and(|c| c.data_set == *item))
+            })
+            .map_or(String::new(), |(n, _)| n.clone())
+    }
+
+    /// The value of a transfer report's own member, if `m` is one.
+    fn report_member(&self, id: AssocId, m: &str, ts: &str, conditions: u8) -> Option<Value> {
+        let domain = self.peer_of(id)?.domain.as_str();
+        match m {
+            "Transfer_Set_Name" => Some(name_value(domain, ts)),
+            "Transfer_Set_Time_Stamp" => Some(Value::Integer(unix_secs())),
+            "DSConditions_Detected" => Some(transfer::conditions(conditions)),
+            _ => None,
+        }
+    }
+
+    /// The InformationReport. A data set that lists the report's own members (Transfer_Set_Name, ...) is reported whole, by its name
+    /// (`variableListName`), one result per member in order, as the field does. Any other report is a `listOfVariable`: the report's
+    /// own members, then the listed data set members.
     fn report(&self, id: AssocId, ts: &str, set: &str, due: &transfer::Due) -> Option<Vec<u8>> {
+        let members = self.sessions.get(&id)?.sets.get(set)?;
+        let whole = due.members.len() == members.len();
+        let (access, values) = if whole && members.iter().any(|m| is_report_member(m)) {
+            self.named_report(id, ts, set, due.conditions)?
+        } else {
+            self.listed_report(id, ts, set, due)?
+        };
+        information_report(access, &values)
+    }
+
+    fn named_report<'a>(
+        &'a self,
+        id: AssocId,
+        ts: &str,
+        set: &'a str,
+        conditions: u8,
+    ) -> Option<(VariableAccess<'a>, Vec<Value>)> {
+        let domain = self.peer_of(id)?.domain.as_str();
+        let values = self.sessions.get(&id)?.sets.get(set)?.iter();
+        let values = values.map(|m| {
+            let object = self.objects.get(m).map(|o| self.value_of(o));
+            object.or_else(|| self.report_member(id, m, ts, conditions))
+        });
+        let name = ObjectName::DomainSpecific { domain, item: set };
+        Some((
+            VariableAccess::VariableListName(name),
+            values.collect::<Option<_>>()?,
+        ))
+    }
+
+    /// The report's own members (the ones the data set lists, domain-scoped as in mms.pcap frame 86, else all three, VMD-scoped),
+    /// then the members `due` lists.
+    fn listed_report<'a>(
+        &'a self,
+        id: AssocId,
+        ts: &str,
+        set: &str,
+        due: &transfer::Due,
+    ) -> Option<(VariableAccess<'a>, Vec<Value>)> {
         let domain = self.peer_of(id)?.domain.as_str();
         let members = self.sessions.get(&id)?.sets.get(set)?;
-        let mut names = vec![
-            ObjectName::VmdSpecific("Transfer_Set_Name"),
-            ObjectName::VmdSpecific("Transfer_Set_Time_Stamp"),
-            ObjectName::VmdSpecific("DSConditions_Detected"),
-        ];
-        let mut values = vec![
-            name_value(domain, ts),
-            Value::Integer(unix_secs()),
-            transfer::conditions(due.conditions),
-        ];
-        for m in due.members.iter().filter_map(|i| members.get(*i)) {
-            names.push(ObjectName::DomainSpecific { domain, item: m });
-            values.push(self.objects.get(m).map(|o| self.value_of(o))?);
-        }
-        let encoded: Vec<Vec<u8>> = values
+        let listed: Vec<&'a str> = members
             .iter()
-            .map(|v| Value::encode_all(std::slice::from_ref(v)).ok())
+            .map(String::as_str)
+            .filter(|m| is_report_member(m))
+            .collect();
+        let head: Vec<(ObjectName, &str)> = if listed.is_empty() {
+            let vmd = |m: &&'static str| (ObjectName::VmdSpecific(m), *m);
+            REPORT_MEMBERS.iter().map(vmd).collect()
+        } else {
+            let own = |m: &&'a str| (ObjectName::DomainSpecific { domain, item: m }, *m);
+            listed.iter().map(own).collect()
+        };
+        let mut values: Vec<_> = head
+            .iter()
+            .map(|(_, m)| self.report_member(id, m, ts, due.conditions))
             .collect::<Option<_>>()?;
-        let results = encoded
-            .iter()
-            .map(|b| {
-                Cursor::new(b)
-                    .next_required()
-                    .map(iec61850_rs::proto::mms::AccessResult::Success)
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .ok()?;
-        let access = VariableAccess::ListOfVariable(
-            names.into_iter().map(VariableSpecification::Name).collect(),
-        );
-        Pdu::Unconfirmed(Unconfirmed::InformationReport { access, results })
-            .to_vec()
-            .ok()
+        let mut names: Vec<_> = head.into_iter().map(|(n, _)| n).collect();
+        let changed = due.members.iter().filter_map(|i| members.get(*i));
+        for m in changed.filter(|m| !is_report_member(m)) {
+            names.push(ObjectName::DomainSpecific { domain, item: m });
+            values.push(self.value_of(self.objects.get(m)?));
+        }
+        let specs = names.into_iter().map(VariableSpecification::Name).collect();
+        Some((VariableAccess::ListOfVariable(specs), values))
     }
+}
+
+/// The unconfirmed InformationReport PDU for `access` with one successful result per value.
+fn information_report(access: VariableAccess, values: &[Value]) -> Option<Vec<u8>> {
+    let encoded: Vec<Vec<u8>> = values
+        .iter()
+        .map(|v| Value::encode_all(std::slice::from_ref(v)).ok())
+        .collect::<Option<_>>()?;
+    let results = encoded
+        .iter()
+        .map(|b| {
+            Cursor::new(b)
+                .next_required()
+                .map(iec61850_rs::proto::mms::AccessResult::Success)
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    Pdu::Unconfirmed(Unconfirmed::InformationReport { access, results })
+        .to_vec()
+        .ok()
 }
 
 impl Handler for Device {
@@ -1341,7 +1441,7 @@ mod tests {
             status: true,
             ..Cfg::default()
         };
-        d.write_one(1, &name(&t), &cfg.to_value(), 0).unwrap();
+        d.write_one(1, &name(&t), &cfg.to_value(false), 0).unwrap();
         assert_eq!(
             d.delete(1, 0, &[name("S1"), name("S2"), name("S3")], None),
             Answer::DataSetDeleted {
@@ -1412,7 +1512,8 @@ mod tests {
             status: true,
             ..Cfg::default()
         };
-        d.write_one(1, &name(&t), &cfg.to_value(), 5_000).unwrap();
+        d.write_one(1, &name(&t), &cfg.to_value(false), 5_000)
+            .unwrap();
         assert!(d.refresh(5_999).is_empty());
         let due = d.refresh(6_000);
         assert_eq!(due.len(), 1);
@@ -1435,6 +1536,237 @@ mod tests {
         );
         assert_eq!(names[3], name("MW"));
         assert_eq!(results.len(), 5);
+    }
+
+    /// A request through the wire path (encode, `Handler::request`), and the answer's bytes.
+    fn wire(d: &mut Device, service: ConfirmedRequest) -> Vec<u8> {
+        let pdu = Pdu::ConfirmedRequest {
+            invoke_id: 7,
+            service,
+        }
+        .to_vec()
+        .unwrap();
+        d.request(1, Instant(0), 7, &pdu).0
+    }
+
+    fn wire_write(d: &mut Device, name: ObjectName, v: &Value) -> Vec<u8> {
+        let bytes = Value::encode_all(std::slice::from_ref(v)).unwrap();
+        let tlv = Cursor::new(&bytes).next_required().unwrap();
+        let access = VariableAccess::ListOfVariable(vec![VariableSpecification::Name(name)]);
+        wire(
+            d,
+            ConfirmedRequest::Write {
+                access,
+                values: vec![tlv],
+            },
+        )
+    }
+
+    /// The client requests of the chaugan capture (192.0.2.3 -> 192.0.2.2, frames 81, 100, 125: define a data set that starts with
+    /// Transfer_Set_Name and DSConditions_Detected, read Next_DSTransfer_Set, write a 13-member DSTransferSet with an unsigned
+    /// scope), with the capture's domain, and the report layout of its server (frame 515): variableListName, one result per member.
+    #[test]
+    fn replay_of_the_2000_capture_a_named_data_set_reported_by_variable_list_name() {
+        let dom = "STATKRAFT_STATNETT_L";
+        let mut d = device(&format!("<peer><name>{dom}</name></peer>"));
+        d.opened(1, vec![1, 2, 3, 4]);
+        let name = |i| ObjectName::DomainSpecific {
+            domain: dom,
+            item: i,
+        };
+        let mem = |i| VariableSpecification::Name(name(i));
+        let define = |n, members: &[&'static str]| ConfirmedRequest::DefineNamedVariableList {
+            name: name(n),
+            variables: members.iter().map(|m| mem(m)).collect(),
+        };
+        let created = mms::encode(&Answer::DataSetCreated, 7);
+        assert_eq!(
+            wire(
+                &mut d,
+                define(
+                    "DS_ANA_STATKR_L",
+                    &["Transfer_Set_Name", "DSConditions_Detected", "MW"]
+                )
+            ),
+            created
+        );
+        assert_eq!(
+            wire(
+                &mut d,
+                define("TS_ONLY", &["Transfer_Set_Time_Stamp", "Transfer_Set_Name"])
+            ),
+            created
+        );
+        let next = Value::Structure(vec![
+            Value::Unsigned(1),
+            Value::VisibleString(dom.into()),
+            Value::VisibleString("DSTrans_1".into()),
+        ]);
+        let read_next = ConfirmedRequest::Read {
+            specification_with_result: false,
+            access: VariableAccess::ListOfVariable(vec![mem("Next_DSTransfer_Set")]),
+        };
+        assert_eq!(
+            wire(&mut d, read_next),
+            mms::encode(&Answer::Read(vec![Ok(next)]), 7),
+            "frame 101: {{unsigned 1, domain, name}}"
+        );
+        let int = Value::Integer;
+        let captured = Value::Structure(vec![
+            Value::Structure(vec![
+                Value::Unsigned(1),
+                Value::VisibleString(dom.into()),
+                Value::VisibleString("DS_ANA_STATKR_L".into()),
+            ]),
+            int(0),
+            int(5),
+            int(0),
+            int(0),
+            int(0),
+            transfer::conditions(transfer::INTERVAL),
+            Value::Boolean(false),
+            Value::Boolean(false),
+            Value::Boolean(false),
+            Value::Boolean(false),
+            Value::Boolean(true),
+            int(0),
+        ]);
+        assert_eq!(
+            wire_write(&mut d, name("DSTrans_1"), &captured),
+            mms::encode(&Answer::Write(vec![Ok(())]), 7)
+        );
+        assert!(d.refresh(4_999).is_empty());
+        let due = d.refresh(5_000);
+        let Ok(Pdu::Unconfirmed(Unconfirmed::InformationReport {
+            access: VariableAccess::VariableListName(n),
+            results,
+        })) = Pdu::parse(&due[0].1, &Limits::DEFAULT)
+        else {
+            panic!("frame 515 is a variableListName report")
+        };
+        assert_eq!(n, name("DS_ANA_STATKR_L"));
+        assert_eq!(results.len(), 3, "one result per member, in order");
+        let v: Vec<Value> = results
+            .iter()
+            .map(|r| match r {
+                iec61850_rs::proto::mms::AccessResult::Success(t) => {
+                    iec61850_rs::proto::data::DataView::from_tlv(*t)
+                        .unwrap()
+                        .to_owned(&Limits::DEFAULT)
+                        .unwrap()
+                }
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            v[0],
+            name_value(dom, "DSTrans_1"),
+            "{{unsigned 1, domain, transfer set}}"
+        );
+        assert_eq!(v[1], transfer::conditions(transfer::INTERVAL));
+        // the set read by name gives the same shape, the transfer set filled in
+        let Answer::Read(r) = d.read(
+            1,
+            &VariableAccess::VariableListName(name("DS_ANA_STATKR_L")),
+        ) else {
+            panic!()
+        };
+        assert_eq!(r.len(), 3);
+        assert_eq!(r[0], Ok(name_value(dom, "DSTrans_1")));
+        assert_eq!(r[1], Ok(transfer::conditions(0)));
+        let Answer::Read(r) = d.read(1, &VariableAccess::VariableListName(name("TS_ONLY"))) else {
+            panic!()
+        };
+        assert!(
+            matches!(r[0], Ok(Value::Integer(t)) if t > 1_700_000_000),
+            "the time stamp"
+        );
+        assert_eq!(
+            r[1],
+            Ok(name_value(dom, "")),
+            "no transfer set reports TS_ONLY"
+        );
+    }
+
+    /// The 1996 capture (mms.pcap frame 80): a 12-member DSTransferSet with Buffer_Time 1, object change, RBE, written to a server
+    /// whose TASE2_Version is 1996.8; reporting starts without a Status member and waits the buffer time.
+    #[test]
+    fn replay_of_the_1996_capture_twelve_members_and_buffer_time() {
+        let dom = "KIRKLAND";
+        let mut d = device(&format!(
+            "<peer><name>{dom}</name></peer><tase2-version>1996.8</tase2-version>"
+        ));
+        d.opened(1, vec![1, 2, 3, 4]);
+        let name = |i| ObjectName::DomainSpecific {
+            domain: dom,
+            item: i,
+        };
+        let mem = |i| VariableSpecification::Name(name(i));
+        let define = ConfirmedRequest::DefineNamedVariableList {
+            name: name("EMS_STATUS_ICCP_IN"),
+            variables: vec![
+                mem("Transfer_Set_Name"),
+                mem("DSConditions_Detected"),
+                mem("MW"),
+            ],
+        };
+        assert_eq!(
+            wire(&mut d, define),
+            mms::encode(&Answer::DataSetCreated, 7)
+        );
+        let ts = d.next_ts(1).unwrap();
+        let int = Value::Integer;
+        let captured = Value::Structure(vec![
+            Value::Structure(vec![
+                Value::Unsigned(1),
+                Value::VisibleString(dom.into()),
+                Value::VisibleString("EMS_STATUS_ICCP_IN".into()),
+            ]),
+            int(0),
+            int(0),
+            int(0),
+            int(1),
+            int(0),
+            transfer::conditions(transfer::CHANGE),
+            Value::Boolean(false),
+            Value::Boolean(false),
+            Value::Boolean(true),
+            Value::Boolean(true),
+            int(0),
+        ]);
+        assert_eq!(
+            wire_write(&mut d, name(&ts), &captured),
+            mms::encode(&Answer::Write(vec![Ok(())]), 7)
+        );
+        assert_eq!(
+            d.read_one(1, &name(&ts)),
+            Ok(captured),
+            "read back in the 12-member layout"
+        );
+        d.store.ack("an", Datum::Analog(42.0));
+        assert!(
+            d.refresh(10_500).is_empty(),
+            "Buffer_Time of 1 s holds the first change"
+        );
+        let due = d.refresh(11_500);
+        assert_eq!(due.len(), 1, "armed without a Status member");
+        let Ok(Pdu::Unconfirmed(Unconfirmed::InformationReport {
+            access: VariableAccess::ListOfVariable(items),
+            ..
+        })) = Pdu::parse(&due[0].1, &Limits::DEFAULT)
+        else {
+            panic!("an RBE report of one changed member is a list of variables")
+        };
+        let names: Vec<_> = items.iter().filter_map(|i| i.name().copied()).collect();
+        assert_eq!(
+            names,
+            [
+                name("Transfer_Set_Name"),
+                name("DSConditions_Detected"),
+                name("MW")
+            ],
+            "frame 86: the set's own members domain-scoped, then the changed point"
+        );
     }
 
     #[test]
@@ -1535,7 +1867,7 @@ mod tests {
             TypeSpec::Structure { .. }
         ));
         let t = d.next_ts(1).unwrap();
-        assert_eq!(ty(&d, name(&t)), transfer::type_spec());
+        assert_eq!(ty(&d, name(&t)), transfer::type_spec(false));
         assert!(matches!(ty(&d, name("MW")), TypeSpec::FloatingPoint { .. }));
         assert_eq!(d.attributes(1, &name("ghost")), Answer::NOT_FOUND);
         assert_eq!(
@@ -1595,15 +1927,15 @@ mod tests {
             data_set: "S1".into(),
             ..Cfg::default()
         };
-        d.write_one(1, &name("DSTrans_1"), &cfg.to_value(), 0)
+        d.write_one(1, &name("DSTrans_1"), &cfg.to_value(false), 0)
             .unwrap();
-        assert_eq!(d.read_one(1, &name("DSTrans_1")), Ok(cfg.to_value()));
+        assert_eq!(d.read_one(1, &name("DSTrans_1")), Ok(cfg.to_value(false)));
         let other = Cfg {
             domain: "OTHER".into(),
             ..cfg
         };
         assert_eq!(
-            d.write_one(1, &name("DSTrans_1"), &other.to_value(), 0),
+            d.write_one(1, &name("DSTrans_1"), &other.to_value(false), 0),
             Err(NON_EXISTENT)
         );
         assert_eq!(

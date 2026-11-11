@@ -3,9 +3,11 @@
 //!
 //! Components, in order: Data_Set_Name {scope, domain, name}, Start_Time, Interval, TLE, Buffer_Time, Integrity_Check,
 //! DSConditions_Requested (5 bits), Block_Data, Critical, RBE, All_Changes_Reported, Status, Event_Code_Requested.
-//! Supported: Interval and Integrity_Check timers, object change, RBE, Status (arm/disarm). Start_Time, TLE,
-//! All_Changes_Reported and Event_Code_Requested are stored and read back but have no effect; Buffer_Time, Critical and
-//! Block_Data other than zero/false are refused (object-value-invalid), because honouring them silently would be a lie.
+//! The 1996 edition has no All_Changes_Reported (12 members, as in the Wireshark mms.pcap of 2005, where the fourth flag is always
+//! true: it is Status): both layouts are accepted, and read back in the one the configured TASE2_Version names. The scope is unsigned in the field (both real captures); an integer scope is accepted too.
+//! Supported: Interval and Integrity_Check timers, object change (held for Buffer_Time seconds after the first change), RBE,
+//! Status (arm/disarm). Start_Time, TLE, All_Changes_Reported and Event_Code_Requested are stored and read back but have no
+//! effect; Critical and Block_Data other than false are refused (object-value-invalid), because honouring them silently would be a lie.
 
 use crate::model::Value as Datum;
 use iec61850_rs::proto::data::Value;
@@ -24,7 +26,7 @@ pub const SUPPORTED: u8 = INTERVAL | INTEGRITY | CHANGE;
 /// `Transfer_Set_Name` / `Data_Set_Name`: {scope (1 = domain), domain, name}.
 pub fn name_value(domain: &str, name: &str) -> Value {
     Value::Structure(vec![
-        Value::Integer(1),
+        Value::Unsigned(1),
         Value::VisibleString(domain.into()),
         Value::VisibleString(name.into()),
     ])
@@ -32,7 +34,7 @@ pub fn name_value(domain: &str, name: &str) -> Value {
 
 pub fn name_type() -> TypeSpec {
     structure(vec![
-        TypeSpec::Integer(8),
+        TypeSpec::Unsigned(8),
         TypeSpec::VisibleString(-32),
         TypeSpec::VisibleString(-32),
     ])
@@ -55,7 +57,7 @@ pub fn structure(parts: Vec<TypeSpec>) -> TypeSpec {
 /// The name a `{scope, domain, name}` structure carries, if it is one.
 fn name_of(v: &Value) -> Option<(String, String)> {
     match v.members()? {
-        [Value::Integer(_), Value::VisibleString(d), Value::VisibleString(n)] => {
+        [Value::Integer(_) | Value::Unsigned(_), Value::VisibleString(d), Value::VisibleString(n)] => {
             Some((d.clone(), n.clone()))
         }
         _ => None,
@@ -95,9 +97,10 @@ fn flag(v: &Value) -> Option<bool> {
     }
 }
 
-pub fn type_spec() -> TypeSpec {
+/// The type of a DSTransfer_Set: 13 members, or 12 (no All_Changes_Reported) when `v1996`.
+pub fn type_spec(v1996: bool) -> TypeSpec {
     let int = || TypeSpec::Integer(32);
-    structure(vec![
+    let mut parts = vec![
         name_type(),
         int(),
         int(),
@@ -105,13 +108,11 @@ pub fn type_spec() -> TypeSpec {
         int(),
         int(),
         TypeSpec::BitString(5),
-        TypeSpec::Boolean,
-        TypeSpec::Boolean,
-        TypeSpec::Boolean,
-        TypeSpec::Boolean,
-        TypeSpec::Boolean,
-        TypeSpec::Integer(16),
-    ])
+    ];
+    // Block_Data, Critical, RBE, [All_Changes_Reported,] Status
+    parts.extend(std::iter::repeat_with(|| TypeSpec::Boolean).take(if v1996 { 4 } else { 5 }));
+    parts.push(TypeSpec::Integer(16));
+    structure(parts)
 }
 
 /// The numbers of components `idx`, none negative (seconds); `None` if any is not an integer.
@@ -121,23 +122,32 @@ fn counts(m: &[Value], idx: [usize; 5]) -> Option<Vec<i64>> {
         .collect()
 }
 
-fn flags(m: &[Value], idx: [usize; 5]) -> Option<Vec<bool>> {
+fn flags(m: &[Value], idx: [usize; 4]) -> Option<Vec<bool>> {
     idx.iter().map(|i| flag(m.get(*i)?)).collect()
 }
 
 impl Cfg {
-    /// Buffering, acknowledged (critical) and blocked reports, and conditions we never detect, are not built.
+    /// Acknowledged (critical) and blocked reports, and conditions we never detect, are not built.
     fn supported(&self) -> bool {
-        self.buffer == 0 && !self.block && !self.critical && self.conditions & !SUPPORTED == 0
+        !self.block && !self.critical && self.conditions & !SUPPORTED == 0
     }
 
     /// A DataAccessError code on refusal: type-inconsistent for the wrong shape, object-value-invalid for what is not supported.
     pub fn from_value(v: &Value) -> Result<Cfg, i64> {
-        let m = v.members().filter(|m| m.len() == 13).ok_or(INCONSISTENT)?;
+        let m = v
+            .members()
+            .filter(|m| matches!(m.len(), 12 | 13))
+            .ok_or(INCONSISTENT)?;
         let (domain, data_set) = name_of(&m[0]).ok_or(INCONSISTENT)?;
-        // start, interval, tle, buffer, integrity (seconds) and block, critical, rbe, all-changes, status
+        // start, interval, tle, buffer, integrity (seconds); block, critical, rbe and status (the one before Event_Code); 1996 has no
+        // All_Changes_Reported
         let n = counts(m, [1, 2, 3, 4, 5]).ok_or(INCONSISTENT)?;
-        let b = flags(m, [7, 8, 9, 10, 11]).ok_or(INCONSISTENT)?;
+        let b = flags(m, [7, 8, 9, m.len() - 2]).ok_or(INCONSISTENT)?;
+        let all_changes = if m.len() == 13 {
+            flag(&m[10])
+        } else {
+            Some(false)
+        };
         let Value::BitString { bytes, .. } = &m[6] else {
             return Err(INCONSISTENT);
         };
@@ -153,9 +163,9 @@ impl Cfg {
             block: b[0],
             critical: b[1],
             rbe: b[2],
-            all_changes: b[3],
-            status: b[4],
-            event_code: int(&m[12]).ok_or(INCONSISTENT)?,
+            all_changes: all_changes.ok_or(INCONSISTENT)?,
+            status: b[3],
+            event_code: int(&m[m.len() - 1]).ok_or(INCONSISTENT)?,
         };
         if cfg.supported() {
             Ok(cfg)
@@ -164,9 +174,10 @@ impl Cfg {
         }
     }
 
-    pub fn to_value(&self) -> Value {
+    /// As written: 13 members, or 12 (no All_Changes_Reported) when `v1996`.
+    pub fn to_value(&self, v1996: bool) -> Value {
         let int = Value::Integer;
-        Value::Structure(vec![
+        let mut m = vec![
             name_value(&self.domain, &self.data_set),
             int(self.start),
             int(self.interval),
@@ -177,10 +188,13 @@ impl Cfg {
             Value::Boolean(self.block),
             Value::Boolean(self.critical),
             Value::Boolean(self.rbe),
-            Value::Boolean(self.all_changes),
-            Value::Boolean(self.status),
-            int(self.event_code),
-        ])
+        ];
+        if !v1996 {
+            m.push(Value::Boolean(self.all_changes));
+        }
+        m.push(Value::Boolean(self.status));
+        m.push(int(self.event_code));
+        Value::Structure(m)
     }
 }
 
@@ -207,6 +221,8 @@ pub struct Ts {
     seen: Vec<Option<Datum>>,
     next_interval: u64,
     next_integrity: u64,
+    /// When the first change not yet reported was seen (Buffer_Time holds the report back from here).
+    pending: Option<u64>,
 }
 
 impl Ts {
@@ -227,6 +243,7 @@ impl Ts {
             self.next_integrity = now_ms + secs(cfg.integrity);
         }
         self.armed = cfg.status;
+        self.pending = None;
         self.cfg = Some(cfg);
     }
 
@@ -249,17 +266,23 @@ impl Ts {
     /// Is a report due at `now_ms` given the members' `current` values? Taking it moves the baseline and the timers.
     pub fn poll(&mut self, now_ms: u64, current: &[Option<Datum>]) -> Option<Due> {
         let cfg = self.cfg.as_ref().filter(|_| self.armed)?;
-        let (watch_change, rbe) = (cfg.conditions & CHANGE != 0, cfg.rbe);
+        let (watch_change, rbe, hold) = (cfg.conditions & CHANGE != 0, cfg.rbe, secs(cfg.buffer));
         let mut hit = self.timers(now_ms);
         let changed: Vec<usize> = (0..current.len())
             .filter(|i| self.seen.get(*i) != Some(&current[*i]))
             .collect();
         if watch_change && !changed.is_empty() {
-            hit |= CHANGE;
+            let since = *self.pending.get_or_insert(now_ms);
+            if now_ms >= since + hold {
+                hit |= CHANGE;
+            }
+        } else {
+            self.pending = None;
         }
         if hit == 0 {
             return None;
         }
+        self.pending = None;
         self.seen = current.to_vec();
         let only_changes = rbe && hit == CHANGE;
         Some(Due {
@@ -300,19 +323,19 @@ mod tests {
     #[test]
     fn a_structure_round_trips_and_shape_errors_are_inconsistent() {
         let c = cfg();
-        assert_eq!(Cfg::from_value(&c.to_value()), Ok(c.clone()));
+        assert_eq!(Cfg::from_value(&c.to_value(false)), Ok(c.clone()));
         assert_eq!(Cfg::from_value(&Value::Integer(1)), Err(INCONSISTENT));
-        let mut short = c.to_value();
+        let mut short = c.to_value(false);
         if let Value::Structure(m) = &mut short {
             m.pop();
         }
         assert_eq!(Cfg::from_value(&short), Err(INCONSISTENT));
-        let mut bad = c.to_value();
+        let mut bad = c.to_value(false);
         if let Value::Structure(m) = &mut bad {
             m[2] = Value::Boolean(true);
         }
         assert_eq!(Cfg::from_value(&bad), Err(INCONSISTENT));
-        let mut neg = c.to_value();
+        let mut neg = c.to_value(false);
         if let Value::Structure(m) = &mut neg {
             m[2] = Value::Integer(-1);
         }
@@ -321,24 +344,130 @@ mod tests {
             Err(INCONSISTENT),
             "no negative seconds"
         );
-        assert_eq!(type_spec(), type_spec());
+        assert_ne!(type_spec(false), type_spec(true));
     }
 
     #[test]
     fn what_is_not_supported_is_refused_not_ignored() {
         for (i, v) in [
-            (4, Value::Integer(5)),    // Buffer_Time
             (7, Value::Boolean(true)), // Block_Data
             (8, Value::Boolean(true)), // Critical
             (6, conditions(0x10)),     // operator request
             (6, conditions(0x08)),     // external event
         ] {
-            let mut x = cfg().to_value();
+            let mut x = cfg().to_value(false);
             if let Value::Structure(m) = &mut x {
                 m[i] = v;
             }
             assert_eq!(Cfg::from_value(&x), Err(INVALID), "component {i}");
         }
+    }
+
+    #[test]
+    fn the_scope_is_unsigned_out_and_integer_or_unsigned_in() {
+        let c = cfg();
+        let v = c.to_value(false);
+        assert_eq!(
+            v.members().unwrap()[0].members().unwrap()[0],
+            Value::Unsigned(1)
+        );
+        let mut x = v;
+        if let Value::Structure(m) = &mut x {
+            m[0] = Value::Structure(vec![
+                Value::Integer(1),
+                Value::VisibleString("EMS1".into()),
+                Value::VisibleString("DS1".into()),
+            ]);
+        }
+        assert_eq!(Cfg::from_value(&x), Ok(c));
+        assert_eq!(
+            name_type(),
+            structure(vec![
+                TypeSpec::Unsigned(8),
+                TypeSpec::VisibleString(-32),
+                TypeSpec::VisibleString(-32)
+            ])
+        );
+    }
+
+    #[test]
+    fn the_1996_layout_has_twelve_members_without_all_changes_reported() {
+        let mut c = cfg();
+        c.all_changes = true;
+        let v = c.to_value(true);
+        let back = Cfg::from_value(&v).unwrap();
+        assert!(
+            !back.all_changes && back.status,
+            "the flag before Event_Code is Status"
+        );
+        c.all_changes = false;
+        let v = c.to_value(true);
+        assert_eq!(v.members().unwrap().len(), 12);
+        assert_eq!(c.to_value(false).members().unwrap().len(), 13);
+        assert_eq!(Cfg::from_value(&v), Ok(c.clone()));
+        let mut off = c.clone();
+        off.status = false;
+        assert_eq!(
+            Cfg::from_value(&off.to_value(true)),
+            Ok(off),
+            "a 1996 client can stop a set"
+        );
+        let TypeSpec::Structure { components, .. } = type_spec(true) else {
+            panic!()
+        };
+        assert_eq!(components.len(), 12);
+        let mut r = c.to_value(false);
+        if let Value::Structure(m) = &mut r {
+            m.truncate(11); // 11 members: neither layout
+        }
+        assert_eq!(Cfg::from_value(&r), Err(INCONSISTENT));
+    }
+
+    #[test]
+    fn buffer_time_holds_a_change_report_back_and_gathers_changes() {
+        let mut c = cfg();
+        c.interval = 0;
+        c.buffer = 2;
+        c.rbe = true;
+        let mut t = Ts::default();
+        t.set(c, 0, vec![a(1.0), a(2.0)]);
+        assert_eq!(
+            t.poll(1_000, &[a(5.0), a(2.0)]),
+            None,
+            "first change starts the buffer"
+        );
+        assert_eq!(t.poll(2_999, &[a(5.0), a(7.0)]), None, "still buffering");
+        assert_eq!(
+            t.poll(3_000, &[a(5.0), a(7.0)]),
+            Some(Due {
+                conditions: CHANGE,
+                members: vec![0, 1]
+            }),
+            "both changes in one report, two seconds after the first"
+        );
+        assert_eq!(t.poll(9_000, &[a(5.0), a(7.0)]), None);
+        // a change that reverts inside the buffer is never reported, and the next change starts a fresh buffer
+        assert_eq!(t.poll(10_000, &[a(6.0), a(7.0)]), None);
+        assert_eq!(t.poll(11_000, &[a(5.0), a(7.0)]), None);
+        assert_eq!(t.poll(20_000, &[a(6.0), a(7.0)]), None);
+        assert!(t.poll(22_000, &[a(6.0), a(7.0)]).is_some());
+    }
+
+    #[test]
+    fn rewriting_a_set_restarts_the_buffer() {
+        let mut c = cfg();
+        c.interval = 0;
+        c.buffer = 2;
+        let mut t = Ts::default();
+        t.set(c.clone(), 0, vec![a(1.0)]);
+        assert_eq!(t.poll(1_000, &[a(2.0)]), None, "buffer starts at 1 s");
+        t.set(c, 2_000, vec![a(1.0)]);
+        assert_eq!(
+            t.poll(3_000, &[a(2.0)]),
+            None,
+            "restarted at 3 s, not due at 3 s"
+        );
+        assert!(t.poll(5_000, &[a(2.0)]).is_some());
     }
 
     #[test]

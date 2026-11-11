@@ -298,8 +298,13 @@ bits and `TASE2_Version` {2000;8} on every read.
 | our Identify, `Bilateral_Table_ID`, `TASE2_Version`, `Supported_Features`, data set members against telcon's server | telcon | the test daemon does not serve them (its own `blt-id` fails) | peer limit, ww-c43 |
 
 Skipped with a reason: igs writing a `Data_State` (its CLI sends a boolean), telcon reading `TASE2_Version` / `Supported_Features` (no
-command). Smoke findings not fixed here and not exercised by a passing check: the Transfer_Set_Name scope as `unsigned` (ww-otj.64), a
-12-member DSTransferSet, Buffer_Time, and data sets whose first members are `Transfer_Set_Name` / `DSConditions_Detected` (ww-otj.65).
+command). The Transfer_Set_Name
+scope is `unsigned` on our side now (ww-otj.64; igstase2-server still refuses an unsigned scope in a *write*, DataAccessError 7, so our thin
+client writes an integer; our server takes both). The 12- and 13-member DSTransferSet, Buffer_Time and data sets that list
+`Transfer_Set_Name` / `DSConditions_Detected` with `variableListName` reports (ww-otj.65) are proved by two unit tests in
+`src/fd/proto/iccp/mod.rs` that replay the real captures' client requests (mms.pcap frame 80, chaugan frames 81, 100 and 125, with the
+captures' domain names) and assert the structure of the server's answers against the captures (frames 101 and 515: unsigned scope,
+`variableListName`, one result per member). The captures themselves are not committed, so the requests are transcribed.
 Observed, not marked: after a Conclude response our stack closes the TCP connection, and igs sends an ACSE release request after the
 Conclude that meets an RST (tshark: "Connection reset", an undecoded zero-byte MMS PDU and OID; allowed in `proto.env`, ww-otj.73).
 `make conformance PROTO=iec61850` fails its GOOSE-subscriber step on the Lima daemon with the old binary and image too (ww-otj.72); the MMS steps pass.
@@ -327,7 +332,7 @@ itself is still not checked against the text of 503 8.2.9.
   document (Ipesoft D2000); the three stacks and the captures now corroborate the version, the 12-bit features, and most of block 1,
   but not the QTimeTag order. Everything else is unverified ([field-device-iccp.md](field-device-iccp.md)).
 - Both new peers are test daemons, not products: telcon's does not serve the special variables, igs's does not serve GetNameList.
-- Conformance blocks 1 and 2 are reported; blocks 3 to 9 are not built. Operator request, buffering and critical reports are
+- Conformance blocks 1 and 2 are reported; blocks 3 to 9 are not built. Operator request and critical reports are
   refused. No TLS (62351-3) or 62351-4.
 - The peer is identified by remote IP; the ACSE AP-title is not checked, because the pinned crate does not expose it. Our client
   does send one (igs's table requires it).
@@ -556,8 +561,8 @@ code and not libiec61850, then ran the ones that built. Dates, licences and acti
 
 **ICCP smoke findings** (filed and tracked in the ICCP section, not repeated here): F1 and F7 nesting level and service-error access code,
 ww-otj.61 (fixed); F2 12-bit `Supported_Features`, ww-otj.62 (fixed); F3 `TASE2_Version` 2000.8, ww-otj.63 (fixed); F4 Transfer_Set_Name
-scope as `unsigned`, ww-otj.64 (open); F5 and F6 13-member `DSTransferSet`, Buffer_Time, data sets with `Transfer_Set_Name` members and
-`variableListName` reports, ww-otj.65 (open); F8 calling AP-title, ww-otj.66 (fixed). Related and open: ww-otj.69 (QTimeTag order), .70, .71, .73.
+scope as `unsigned`, ww-otj.64 (fixed); F5 and F6 12- and 13-member `DSTransferSet`, Buffer_Time, data sets with `Transfer_Set_Name` members and
+`variableListName` reports, ww-otj.65 (fixed); F8 calling AP-title, ww-otj.66 (fixed). Related and open: ww-otj.69 (QTimeTag order), .70, .71, .73.
 
 **Gaps this closed.** DNP3 had one master family (opendnp3); IEC 61850 had one client stack (libiec61850) under a server built on one young
 library; both now have independent clients that agree. ICCP's recalled layouts now meet two independent stacks and two real captures (the
