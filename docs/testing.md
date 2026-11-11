@@ -20,8 +20,8 @@ code with our own reading of a standard shows consistency, not correctness; the 
 | Field-device core | Unit and robustness tests; fuzz targets for config and datagram; the shared quality gates | Stock bennu (config semantics, from the spec) | Covered by tests; no dedicated differential for the core |
 | DNP3 outstation | Byte-for-byte replay of recorded stock transcripts; opendnp3 master; tshark expert info; Zeek ICSNPP; fuzz | Stock bennu outstation, opendnp3, tshark, Zeek ICSNPP | Strongest of the protocols |
 | IEC 61850 MMS + GOOSE | libiec61850 client examples and GOOSE subscriber; tshark `mms`/`goose`; in-process client; fuzz | libiec61850 (GPL, test peers only), tshark. No stock oracle: bennu has no 61850 server | Covered against one independent stack; the server library is young |
-| ICCP / TASE.2 server | `mms_utility` browse and read; our thin ICCP client; tshark `mms`; fuzz | **None for TASE.2.** libiec61850 and tshark cover the MMS layer only | Weakest: object layouts are from recall |
-| ICCP parsers (Zeek, Wireshark) | btest baselines and field goldens over `tests/pcaps/iccp` | tshark's own MMS dissector underneath; no independent ICCP capture | Tested on our own and synthetic captures |
+| ICCP / TASE.2 server | `mms_utility` browse and read; our thin ICCP client; tshark `mms`; fuzz; igs-iec-tase2 and telcon-tase2 as clients and as servers | Two independent, young TASE.2 stacks (igs, telcon) plus two real captures (checked by the parsers); libiec61850 and tshark for the MMS layer | Better: three readings of the standard agree on most of block 1; known disagreements are marked (below). Still no oracle |
+| ICCP parsers (Zeek, Wireshark) | btest baselines and field goldens over `tests/pcaps/iccp`; the two real captures when fetched | tshark's own MMS dissector underneath; the Wireshark wiki `mms.pcap` and the chaugan capture (real ICCP) | Tested on synthetic captures and, locally, on two real ones |
 | Whole system | Burger range boards, live range runs | Stock bennu, phēnix, OVS | Covers stock bennu fixes and ferrofire runs; see below |
 
 Everything below is in the repo and runs from `make`. Make targets that need docker run in the `ff-rust:22.04` container or
@@ -226,55 +226,84 @@ Group runs them) and bring the server.
 ## ICCP / TASE.2 server
 
 **Checked.** `tests/iccp_net.rs` (socket tests with our thin client, `tests/common/iccp_client.rs`, also `examples/iccp-client`),
-a hostile-bytes test, fuzz target `fd_iccp`. `conformance/iccp/`: libiec61850's `mms_utility` (domains, identity, directory, three
-reads of named variables) and the thin client (browse, read, write, data set, transfer set, three reports) run against our
-server; tshark must find 0 malformed frames and no expert warnings, Initiate, GetNameList, Read, Write,
-DefineNamedVariableList and InformationReport present, ICCP names in the MMS fields.
+a hostile-bytes test, fuzz target `fd_iccp`. `make conformance PROTO=iccp` (`conformance/iccp/`) runs four legs against our server and the
+peers' servers in one capture, then judges it with tshark (0 malformed, expert info clean apart from the allow-list in `proto.env`, MMS
+decodes), `tools/wireshark/iccp.lua` and the Zeek analyzer:
 
-**Oracle.** None for the TASE.2 layer. What is independent: `mms_utility` proves the OSI and MMS layers against a third party;
-tshark's MMS dissector decodes every frame. What is not: the object layouts (Data_Real, State and Discrete with Q and QTimeTag,
-`DSTransfer_Set`, report item order, `Supported_Features`), which the server, the thin client, the Zeek analyzer and the
-Wireshark script all take from the same recall of the standard.
+1. libiec61850's `mms_utility` (domains, identity, directory, three reads) and our thin client (browse, read, write, data set,
+   transfer set, three reports) against our server. As before.
+2. **igstase2-client** ([aklira/igs-iec-tase2](https://github.com/aklira/igs-iec-tase2) with igs-iso9506-mms, Apache-2.0) against our
+   server: associates with a Bilateral Table (it checks `Bilateral_Table_ID`, `TASE2_Version` 2000.08 and the length of
+   `Supported_Features` itself), GetNameList, read of data values and a type, write of a plain real, create / delete a data set, and a
+   client whose table id differs. Concludes.
+3. **tase2-client** ([janfietz/telcon-tase2](https://github.com/janfietz/telcon-tase2), `tase2-test-tools`, MIT OR Apache-2.0) daemon against
+   our server: `blt-id`, name lists, reads of plain real, state and Q real, write, define / read / delete a data set.
+4. Our thin client, one named check per step (`ICCP_STEPS=1`), against **igstase2-server** (port 10102, `igs-server.toml`; calls with an
+   AP-title, `ICCP_CALLING_AP_TITLE`) and telcon's **tase2-server** (port 10103): association, Identify, browse, `Bilateral_Table_ID` /
+   `TASE2_Version` / `Supported_Features`, reads, write, data set define / members / read / delete, `Next_DSTransfer_Set`, a transfer
+   set armed with interval and with RBE and its reports, Conclude.
 
-**Run.** `cargo test`; `make conformance PROTO=iccp` (needs `make testpeers` and a built ferrofire plus the example, `make test`);
-`cargo +nightly fuzz run fd_iccp` in `fuzz/`.
+Every expectation is `ok` (must pass), `xfail` (a known disagreement or peer limit: the run fails if it starts to pass, so the mark
+cannot go stale) or `skip` (printed with the reason). Wire checks on top: the negotiated nesting level never exceeds the proposed one
+(igs proposes 2) and a proposal of 2 is answered 2; object-non-existent reaches igs as ServiceError access 2; `Supported_Features` is 12
+bits and `TASE2_Version` {2000;8} on every read.
+
+**What still fails, and why** (all marked `xfail`):
+
+| Check | Peer | Why | Bead |
+|---|---|---|---|
+| igs `start` of a transfer set (interval, RBE) against our server | igs | igs neither defines the data set nor reads `Next_DSTransfer_Set`, and each CLI call is its own association; ours has no preconfigured data sets or transfer-set names | ww-otj.71 |
+| telcon `read --kind real_q_time_tag` / `state_q_time_tag` | telcon | telcon decodes the QTimeTag structures as {value, flags, time}; ours and igs's are {time, value, flags}; no real capture holds one | ww-otj.69 |
+| telcon `transfer-set` against our server; our `arm` against telcon's server | telcon | telcon wants a 2-member `Transfer_Set_Name`; both real captures and ours have 3 (scope, domain, name) | ww-otj.70 |
+| our GetNameList / variables against igs's server | igs | the server does not serve GetNameList (its docs) | peer limit |
+| our Identify, `Bilateral_Table_ID`, `TASE2_Version`, `Supported_Features`, data set members against telcon's server | telcon | the test daemon does not serve them (its own `blt-id` fails) | peer limit |
+
+Skipped with a reason: igs writing a `Data_State` (its CLI sends a boolean), telcon reading `TASE2_Version` / `Supported_Features` (no
+command). Smoke findings not fixed here and not exercised by a passing check: the Transfer_Set_Name scope as `unsigned` (ww-otj.64), a
+12-member DSTransferSet, Buffer_Time, and data sets whose first members are `Transfer_Set_Name` / `DSConditions_Detected` (ww-otj.65).
+Observed, not marked: after a Conclude response our stack closes the TCP connection, and igs sends an ACSE release request after the
+Conclude that meets an RST (tshark: "Connection reset", an undecoded zero-byte MMS PDU and OID; allowed in `proto.env`).
+`Bilateral_Table_ID` is domain-scoped on the wire in both real captures and in igs; we serve it in the VMD scope as well (a superset).
+
+**The real captures.** `tests/pcaps/iccp/fetch-real.sh` downloads the Wireshark wiki `mms.pcap` (ICCP between two utilities, 2005,
+TASE2_Version {1996;8}) and chaugan/wireshark-iccp-dissector's `iccp_with_switchover_anon.pcap` (9 associations, {2000;8}) into
+`tests/pcaps/iccp/real/` (git-ignored, sha256-pinned; the captures are other people's data and are never committed). If that directory
+exists, the run asserts on both: tshark 0 malformed, `iccp.lua` without Lua errors and every `Supported_Features` 12 bits, the
+TASE2_Version above, and the Zeek analyzer with an empty weird.log and reporter.log. This is how the 9-bit string and the log limits
+(Zeek `log_container_field_truncated`) were found.
+
+**Oracle.** None for the TASE.2 layer, but now three readings: ours, igs-iec-tase2 (clean-room from 60870-6-503/802 with clause
+references in its PROVENANCE.md) and telcon-tase2, plus two real captures for the wire shapes. **These peers are young and possibly
+AI-assisted, so agreement is evidence, not proof;** where they disagree with each other (ww-otj.69) the standard decides, and it is not
+in the repo. Bit meanings of `Supported_Features` (bit n = block n+1; ours sets blocks 1 and 2) are from igs's model and four real
+`Supported_Features` values; the real ones set blocks 1, 2, 4, 5, 7 and others, never contradicting that numbering, but the numbering
+itself is still not checked against the text of 503 8.2.9.
+
+**Run.** `cargo test`; `make testpeers` (builds both peers from pinned commits: about 15 minutes), `tests/pcaps/iccp/fetch-real.sh`, then
+`make test` (builds ferrofire and the example) and `make conformance PROTO=iccp`; `cargo +nightly fuzz run fd_iccp` in `fuzz/`.
 
 **Gaps.**
-- IEC 60870-6-503 and -802 are paywalled and not in the repo. The layouts are from recall of public implementations and
-  documentation. Only the validity and current-source codes and their place in the quality octet were corroborated, by one
-  vendor document (Ipesoft D2000). Everything else is unverified ([field-device-iccp.md](field-device-iccp.md)).
-- Our client, server and parsers share the same assumptions, so they agree with each other whether or not the assumptions are
-  right. A pass means "consistent with our reading".
+- IEC 60870-6-503 and -802 are paywalled and not in the repo. Only the validity and current-source codes were corroborated by a vendor
+  document (Ipesoft D2000); the three stacks and the captures now corroborate the version, the 12-bit features, and most of block 1,
+  but not the QTimeTag order. Everything else is unverified ([field-device-iccp.md](field-device-iccp.md)).
+- Both new peers are test daemons, not products: telcon's does not serve the special variables, igs's does not serve GetNameList.
 - Conformance blocks 1 and 2 are reported; blocks 3 to 9 are not built. Operator request, buffering and critical reports are
   refused. No TLS (62351-3) or 62351-4.
-- The peer is identified by remote IP; the ACSE AP-title is not checked, because the pinned crate does not expose it.
+- The peer is identified by remote IP; the ACSE AP-title is not checked, because the pinned crate does not expose it. Our client
+  does send one (igs's table requires it).
+- `iec61850-rs` 0.4.0 is patched in `third_party/` (Initiate nesting; see its PATCHES.md, ww-otj.68).
 
 **Ideas.**
 1. Buy the standard (IEC 60870-6-503 for the services and protocol, -802 for the object models) and check every layout line by
-   line against `model.rs` and `transfer.rs`. This closes most of the gap on its own.
-2. Public captures. Searched 2026-11-10: no ICCP or TASE.2 capture was found. Wireshark's wiki has an MMS capture,
-   [`mms.pcap.gz`](https://wiki.wireshark.org/SampleCaptures) (plain MMS; no licence stated on the page; not checked whether it
-   holds TASE.2 names). The community collections [automayt/ICS-pcap](https://github.com/automayt/ICS-pcap) (no licence in the
-   repo, last push 2020) and [tjcruz-dei/ICS_PCAPS](https://github.com/tjcruz-dei/ICS_PCAPS) (no licence) were not found to
-   list ICCP; the file lists were not read in full. A 2013 Wireshark Q&A thread
-   ([ask.wireshark.org/questions/19908](https://ask.wireshark.org/questions/19908/dissector-for-iccptase2)) reports TASE.2 showing
-   as malformed MMS, which means someone had a capture; asking there or on the Wireshark and Zeek lists for one is cheap.
-3. Open implementations, as a second reading of the standard (not an oracle, but independent of our assumptions):
-   [FreeTase2](https://github.com/aklira/FreeTase2) (Python, built on libiec61850, GPL-3.0, last push April 2020, has a `tase2`
-   package and tests; its README lists blocks 1, 2 and 4), and
-   [pyiec61850-ng](https://github.com/f0rw4rd/pyiec61850-ng) (GPL-3.0; its README calls its TASE.2 support "highly
-   experimental"). Both come from the same libiec61850 base and from someone else's recall. Run FreeTase2's client against our
-   server and compare its object layouts with ours; where they differ, the standard decides. GPL: test peer only, as with
-   libiec61850.
-4. Vendor trial stacks: Triangle MicroWorks' IEC 60870-6 (TASE.2/ICCP) source library
-   ([product pages](https://files.trianglemicroworks.com/products/source-code-libraries/iec-60870-6); states blocks 1, 2 and 5,
-   data sets, transfer sets, SBO control); SISCO MMS-EASE and AX-S4 ICCP; other commercial ICCP gateways (for example
-   Ipesoft D2000's ICCP driver, Elipse's ICCP driver). Evaluation licences and terms were not checked; ask each vendor. A trial
-   client talking to our server is the closest thing to an independent peer.
-5. OpenMUC (Java; includes an open MMS client and server library, licence to be checked per module) as a generic MMS peer
-   with a TASE.2 layer written on top; weaker than a real ICCP stack.
-6. Interop events and utility partners: an EMS vendor or a utility with an ICCP link can capture one Initiate and one
-   InformationReport from a real link; diff against `conformance/iccp/`. That diff is the first thing to do with any real peer.
+   line against `model.rs` and `transfer.rs`. This settles ww-otj.69 and the feature bits.
+2. More real captures: the other public collections ([automayt/ICS-pcap](https://github.com/automayt/ICS-pcap),
+   [tjcruz-dei/ICS_PCAPS](https://github.com/tjcruz-dei/ICS_PCAPS)) were not read in full; none has been checked for QTimeTag objects.
+3. More open implementations as further readings: [FreeTase2](https://github.com/aklira/FreeTase2) (Python on libiec61850, GPL-3.0, blocks
+   1, 2 and 4) and [pyiec61850-ng](https://github.com/f0rw4rd/pyiec61850-ng) (GPL-3.0, "highly experimental"), rusty-iccp, cB-Sigma's iccpsim
+   (all untried). GPL: test peer only, as with libiec61850.
+4. Vendor trial stacks: Triangle MicroWorks' IEC 60870-6 source library (blocks 1, 2 and 5), SISCO MMS-EASE and AX-S4 ICCP, Ipesoft D2000's
+   ICCP driver, Elipse's. Evaluation terms were not checked. A trial client talking to our server is the closest thing to a product peer.
+5. Interop events and utility partners: an EMS vendor or a utility can capture one Initiate and one InformationReport from a real link.
 
 ## ICCP parsers (Zeek and Wireshark)
 
@@ -285,8 +314,9 @@ tshark's MMS) are run over the same corpus, `tests/pcaps/iccp`: libiec61850 serv
 a message that fails to parse is dropped on its own and the next one on the connection still parses. Wireshark: field goldens in
 `tests/pcaps/iccp/expected`, 0 malformed.
 
-**Oracle.** tshark's built-in MMS decoder for the layers below TASE.2. For TASE.2 itself, none: the `tase2_*.pcap` files were
-written by `make_pcaps.py` from the same layouts the parsers implement. The libiec61850 captures are real MMS but contain no ICCP.
+**Oracle.** tshark's built-in MMS decoder for the layers below TASE.2. For TASE.2 itself the synthetic `tase2_*.pcap` files were written
+by `make_pcaps.py` from the same layouts the parsers implement; the libiec61850 captures are real MMS but contain no ICCP. The two real ICCP
+captures (`fetch-real.sh`, see above) are the independent check: `make conformance PROTO=iccp` runs both parsers over them.
 
 **Run.** `make zeek-iccp` (builds in the `ff-zeek` container; `ZEEK_ICCP_FLAGS=--update` rewrites baselines, read the diff);
 `make wireshark` (host tshark; also runs the datagram test vector).
@@ -342,7 +372,7 @@ Limits: each board is one run on one host; none exercises ferrofire's own field 
 
 ## Known gaps in one list
 
-1. ICCP/TASE.2 object layouts from recall; no independent ICCP peer or capture; client, server and parsers share assumptions.
+1. ICCP/TASE.2 object layouts are from recall, checked against two young peers (igs, telcon) and two real captures but not the standard; the QTimeTag member order is disputed between the peers (ww-otj.69).
 2. IEC 61850 server rests on a young single-author library; one independent peer stack.
 3. No amd64 testpeers build exercised (the publish workflow exists, no tag has been pushed).
 4. Fuzzing needs a nightly toolchain, and the CI run is 10 s per target.

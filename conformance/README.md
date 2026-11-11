@@ -129,6 +129,8 @@ The image built before 2026-11-10 lacks the control client and the GOOSE subscri
 | `ff-dnp3-master HOST PORT LOCAL REMOTE [wait_s] [crob IDX CODE\|select-crob IDX CODE\|ao IDX VALUE]...` | ours, on opendnp3 | MIT / Apache-2.0 | scriptable master: integrity poll, commands, poll |
 | `server_example_*`, `iec61850_client_example1`, `client_example_control`, `iec61850_client_example_reporting`, `goose_publisher_example`, `goose_subscriber_example`, `goose_observer` | libiec61850 v1.6.2 | **GPL-3.0, test peers only, never linked** | IEC 61850 server/client/GOOSE |
 | `mms_utility -h HOST -d`, `-r VAR -a DOMAIN` | libiec61850 | GPL-3.0 | generic MMS client for ICCP named-variable reads |
+| `igstase2-client`, `igstase2-server` | aklira/igs-iec-tase2 + igs-iso9506-mms, pinned commits | Apache-2.0 | independent TASE.2 client and server (ICCP conformance) |
+| `tase2-client`, `tase2-server` (daemons, JSON on a Unix socket) | janfietz/telcon-tase2 `tase2-test-tools`, pinned commit | MIT OR Apache-2.0 | independent TASE.2 client and server (ICCP conformance); `jq` is in the image for them |
 | tshark 4.4, tcpdump, nmap 7.95 (`iec61850-mms`, `iec-identify`, `s7-info`, `bacnet-info`, `enip-info`, `modbus-discover`) | Debian | | analysis |
 | Zeek 9.0.1 + icsnpp-dnp3, modbus, bacnet, s7comm, enip, opcua-binary, synchrophasor | CISA | | `/etc/ff-testpeers.zeek-packages` lists what installed |
 
@@ -139,9 +141,29 @@ and the nmap scripts). nmap has no `dnp3-info` script. Licence texts: `/usr/shar
 `.github/workflows/testpeers.yml` builds linux/amd64 + arm64 and pushes `ghcr.io/<owner>/ferrofire-testpeers` on a `v*` tag (or by hand).
 It does nothing until a tag exists.
 
-## ICCP / TASE.2 (no oracle, no open peer)
-`conformance/iccp/`: libiec61850's `mms_utility` (generic MMS client) browses and reads the server, and our thin ICCP client
-(`examples/iccp-client`, copied into the peers container through `PEER_BIN` in `proto.env`) does the TASE.2 part: write, data set,
-transfer set, InformationReport. `make conformance PROTO=iccp` (`DUT_DEFAULT=rust`). The judgement is tshark's `mms` dissector
-(0 malformed, 0 expert warnings, ICCP names in `mms.vmd_specific`/`mms.domainId`/`mms.itemId`); see docs/field-device-iccp.md for what that does
-and does not prove.
+## ICCP / TASE.2 (no oracle; two independent peers)
+`conformance/iccp/`, `DUT_DEFAULT=rust`: `make conformance PROTO=iccp`. One capture (tcp 102, 10102, 10103) of four legs, judged by tshark
+(0 malformed, expert info clean), `tools/wireshark/iccp.lua` and the Zeek Spicy analyzer (`prepare.sh` builds it in the testpeers image):
+
+| Leg | Client | Server |
+|---|---|---|
+| 1 | libiec61850 `mms_utility`; our thin client (`examples/iccp-client`, `PEER_BIN`) | ferrofire on 102 |
+| 2 | `igstase2-client` (igs-iec-tase2, Apache-2.0) | ferrofire on 102 |
+| 3 | telcon-tase2 `tase2-client` daemon (MIT OR Apache-2.0) | ferrofire on 102 |
+| 4 | our thin client, `ICCP_STEPS=1` (one `step NAME: ok|FAIL` line per check) | `igstase2-server` on 10102 (`igs-server.toml`), telcon `tase2-server` on 10103 |
+
+Both peers are built from pinned commits in `docker/testpeers/Dockerfile` and run as separate processes; ferrofire's Cargo graph does not
+contain them. `check.sh` marks each expectation `ok`, `xfail BEAD-OR-REASON` (it must still fail; if it starts to pass the run fails until
+the mark is removed) or `skip` (printed, with the reason): see docs/testing.md for the list. `proto.env` adds `TSHARK_EXTRA` (`-d
+tcp.port==10102,tpkt ...`, applied by `lib.sh`'s `tshark` function) and `PEER_EXTRA` (repo files copied into the peers container: the Lua
+dissector and the Zeek package sources). `ICCP_STEPS`, `ICCP_CALLING_AP_TITLE` are read by the example.
+
+**Real captures.** `tests/pcaps/iccp/fetch-real.sh` downloads the Wireshark wiki `mms.pcap` and chaugan's
+`iccp_with_switchover_anon.pcap` (pinned commit, sha256 verified) into `tests/pcaps/iccp/real/`, which is git-ignored; `run.sh` copies the
+directory to `/real` when it exists, and `check.sh` / `zeek.sh` then assert on each: 0 malformed, Lua without errors, 12-bit
+`Supported_Features`, the `TASE2_Version` of that capture, an empty Zeek weird.log and reporter.log. Without the directory the step prints SKIP.
+
+To run: `make testpeers` (use `TESTPEERS=<image>` for another tag), `make test` (builds `target-linux/debug/ferrofire` and the example),
+optionally `tests/pcaps/iccp/fetch-real.sh`, then `make conformance PROTO=iccp`. Output in `target/conformance/iccp/`: `iccp.pcap`,
+`peer.out` (every operation as `### label`, output, `rc=`), `dut.out`, `zeek/`, `zeek-real-*/`, `lua.err`.
+The peers are young and possibly AI-assisted: agreement is evidence, not proof. See docs/field-device-iccp.md for what the server serves.
