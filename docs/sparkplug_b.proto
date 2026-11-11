@@ -1,0 +1,27 @@
+// Sparkplug B payload schema as ferrofire uses it: the subset an edge node needs, written from the public Eclipse Sparkplug
+// specification (Sparkplug 3.0, "Payloads" appendix). Field numbers are the specification's. Nothing here comes from Eclipse Tahu or
+// sparkplug-rs (both EPL-2.0); the Rust types in src/fd/proto/mqtt/sparkplug.rs are this schema, derived by hand with prost.
+// Left out, and skipped by the decoder: Metric.metadata (8), properties (9), dataset_value (17), template_value (18),
+// extension_value (19), Payload.uuid (4), body (5).
+syntax = "proto2";
+
+message Payload {
+  optional uint64 timestamp = 1;   // milliseconds since the Unix epoch
+  repeated Metric metrics = 2;
+  optional uint64 seq = 3;         // 0 in an NBIRTH, then 1..255 wrapping in NDATA
+  message Metric {
+    optional string name = 1;      // in an NBIRTH; later messages may use the alias alone
+    optional uint64 alias = 2;
+    optional uint64 timestamp = 3;
+    optional uint32 datatype = 4;  // 4 Int64 (bdSeq), 10 Double, 11 Boolean as ferrofire sends them
+    optional bool is_null = 7;
+    oneof value {
+      uint32 int_value = 10;
+      uint64 long_value = 11;
+      float float_value = 12;
+      double double_value = 13;
+      bool boolean_value = 14;
+      string string_value = 15;
+    }
+  }
+}

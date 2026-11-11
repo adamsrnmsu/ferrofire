@@ -145,3 +145,17 @@ It does nothing until a tag exists.
 transfer set, InformationReport. `make conformance PROTO=iccp` (`DUT_DEFAULT=rust`). The judgement is tshark's `mms` dissector
 (0 malformed, 0 expert warnings, ICCP names in `mms.vmd_specific`/`mms.domainId`/`mms.itemId`); see docs/field-device-iccp.md for what that does
 and does not prove.
+
+## MQTT and Sparkplug B
+
+    make conformance PROTO=mqtt         # DUT=rust is the default: bennu has no MQTT, so there is no stock side
+
+`conformance/mqtt/server.xml` has two `<mqtt-client>` elements on the same tags (plain topics and a Sparkplug B edge node). The broker
+is Mosquitto, started by `peer.sh` inside the peers container on 127.0.0.1:1883 (the lab default of the range's broker image: anonymous,
+plaintext); the device retries until it is up. `peer.sh` then runs, in order: `mosquitto_sub` (retained values), `mosquitto_pub` (a QoS 1
+command), `paho_client.py` (Eclipse Paho for Python: reads the topics, writes an in-range and an out-of-range command), the Tahu host
+(`docker/testpeers/tahu/TahuHost.java`: sends a Rebirth NCMD, decodes the NBIRTH and NDATA with Eclipse Tahu 1.0.21, writes a metric by NCMD)
+and finally `kill -9`s the device to see the wills. `provider.py` is a stand-in provider REP socket that logs every `WRITE=`, which is how
+"the command reached the write queue" is observed. `check.sh` asserts the tshark `mqtt` fields and the peers' results, `zeek.sh` the
+`mqtt_connect` / `mqtt_subscribe` / `mqtt_publish` logs (Zeek's built-in analyzer, no package). `proto.env` sets `PEER_FLAGS` so that the
+peers container shares the device's process namespace (needed for the `kill`). Tahu and Paho are EPL-2.0 test peers; ferrofire links none of it.
