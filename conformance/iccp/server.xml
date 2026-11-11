@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SCEPTRE>
+    <field-device>
+        <name>rtu-1</name>
+        <cycle-time>500</cycle-time>
+        <tags>
+            <external-tag><name>brkr</name><io>I3</io><type>binary</type></external-tag>
+            <external-tag><name>load-power</name><io>I1</io><type>analog</type></external-tag>
+            <external-tag><name>bus-voltage</name><io>I2</io><type>analog</type></external-tag>
+            <external-tag><name>cmd1</name><io>O0</io><type>binary</type></external-tag>
+            <external-tag><name>load-mw-setpoint</name><io>O3</io><type>analog</type></external-tag>
+        </tags>
+        <comms>
+            <iccp-server>
+                <endpoint>tcp://127.0.0.1:102</endpoint>
+                <event-logging>rtu-1-iccp.log</event-logging>
+                <bilateral-table><id>BLT_RANGE_EMS1</id></bilateral-table>
+                <data-state><tag>brkr</tag><name>BRKR_1</name><variant>QTimeTag</variant></data-state>
+                <data-real><tag>load-power</tag><name>LOAD_MW</name><variant>QTimeTag</variant></data-real>
+                <data-real><tag>bus-voltage</tag><name>BUS_KV</name></data-real>
+                <data-state><tag>cmd1</tag><name>CMD_1</name><variant>plain</variant></data-state>
+                <data-real><tag>load-mw-setpoint</tag><name>SETPOINT</name><variant>Q</variant></data-real>
+                <peer>
+                    <name>EMS1</name>
+                    <read>BRKR_1 LOAD_MW CMD_1 SETPOINT</read>
+                    <write>CMD_1 SETPOINT</write>
+                </peer>
+            </iccp-server>
+        </comms>
+        <input>
+            <endpoint>udp://239.0.0.1:40000</endpoint>
+            <analog><id>I1</id><name>load-1_bus-1.mw</name></analog>
+            <analog><id>I2</id><name>bus-1.vm</name></analog>
+            <binary><id>I3</id><name>load-1_bus-1.active</name></binary>
+        </input>
+        <output>
+            <endpoint>tcp://127.0.0.1:5555</endpoint>
+            <binary><id>O0</id><name>load-1_bus-1.active</name></binary>
+            <analog><id>O3</id><name>load-1_bus-1.mw</name></analog>
+        </output>
+    </field-device>
+</SCEPTRE>

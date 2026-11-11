@@ -73,3 +73,14 @@ pub fn set_multicast_if(s: &std::net::UdpSocket, a: std::net::Ipv4Addr) -> Resul
         )),
     }
 }
+
+/// Seconds east of UTC the local clock is at `unix`.
+pub fn utc_offset(unix: i64) -> i64 {
+    let t = unix as libc::time_t;
+    // SAFETY: localtime_r writes only into the zeroed struct we pass, from a valid time_t.
+    unsafe {
+        let mut tm: libc::tm = std::mem::zeroed();
+        libc::localtime_r(&t, &mut tm);
+        tm.tm_gmtoff
+    }
+}

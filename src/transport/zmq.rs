@@ -64,6 +64,10 @@ fn answer(handler: &Handler, parts: &[Vec<u8>]) -> Vec<u8> {
 /// Connect a REQ client to `endpoint` (the provider's REP); calls give up after `timeout_ms`.
 /// The connection is made on the first call (and again after a failed one), so an absent provider is a timeout, not a startup error.
 pub fn requester(endpoint: &str, timeout_ms: i32) -> Result<Box<dyn Requester>, String> {
+    // the connect is lazy, so a malformed endpoint would otherwise only ever show as timeouts
+    if !endpoint.contains("://") {
+        return Err(format!("bad endpoint {endpoint}: expected tcp://host:port"));
+    }
     Ok(Box::new(Req {
         rt: runtime()?,
         endpoint: endpoint_of(endpoint),

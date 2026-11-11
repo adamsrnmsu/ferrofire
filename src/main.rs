@@ -50,6 +50,8 @@ enum Cmd {
         path: String,
         tag: String,
     },
+    /// Stand-in for bennu-field-device: reads a sceptre config.xml, serves protocols over the provider's data
+    FieldDevice(ferrofire::fd::Cli),
     /// Print a shell completion script
     Completions { shell: clap_complete::Shell },
 }
@@ -105,6 +107,7 @@ fn dispatch(cmd: Cmd) {
         Cmd::Pypower(a) => ferrofire::pypower::run_cli(a),
         Cmd::Simulink { args } => ferrofire::simulink::main(&args),
         Cmd::Log { args } => ferrofire::log::main(&args),
+        Cmd::FieldDevice(a) => std::process::exit(ferrofire::fd::main(a)),
         _ => {}
     }
 }

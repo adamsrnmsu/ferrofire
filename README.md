@@ -31,7 +31,7 @@ ferrofire covers both layers, in Rust, as drop-ins for bennu's pieces:
 | | Replaces | Status |
 |---|---|---|
 | **Provider** (`ferrofire run`): a simple, fast process and power-flow simulator from a YAML model, no MATLAB, Simulink or PowerWorld | bennu's Simulink provider and PyPower solver | **Working**: runs the waterway range today with stock bennu RTUs |
-| **Field device**: the software RTU, speaking the same protocols and config files as `bennu-field-deviced`, plus more OT protocols | `bennu-field-deviced` | **In progress**: [spec](docs/field-device-spec.md); DNP3, IEC 61850 and ICCP first |
+| **Field device**: the software RTU, speaking the same protocols and config files as `bennu-field-deviced`, plus more OT protocols | `bennu-field-deviced` | **In progress**: [spec](docs/field-device-spec.md); `ferrofire field-device --file config.xml`. Working: DNP3, IEC 61850 (MMS server + GOOSE publisher, [notes](docs/field-device-iec61850.md)), ICCP/TASE.2 server, conformance blocks 1-2 ([notes](docs/field-device-iccp.md)): checked only against our own reading of the standard; the TASE.2 object layouts are not yet verified against IEC 60870-6-503/-802. Modbus, IEC 104, BACnet and serial next |
 | **Tools** (`probe`, `top`, `doctor`, `log`, `explain`): read and write tags, play timed inject scripts, record, diff RTUs against the provider, watch live values and staleness, check a range's health, toggle logging on a running process | `bennu-probe`, reading log files | **Working**: proven live on the waterway range ([captures](docs/live-tools/README.md)) |
 
 ![ferrofire top on the waterway range: live tag values, age, quality and trend, with a log pane](docs/img/top.png)
@@ -336,7 +336,7 @@ outputs:
 
 - Done: phase 0 (engine, waterway model), 1 (power flow), 2 (native provider), 3 (PyPower drop-in).
 - Next: phase 4 (pump station with power in a live range), phase 5 (upstream sceptre-phenix-apps type).
-- Then: a Rust drop-in for `bennu-field-deviced` (spec in `docs/field-device-spec.md`).
+- Then: the remaining protocols of the Rust drop-in for `bennu-field-deviced` (`ferrofire field-device`; spec in `docs/field-device-spec.md`).
 
 ## Known differences from stock
 

@@ -10,8 +10,10 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 ferrofire = { path = ".." }
+roxmltree = "0.20"
+iec61850-rs = { version = "=0.4.0", default-features = false, features = ["server", "goose", "net"] }
 
-# its own workspace: the fuzz crate needs nightly and must not be part of the main build
+# its own workspace: the fuzz crate needs nightly and must not be part of the main build; run with `cargo +nightly fuzz run <target>`
 [workspace]
 
 [[bin]]
@@ -35,5 +37,35 @@ doc = false
 [[bin]]
 name = "model"
 path = "fuzz_targets/model.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fd_datagram"
+path = "fuzz_targets/fd_datagram.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fd_config"
+path = "fuzz_targets/fd_config.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fd_dnp3"
+path = "fuzz_targets/fd_dnp3.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fd_iec61850"
+path = "fuzz_targets/fd_iec61850.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fd_iccp"
+path = "fuzz_targets/fd_iccp.rs"
 test = false
 doc = false

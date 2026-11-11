@@ -69,7 +69,8 @@ Wave 1 = rows 1-4 (9-12 days); rows 5-9 on request. Any Tier 2 protocol is reach
 |---|---|
 | Step Function `dnp3` 1.8.0 / `rodbus` 1.6.0 | non-commercial, non-production agreement, no redistribution (SPEC §5.2; text re-fetched 2026-11-10, unchanged) |
 | `lib60870(-sys)` GPL-3, roboplc `iec60870-5` (Bohemia, paid), `s7commplus` (LGPL-3), `sparkplug-rs` + Eclipse `.proto` (EPL-2.0), `cip` 0.1.0 ("non-standard"), `darra-profinet-slave` (proprietary), `rust-snap7` (C core, licence unverified), `bacnet-stack` port (GPL-2 + exception) | licence |
-| S7comm-plus, ICCP/TASE.2, Codesys | proprietary or 8-10+ days each, no blue parser, at most a banner stub later |
+| S7comm-plus, Codesys | proprietary or 8-10+ days each, no blue parser, at most a banner stub later |
+| ICCP/TASE.2 | was listed here; Ryan overrode it (2026-11-10) and it is built on the shared MMS layer: docs/field-device-iccp.md |
 | EtherCAT subdevice, KNX/IP, Niagara Fox, PCWorx/ProConOS, MELSEC/SLMP, ROC Plus, BSAP, Genisys, C12.22 | no phenix template, niche audience or real-time raw Ethernet; 2-7 days each on request only |
 | IEC 61850 as a *parity* item | stock never loads it (§0) |
 
@@ -132,7 +133,7 @@ pub static REGISTRY: &[(&str, Start)] = &[            // Start = fn(Node, &mut T
 | OPC UA | `async-opcua-server` 0.19.0 / 2026-07 / 152k | **MPL-2.0** (file-level copyleft: fine unmodified, NOTICE entry, publish any patch to its files, explicit cargo-deny exception) | `open62541` (C), `opcua` 0.12 (unmaintained) |
 | MQTT | `rumqttc` 0.25.1 / 9.9M; `prost` for Sparkplug | Apache-2.0 | `sparkplug-rs` (EPL-2.0) |
 | FINS, C37.118, GE SRTP, ENIP | own; test clients `omron-fins` 0.6.0 (MIT), `pypmu` (BSD-3), `rust-ethernet-ip` 1.2.1 (MIT) | MIT (own) | `cip` 0.1.0 ("non-standard") |
-| IEC 61850 (if ever) | `iec61850-rs` 0.4.0 or csp0924 `iec61850-*` 0.4.0, after a 1-day spike | MIT OR Apache-2.0 | `libiec61850` (GPL) |
+| IEC 61850 | **`iec61850-rs` 0.4.0, pinned** (spike done 2026-11-10, ww-otj.45, docs/field-device-iec61850.md); csp0924 `iec61850-*` and an own stack not chosen | MIT OR Apache-2.0 | `libiec61850` (GPL, test peer only) |
 
 Policy (lands with ww-otj.35 `deny.toml`): allow MIT, Apache-2.0, BSD-2/3, ISC, Zlib, Unicode; MPL-2.0 only by named exception; deny GPL/LGPL/AGPL/EPL
 and anything crates.io calls "non-standard".
