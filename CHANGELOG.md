@@ -1,3 +1,15 @@
+# [0.1.1](https://github.com/adamsrnmsu/ferrofire/compare/v0.1.0...v0.1.1) - 2026-11-11
+
+### 🐛 Bug Fixes
+
+- _(release)_ inline the zig pins so a tag-dispatched rebuild works on old tags [_(6d83ccb)_](https://github.com/adamsrnmsu/ferrofire/commit/6d83ccbcac40c9c3cd861b01feb9eb82e98cdf80)
+
+- _(release)_ build musl binaries with zig instead of apt; apt mirror fallback in the CI image [_(6f6a53e)_](https://github.com/adamsrnmsu/ferrofire/commit/6f6a53e2a2fe134574cfa036d5504f923a17fe2c)
+
+### 🚜 Refactor
+
+- _(scpi)_ read analog tags with MEASure:SCALar instead of ANALog [_(77e3da6)_](https://github.com/adamsrnmsu/ferrofire/commit/77e3da60b2c95cffc654ee95998f1614defc505b)
+
 # [0.1.0](https://github.com/adamsrnmsu/ferrofire/releases/tag/v0.1.0) - 2026-11-11
 
 ### 🚀 Features
