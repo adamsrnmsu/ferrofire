@@ -422,3 +422,52 @@ fn the_thin_client_can_call_with_an_ap_title() {
     ]))));
     assert!(!has(&bytes_of_the_association_request(None)));
 }
+
+/// ww-otj.61 (F1) through the whole server: a client that proposes data-structure nesting 2 (igs-iec-tase2, the TASE.2 minimum) must be
+/// answered with at most 2. The library client always proposes 5, so the proposal is rewritten on the wire (same length).
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn the_initiate_response_never_negotiates_more_nesting_than_proposed() {
+    use iec61850_rs::common::Instant;
+    use iec61850_rs::proto::mms::association::{Association, AssociationConfig};
+    use std::io::{Read, Write};
+    let (addr, _store, stop) = start().await;
+    fn find(hay: &[u8], n: u8) -> Option<usize> {
+        hay.windows(3).position(|w| w == [0x83, 0x01, n])
+    }
+    let accept = blocking(move || {
+        let mut s = std::net::TcpStream::connect(&addr).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut c = Association::client(AssociationConfig::default());
+        c.start(Instant::ZERO).unwrap();
+        let (mut got, mut buf) = (vec![], [0u8; 4096]);
+        loop {
+            while let Some(p) = c.poll_transmit() {
+                let mut p = p.to_vec();
+                if let Some(at) = find(&p, 5) {
+                    p[at + 2] = 2; // the AARQ's Initiate: propose 2
+                    let cbb = p
+                        .windows(5)
+                        .position(|w| w == [0x81, 0x03, 0x05, 0xF1, 0x00]);
+                    p[cbb.expect("parameterCBB") + 3] = 0xE0; // ... and fewer parameter CBB bits
+                }
+                s.write_all(&p).unwrap();
+            }
+            let n = s.read(&mut buf).unwrap();
+            if n == 0 {
+                break;
+            }
+            c.on_bytes(Instant::ZERO, &buf[..n]);
+            if c.is_established() || find(&buf[..n], 2).is_some() {
+                got = buf[..n].to_vec();
+                break;
+            }
+        }
+        got
+    })
+    .await;
+    stop.cancel();
+    assert!(find(&accept, 2).is_some(), "answers 2: {accept:02x?}");
+    assert!(find(&accept, 5).is_none(), "never more than proposed");
+    let cbb = |b: u8| accept.windows(5).any(|w| w == [0x81, 0x03, 0x05, b, 0x00]);
+    assert!(cbb(0xE0) && !cbb(0xF1), "parameterCBB is the intersection");
+}

@@ -6,8 +6,13 @@ upstream releases the fix (bead ww-otj.68).
 
 1. `src/proto/mms/association.rs`, `answer_associate`: the Initiate response negotiated `dataStructureNestingLevel` 5 whatever the client
    proposed. ISO 9506 negotiates down, so it is `min(proposed, 5)` now (and absent when not proposed), and `version` is `min(proposed, 1)`.
-   Test: `the_negotiated_nesting_level_does_not_exceed_the_proposed_one`. (`localDetail` and the outstanding-call limits were already
+   `parameterCBB` is the bitwise AND of the proposal and this server's. (`servicesSupportedCalling` in the request and
+   `servicesSupportedCalled` in the response are independent lists in ISO 9506, not negotiated.)
+   Test: `the_negotiated_nesting_level_does_not_exceed_the_proposed_one`; the same through ferrofire's whole ICCP server:
+   `tests/iccp_net.rs`. (`localDetail` and the outstanding-call limits were already
    negotiated down by 0.4.0.)
 
 Not patched here, corrected in ferrofire (`src/fd/mms.rs`, `encode`): `Answer::NOT_FOUND` carries DataAccessError 10 in the ServiceError
 `access` class, where object-non-existent is 2.
+
+The `fuzz/` crate is its own workspace, so it carries the same `[patch.crates-io]` entry in `fuzz/Cargo.toml`.

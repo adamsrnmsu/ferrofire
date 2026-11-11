@@ -13,6 +13,10 @@ ferrofire = { path = ".." }
 roxmltree = "0.20"
 iec61850-rs = { version = "=0.4.0", default-features = false, features = ["server", "goose", "net"] }
 
+# the fuzz crate is its own workspace, so the root [patch] does not reach it: same one-fix copy of iec61850-rs as the main build
+[patch.crates-io]
+iec61850-rs = { path = "../third_party/iec61850-rs" }
+
 # its own workspace: the fuzz crate needs nightly and must not be part of the main build; run with `cargo +nightly fuzz run <target>`
 [workspace]
 

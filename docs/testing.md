@@ -25,7 +25,7 @@ code with our own reading of a standard shows consistency, not correctness; the 
 | Whole system | Burger range boards, live range runs | Stock bennu, phēnix, OVS | Covers stock bennu fixes and ferrofire runs; see below |
 
 Everything below is in the repo and runs from `make`. Make targets that need docker run in the `ff-rust:22.04` container or
-in the `ferrofire-testpeers` image (`make testpeers`, about 10 minutes the first time).
+in the `ferrofire-testpeers` image (`make testpeers`, about 10 minutes the first time, longer with the two Rust peers).
 
 ## Provider engine and power flow
 
@@ -262,7 +262,8 @@ Skipped with a reason: igs writing a `Data_State` (its CLI sends a boolean), tel
 command). Smoke findings not fixed here and not exercised by a passing check: the Transfer_Set_Name scope as `unsigned` (ww-otj.64), a
 12-member DSTransferSet, Buffer_Time, and data sets whose first members are `Transfer_Set_Name` / `DSConditions_Detected` (ww-otj.65).
 Observed, not marked: after a Conclude response our stack closes the TCP connection, and igs sends an ACSE release request after the
-Conclude that meets an RST (tshark: "Connection reset", an undecoded zero-byte MMS PDU and OID; allowed in `proto.env`).
+Conclude that meets an RST (tshark: "Connection reset", an undecoded zero-byte MMS PDU and OID; allowed in `proto.env`, ww-otj.73).
+`make conformance PROTO=iec61850` fails its GOOSE-subscriber step on the Lima daemon with the old binary and image too (ww-otj.72); the MMS steps pass.
 `Bilateral_Table_ID` is domain-scoped on the wire in both real captures and in igs; we serve it in the VMD scope as well (a superset).
 
 **The real captures.** `tests/pcaps/iccp/fetch-real.sh` downloads the Wireshark wiki `mms.pcap` (ICCP between two utilities, 2005,

@@ -1043,7 +1043,10 @@ impl Association {
     fn answer_associate(&mut self, cp: &Cp<'_>, mms_context: u16, acse_context: u16, peer: &Initiate<'_>) -> Result<()> {
         let max_pdu = i64::from(self.cfg.max_pdu).min(peer.local_detail.unwrap_or(i64::from(self.cfg.max_pdu)));
         let mine = i64::from(self.cfg.max_outstanding);
+        // ferrofire patch: parameterCBB is negotiated down too, bit by bit (the proposal's bits that this server also has)
+        let cbb: Vec<u8> = PARAMETER_CBB.1.iter().enumerate().map(|(i, b)| b & peer.parameter_cbb.1.get(i).copied().unwrap_or(0)).collect();
         let mut init = Initiate::request(max_pdu, mine, PARAMETER_CBB, SERVICES_SUPPORTED);
+        init.parameter_cbb = (PARAMETER_CBB.0, &cbb);
         // ISO 9506 negotiates *down*, exactly as `localDetail` above does: the negotiated
         // value may not exceed what the client proposed. Answering with this server's own
         // configuration regardless would tell a client that asked for two that it may have
@@ -1260,10 +1263,15 @@ mod tests {
         let mut connect = c.poll_transmit().map(<[u8]>::to_vec).unwrap();
         let at = find(&connect, nesting(5)).expect("the client proposes nesting 5");
         connect[at + 2] = 2; // same length: a client that proposes 2
+        let cbb = |b: u8| [0x81, 0x03, 0x05, b, 0x00];
+        let at = connect.windows(5).position(|w| w == cbb(0xF1)).expect("the client proposes parameterCBB f1 00");
+        connect[at + 3] = 0xE0; // ... and fewer parameter CBB bits than this server has
         s.on_bytes(Instant::ZERO, &connect);
         let accept = s.poll_transmit().map(<[u8]>::to_vec).unwrap();
         assert!(find(&accept, nesting(2)).is_some(), "answers 2");
         assert!(find(&accept, nesting(5)).is_none(), "never more than proposed");
+        let has = |b: u8| accept.windows(5).any(|w| w == cbb(b));
+        assert!(has(0xE0) && !has(0xF1), "negotiated CBB is the intersection of the proposal and the server's");
     }
 
     fn connect() -> (Association, Association) {
