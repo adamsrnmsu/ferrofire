@@ -10,6 +10,18 @@ unused-allowed-license = "allow"
 
 [advisories]
 yanked = "deny"
+# rumqttc 0.25.1 (the latest release, ww-otj.56) depends on rustls-webpki 0.102.8 only for the `webpki::Error` variant of its TLS error
+# type and on rustls-pemfile only to read PEM files. Certificate verification is done by rustls 0.23, which uses the patched
+# rustls-webpki 0.103.x (both are in the lockfile), so the five webpki advisories below concern code that is linked but never called.
+# Remove these when rumqttc moves to webpki 0.103 and rustls-pki-types' PEM parser.
+ignore = [
+    "RUSTSEC-2025-0134", # rustls-pemfile unmaintained
+    "RUSTSEC-2026-0049", # rustls-webpki 0.102.8: CRL matching
+    "RUSTSEC-2026-0098", # rustls-webpki 0.102.8: URI name constraints
+    "RUSTSEC-2026-0099", # rustls-webpki 0.102.8: wildcard name constraints
+    "RUSTSEC-2026-0104", # rustls-webpki 0.102.8: CRL parsing panic
+    "RUSTSEC-2026-0382", # rustls-webpki 0.102.8: distrusted intermediates
+]
 
 [bans]
 multiple-versions = "warn"

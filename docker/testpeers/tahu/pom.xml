@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Only used at image build time (mvn dependency:copy-dependencies) to fetch the Sparkplug B test peer's jars from Maven Central.
+     Eclipse Tahu is EPL-2.0 and Eclipse Paho is EPL-2.0 / EDL-1.0: separate test peers, never linked into ferrofire. -->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>ferrofire</groupId>
+  <artifactId>tahu-host</artifactId>
+  <version>0</version>
+  <dependencies>
+    <dependency><groupId>org.eclipse.tahu</groupId><artifactId>tahu-core</artifactId><version>1.0.21</version></dependency>
+    <dependency><groupId>org.eclipse.paho</groupId><artifactId>org.eclipse.paho.client.mqttv3</artifactId><version>1.2.5</version></dependency>
+  </dependencies>
+</project>

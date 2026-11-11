@@ -22,6 +22,7 @@ code with our own reading of a standard shows consistency, not correctness; the 
 | IEC 61850 MMS + GOOSE | libiec61850 client examples and GOOSE subscriber; tshark `mms`/`goose`; in-process client; fuzz | libiec61850 (GPL, test peers only), tshark. No stock oracle: bennu has no 61850 server | Covered against one independent stack; the server library is young |
 | ICCP / TASE.2 server | `mms_utility` browse and read; our thin ICCP client; tshark `mms`; fuzz; igs-iec-tase2 and telcon-tase2 as clients and as servers | Two independent, young TASE.2 stacks (igs, telcon) plus two real captures (checked by the parsers); libiec61850 and tshark for the MMS layer | Better: three readings of the standard agree on most of block 1; known disagreements are marked (below). Still no oracle |
 | ICCP parsers (Zeek, Wireshark) | btest baselines and field goldens over `tests/pcaps/iccp`; the two real captures when fetched | tshark's own MMS dissector underneath; the Wireshark wiki `mms.pcap` and the chaugan capture (real ICCP) | Tested on synthetic captures and, locally, on two real ones |
+| MQTT client + Sparkplug B | Unit tests of the engine and the payload codec; integration tests against a real Mosquitto child process; conformance with mosquitto_pub/sub, Eclipse Paho, an Eclipse Tahu host, tshark and Zeek; fuzz of the NCMD decoder | Mosquitto (broker), Paho and mosquitto clients (MQTT), Tahu (Sparkplug payload codec), tshark `mqtt`, Zeek `mqtt_*` logs. No stock oracle: bennu has no MQTT | Covered for the subset in [field-device-mqtt.md](field-device-mqtt.md); Sparkplug host behaviour is only as good as one Tahu run |
 | Whole system | Burger range boards, live range runs | Stock bennu, phēnix, OVS | Covers stock bennu fixes and ferrofire runs; see below |
 
 Everything below is in the repo and runs from `make`. Make targets that need docker run in the `ff-rust:22.04` container or
@@ -331,6 +332,54 @@ captures (`fetch-real.sh`, see above) are the independent check: `make conforman
 **Ideas.** Any real ICCP capture (see above) is the test: run both parsers over it, and every unparsed or mislabelled field is a
 bug in a layout. Compare the Wireshark script's output with a vendor tool's decode of the same capture.
 
+## MQTT client and Sparkplug B
+
+`<mqtt-client>` ([field-device-mqtt.md](field-device-mqtt.md)); engine and codec in `src/fd/proto/mqtt/`.
+
+**Strategy.** The module is split so that most of it needs no socket: `engine.rs` (what to publish when, command validation),
+`sparkplug.rs` (payload encode and decode) and the config parser are unit tested; `tests/mqtt_net.rs` runs the real client against
+a real Mosquitto started as a child process (`mosquitto` and `openssl` are in the `ff-rust` image (an image built before ww-otj.56 must be rebuilt: `docker build -t ff-rust:22.04 docker`, because `make image` only builds when the image is missing), so it runs under `make test` and
+under the mutator); `make conformance PROTO=mqtt` runs two `<mqtt-client>` elements (plain and Sparkplug) on one device against
+Mosquitto inside the `ferrofire-testpeers` image with the peers below.
+
+**Checked, and by what.**
+- Publish on change and every refresh, retained values for a late subscriber, `status` online / offline: unit tests, `mqtt_net.rs`,
+  `mosquitto_sub` and Paho in the conformance run.
+- Commands: `.../set` and NCMD writes reach the store's write queue only if the point is writable, the type fits, the number is finite
+  and within the limits; an unknown tag is logged and skipped (unit, `mqtt_net.rs`, fuzz `fd_mqtt`, and in the conformance run Paho and
+  `mosquitto_pub` commands reach a stand-in provider while an out-of-range one does not).
+- Will and goodbye: a clean stop publishes `offline` / NDEATH (`mqtt_net.rs`); a dropped connection makes the broker send the will
+  (`mqtt_net.rs` aborts the task; the conformance run `kill -9`s the device and reads both wills).
+- Bounded queue: against a broker that accepts the connection and then acknowledges nothing, the queue fills, the rest of the tick is dropped and the
+  log hears of it once (`mqtt_net.rs`); a `<queue>` too small for one birth is refused at load.
+- Reconnect: the client starts before the broker, and the broker is killed and restarted under it (`mqtt_net.rs`); the backoff
+  arithmetic is unit tested. The scan cycle is not involved: the module only reads the datastore.
+- TLS 1.2/1.3 with rustls, a client certificate and a password: `mqtt_net.rs` with a throwaway CA made by `openssl`; a wrong password
+  never gets a session.
+- Sparkplug B: NBIRTH / NDATA / NDEATH shape, `bdSeq` agreement between will and birth, `seq` wrapping, aliases, Rebirth NCMD, NCMD
+  writes by name and alias: unit tests and `mqtt_net.rs`; in the conformance run an **Eclipse Tahu 1.0.21** payload decoder (our small
+  `TahuHost.java`, jars from Maven Central, EPL-2.0, test peer only) decodes our NBIRTH and NDATA, its Rebirth NCMD produces a new
+  NBIRTH and its NCMD write reaches the provider.
+- Wire: tshark finds 158 MQTT packets and 0 malformed, `expert,warn` empty; Zeek's built-in analyzer writes `mqtt_connect.log`
+  (client ids, will topic), `mqtt_subscribe.log` and `mqtt_publish.log` rows for our topics.
+- Mutation: `mutator --test-command 'cargo test --lib --test mqtt_net' src/fd/proto/mqtt` (not the whole `make mutate`): 101 sites, 101 killed, 0 survivors. The test command must not contain `&&`: the mutator does not run it through a shell, and the first run silently skipped the integration tests.
+- Fuzz: `fd_mqtt` feeds arbitrary bytes as an NCMD and as a plain command through `Engine::message` and the decoder; invariants: no panic,
+  a read-only point is never queued, a queued analog is within its limits.
+
+**Oracles.** Independent: Mosquitto (broker semantics, retained messages, wills), Paho and the mosquitto clients (a client not written by
+us reading and commanding), Tahu (the Sparkplug payload codec), tshark and Zeek (the MQTT framing). Not independent: the engine tests
+and `mqtt_net.rs` use `rumqttc` on both sides.
+
+**Gaps.**
+- No stock oracle and no second broker: Mosquitto only (no EMQX / HiveMQ / VerneMQ).
+- Tahu is used as a codec and a thin host; no Ignition or other commercial Sparkplug host has been tried, and the primary-host `STATE`
+  topic, DBIRTH / DDATA and Sparkplug metric types other than Int64 / Double / Boolean on output are not implemented.
+- MQTT 3.1.1 only (no MQTT 5 properties); QoS 2 is passed through to the library and not specifically tested.
+- `ssl://` needs `<tls-ca>`: the system trust store is not used. TLS is tested against Mosquitto only, with RSA certificates.
+- A tag name containing `/` cannot be commanded in the plain scheme.
+- Retained messages on a command topic are ignored, so a command cannot be made persistent through the broker either.
+- Network faults between device and broker (loss, delay) are not injected; only a refused connection, a restart and a kill.
+
 ## Quality gates
 
 These apply to the whole of `src/`, from [ub-mode](https://github.com/unclebob/ub-mode); numbers and history are in
@@ -381,4 +430,5 @@ Limits: each board is one run on one host; none exercises ferrofire's own field 
 6. Waterway physics golden comes from ferrofire's own earlier code; PYPOWER is the only power-flow reference.
 7. Snapshot tests pin output format, not correctness.
 8. Mutation results do not yet cover the field-device modules in the recorded numbers.
-9. The drop-in pypower and stock conformance scripts need the Lima VM and are run by hand.
+9. MQTT is checked against Mosquitto, Paho and Tahu only; see the MQTT section for what a commercial Sparkplug host might still dislike.
+10. The drop-in pypower and stock conformance scripts need the Lima VM and are run by hand.

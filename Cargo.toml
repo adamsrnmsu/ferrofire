@@ -24,9 +24,16 @@ socket2 = { version = "0.6", features = ["all"] }
 # IEC 61850 / MMS (MIT OR Apache-2.0, sans-IO, no unsafe). Pre-1.0 and every minor breaks, hence the exact pin (spike: bead ww-otj.45).
 iec61850-rs = { version = "=0.4.0", default-features = false, features = ["server", "goose", "net"], optional = true }
 
+# MQTT 3.1.1/5 client (Apache-2.0); TLS through rustls. Sparkplug B payloads are prost messages derived by hand in src/fd/proto/mqtt/sparkplug.rs.
+rumqttc = { version = "0.25", default-features = false, features = ["use-rustls-no-provider"], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+prost = { version = "0.14", default-features = false, features = ["derive", "std"], optional = true }
+
 [features]
 # One feature per protocol module (docs/field-device-protocols-plan.md section 2). The parity set is default; extras are opt-in.
-default = ["proto-modbus", "proto-dnp3", "proto-iec104", "proto-bacnet", "proto-serial", "proto-iec61850", "proto-iccp"]
+# proto-mqtt is the exception: the quality gates (crap, mutate) build the default features only, and deny.toml carries advisory ignores
+# for rumqttc's unused webpki 0.102 (bead ww-otj.56 follow-up: drop both once rumqttc moves on). Build without it: --no-default-features.
+default = ["proto-modbus", "proto-dnp3", "proto-iec104", "proto-bacnet", "proto-serial", "proto-iec61850", "proto-iccp", "proto-mqtt"]
 proto-modbus = []
 proto-dnp3 = []
 proto-iec104 = []
@@ -34,6 +41,7 @@ proto-bacnet = []
 proto-serial = []
 proto-iec61850 = ["dep:iec61850-rs"]
 proto-iccp = ["dep:iec61850-rs"]
+proto-mqtt = ["dep:rumqttc", "dep:prost", "dep:rustls"]
 all-protocols = ["default", "proto-iec61850", "proto-iccp"]
 
 [profile.release]

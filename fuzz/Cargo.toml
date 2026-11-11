@@ -79,3 +79,9 @@ name = "fd_iccp"
 path = "fuzz_targets/fd_iccp.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "fd_mqtt"
+path = "fuzz_targets/fd_mqtt.rs"
+test = false
+doc = false

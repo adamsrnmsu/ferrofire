@@ -69,6 +69,14 @@ RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq 
 RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends jq >/dev/null && rm -rf /var/lib/apt/lists/*
 COPY --from=rustpeers /out/bin/ /usr/local/bin/
 COPY --from=rustpeers /out/licenses/ /usr/share/doc/ferrofire-testpeers/
+# MQTT peers (conformance/mqtt): Mosquitto (EPL-2.0 / EDL-1.0) broker and clients, Eclipse Paho for Python as the independent second
+# client, and Eclipse Tahu (EPL-2.0, jars from Maven Central) behind our TahuHost.java as the Sparkplug B host application. All of
+# them are separate test peers; ferrofire writes its own Sparkplug B schema from the public spec and links none of this.
+RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+      mosquitto mosquitto-clients python3-paho-mqtt python3-zmq default-jdk-headless maven >/dev/null && rm -rf /var/lib/apt/lists/*
+COPY tahu/ /opt/tahu-host/
+RUN cd /opt/tahu-host && mvn -q -B dependency:copy-dependencies -DoutputDirectory=lib >/dev/null && javac -cp 'lib/*' TahuHost.java \
+ && rm -rf /root/.m2 && ls lib | grep -c jar
 COPY --from=build /out/bin/ /usr/local/bin/
 COPY --from=build /out/licenses/ /usr/share/doc/ferrofire-testpeers/
 CMD ["bash"]
