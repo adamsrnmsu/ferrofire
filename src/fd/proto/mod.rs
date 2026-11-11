@@ -10,6 +10,8 @@ pub mod iccp;
 pub mod iec61850;
 #[cfg(feature = "proto-modbus")]
 pub mod modbus;
+#[cfg(feature = "proto-mqtt")]
+pub mod mqtt;
 
 use super::config::{ConfigError, Opts, Tags};
 use super::store::Store;
@@ -67,6 +69,8 @@ pub static REGISTRY: &[(&str, Start)] = &[
     ("iec61850-server", start::<iec61850::Server>),
     #[cfg(feature = "proto-iccp")]
     ("iccp-server", start::<iccp::Server>),
+    #[cfg(feature = "proto-mqtt")]
+    ("mqtt-client", start::<mqtt::Client>),
 ];
 
 /// Every `<comms>` tag a build can have, and the Cargo feature that provides it.
@@ -81,6 +85,7 @@ pub const KNOWN: &[(&str, &str)] = &[
     ("bacnet-client", "proto-bacnet"),
     ("iec61850-server", "proto-iec61850"),
     ("iccp-server", "proto-iccp"),
+    ("mqtt-client", "proto-mqtt"),
 ];
 
 /// Start the module a `<comms>` child names. `Ok(None)`: a tag nothing knows is warned about and skipped; a tag whose feature is
