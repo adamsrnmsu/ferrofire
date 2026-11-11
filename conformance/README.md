@@ -117,6 +117,8 @@ Bennu never loads an IEC 61850 server, so `conformance/iec61850/` has only the a
 Write, InformationReport and `goose` fields (appid, gocbRef, data set, entries) and what the peers printed. Values are not asserted: the
 DUT's inputs come from whatever publishes on the multicast group. No Zeek parser exists for MMS or GOOSE (`zeek.sh` prints SKIP). The
 DUT container gets `--cap-add NET_RAW` (`DUT_CAPS` in `proto.env`) because GOOSE needs `CAP_NET_RAW`; see docs/field-device-iec61850.md.
+The libiec61850 GOOSE subscriber is not run: its kernel filter drops VLAN-tagged frames on `lo` (ww-otj.72); go-iec61850 subscribes
+instead. iec61850bean and go-iec61850 (independent of libiec61850) are asserted in `check.sh` as well.
 The image built before 2026-11-10 lacks the control client and the GOOSE subscriber (their binaries are named
 `client_example_control` and `goose_subscriber_example`; the Dockerfile asked for other names): run `make testpeers` again, or point
 `TESTPEERS=` at an image that has them.
@@ -129,6 +131,9 @@ The image built before 2026-11-10 lacks the control client and the GOOSE subscri
 | `ff-dnp3-master HOST PORT LOCAL REMOTE [wait_s] [crob IDX CODE\|select-crob IDX CODE\|ao IDX VALUE]...` | ours, on opendnp3 | MIT / Apache-2.0 | scriptable master: integrity poll, commands, poll |
 | `server_example_*`, `iec61850_client_example1`, `client_example_control`, `iec61850_client_example_reporting`, `goose_publisher_example`, `goose_subscriber_example`, `goose_observer` | libiec61850 v1.6.2 | **GPL-3.0, test peers only, never linked** | IEC 61850 server/client/GOOSE |
 | `mms_utility -h HOST -d`, `-r VAR -a DOMAIN` | libiec61850 | GPL-3.0 | generic MMS client for ICCP named-variable reads |
+| `java -cp '/opt/iec61850bean/*' com.beanit.iec61850bean.app.ConsoleClient -h H -p 102` (stdin: `m`, `ga`, `q`) | iec61850bean 1.9.0, Maven Central, sha256-pinned | Apache-2.0 | independent IEC 61850 MMS client (Java, own ASN.1 codec) |
+| `ffgoiec ADDR IFACE [REF...]` | ours (`docker/testpeers/goiec/`) over otfabric/go-iec61850 v1.16.2 | MIT | independent MMS client and GOOSE subscriber (Go) |
+| `/opt/dnp3py/bin/python` with `dnp3` | dnp3py 0.6.0 (PNNL), pip in a venv | MIT | independent DNP3 master (pure Python) |
 | `igstase2-client`, `igstase2-server` | aklira/igs-iec-tase2 + igs-iso9506-mms, pinned commits | Apache-2.0 | independent TASE.2 client and server (ICCP conformance) |
 | `tase2-client`, `tase2-server` (daemons, JSON on a Unix socket) | janfietz/telcon-tase2 `tase2-test-tools`, pinned commit | MIT OR Apache-2.0 | independent TASE.2 client and server (ICCP conformance); `jq` is in the image for them |
 | tshark 4.4, tcpdump, nmap 7.95 (`iec61850-mms`, `iec-identify`, `s7-info`, `bacnet-info`, `enip-info`, `modbus-discover`) | Debian | | analysis |
@@ -136,6 +141,9 @@ The image built before 2026-11-10 lacks the control client and the GOOSE subscri
 
 Not in the image: icsnpp-profinet (no such package), a Zeek IEC 61850/ICCP parser (none exists; those protocols are judged by tshark `mms`/`goose`
 and the nmap scripts). nmap has no `dnp3-info` script. Licence texts: `/usr/share/doc/ferrofire-testpeers/`.
+
+Third-party captures for parser checks (not part of `make conformance`): `tests/pcaps/public/fetch.sh` then `check-parsers.sh`
+(ITI/ICS-Security-Tools DNP3, MMS, GOOSE; pinned commit, sha256 per file; see docs/testing.md).
 
 ## Publishing
 `.github/workflows/testpeers.yml` builds linux/amd64 + arm64 and pushes `ghcr.io/<owner>/ferrofire-testpeers` on a `v*` tag (or by hand).

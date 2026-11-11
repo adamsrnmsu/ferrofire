@@ -1,7 +1,7 @@
 # ferrofire-testpeers: reference peers + blue-team tooling for the field-device acceptance harness (conformance/).
 #   docker build -t ferrofire-testpeers docker/testpeers          (arm64 and amd64: every stage is multi-arch)
 # Licence policy: opendnp3 is Apache-2.0. libiec61850 (and mbpoll, from Debian) are GPL-3.0 and are shipped here ONLY as separate test peers in
-# its own binaries; ferrofire never links it, and nothing in this image is copied into a ferrofire release artefact.
+# its own binaries; ferrofire never links it (iec61850bean Apache-2.0, go-iec61850 MIT, dnp3py MIT, igs/telcon permissive, Tahu/Paho/Mosquitto EPL-2.0), and nothing in this image is copied into a ferrofire release artefact.
 ARG ZEEK_VERSION=9.0.1
 
 FROM debian:trixie AS build
@@ -49,6 +49,13 @@ RUN mkdir -p /out/bin /out/licenses \
  && cp /src/igs-iec-tase2/target/release/igstase2-server /src/igs-iec-tase2/target/release/igstase2-client /src/telcon-tase2/target/release/tase2-server /src/telcon-tase2/target/release/tase2-client /out/bin/ \
  && cp /src/igs-iec-tase2/LICENSE /out/licenses/igs-APACHE-2.0 && cp /src/telcon-tase2/LICENSE-MIT /out/licenses/telcon-MIT && cp /src/telcon-tase2/LICENSE-APACHE /out/licenses/telcon-APACHE-2.0; ls /out/licenses /out/bin
 
+# otfabric/go-iec61850 v1.16.2 (MIT): a Go MMS + GOOSE stack independent of libiec61850 and iec61850-rs. goiec/ is our ~100-line client over it
+# (go.sum pins the module graph); it runs as its own process (conformance/iec61850) and is never in ferrofire's Cargo graph.
+FROM golang:1.26 AS gopeers
+COPY goiec/ /src/goiec/
+RUN cd /src/goiec && go build -trimpath -o /out/bin/ffgoiec . \
+ && mkdir -p /out/licenses && cp "$(go list -m -f '{{.Dir}}' github.com/otfabric/go-iec61850)/LICENSE" /out/licenses/go-iec61850-MIT
+
 FROM zeek/zeek:${ZEEK_VERSION}
 RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
       tshark tcpdump nmap python3 ca-certificates git cmake g++ make libpcap-dev >/dev/null \
@@ -77,6 +84,22 @@ RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq 
 COPY tahu/ /opt/tahu-host/
 RUN cd /opt/tahu-host && mvn -q -B dependency:copy-dependencies -DoutputDirectory=lib >/dev/null && javac -cp 'lib/*' TahuHost.java \
  && rm -rf /root/.m2 && ls lib | grep -c jar
+# Independent IEC 61850 / DNP3 peers (conformance/iec61850, conformance/dnp3):
+#  - iec61850bean 1.9.0 (Apache-2.0, Fraunhofer ISE/OpenMUC heritage, Java, own ASN.1 codec) with asn1bean 1.12.0 and slf4j 1.7.25, from Maven
+#    Central, sha256-pinned; run with `java -cp '/opt/iec61850bean/*' com.beanit.iec61850bean.app.ConsoleClient` (the JDK is installed above).
+#  - ffgoiec (ours) on otfabric/go-iec61850 v1.16.2 (MIT), built in the gopeers stage.
+#  - dnp3py 0.6.0 (PNNL, MIT, pure Python master), in a venv so Debian's pip policy stays untouched; module `dnp3`.
+RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends curl python3-venv >/dev/null && rm -rf /var/lib/apt/lists/*
+RUN set -e; mkdir -p /opt/iec61850bean && cd /opt/iec61850bean; M=https://repo1.maven.org/maven2; \
+    get() { curl -fsSL --retry 3 -o "$(basename "$1")" "$M/$1"; echo "$2  $(basename "$1")" | sha256sum -c -; }; \
+    get com/beanit/iec61850bean/1.9.0/iec61850bean-1.9.0.jar df114f512c4f9855ac977e52d204eb954d6e4f68842ac00f28ce9a678e879bcb; \
+    get com/beanit/asn1bean/1.12.0/asn1bean-1.12.0.jar 9fa33202dcf1d00f84f289000b0f937aa910b74f771976a625fd638b6f270878; \
+    get org/slf4j/slf4j-api/1.7.25/slf4j-api-1.7.25.jar 18c4a0095d5c1da6b817592e767bb23d29dd2f560ad74df75ff3961dbde25b79; \
+    get org/slf4j/slf4j-simple/1.7.25/slf4j-simple-1.7.25.jar 0966e86fffa5be52d3d9e7b89dd674d98a03eed0a454fbaf7c1bd9493bd9d874
+RUN python3 -m venv /opt/dnp3py && /opt/dnp3py/bin/pip install -q --no-cache-dir dnp3py==0.6.0 \
+ && /opt/dnp3py/bin/python -c "import dnp3.master"
+COPY --from=gopeers /out/bin/ /usr/local/bin/
+COPY --from=gopeers /out/licenses/ /usr/share/doc/ferrofire-testpeers/
 COPY --from=build /out/bin/ /usr/local/bin/
 COPY --from=build /out/licenses/ /usr/share/doc/ferrofire-testpeers/
 CMD ["bash"]

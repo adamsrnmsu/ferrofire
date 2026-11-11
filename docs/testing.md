@@ -171,11 +171,20 @@ datastore after each step, as the DNP3 transcripts do for the wire.
   SBO analog output and a direct analog output against stock and against ours; tshark must find 0 malformed frames and no
   expert Error or Warn (a bad checksum is only a Warn, so Warns count); Zeek's ICSNPP `dnp3.log` and `dnp3_control.log` rows are
   asserted. `conformance/dnp3/smoke.sh` runs the stock `dnp3-client` against ours and reads `brkr:true` and `load-power:400.5`.
+- **dnp3py 0.6.0** ([craigpnnl/dnp3py](https://github.com/craigpnnl/dnp3py), PNNL, MIT, pure Python, 2026), a master written independently
+  of opendnp3 (ww-otj.55): `conformance/dnp3/dnp3py_master.py` does an integrity poll, a class poll, a direct operate (g41 idx 2), a
+  select + operate (g41 idx 1) and a direct CROB (g12 idx 5), and asserts the point sets it decoded (binary inputs 2 and 5, analog inputs
+  0 to 2). It exposes no control statuses, so `check.sh` reads them off the wire: four responses, all status 0 (SUCCESS). Result: it
+  passes against the stock device and against ours, with tshark expert info clean. No disagreement found.
+- Third-party captures (`tests/pcaps/public/fetch.sh`, ITI/ICS-Security-Tools, 188 DNP3 files): `check-parsers.sh` runs tshark and Zeek
+  icsnpp-dnp3 over them. Baseline: 214 captures (DNP3 plus MMS and GOOSE), 4388 packets, 7 malformed (all in files named or built to be
+  malformed: `direct_operate_crob_malform_but_good_crc`, `write_vto_empty_string`, `dataset_exchange`, two opendnp3 conformance dumps), 33
+  expert rows; Zeek: 0 failures, 3 weird.log rows over 188 files. Parser parity only: it says nothing about our outstation.
 - Findings recorded as tests (things the stock device does that the spec did not say): two-octet ranges whenever a type has a
   point above index 255; events before static data, in the order they happened; CON on every non-final fragment; NEED_TIME 30 s
   after a time write; a count qualifier on static data is NO_FUNC_CODE_SUPPORT; a request with any unknown object is refused whole.
 
-**Oracle.** The stock bennu outstation (byte for byte), opendnp3 3.1.2, tshark, Zeek with CISA icsnpp-dnp3.
+**Oracle.** The stock bennu outstation (byte for byte), opendnp3 3.1.2, dnp3py 0.6.0 (a second, unrelated master), tshark, Zeek with CISA icsnpp-dnp3.
 
 **Run.** `make test` (replay); `make testpeers`, then `make conformance PROTO=dnp3` against the stock device or `DUT=rust make
 conformance PROTO=dnp3` against ours; `make diff-dnp3` (live, in containers, build `target-linux/debug/ferrofire` with `make
@@ -192,7 +201,14 @@ same bridge, and one probe's publishes land on the other (this contaminated the 
   none exists yet, so an amd64 build has not been exercised.
 
 **Ideas.** Run opendnp3's own outstation test suite or a DNP3 conformance tool against ours (the DNP3 Users Group publishes
-conformance test procedures; whether a free tool exists was not checked). Build and run the testpeers image on amd64.
+conformance test procedures; whether a free tool exists was not checked). Build and run the testpeers image on amd64. More
+independent masters, found by the ww-otj.55 search and not yet run: [otfabric/dnp3-interop](https://github.com/otfabric/dnp3-interop)
+(MIT; ghcr.io images of five stacks with a JSON-lines contract: opendnp3, DSC go-dnp3, dnp3py, cB-Sigma dnp3, nfm-dnp3; arm64
+manifests unchecked), [cB-Sigma/dnp3](https://github.com/cB-Sigma/dnp3) (Apache-2.0, Go, Secure Authentication v5, file transfer),
+[otfabric/go-dnp3](https://github.com/otfabric/go-dnp3) (MIT; possibly the same author family as cB-Sigma, so not two opinions) and
+[dscsystems/go-dnp3](https://github.com/dscsystems/go-dnp3) (GPL-3.0, experimental). All are 2026 single-author projects, several
+with a CLAUDE.md: they add diversity, not authority. Secure Authentication and file transfer are what they would exercise and the
+stock goldens cannot.
 
 ## IEC 61850 (MMS and GOOSE)
 
@@ -203,7 +219,17 @@ our server on `lo`; `check.sh` asserts tshark's `mms` Initiate, GetNameList, Rea
 (appid, gocbRef, data set, entries) and what the peers printed. Values are not asserted, because the device's inputs come from
 whatever publishes on the multicast group. 0 malformed frames and no expert warnings.
 
-**Oracle.** libiec61850 v1.6.2 (GPL-3.0, built and run only as test peers, never linked), tshark. No stock oracle: bennu never
+Two further clients, independent of libiec61850 and of `iec61850-rs` (ww-otj.55), run in the same capture:
+- **iec61850bean 1.9.0** ([beanit/iec61850bean](https://github.com/beanit/iec61850bean), Apache-2.0, Java, own ASN.1 codec, Maven Central,
+  sha256-pinned in the Dockerfile; last commit 2023-06, stable). `ConsoleClient` with `m` and `ga`: association, GetNameList and
+  GetVariableAccessAttributes for the whole model, the `LLN0.Events` data set, and a read of all data. `check.sh` fails on a missing model,
+  data set, quality fields, an incomplete `ga`, or any exception. Result: no disagreement.
+- **otfabric/go-iec61850 v1.16.2** ([otfabric/go-iec61850](https://github.com/otfabric/go-iec61850), MIT, Go; `docker/testpeers/goiec/` is our
+  ~100-line client over it): browse of logical devices, nodes and data objects, the data set (12 members), the GoCB read back
+  (GoEna true, confRev 1), a typed read of `AnIn1.mag.f[MX]`, and a GOOSE subscriber on `lo` that decodes gocbRef, datSet, appid 1000,
+  confRev and 12 entries. Result: no disagreement. Cosmetic: its browse lists the `LLN0` control blocks as data objects.
+
+**Oracle.** libiec61850 v1.6.2 (GPL-3.0, built and run only as test peers, never linked), iec61850bean 1.9.0, go-iec61850 v1.16.2, tshark. No stock oracle: bennu never
 loads an IEC 61850 server. Zeek has no MMS or GOOSE parser, so that step prints SKIP.
 
 **Run.** `cargo test`; `make testpeers` (rebuild after the Dockerfile changed: images built before 2026-11-10 lack the control
@@ -212,16 +238,26 @@ client and GOOSE subscriber); `make conformance PROTO=iec61850`; `cargo +nightly
 **Gaps.**
 - The server is built on `iec61850-rs` 0.4.0, a pre-1.0 crate from a single author (first release 2026-09-05; every minor
   version breaks; pinned with `=0.4.0`). Its claims of libiec61850 interop are its own; ours is one stack, one version.
-- One independent peer. An agreement between `iec61850-rs` and ferrofire's use of it is not independent of the library.
-- GOOSE: the subscriber is libiec61850's, which does not deliver frames to `01-0C-CD-01-00-00` (observed on `lo`), so the default
-  destination is `...-00-01`. No test on a physical L2 segment. No subscriber in ferrofire. No TLS (62351-3), 62351-6
+- Three clients now (libiec61850, bean, go-iec61850), but none of them is a server, and none was run against a differently-configured model
+  (all use libiec61850's `simpleIOGenericIO` names). The Go stack's author cross-tests it against libiec61850 and bean, so its agreement
+  is partly theirs. An agreement between `iec61850-rs` and ferrofire's use of it is not independent of the library.
+- GOOSE: libiec61850's `goose_subscriber_example` receives nothing on `lo` (ww-otj.72). Cause found: its Linux receiver attaches the kernel
+  filter `ether proto 0x88b8` (offset 12), which drops VLAN priority-tagged frames when the tag is inline, as on `lo` and virtual links; a
+  NIC with VLAN offload strips the tag first. Our frames are tagged (VID 0, priority 4, as the standard recommends) and so are libiec61850's
+  own publisher's: its publisher and subscriber examples do not hear each other on `lo` either. Not a ferrofire fault; the step is
+  replaced by go-iec61850's subscriber, which decodes the tagged stream. The subscriber binary stays in the image. libiec61850's filter
+  also does not deliver frames to `01-0C-CD-01-00-00` (observed on `lo`), so the default destination is `...-00-01`. No test on a physical L2 segment. No subscriber in ferrofire. No TLS (62351-3), 62351-6
   authentication or R-GOOSE.
 - Values and control semantics (select-before-operate state machines) are exercised, not asserted against a reference.
 
 **Ideas.** Differential fuzzing: feed the same mutated MMS PDUs to libiec61850's server and to ours and compare the response
 class (reply, error, reject, close); a crash or a hang on either is a finding, and so is any disagreement worth reading.
-Run a second client stack (OpenMUC's Java OpenIEC61850, or a vendor client such as Triangle MicroWorks' test harness) against
-ours. Run an IED simulator's SCL through our SCL loader. Attend an interoperability event (IEC 61850 UCA International Users
+Run more stacks against ours: [otfabric/iec61850-interop](https://github.com/otfabric/iec61850-interop) (MIT; pins libiec61850, bean,
+dscsystems/go-iec61850, csp0924/iec61850-rust and cB-Sigma in ghcr.io images behind one JSON-lines adapter contract; arm64 manifests
+unchecked), [csp0924/iec61850-rust](https://github.com/csp0924/iec61850-rust) (MIT or Apache-2.0, own COTP to ISO 9506 stack, a PICS, nine
+fuzz targets; check it shares no code with `iec61850-rs`), [dscsystems/go-iec61850](https://github.com/dscsystems/go-iec61850) (GPL-3.0, a
+terminal client `iedx`, 62351-3/-4) and a vendor client such as Triangle MicroWorks' test harness. Servers for the reverse direction
+(our client against theirs): bean's `ConsoleServer`, `ied-server` of go-iec61850 and cB-Sigma's `iedsim`, all SCL-driven. Run an IED simulator's SCL through our SCL loader. Attend an interoperability event (IEC 61850 UCA International Users
 Group runs them) and bring the server.
 
 ## ICCP / TASE.2 server
@@ -380,6 +416,91 @@ and `mqtt_net.rs` use `rumqttc` on both sides.
 - Retained messages on a command topic are ignored, so a command cannot be made persistent through the broker either.
 - Network faults between device and broker (loss, delay) are not injected; only a refused connection, a restart and a kill.
 
+## Independent peers and public captures (ww-otj.55)
+
+Several of our tests are circular (our client against our server; ICCP layouts recalled once and shared by the server, the test client and
+both parsers). ww-otj.55 searched GitHub, Maven, PyPI, crates.io and the literature (November 2026) for peers and captures that are not our
+code and not libiec61850, then ran the ones that built. Dates, licences and activity below come from the GitHub and crates.io APIs on
+2026-11-10; behaviour claims are from READMEs unless the table says we ran it. Smoke report: `/var/tmp/peer-smoke.md` (not committed).
+
+**In the testpeers image and the harness now** (all separate processes, pinned, never in the Cargo graph):
+
+| Peer | Licence | Protocol | Check | Result |
+|---|---|---|---|---|
+| iec61850bean 1.9.0 | Apache-2.0 | IEC 61850 MMS client | `conformance/iec61850` (6 assertions) | agrees |
+| otfabric/go-iec61850 1.16.2 via `ffgoiec` | MIT | MMS client, GOOSE subscriber | `conformance/iec61850` (5 assertions) | agrees; replaces the libiec61850 GOOSE step (ww-otj.72) |
+| dnp3py 0.6.0 | MIT | DNP3 master | `conformance/dnp3` (8 + 2 assertions) | agrees, against stock and against ours |
+| igs-iec-tase2, telcon-tase2 | Apache-2.0; MIT OR Apache-2.0 | ICCP client and server | `conformance/iccp` (ww-otj.67; section above) | found F1 to F3 and F8, fixed; see below |
+
+**ICCP smoke findings** (filed and tracked in the ICCP section, not repeated here): F1 and F7 nesting level and service-error access code,
+ww-otj.61 (fixed); F2 12-bit `Supported_Features`, ww-otj.62 (fixed); F3 `TASE2_Version` 2000.8, ww-otj.63 (fixed); F4 Transfer_Set_Name
+scope as `unsigned`, ww-otj.64 (open); F5 and F6 13-member `DSTransferSet`, Buffer_Time, data sets with `Transfer_Set_Name` members and
+`variableListName` reports, ww-otj.65 (open); F8 calling AP-title, ww-otj.66 (fixed). Related and open: ww-otj.69 (QTimeTag order), .70, .71, .73.
+
+**Gaps this closed.** DNP3 had one master family (opendnp3); IEC 61850 had one client stack (libiec61850) under a server built on one young
+library; both now have independent clients that agree. ICCP's recalled layouts now meet two independent stacks and two real captures (the
+flag-octet layout decodes about 190 000 real quality octets sensibly; the other disagreements are listed above).
+
+**Public captures.**
+
+| Capture | Source and terms | Contents | Used |
+|---|---|---|---|
+| `mms.pcap.gz` | [Wireshark wiki](https://wiki.wireshark.org/MMS); no terms stated | 2005 ICCP between two utilities: association, 12-bit `Supported_Features`, TASE2_Version 1996.8, 12-member DSTransferSet writes, 115 reports | ICCP fetch script (ww-otj.67), never committed |
+| `iccp_with_switchover_anon.pcap` | [chaugan/wireshark-iccp-dissector](https://github.com/chaugan/wireshark-iccp-dissector), repo GPL-2.0; origin unconfirmed | 7972 frames, 9 associations, TASE2_Version 2000.8, 13-member transfer sets, 1895 `variableListName` reports | same |
+| ITI/ICS-Security-Tools `pcaps/dnp3`, `pcaps/IEC61850` | [ITI/ICS-Security-Tools](https://github.com/ITI/ICS-Security-Tools), repo CC-BY-4.0; per-capture terms unstated | 188 DNP3 files (authentication, file transfer, restart, unsolicited, CROB, malformed), 21 single-service MMS PDUs (cancel, kill, takeControl, getDomainAttributes...), GOOSE, one MMS+GOOSE session | `tests/pcaps/public/fetch.sh` (pinned commit, sha256 per file) and `check-parsers.sh`; not committed |
+| DNP3 Intrusion Detection Dataset | [Zenodo 7348493](https://zenodo.org/records/7348493), CC BY 4.0 | nine attack scenarios; benign traffic is opendnp3, so not an oracle | not used |
+| Wireshark `test/captures` `dnp_coverage`, `iec104_coverage` | [wireshark/wireshark](https://github.com/wireshark/wireshark/tree/master/test/captures), GPL-2.0 repo, per-file terms unstated | 5 and 14 KB of dissector coverage | not used |
+| [automayt/ICS-pcap](https://github.com/automayt/ICS-pcap) | no licence; git-lfs | S7, ENIP, FINS, GE-SRTP, BACnet, Modbus, IEC 104 and more | not used; the only source of FINS and GE-SRTP traffic |
+| Datasets with DOIs (verified at Crossref / DataCite 2026-11-10; contents not opened) | [10.5281/zenodo.19704482](https://doi.org/10.5281/zenodo.19704482) IEC104-IDS-2025 (CC BY 4.0, real RTU and breaker); [10.21227/zb9s-yg93](https://doi.org/10.21227/zb9s-yg93) IEC 104 command abuse, raw pcaps; [10.21227/xxq7-sk20](https://doi.org/10.21227/xxq7-sk20) GOOSE and SV, raw pcaps; [10.5281/zenodo.20696376](https://doi.org/10.5281/zenodo.20696376) MMS supervisory control (normalized records, not raw pcap); [10.5281/zenodo.19969459](https://doi.org/10.5281/zenodo.19969459) GOOSEIDRS (CSV); [10.5281/zenodo.8375656](https://doi.org/10.5281/zenodo.8375656) Modbus+MMS MITM (xlsx tables only) | | not used |
+
+Only the ITI `dnp3` and `IEC61850` folders are fetched; its other folders (S7, ENIP, Modbus, C37.118, BACnet...) are not. No public ICCP capture other than the
+two above turned up. The Brno traffic generator paper and the other literature below state no data release.
+
+**Remaining options, by protocol.** None of these has been run.
+
+| Protocol | Candidate | Licence, language, activity | Independent of what we use? | Would check |
+|---|---|---|---|---|
+| ICCP | [cB-Sigma/iec61850-sim](https://github.com/cB-Sigma/iec61850-sim) `iccpsim` | Apache-2.0, Go, 2026-10, v0.1.0 | yes, own OSI stack | a third independent TASE.2 server; blocks 1 to 5 and 7 |
+| ICCP | [gazzasaur/rusty-iccp](https://github.com/gazzasaur/rusty-iccp) | MIT, Rust, 2026-11, 0.9.3 | yes; initiator library only (igs recorded it does not serve) | association path, AP-title handling |
+| ICCP | [riclolsen/json-scada](https://github.com/riclolsen/json-scada) ICCP drivers | GPL-3.0 drivers, closed Go library, prebuilt arm64 and amd64 binaries; needs MongoDB; very active | plausibly (native Go) but unverifiable | the best field-proven client: bilateral tables, DSTS, `*QTimeTagExtended`; licence of the binary unclear |
+| ICCP | [boosali/iccp-sim](https://github.com/boosali/iccp-sim) | no licence, vendors telcon crates | no (telcon) | convenience only |
+| ICCP | FreeTase2, fcovatti/iccp, fledge-south/north-tase2 | GPL-3.0 / GPL-3.0 / Apache-2.0 with commercial MZ libtase2 | **no**: all wrap libiec61850 or libtase2 | nothing independent (FreeTase2 is a Python wrapper over libiec61850, dormant since 2020) |
+| ICCP | Triangle MicroWorks IEC 60870-6, MZ libtase2, SISCO, Ipesoft D2000 | commercial | yes | no free evaluation terms found |
+| IEC 104 | [j60870](https://github.com/gythialy/j60870) (OpenMUC lineage) | GPL-3.0 (commercial too), Java, 2026-11 | yes (separate from lib60870) | APCI state machine, ASDU codec, interrogation, SBO; **ferrofire has no 104 server to test** |
+| IEC 104 | [mz-automation/lib60870](https://github.com/mz-automation/lib60870) | GPL-3.0, C, 2026-08 | the reference stack; c104 and the Rust `lib60870` crate wrap it | same; primary oracle once a server exists |
+| IEC 104 | [otfabric/go-iec104](https://github.com/otfabric/go-iec104) + `iec104ctl`; wendy512/iec104; cB-Sigma/iec60870 | MIT; Apache-2.0; Apache-2.0, Go | yes | scripted clients; go-iec104 CI cross-tests j60870 and lib60870 |
+| DNP3 | dnp3-interop images, cB-Sigma/dnp3, go-dnp3 | see the DNP3 section | yes | Secure Authentication v5, file transfer |
+| BACnet/IP | [bacnet-stack](https://github.com/bacnet-stack/bacnet-stack) apps (`bacwi`, `bacrp`, `bacrpm`, `bacwp`) | GPL-2.0 with GCC exception, C, v1.5.10 2026-10 | yes | Who-Is, ReadProperty(Multiple), WriteProperty; Tier 2, no BACnet server module exists yet |
+| S7comm | [python-snap7](https://github.com/gijzelaerr/python-snap7) 3.x | MIT, Python, 2026-11-08 | yes | COTP, setup, ReadVar/WriteVar; Tier 2 |
+| OPC UA | open62541 (MPL-2.0), OPC Foundation UA-.NETStandard, asyncua (LGPL-3.0), Eclipse Milo (EPL-2.0) | C, C#, Python, Java; all active | mutually independent | hello/ack handshake, secure channel, browse, subscriptions; Tier 2 |
+| EtherNet/IP | [OpENer](https://github.com/EIPStackGroup/OpENer), pycomm3, cpppo | BSD-style, MIT, GPL-3/commercial | yes | ListIdentity, RegisterSession, CIP; Tier 2 |
+| C37.118 | [pyPMU](https://github.com/iicsys/pypmu), openPDC | BSD-3, MIT | yes | CFG-2, data frames; ITI has four C37.118 pcaps |
+| MQTT / Sparkplug | Mosquitto, Paho, Tahu | already in use (MQTT section) | yes | done |
+| Modbus | libmodbus tests; mbpoll is libmodbus | LGPL-2.1, C | libmodbus: **not** independent of mbpoll | the server is being merged separately; its peers are in the Modbus section |
+| MMS framing, GOOSE | [MatrixEditor/icspacket](https://github.com/MatrixEditor/icspacket) (GPL-3.0, Python, ASN.1 for COTP/ACSE/MMS); goosestalker, pygoose (Scapy) | 2026-08; 2021; 2025 | yes | raw PDU crafting for the TASE.2 and 61850 servers; malformed-PDU fuzz |
+
+Excluded as wrappers of libiec61850: pyiec61850-ng, the PyPI `iec61850` package (a façade over a Rust workspace we did not trace),
+OpenPLC61850, libiec61850 forks.
+
+**Literature** (each DOI resolves at Crossref; the papers state what they say, we have not obtained the full texts of the paywalled ones):
+- Ilgner, Cika, Stusek, *SCADA-Based Message Generator for Multi-Vendor Smart Grids: Distributed Integration and Verification of TASE.2*,
+  Sensors 2021, [10.3390/s21206793](https://doi.org/10.3390/s21206793) (CC BY 4.0; extends the ICUMT 2020 paper
+  [10.1109/icumt51630.2020.9222445](https://doi.org/10.1109/icumt51630.2020.9222445)). Message-flow figure of the join procedure and the
+  DSTS negotiation order, to compare with `transfer.rs`. No byte layouts, no released code or captures.
+- *Secure ICCP Final Report*, US DOE / OSTI 2018, [10.2172/1436849](https://doi.org/10.2172/1436849). The PDF was not retrievable; the
+  secure-association profile (TLS, 62351) is the part to read if we add 62351-3.
+- *Examination of ELCOM-90, TASE.1 and ICCP/TASE.2*, IEEE Trans. Power Delivery,
+  [10.1109/61.584329](https://doi.org/10.1109/61.584329), and the Springer chapter *Telecontrol Standard IEC 60870-6 TASE.2 Globally
+  Adopted*, [10.1007/978-3-7091-6421-1_5](https://doi.org/10.1007/978-3-7091-6421-1_5): conformance blocks and profile overviews (paywalled; not
+  confirmed to hold object tables).
+- GOOSE Secure dataset paper, Energies 2024, [10.3390/en17236098](https://doi.org/10.3390/en17236098).
+None gives the byte layouts of `Bilateral_Table`, `Transfer_Set`, DS conditions or `Supported_Features`. Those still need the IEC 60870-6-503
+and -802 text (ICCP section, idea 1).
+
+**Still open.** ICCP layouts are not checked against the standard. No IEC 60870-5-104 server exists to test j60870 or lib60870 (file a bead when
+one is planned). Nothing was run on amd64. The "remaining options" above are untried; every one is a young single-author project except the
+bacnet-stack, open62541, OpENer, Mosquitto, python-snap7 and lib60870 group, which are the ones to prefer when the Tier 2 modules land.
+
 ## Quality gates
 
 These apply to the whole of `src/`, from [ub-mode](https://github.com/unclebob/ub-mode); numbers and history are in
@@ -423,8 +544,8 @@ Limits: each board is one run on one host; none exercises ferrofire's own field 
 ## Known gaps in one list
 
 1. ICCP/TASE.2 object layouts are from recall, checked against two young peers (igs, telcon) and two real captures but not the standard; the QTimeTag member order is disputed between the peers (ww-otj.69).
-2. IEC 61850 server rests on a young single-author library; one independent peer stack.
-3. No amd64 testpeers build exercised (the publish workflow exists, no tag has been pushed).
+2. IEC 61850 server rests on a young single-author library; three independent client stacks (libiec61850, bean, go-iec61850) agree with it, but no independent server has been used against our client side, and none has run a model other than libiec61850's example.
+3. No amd64 testpeers build exercised (the new peers are multi-arch: bean is Java, go-iec61850 pure Go, dnp3py pure Python) (the publish workflow exists, no tag has been pushed).
 4. Fuzzing needs a nightly toolchain, and the CI run is 10 s per target.
 5. No loss measured on a real network; netem loss is uniform.
 6. Waterway physics golden comes from ferrofire's own earlier code; PYPOWER is the only power-flow reference.
