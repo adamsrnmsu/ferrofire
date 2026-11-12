@@ -1,0 +1,64 @@
+# A HiSLIP session as the instrument's state machine sees it, with no sockets. `> sync TYPE CTL PARAM "payload"` is a message from the
+# client on the synchronous channel, `> async ...` one on the asynchronous channel; the `<` lines after it are exactly the frames that
+# come back, in order (none: nothing). CTL is decimal, PARAM hexadecimal (a MessageID, normally), the payload a quoted string with
+# \n, \" and \\ escapes. `@ connect` is a new session. {version} is this crate's version.
+
+# Queries are answered in one DataEND with the MessageID of the query; a client that has read everything sets RMT-delivered (CTL 1).
+> sync DATA_END 1 FFFFFF00 "*IDN?"
+< DATA_END 0 FFFFFF00 "ferrofire,rtu-1,0,{version}\n"
+> sync DATA_END 1 FFFFFF02 "MEAS:SCAL:LEVEL?;:MEAS:BIN:ALARM?"
+< DATA_END 0 FFFFFF02 "12.5;1\n"
+> sync DATA_END 1 FFFFFF04 "*CLS"
+
+# A message in pieces is one message: it runs at the DataEND.
+> sync DATA 1 FFFFFF06 "*ID"
+> sync DATA 1 FFFFFF06 "N?;*OP"
+> sync DATA_END 1 FFFFFF06 "C?"
+< DATA_END 0 FFFFFF06 "ferrofire,rtu-1,0,{version};1\n"
+
+# The status byte on the asynchronous channel: MAV while the last response has not been read.
+> async ASYNC_STATUS_QUERY 0 FFFFFF06 ""
+< ASYNC_STATUS_RESPONSE 16 0 ""
+> async ASYNC_STATUS_QUERY 1 FFFFFF06 ""
+< ASYNC_STATUS_RESPONSE 0 0 ""
+
+# -410 Query INTERRUPTED: a message started (RMT-delivered clear) over a response nobody read. The Interrupted names the lost response.
+> sync DATA_END 0 FFFFFF08 "*OPC?"
+< DATA_END 0 FFFFFF08 "1\n"
+> sync DATA_END 0 FFFFFF0A "*OPC?"
+< INTERRUPTED 0 FFFFFF08 ""
+< DATA_END 0 FFFFFF0A "1\n"
+> sync DATA_END 1 FFFFFF0C "SYST:ERR?"
+< DATA_END 0 FFFFFF0C "-410,\"Query INTERRUPTED\"\n"
+> sync DATA_END 1 FFFFFF0E "SYST:ERR?"
+< DATA_END 0 FFFFFF0E "0,\"No error\"\n"
+
+# -420 Query UNTERMINATED: a message that never got its DataEND is given up when another starts; the query in it is not run.
+> sync DATA 1 FFFFFF10 "*IDN?"
+> sync DATA_END 1 FFFFFF12 "SYST:ERR?"
+< DATA_END 0 FFFFFF12 "-420,\"Query UNTERMINATED\"\n"
+> sync DATA 1 FFFFFF14 "*ESE 7"
+> sync DATA_END 1 FFFFFF16 "*ESE?"
+< DATA_END 0 FFFFFF16 "0\n"
+
+# The maximum message size of the client cuts a response into frames (272 bytes until it says; the payload is 16 less).
+> async ASYNC_MAX_SIZE 0 0 "\0\0\0\0\0\0\0\x40"
+< ASYNC_MAX_SIZE_RESPONSE 0 0 "\0\0\0\0\0\x10\0\0"
+
+# Device clear: the async request is acknowledged, the sync channel drops messages until DeviceClearComplete, and no error is raised.
+> sync DATA 1 FFFFFF18 "*IDN?"
+> async ASYNC_DEVICE_CLEAR 0 0 ""
+< ASYNC_DEVICE_CLEAR_ACK 0 0 ""
+> sync DATA_END 1 FFFFFF1A "*IDN?"
+> sync DEVICE_CLEAR_COMPLETE 0 0 ""
+< DEVICE_CLEAR_ACK 0 0 ""
+> sync DATA_END 1 FFFFFF00 "SYST:ERR:COUN?"
+< DATA_END 0 FFFFFF00 "0\n"
+
+# Messages the server does not know are an Error, not the end; remote/local is accepted.
+> sync ASYNC_LOCK 0 0 ""
+< ERROR 1 0 "unrecognized message type"
+> async DATA 0 0 ""
+< ERROR 1 0 "unrecognized message type"
+> async ASYNC_REMOTE_LOCAL 3 FFFFFF00 ""
+< ASYNC_REMOTE_LOCAL_RESPONSE 0 0 ""
