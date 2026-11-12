@@ -805,7 +805,7 @@ mod tests {
             assert_eq!(r.ask("*ESR?"), format!("{bit}\n"), "{line}");
             assert_eq!(r.ask("*ESR?"), "0\n", "{line}: cleared by the read");
         }
-        let mut s = Session::new();
+        let s = Session::new();
         for (code, bit) in [
             (-100, 32),
             (-199, 32),
