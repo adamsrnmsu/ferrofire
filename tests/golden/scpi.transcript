@@ -211,3 +211,57 @@
 < 0,"No error"
 > *ESR?
 < 0
+
+# A number too long for a double is an invalid number (-121); only an exponent past the range is -123.
+@ connect
+> SOUR:SETPOINT 99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999
+> SYST:ERR?
+< -121,"Invalid character in number"
+> SOUR:SETPOINT 1E999
+> SYST:ERR?
+< -123,"Exponent too large"
+
+# *RST sets the writable tags that have a <default-value> to it, and leaves the error queue and the registers alone (IEEE 488.2 10.32).
+@ connect
+@ drain
+@ idle setpoint
+> *ESE 33
+> *SRE 8
+> *FOO
+> *RST
+@ queued setpoint
+> *ESE?
+< 33
+> *SRE?
+< 8
+> SYST:ERR:COUN?
+< 1
+> *ESR?
+< 32
+> SOUR:SETPOINT?
+< 1000
+> SYST:ERR?
+< -113,"Undefined header;*FOO"
+
+# One instrument, two connections: the second sees the error the first caused, and reads (so empties) the same queue and registers.
+@ connect
+@ session 0
+> *ESE 32
+> *FOO
+@ session 1
+> *ESE?
+< 32
+> *STB?
+< 36
+> SYST:ERR:COUN?
+< 1
+> SYST:ERR?
+< -113,"Undefined header;*FOO"
+@ session 0
+> SYST:ERR:COUN?
+< 0
+> *ESR?
+< 32
+@ session 1
+> *ESR?
+< 0

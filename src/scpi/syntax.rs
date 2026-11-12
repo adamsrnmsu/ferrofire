@@ -149,14 +149,19 @@ fn number_len(b: &[u8]) -> usize {
     i
 }
 
-/// -121 invalid character in number, -131 invalid suffix (`5V`), -123 exponent too large.
+/// -121 invalid character in number (also a mantissa too long to be a number), -131 invalid suffix (`5V`), -123 exponent too large
+/// (only when the number has an exponent).
 fn number(t: &str) -> Result<f64, i32> {
     let n = number_len(t.as_bytes());
     match t[n..].trim_start().chars().next() {
         _ if n == 0 => Err(-121),
         Some(c) if c.is_ascii_alphabetic() => Err(-131),
         Some(_) => Err(-121),
-        None => t.parse::<f64>().ok().filter(|x| x.is_finite()).ok_or(-123),
+        None => match t.parse::<f64>() {
+            Ok(x) if x.is_finite() => Ok(x),
+            _ if t.contains(['e', 'E']) => Err(-123),
+            _ => Err(-121),
+        },
     }
 }
 
@@ -263,11 +268,35 @@ mod tests {
             ("5 V", -131),
             ("1e999", -123),
             ("-1e999", -123),
+            ("1E+400", -123),
             ("--1", -121),
         ] {
             assert_eq!(params(text), Err(code), "{text:?}");
         }
         assert_eq!(params("inf"), Ok(vec![Param::Word("INF".into())]));
+    }
+
+    #[test]
+    fn a_number_too_long_for_a_double_is_invalid_and_only_an_exponent_is_too_large() {
+        let long = "9".repeat(400);
+        assert_eq!(params(&long), Err(-121), "400 digits, no exponent");
+        assert_eq!(params(&format!("-{long}.5")), Err(-121));
+        assert_eq!(
+            params(&format!("{long}E1")),
+            Err(-123),
+            "the exponent takes it past the range"
+        );
+        assert_eq!(params(&format!("{long}E-100")), Ok(vec![Param::Num(1e300)]));
+        assert_eq!(
+            params("1E-999999"),
+            Ok(vec![Param::Num(0.0)]),
+            "underflow is zero, not an error"
+        );
+        assert_eq!(
+            params(&"9".repeat(300)).map(|p| p.len()),
+            Ok(1),
+            "300 digits fit"
+        );
     }
 
     #[test]

@@ -23,7 +23,8 @@ struct Device {
 fn start(inner: &str) -> Device {
     let port = free_port();
     let (server, store) = load(&format!(
-        "<endpoint>tcp://127.0.0.1:{port}</endpoint><event-logging>/dev/null</event-logging>{inner}"
+        "<endpoint>tcp://127.0.0.1:{port}</endpoint><event-logging>/dev/null</event-logging>
+         <hislip-endpoint>none</hislip-endpoint><vxi11-endpoint>none</vxi11-endpoint>{inner}"
     ));
     let stop = CancellationToken::new();
     let task = tokio::spawn(server.run(store.clone(), stop.clone()));
@@ -124,6 +125,43 @@ async fn a_message_cut_by_a_half_close_is_answered_before_the_server_closes() {
         drain(&mut s, Duration::from_secs(2)).await,
         (IDN.into(), true)
     );
+    d.stop.cancel();
+}
+
+#[tokio::test]
+async fn a_bare_carriage_return_ends_a_line_too() {
+    let d = start("");
+    let mut s = connect(d.port).await;
+    s.write_all(b"*IDN?\r*OPC?\r*TST?\r\n").await.unwrap();
+    assert_eq!(
+        drain(&mut s, Duration::from_millis(300)).await,
+        (format!("{IDN}1\n0\n"), false)
+    );
+    d.stop.cancel();
+}
+
+#[tokio::test]
+async fn the_status_system_is_the_instruments_unless_the_scope_is_the_connection() {
+    let d = start("");
+    let (mut a, mut b) = (connect(d.port).await, connect(d.port).await);
+    a.write_all(b"*ESE 32\nFOO\n").await.unwrap();
+    assert_eq!(ask(&mut b, "*ESE?").await, "32\n");
+    assert_eq!(
+        ask(&mut b, "SYST:ERR?").await,
+        "-113,\"Undefined header;FOO\"\n"
+    );
+    assert_eq!(
+        ask(&mut a, "SYST:ERR:COUN?").await,
+        "0\n",
+        "b emptied the queue a filled"
+    );
+    d.stop.cancel();
+    let d = start("<status-scope>connection</status-scope>");
+    let (mut a, mut b) = (connect(d.port).await, connect(d.port).await);
+    a.write_all(b"*ESE 32\nFOO\n").await.unwrap();
+    assert_eq!(ask(&mut b, "*ESE?").await, "0\n");
+    assert_eq!(ask(&mut b, "SYST:ERR:COUN?").await, "0\n");
+    assert_eq!(ask(&mut a, "SYST:ERR:COUN?").await, "1\n");
     d.stop.cancel();
 }
 
@@ -232,7 +270,8 @@ async fn a_port_already_in_use_is_logged_and_the_task_ends() {
     let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = held.local_addr().unwrap().port();
     let (server, store) = load(&format!(
-        "<endpoint>tcp://127.0.0.1:{port}</endpoint><event-logging>/dev/null</event-logging>"
+        "<endpoint>tcp://127.0.0.1:{port}</endpoint><event-logging>/dev/null</event-logging>
+         <hislip-endpoint>none</hislip-endpoint><vxi11-endpoint>none</vxi11-endpoint>"
     ));
     let task = tokio::spawn(server.run(store, CancellationToken::new()));
     timeout(Duration::from_secs(2), task)
