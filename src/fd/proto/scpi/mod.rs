@@ -1,9 +1,12 @@
-//! SCPI instrument over a raw TCP socket (`<scpi-server>`, docs/field-device-scpi.md): the field device presents its tags as a
-//! SCPI-99 instrument on port 5025, newline-terminated ASCII, the socket protocol of LXI instruments. `device` is the I/O-free
-//! state machine (status registers, error queue, tag routes, one connection's line buffer), `crate::scpi::syntax` the message text;
-//! this file is the config and the sockets around them: one task per connection, a connection limit, an idle timeout.
+//! SCPI instrument (`<scpi-server>`, docs/field-device-scpi.md): the field device presents its tags as a SCPI-99 instrument on
+//! a raw TCP socket (5025, newline-terminated ASCII, the socket protocol of LXI instruments), HiSLIP (4880, `hislip`) and VXI-11
+//! (portmapper and core channel, `vxi11`). `device` is the I/O-free state machine (status registers, error queue, tag routes, one
+//! connection's line buffer) all three feed, `crate::scpi::syntax` the message text; this file is the config and the sockets of the
+//! raw protocol: one task per connection, a connection limit shared by all three transports, an idle timeout.
 
 pub mod device;
+pub mod hislip;
+pub mod vxi11;
 
 use super::super::config::{bounded, child, number, text, ConfigError, Opts, Tags};
 use super::super::eventlog::EventLog;
@@ -14,18 +17,23 @@ use super::{device_name, Module};
 use crate::hint::show;
 use crate::model::Kind;
 use crate::scpi::syntax::is_mnemonic;
-use device::{Instrument, Route, Session};
+use device::{Instrument, Route, Scope, Session, Shared};
 use roxmltree::Node;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 /// A reply that cannot be written within this long ends the connection.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_ENDPOINT: &str = "tcp://0.0.0.0:5025";
+const DEFAULT_HISLIP: &str = "tcp://0.0.0.0:4880";
+const DEFAULT_VXI11_CORE: &str = "tcp://0.0.0.0:4881";
+/// The key value that turns a transport off.
+const NONE: &str = "none";
 
 pub struct Server {
     endpoint: String,
@@ -34,6 +42,34 @@ pub struct Server {
     max_connections: usize,
     /// A client silent for this long is dropped; `Duration::MAX` for never.
     idle: Duration,
+    scope: Scope,
+    /// HiSLIP's endpoint; `None` when it is off.
+    hislip: Option<String>,
+    /// VXI-11's portmapper and core channel endpoints; `None` when it is off.
+    vxi11: Option<(String, String)>,
+}
+
+/// An endpoint key: its text, `default` when absent, `None` when it says `none`.
+fn transport(node: Node, key: &str, default: &str) -> Option<String> {
+    let v = text(node, key).unwrap_or_else(|| default.into());
+    (v != NONE).then_some(v)
+}
+
+/// The portmapper's port is 111 for a process that may bind it, else 1111 (a client then has to be told the port).
+fn default_portmapper() -> String {
+    let port = if crate::sys::getuid() == 0 { 111 } else { 1111 };
+    format!("tcp://0.0.0.0:{port}")
+}
+
+fn status_scope(node: Node) -> Result<Scope, ConfigError> {
+    match text(node, "status-scope").as_deref() {
+        None | Some("instrument") => Ok(Scope::Instrument),
+        Some("connection") => Ok(Scope::Connection),
+        Some(v) => Err(ConfigError(format!(
+            "<status-scope> `{}` is not instrument or connection",
+            show(v)
+        ))),
+    }
 }
 
 /// The mnemonic a tag gets in the default paths: letters, digits and `_` upper-cased, anything else becomes `_`, and a name that
@@ -193,55 +229,218 @@ impl Module for Server {
                 s => Duration::from_secs(s),
             },
             ins,
+            scope: status_scope(node)?,
+            hislip: transport(node, "hislip-endpoint", DEFAULT_HISLIP),
+            vxi11: transport(node, "vxi11-endpoint", &default_portmapper()).map(|pm| {
+                (
+                    pm,
+                    text(node, "vxi11-core-endpoint").unwrap_or_else(|| DEFAULT_VXI11_CORE.into()),
+                )
+            }),
         })
     }
 
     async fn run(self, store: Store, stop: CancellationToken) {
-        let listener = match net::listen(&self.endpoint).await {
-            Ok(l) => l,
+        let (ins, log) = (Arc::new(self.ins), self.log);
+        let tx = Transports {
+            permits: Arc::new(Semaphore::new(self.max_connections)),
+            max: self.max_connections,
+            log,
+            stop: stop.clone(),
+        };
+        let global = device::shared();
+        let raw = {
+            let (ins, store, stop, scope, global) = (
+                ins.clone(),
+                store.clone(),
+                stop.clone(),
+                self.scope,
+                global.clone(),
+            );
+            let idle = self.idle;
+            tx.accept(&self.endpoint, "scpi", move |s| {
+                let (ins, store, stop) = (ins.clone(), store.clone(), stop.clone());
+                let session = Session::sharing(scope.status(&global));
+                async move { serve(s, session, &ins, &store, idle, &stop).await }
+            })
+        };
+        let hislip = self.hislip.as_deref().map(|ep| {
+            let srv = Arc::new(hislip::Server {
+                ins: ins.clone(),
+                store: store.clone(),
+                hub: hislip::Hub::new(self.scope, global.clone()),
+                idle: self.idle,
+                stop: stop.clone(),
+            });
+            tx.accept(ep, "hislip", move |s| {
+                let srv = srv.clone();
+                async move { srv.serve(s).await }
+            })
+        });
+        let vxi11 = self.vxi11.as_ref().map(|(pm, core)| {
+            tx.vxi11(
+                pm,
+                core,
+                (ins.clone(), store.clone()),
+                (self.scope, global.clone()),
+                self.idle,
+            )
+        });
+        tokio::join!(
+            raw,
+            async {
+                if let Some(h) = hislip {
+                    h.await
+                }
+            },
+            async {
+                if let Some(v) = vxi11 {
+                    v.await
+                }
+            }
+        );
+    }
+}
+
+/// What every transport's listener shares: the connection limit, the event log and the stop signal.
+struct Transports {
+    permits: Arc<Semaphore>,
+    /// The size of `permits`, which VXI-11 also limits its links to.
+    max: usize,
+    log: Arc<EventLog>,
+    stop: CancellationToken,
+}
+
+impl Transports {
+    /// Bind `ep`; a failure is logged and the other transports go on.
+    async fn bind(&self, ep: &str, what: &str) -> Option<TcpListener> {
+        match net::listen(ep).await {
+            Ok(l) => Some(l),
             Err(e) => {
                 self.log.log(
                     "error",
-                    "scpi server init",
+                    &format!("{what} server init"),
                     &format!("failed to start the server: {e}"),
                 );
-                tracing::error!("scpi-server: {e}");
-                return;
+                tracing::error!("scpi-server ({what}): {e}");
+                None
             }
-        };
-        let (ins, log, idle) = (Arc::new(self.ins), self.log, self.idle);
-        let permits = Arc::new(Semaphore::new(self.max_connections));
+        }
+    }
+
+    /// Accept on `ep` and run `serve` for each connection, within the connection limit: at it a new client is accepted and closed
+    /// at once (it sees a reset), the others keep their service.
+    async fn accept<F, Fut>(&self, ep: &str, what: &str, serve: F)
+    where
+        F: Fn(TcpStream) -> Fut,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        if let Some(l) = self.bind(ep, what).await {
+            self.accept_on(&l, what, serve).await;
+        }
+    }
+
+    async fn accept_on<F, Fut>(&self, l: &TcpListener, what: &str, serve: F)
+    where
+        F: Fn(TcpStream) -> Fut,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
         let on_conn = |stream: TcpStream| {
-            // At the limit a new client is accepted and closed at once: it sees a reset, the others keep their service.
-            if let Ok(permit) = permits.clone().try_acquire_owned() {
-                let (ins, store, stop) = (ins.clone(), store.clone(), stop.clone());
+            if let Ok(permit) = self.permits.clone().try_acquire_owned() {
+                let fut = serve(stream);
                 tokio::spawn(async move {
-                    serve(stream, &ins, &store, idle, &stop).await;
+                    fut.await;
                     drop(permit);
                 });
             }
         };
         let report = |e: &std::io::Error| {
-            log.log(
+            self.log.log(
                 "error",
-                "scpi accept",
+                &format!("{what} accept"),
                 &format!("accept failed: {e}; retrying"),
             )
         };
-        net::accept_loop(&listener, &stop, on_conn, report).await;
+        net::accept_loop(l, &self.stop, on_conn, report).await;
+    }
+
+    /// VXI-11: the core channel on `core`, the portmapper on `pm` (TCP and UDP) telling clients where it is.
+    async fn vxi11(
+        &self,
+        pm: &str,
+        core: &str,
+        (ins, store): (Arc<Instrument>, Store),
+        (scope, global): (Scope, Shared),
+        idle: Duration,
+    ) {
+        let Some(core_l) = self.bind(core, "vxi11 core").await else {
+            return;
+        };
+        let port = core_l.local_addr().map(|a| a.port()).unwrap_or_default();
+        let svc = Arc::new(vxi11::Vxi11::new(
+            ins,
+            store,
+            (scope, global),
+            port,
+            self.max,
+        ));
+        let serve = |svc: Arc<vxi11::Vxi11>, stop: CancellationToken| {
+            move |s: TcpStream| {
+                let (svc, stop) = (svc.clone(), stop.clone());
+                async move { vxi11::serve_tcp(s, &svc, idle, &stop).await }
+            }
+        };
+        let portmapper = async {
+            if let Some(l) = self.bind(pm, "vxi11 portmapper").await {
+                self.accept_on(
+                    &l,
+                    "vxi11 portmapper",
+                    serve(svc.clone(), self.stop.clone()),
+                )
+                .await;
+            }
+        };
+        let udp = async {
+            if let Some(sock) = self.udp(pm).await {
+                vxi11::serve_udp(sock, &svc, &self.stop).await;
+            }
+        };
+        tokio::join!(
+            self.accept_on(&core_l, "vxi11 core", serve(svc.clone(), self.stop.clone())),
+            portmapper,
+            udp
+        );
+    }
+
+    /// The portmapper's UDP socket: the same address as its TCP listener.
+    async fn udp(&self, ep: &str) -> Option<UdpSocket> {
+        let bound = match net::parse(ep) {
+            Ok(net::Endpoint::Tcp(addr)) => UdpSocket::bind(addr).await.map_err(|e| e.to_string()),
+            _ => Err(format!("endpoint `{}` is not tcp://ip:port", show(ep))),
+        };
+        bound
+            .map_err(|e| {
+                self.log.log(
+                    "error",
+                    "vxi11 portmapper init",
+                    &format!("no UDP portmapper: {e}"),
+                );
+            })
+            .ok()
     }
 }
 
 /// Serve one client until it goes, goes quiet or the device stops. The socket closes when this returns.
 async fn serve(
     mut stream: TcpStream,
+    mut session: Session,
     ins: &Instrument,
     store: &Store,
     idle: Duration,
     stop: &CancellationToken,
 ) {
     net::keepalive(&stream);
-    let (mut session, mut buf) = (Session::new(), [0u8; 4096]);
+    let mut buf = [0u8; 4096];
     loop {
         let read = tokio::select! {
             _ = stop.cancelled() => return,
@@ -313,6 +512,13 @@ mod tests {
         assert_eq!((s.max_connections, s.ins.max_line), (16, 1024));
         assert_eq!(s.idle, Duration::from_secs(300));
         assert!(s.ins.routes.is_empty());
+        assert_eq!(s.scope, Scope::Instrument);
+        assert_eq!(s.hislip.as_deref(), Some("tcp://0.0.0.0:4880"));
+        let pm = if crate::sys::getuid() == 0 { 111 } else { 1111 };
+        assert_eq!(
+            s.vxi11,
+            Some((format!("tcp://0.0.0.0:{pm}"), "tcp://0.0.0.0:4881".into()))
+        );
         let s = parse(
             "<endpoint>tcp://127.0.0.1:1</endpoint><manufacturer>Acme</manufacturer><model>M1</model><serial>S/9</serial>
              <max-connections>3</max-connections><max-line>200</max-line><idle-timeout>7</idle-timeout><event-logging>/dev/null</event-logging>",
@@ -335,6 +541,33 @@ mod tests {
             Duration::MAX
         );
         assert_eq!(s.instrument().idn, s.ins.idn);
+    }
+
+    #[test]
+    fn transports_and_the_status_scope_are_configured_or_switched_off() {
+        let s = parse(
+            "<status-scope>connection</status-scope><hislip-endpoint>tcp://127.0.0.1:4</hislip-endpoint>
+             <vxi11-endpoint>tcp://127.0.0.1:5</vxi11-endpoint><vxi11-core-endpoint>tcp://127.0.0.1:6</vxi11-core-endpoint>",
+            &Opts::default(),
+        )
+        .unwrap();
+        assert_eq!(s.scope, Scope::Connection);
+        assert_eq!(s.hislip.as_deref(), Some("tcp://127.0.0.1:4"));
+        assert_eq!(
+            s.vxi11,
+            Some(("tcp://127.0.0.1:5".into(), "tcp://127.0.0.1:6".into()))
+        );
+        let s = parse(
+            "<status-scope>instrument</status-scope><hislip-endpoint>none</hislip-endpoint><vxi11-endpoint>none</vxi11-endpoint>",
+            &Opts::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            (s.scope, s.hislip, s.vxi11),
+            (Scope::Instrument, None, None)
+        );
+        assert!(err("<status-scope>session</status-scope>")
+            .contains("<status-scope> `session` is not instrument or connection"));
     }
 
     #[test]

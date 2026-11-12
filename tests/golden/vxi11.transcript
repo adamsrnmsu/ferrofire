@@ -1,0 +1,122 @@
+# VXI-11 as ONC RPC calls and replies, with no sockets. `> PROGRAM PROC args...` is a call: PROGRAM is pmap (100000 v2), core
+# (0x0607AF = 395183, v1) or abort (0x0607B0 = 395184, v1), PROC the procedure number, the args XDR words (decimal) and `s"text"` for opaque data (length,
+# bytes, padding). The `<` line after it is the results of the accepted reply in the same notation (`ok` first), or `err STAT` for an
+# RPC accept_stat other than success (1 PROG_UNAVAIL, 2 PROG_MISMATCH low high, 3 PROC_UNAVAIL, 4 GARBAGE_ARGS). `@ connect` is a new
+# TCP connection (its links go). {version} is this crate's version. Escapes in text: \n, \", \\.
+
+# The portmapper: where is the core channel (TCP; UDP has none)? 4881 is the port the test gives the service.
+> pmap 3 395183 1 6 0
+< ok 4881
+> pmap 3 395183 1 17 0
+< ok 0
+> pmap 3 395184 1 6 0
+< ok 4881
+> pmap 3 12345 1 6 0
+< ok 0
+> pmap 1 395183 1 6 4881
+< ok 0
+> pmap 4
+< ok 1 395183 1 6 4881 1 395184 1 6 4881 0
+> pmap 0
+< ok
+> pmap 5
+< err 3
+> pmap 3 1
+< err 4
+
+# A link: create, write with END, read the response with its reason (END is 4), read the status byte (MAV is 16 while a response waits).
+> core 10 7 0 0 s"inst0"
+< ok 0 1 4881 1048576
+> core 11 1 0 0 8 s"*IDN?\n"
+< ok 0 6
+> core 13 1 0 0 0
+< ok 0 16
+> core 12 1 100 0 0 0 0
+< ok 0 4 s"ferrofire,rtu-1,0,{version}\n"
+> core 13 1 0 0 0
+< ok 0 0
+
+# Reasons: the size (REQCNT 1), the termination character (CHR 2, flag 128), the end together with them.
+> core 11 1 0 0 8 s"*IDN?"
+< ok 0 5
+> core 12 1 7 0 0 0 0
+< ok 0 1 s"ferrofi"
+> core 12 1 100 0 0 128 44
+< ok 0 2 s"re,"
+> core 12 1 100 0 0 128 10
+< ok 0 6 s"rtu-1,0,{version}\n"
+
+# -410: a write that starts a message while a response is unread drops the response. -420: a read with nothing to say, or while a
+# message is half written.
+> core 11 1 0 0 8 s"*IDN?"
+< ok 0 5
+> core 11 1 0 0 8 s"*OPC?"
+< ok 0 5
+> core 12 1 100 0 0 0 0
+< ok 0 4 s"1\n"
+> core 11 1 0 0 8 s"SYST:ERR?"
+< ok 0 9
+> core 12 1 100 0 0 0 0
+< ok 0 4 s"-410,\"Query INTERRUPTED\"\n"
+> core 12 1 100 0 0 0 0
+< ok 15 0 s""
+> core 11 1 0 0 0 s"*IDN?"
+< ok 0 5
+> core 12 1 100 0 0 0 0
+< ok 15 0 s""
+> core 11 1 0 0 8 s"SYST:ERR?"
+< ok 0 9
+> core 12 1 100 0 0 0 0
+< ok 0 4 s"-420,\"Query UNTERMINATED\"\n"
+> core 11 1 0 0 8 s"SYST:ERR?"
+< ok 0 9
+> core 12 1 100 0 0 0 0
+< ok 0 4 s"-420,\"Query UNTERMINATED\"\n"
+
+# Clear, trigger, remote and local are accepted; lock, interrupt channel and DOCMD are not supported; unlock has nothing to release.
+> core 11 1 0 0 8 s"*IDN?"
+< ok 0 5
+> core 15 1 0 0 0
+< ok 0
+> core 12 1 100 0 0 0 0
+< ok 15 0 s""
+> core 14 1 0 0 0
+< ok 0
+> core 16 1 0 0 0
+< ok 0
+> core 17 1 0 0 0
+< ok 0
+> core 18 1 0 0 0
+< ok 8
+> core 19 1
+< ok 12
+> core 20 1 0 0 0
+< ok 8
+> core 22 1 0 0 0
+< ok 8 0
+> core 25 0 0 0 0 0
+< ok 8
+> abort 1 1
+< ok 0
+
+# Errors: an unknown link is 4 in the shape of each reply, another device name is 3, locking at create is 8.
+> core 15 99 0 0 0
+< ok 4
+> core 12 99 100 0 0 0 0
+< ok 4 0 0
+> core 13 99 0 0 0
+< ok 4 0
+> core 10 7 0 0 s"gpib0,5"
+< ok 3 0 4881 1048576
+> core 10 7 1 0 s"inst0"
+< ok 8 0 4881 1048576
+> core 23 1
+< ok 0
+> core 23 1
+< ok 4
+> core 99
+< err 3
+> core 10 7
+< err 4
+> nobody 0
+< err 1

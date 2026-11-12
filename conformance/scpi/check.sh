@@ -18,9 +18,31 @@ for p in "pyvisa: \*IDN? names" "pyvisa: MEAS:SCAL:LEVEL[?] = 250.5" "pyvisa: SO
          "pyvisa: SOUR:BREAKER_CMD ON reached the provider write queue" "pyvisa: \*STB[?] after the error" "pyvisa: \*ESR[?] after the error" \
          "pyvisa: SYST:ERR[?] is -222" "pyvisa: the out-of-range write never reached the provider" \
          "lxi: \*IDN[?]" "lxi: MEAS:SCAL:LEVEL[?] = 250.5" "ferrofire scpi: --check script exit 0" "ferrofire scpi: --check exits 1" \
+         "lxi vxi11: \*IDN[?]" "lxi vxi11: MEAS:SCAL:LEVEL[?] = 250.5" "lxi discover: found the device" \
+         "ferrofire scpi: TCPIP::127.0.0.1::hislip0::INSTR --check" "ferrofire scpi: TCPIP::127.0.0.1::INSTR --check" \
+         "ferrofire scpi: TCPIP::127.0.0.1::hislip0::INSTR rejected query found at once" "ferrofire scpi: TCPIP::127.0.0.1::INSTR rejected query found at once" \
          "churn: descriptors flat" "plain socket: overlong and garbage"; do
   grep -q "^PASS $p" "$out/peer.out" && pass "$p" || fail "$p"
 done
+for t in hislip vxi11; do
+  for p in "pyvisa: $t: \*IDN[?] names" "pyvisa: $t: MEAS:SCAL:LEVEL[?] = 250.5" "pyvisa: $t: compound query joins" "pyvisa: $t: status byte after the error" \
+           "pyvisa: $t: \*ESR[?] is the execution error bit" "pyvisa: $t: SYST:ERR[?] is -222" "pyvisa: $t: after a device clear the session still answers" \
+           "pyvisa: $t: a device clear is no error"; do
+    grep -q "^PASS $p" "$out/peer.out" && pass "$p" || fail "$p"
+  done
+done
+for p in "pyvisa: shared status: an error made over HiSLIP is read over VXI-11" "pyvisa: shared status: and is gone for HiSLIP" \
+         "pyvisa: shared status: [*]ESE and the error made over VXI-11 are seen on the raw socket" \
+         "pyvisa: hislip: a message over a response that was not read is INTERRUPTED" "pyvisa: hislip: and only once"; do
+  grep -q "^PASS $p" "$out/peer.out" && pass "$p" || fail "$p"
+done
+# HiSLIP, portmapper and the VXI-11 core channel are in the capture, and tshark's own dissectors (judged malformed/expert-clean above) decoded them
+for f in hislip portmap vxi11_core; do
+  [ "$(count "$pcap" "$f")" -gt 0 ] && pass "tshark decoded $f" || fail "tshark decoded no $f"
+done
+[ "$(count "$pcap" 'tcp.dstport == 4880 && tcp.flags.syn == 1 && tcp.flags.ack == 0')" -ge 4 ] && pass "HiSLIP handshakes to 4880 (two channels per session)" || fail "fewer than 4 HiSLIP handshakes"
+seen 'hislip0' 'the HiSLIP sub-address'
+seen 'inst0' 'the VXI-11 device name'
 grep -q '^PYVISA DONE' "$out/peer.out" && pass "PyVISA finished" || fail "PyVISA did not finish"
 grep -q 'load-mw-setpoint:300.000000' "$out/peer.out" && pass "ferrofire scpi write reached the provider" || fail "ferrofire scpi write did not reach the provider"
 grep -q '^SCPI PEERS DONE' "$out/peer.out" && pass "the device was still serving at the end" || fail "the device was not serving at the end"

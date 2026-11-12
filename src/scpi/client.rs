@@ -1,22 +1,22 @@
-//! `ferrofire scpi`: a client for any SCPI instrument that speaks the raw socket protocol (LXI port 5025), the field device's
-//! `<scpi-server>` included. A message is sent as one line; if some header of it ends in `?` one response line is read. With
-//! `--check` every command is followed by `SYST:ERR?` until the instrument says `0`, and any other code fails the run. Nothing
-//! here is specific to ferrofire's server.
+//! `ferrofire scpi`: a client for any SCPI instrument that speaks the raw socket protocol (LXI port 5025), HiSLIP or VXI-11
+//! (`transport`), the field device's `<scpi-server>` included. A message is sent whole; if some header of it ends in `?` one response
+//! line is read. With `--check` every command is followed by `SYST:ERR?` until the instrument says `0`, and any other code fails the
+//! run. Nothing here is specific to ferrofire's server.
 
 use super::syntax::is_query;
+use super::transport::{connect_to, open, parse_target, Lines, Wire, DEFAULT_PORT};
 use crate::probe::json_str;
 use std::io::{BufRead, IsTerminal, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::TcpStream;
 use std::time::Duration;
-
-const DEFAULT_PORT: u16 = 5025;
 /// `--check` reads at most this many errors after one command (the queue of a real instrument is 16 to 20 deep).
 const MAX_ERRORS: usize = 32;
 
 #[derive(Debug, clap::Args)]
 pub struct ScpiArgs {
-    /// Instrument as HOST[:PORT], port 5025 by default; an IPv6 address in brackets: [::1]:5025
-    #[arg(value_name = "HOST[:PORT]")]
+    /// Instrument as HOST[:PORT] (the raw socket, port 5025 by default; an IPv6 address in brackets: [::1]:5025) or a VISA resource:
+    /// TCPIP::host::INSTR (VXI-11), TCPIP::host::hislip0::INSTR (HiSLIP, hislip0,PORT for another port), TCPIP::host::PORT::SOCKET
+    #[arg(value_name = "HOST[:PORT]|RESOURCE")]
     target: String,
     /// Commands to send, one program message each (`;` joins units inside one); a message with a `?` header is answered with a line
     #[arg(value_name = "COMMAND")]
@@ -33,6 +33,9 @@ pub struct ScpiArgs {
     /// One JSON object per command instead of the bare response
     #[arg(long)]
     json: bool,
+    /// TCP port of the VXI-11 portmapper, for a TCPIP::host::INSTR resource (a VISA resource cannot name it)
+    #[arg(long, default_value_t = 111, value_name = "PORT")]
+    portmapper: u16,
 }
 
 /// An error read from `SYST:ERR?`.
@@ -134,36 +137,50 @@ pub fn script_commands(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// One connection: the line the instrument sends, the line we send.
-pub struct Link<R, W> {
-    rd: R,
-    wr: W,
+/// One connection to an instrument, over whichever protocol.
+pub struct Link<T> {
+    wire: T,
     wait: Duration,
 }
 
-impl<R: BufRead, W: Write> Link<R, W> {
+impl<R: BufRead, W: Write> Link<Lines<R, W>> {
+    /// A raw-socket link over a reader and a writer.
     pub fn new(rd: R, wr: W, wait: Duration) -> Self {
-        Link { rd, wr, wait }
+        Link {
+            wire: Lines { rd, wr },
+            wait,
+        }
     }
+}
 
-    /// Send one message; for a query, read its one response line. A query the instrument rejects gets no response at all.
-    fn exchange(&mut self, cmd: &str) -> Result<Option<String>, Failure> {
+/// What an instrument answers to a query followed by `*OPC?`: the response and `;1`, or only `1` when the query was rejected and so
+/// has no response. `None` is the rejected query; anything else (an instrument that does not join the two) is taken as it is.
+fn without_opc(line: String) -> Option<String> {
+    match line.strip_suffix(";1") {
+        Some(response) => Some(response.to_string()),
+        None if line == "1" => None,
+        None => Some(line),
+    }
+}
+
+impl<T: Wire> Link<T> {
+    /// Send `sent` (the command `cmd`, possibly with more after it); for a query, read its one response line. A query the instrument rejects gets no response at all.
+    fn exchange(&mut self, cmd: &str, sent: &str) -> Result<Option<String>, Failure> {
         let fail = |msg: String| Failure {
             msg,
             timeout: false,
         };
-        writeln!(self.wr, "{cmd}")
-            .and_then(|()| self.wr.flush())
+        self.wire
+            .send(sent)
             .map_err(|e| fail(format!("sending `{cmd}`: {e}")))?;
         if !is_query(cmd) {
             return Ok(None);
         }
-        let mut line = String::new();
-        match self.rd.read_line(&mut line) {
-            Ok(0) => Err(fail(format!(
+        match self.wire.recv() {
+            Ok(None) => Err(fail(format!(
                 "the instrument closed the connection before answering `{cmd}`"
             ))),
-            Ok(_) => Ok(Some(line.trim_end_matches(['\r', '\n']).to_string())),
+            Ok(line) => Ok(line),
             Err(e)
                 if matches!(
                     e.kind(),
@@ -187,7 +204,7 @@ impl<R: BufRead, W: Write> Link<R, W> {
         let mut out = vec![];
         while out.len() < MAX_ERRORS {
             let line = self
-                .exchange("SYST:ERR?")
+                .exchange("SYST:ERR?", "SYST:ERR?")
                 .map_err(|f| f.msg)?
                 .unwrap_or_default();
             match parse_reported(&line)? {
@@ -198,14 +215,27 @@ impl<R: BufRead, W: Write> Link<R, W> {
         Ok(out)
     }
 
-    /// Run one command; with `check`, its errors too. With `check` a query that times out is not the end: the error queue says why
-    /// the instrument did not answer, and only a timeout with an empty queue is a failure.
-    pub fn run(&mut self, cmd: &str, check: bool) -> Result<Outcome, String> {
-        let (response, late) = match self.exchange(cmd) {
-            Ok(r) => (r, None),
-            Err(f) if f.timeout && check => (None, Some(f.msg)),
-            Err(f) => return Err(f.msg),
+    /// Send `cmd`, and for a query read its response. Under `check` a query goes out as `QUERY;*OPC?`, so that an instrument which
+    /// rejects it still answers (with the `1`) and is not waited out. A timeout is then a silent instrument: `Ok` with the reason
+    /// as the second part, for `run` to hold against an empty error queue.
+    fn ask(&mut self, cmd: &str, check: bool) -> Result<(Option<String>, Option<String>), String> {
+        let query = check && is_query(cmd);
+        let sent = if query {
+            format!("{cmd};*OPC?")
+        } else {
+            cmd.to_string()
         };
+        match self.exchange(cmd, &sent) {
+            Ok(r) if query => Ok((r.and_then(without_opc), None)),
+            Ok(r) => Ok((r, None)),
+            Err(f) if f.timeout && check => Ok((None, Some(f.msg))),
+            Err(f) => Err(f.msg),
+        }
+    }
+
+    /// Run one command; with `check`, its errors too. A silent instrument fails the run unless its error queue says why.
+    pub fn run(&mut self, cmd: &str, check: bool) -> Result<Outcome, String> {
+        let (response, late) = self.ask(cmd, check)?;
         let errors = if check { self.errors()? } else { vec![] };
         match (errors.is_empty(), late) {
             (true, Some(msg)) => Err(msg),
@@ -235,20 +265,9 @@ fn show(o: &Outcome, json: bool) -> bool {
     o.errors.is_empty()
 }
 
-fn connect(target: &str, wait: Duration) -> Result<TcpStream, String> {
+pub fn connect(target: &str, wait: Duration) -> Result<TcpStream, String> {
     let (host, port) = split_target(target)?;
-    let addr = (host.as_str(), port)
-        .to_socket_addrs()
-        .map_err(|e| format!("{host}: {e}"))?
-        .next()
-        .ok_or_else(|| format!("{host}: no address"))?;
-    let s = TcpStream::connect_timeout(&addr, wait).map_err(|e| format!("connect {addr}: {e}"))?;
-    let set = s
-        .set_read_timeout(Some(wait))
-        .and_then(|()| s.set_write_timeout(Some(wait)))
-        .and_then(|()| s.set_nodelay(true));
-    set.map_err(|e| format!("{addr}: {e}"))?;
-    Ok(s)
+    connect_to(&host, port, wait)
 }
 
 fn commands(a: &ScpiArgs) -> Result<Vec<String>, String> {
@@ -264,8 +283,8 @@ fn commands(a: &ScpiArgs) -> Result<Vec<String>, String> {
 }
 
 /// Read commands from `input` until `quit`, `exit` or its end, prompting on `prompt`; an instrument error does not end the session.
-fn repl<R: BufRead, W: Write>(
-    link: &mut Link<R, W>,
+fn repl<T: Wire>(
+    link: &mut Link<T>,
     input: &mut impl BufRead,
     prompt: &mut impl Write,
     (check, json): (bool, bool),
@@ -301,12 +320,9 @@ fn wait_of(a: &ScpiArgs) -> Result<Duration, String> {
         })
 }
 
-type Tcp = Link<std::io::BufReader<TcpStream>, TcpStream>;
-
-fn open(a: &ScpiArgs, wait: Duration) -> Result<Tcp, String> {
-    let stream = connect(&a.target, wait)?;
-    let rd = std::io::BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
-    Ok(Link::new(rd, stream, wait))
+fn connect_link(a: &ScpiArgs, wait: Duration) -> Result<Link<Box<dyn Wire>>, String> {
+    let wire = open(&parse_target(&a.target)?, wait, a.portmapper)?;
+    Ok(Link { wire, wait })
 }
 
 /// Nothing to send and a person at the keyboard.
@@ -317,7 +333,7 @@ fn interactive(a: &ScpiArgs, cmds: &[String]) -> bool {
 fn run(a: &ScpiArgs) -> Result<bool, String> {
     let wait = wait_of(a)?;
     let cmds = commands(a)?;
-    let mut link = open(a, wait)?;
+    let mut link = connect_link(a, wait)?;
     if interactive(a, &cmds) {
         let (mut stdin, mut stderr) = (std::io::stdin().lock(), std::io::stderr());
         return repl(&mut link, &mut stdin, &mut stderr, (a.check, a.json));
@@ -345,7 +361,7 @@ mod tests {
     use super::*;
     use std::io::Cursor;
 
-    fn link(replies: &str) -> Link<Cursor<Vec<u8>>, Vec<u8>> {
+    fn link(replies: &str) -> Link<Lines<Cursor<Vec<u8>>, Vec<u8>>> {
         Link::new(
             Cursor::new(replies.as_bytes().to_vec()),
             vec![],
@@ -353,8 +369,8 @@ mod tests {
         )
     }
 
-    fn sent(l: &Link<Cursor<Vec<u8>>, Vec<u8>>) -> String {
-        String::from_utf8(l.wr.clone()).unwrap()
+    fn sent(l: &Link<Lines<Cursor<Vec<u8>>, Vec<u8>>>) -> String {
+        String::from_utf8(l.wire.wr.clone()).unwrap()
     }
 
     #[test]
@@ -514,7 +530,9 @@ mod tests {
         }
     }
 
-    fn scripted(lines: Vec<Option<&'static str>>) -> Link<std::io::BufReader<Script>, Vec<u8>> {
+    fn scripted(
+        lines: Vec<Option<&'static str>>,
+    ) -> Link<Lines<std::io::BufReader<Script>, Vec<u8>>> {
         Link::new(
             std::io::BufReader::new(Script(lines)),
             vec![],
@@ -525,15 +543,36 @@ mod tests {
     #[test]
     fn a_query_the_instrument_rejects_is_explained_by_its_error_queue_under_check() {
         let mut l = scripted(vec![
-            None,
+            Some("1\n"),
             Some("-113,\"Undefined header\"\n"),
             Some("0,\"No error\"\n"),
         ]);
         let o = l.run("NOPE?", true).unwrap();
         assert_eq!((o.response, o.errors[0].code), (None, -113));
         assert_eq!(
-            String::from_utf8(l.wr).unwrap(),
-            "NOPE?\nSYST:ERR?\nSYST:ERR?\n"
+            String::from_utf8(l.wire.wr).unwrap(),
+            "NOPE?;*OPC?\nSYST:ERR?\nSYST:ERR?\n",
+            "the *OPC? answers at once, so the timeout is not waited out"
+        );
+        let mut l = scripted(vec![Some("2.5;1\n"), Some("0,\"No error\"\n")]);
+        let o = l.run("MEAS:SCAL:X?", true).unwrap();
+        assert_eq!((o.response.as_deref(), o.errors.len()), (Some("2.5"), 0));
+        let mut l = scripted(vec![Some("a;b;1\n"), Some("0,\"No error\"\n")]);
+        assert_eq!(
+            l.run("A?;B?", true).unwrap().response.as_deref(),
+            Some("a;b")
+        );
+        let mut l = scripted(vec![Some("not joined\n"), Some("0,\"No error\"\n")]);
+        assert_eq!(
+            l.run("A?", true).unwrap().response.as_deref(),
+            Some("not joined")
+        );
+        let mut l = scripted(vec![Some("x\n")]);
+        assert_eq!(l.run("A?", false).unwrap().response.as_deref(), Some("x"));
+        assert_eq!(
+            String::from_utf8(l.wire.wr).unwrap(),
+            "A?\n",
+            "without --check nothing is added"
         );
         let mut l = scripted(vec![None, Some("0,\"No error\"\n")]);
         assert!(l
@@ -544,7 +583,7 @@ mod tests {
 
     #[test]
     fn the_repl_prompts_runs_each_line_and_stops_at_quit_or_the_end() {
-        let mut l = link("1\n-113,\"x\"\n0,\"No error\"\n0,\"No error\"\n");
+        let mut l = link("1;1\n-113,\"x\"\n0,\"No error\"\n0,\"No error\"\n");
         let (mut prompt, mut input) = (
             vec![],
             Cursor::new(b"\n  *OPC?  \nFOO\nquit\n*IDN?\n".to_vec()),
@@ -557,7 +596,10 @@ mod tests {
             String::from_utf8(prompt.clone()).unwrap(),
             "scpi> scpi> scpi> scpi> "
         );
-        assert_eq!(sent(&l), "*OPC?\nSYST:ERR?\nSYST:ERR?\nFOO\nSYST:ERR?\n");
+        assert_eq!(
+            sent(&l),
+            "*OPC?;*OPC?\nSYST:ERR?\nSYST:ERR?\nFOO\nSYST:ERR?\n"
+        );
         let mut l = link("a\n");
         let mut input = Cursor::new(b"exit\n*IDN?\n".to_vec());
         assert_eq!(

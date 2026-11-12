@@ -1,6 +1,8 @@
 //! Transcripts of an SCPI session, with no sockets: every `>` line is sent to the instrument and the `<` lines after it are exactly
 //! what it must answer (none: nothing). `@ publish POINT VALUE` is the provider, `@ connect` a new connection (fresh registers and
-//! error queue), `@ queued TAG` / `@ idle TAG` check the Store write queue. `{version}` is this crate's version.
+//! error queue), `@ session N` talks as the Nth connection of the same instrument (session 0 is the first; the others share its
+//! registers and error queue), `@ drain` is the provider acknowledging every queued write, `@ queued TAG` / `@ idle TAG` check the
+//! Store write queue. `{version}` is this crate's version.
 //! The expected texts follow SCPI-99 and IEEE 488.2 as written; docs/field-device-scpi.md lists the choices where those leave room.
 
 mod common;
@@ -13,7 +15,8 @@ const TRANSCRIPT: &str = include_str!("golden/scpi.transcript");
 fn the_transcript_is_what_the_instrument_answers() {
     let (server, store) = common::scpi::load("");
     let ins = server.instrument();
-    let mut session = Session::new();
+    let mut sessions = vec![Session::new()];
+    let mut who = 0;
     let version = env!("CARGO_PKG_VERSION");
     let mut lines = TRANSCRIPT
         .lines()
@@ -25,7 +28,17 @@ fn the_transcript_is_what_the_instrument_answers() {
         if let Some(cmd) = line.strip_prefix("@ ") {
             let w: Vec<_> = cmd.split(' ').collect();
             match w[..] {
-                ["connect"] => session = Session::new(),
+                ["connect"] => (sessions, who) = (vec![Session::new()], 0),
+                ["session", n] => {
+                    who = n.parse().unwrap();
+                    while sessions.len() <= who {
+                        sessions.push(Session::sharing(sessions[0].status().clone()));
+                    }
+                }
+                ["drain"] => store
+                    .pending(0)
+                    .into_iter()
+                    .for_each(|(tag, _, v)| store.ack(&tag, v)),
                 ["publish", point, v] => {
                     assert!(store.publish(point, v.parse().unwrap(), 2), "{at}")
                 }
@@ -38,7 +51,7 @@ fn the_transcript_is_what_the_instrument_answers() {
         let sent = line
             .strip_prefix("> ")
             .unwrap_or_else(|| panic!("{at}: expected `> `"));
-        let got = session.feed(ins, &store, format!("{sent}\n").as_bytes());
+        let got = sessions[who].feed(ins, &store, format!("{sent}\n").as_bytes());
         let mut want = String::new();
         while let Some((_, l)) = lines.next_if(|(_, l)| l.starts_with('<')) {
             want.push_str(&l[1..].trim_start_matches(' ').replace("{version}", version));

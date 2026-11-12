@@ -16,7 +16,7 @@ for _ in range(240):   # keep telling the device the values for the whole run
 PY
 for _ in $(seq 60); do python3 -c 'import socket; socket.create_connection(("127.0.0.1", 5025), 1)' 2>/dev/null && break; sleep 0.5; done
 for _ in $(seq 60); do [ "$(ferrofire scpi 127.0.0.1 'MEAS:SCAL:LEVEL?' 2>/dev/null)" = 250.5 ] && break; sleep 0.5; done
-echo "== PyVISA (pyvisa-py, TCPIP::127.0.0.1::5025::SOCKET)"
+echo "== PyVISA (pyvisa-py: TCPIP::127.0.0.1::5025::SOCKET, then HiSLIP and VXI-11)"
 /opt/pyvisa/bin/python "$d/pyvisa_client.py" /tmp/provider.log || exit 1
 echo "== lxi-tools: lxi scpi --raw"
 idn=$(lxi scpi --raw -a 127.0.0.1 -p 5025 '*IDN?') || { echo "FAIL: lxi scpi *IDN? failed"; exit 1; }
@@ -25,6 +25,26 @@ case "$idn" in ferrofire,rtu-1,CONF-0001,*) echo "PASS lxi: *IDN?" ;; *) echo "F
 lvl=$(lxi scpi --raw -a 127.0.0.1 -p 5025 'MEAS:SCAL:LEVEL?')
 echo "lxi MEAS:SCAL:LEVEL? -> $lvl"
 case "$lvl" in 250.5*) echo "PASS lxi: MEAS:SCAL:LEVEL? = 250.5" ;; *) echo "FAIL lxi: level -> $lvl"; exit 1 ;; esac
+echo "== lxi-tools without --raw: VXI-11 through the portmapper on 111"
+idn=$(lxi scpi -a 127.0.0.1 '*IDN?') || { echo "FAIL: lxi scpi (VXI-11) *IDN? failed"; exit 1; }
+echo "lxi (VXI-11) *IDN? -> $idn"
+case "$idn" in ferrofire,rtu-1,CONF-0001,*) echo "PASS lxi vxi11: *IDN?" ;; *) echo "FAIL lxi vxi11: *IDN? -> $idn"; exit 1 ;; esac
+lvl=$(lxi scpi -a 127.0.0.1 'MEAS:SCAL:LEVEL?')
+echo "lxi (VXI-11) MEAS:SCAL:LEVEL? -> $lvl"
+case "$lvl" in 250.5*) echo "PASS lxi vxi11: MEAS:SCAL:LEVEL? = 250.5" ;; *) echo "FAIL lxi vxi11: level -> $lvl"; exit 1 ;; esac
+echo "== lxi discover (VXI-11: a GETPORT broadcast to the UDP portmapper, then *IDN? over the core channel)"
+disc=$(timeout 60 lxi discover 2>&1) || true
+echo "$disc"
+case "$disc" in *'Found "ferrofire,rtu-1,CONF-0001,'*) echo "PASS lxi discover: found the device" ;; *) echo "FAIL lxi discover: the device was not found"; exit 1 ;; esac
+echo "== ferrofire scpi on the HiSLIP and VXI-11 resources"
+ferrofire scpi 127.0.0.1 '*CLS'   # the status system is the instrument's: start from an empty queue
+for res in 'TCPIP::127.0.0.1::hislip0::INSTR' 'TCPIP::127.0.0.1::INSTR'; do
+  r=$(ferrofire scpi "$res" --check '*IDN?' 'MEAS:SCAL:LEVEL?') && case "$r" in *ferrofire,rtu-1,CONF-0001,*250.5*) echo "PASS ferrofire scpi: $res --check" ;; *) echo "FAIL ferrofire scpi: $res -> $r"; exit 1 ;; esac || { echo "FAIL ferrofire scpi: $res"; exit 1; }
+  start=$(date +%s)
+  ferrofire scpi "$res" --check --timeout 30 'NOPE:NOPE?' 2> /tmp/check-err2.txt; rc=$?
+  took=$(( $(date +%s) - start ))
+  { [ "$rc" = 1 ] && [ "$took" -lt 10 ] && grep -q -- '-113,' /tmp/check-err2.txt; } && echo "PASS ferrofire scpi: $res rejected query found at once (${took}s, exit 1)" || { echo "FAIL ferrofire scpi: $res rejected query (rc=$rc, ${took}s)"; exit 1; }
+done
 echo "== ferrofire scpi --check"
 cat > /tmp/script.scpi <<'S'
 # a script for ferrofire scpi --check
@@ -72,6 +92,7 @@ import socket, os, time
 def ask(s, line):
     s.sendall(line + b"\n"); return s.recv(4096).decode().strip()
 s = socket.create_connection(("127.0.0.1", 5025), 5); s.settimeout(5)
+s.sendall(b"*CLS\n")                                    # the queue is the instrument's: the churn left errors in it
 s.sendall(b"A" * 200_000 + b"\n")                       # over max-line (1024): -363, thrown away to the newline
 print("overlong line:", ask(s, b"SYST:ERR?"))
 assert ask(s, b"SYST:ERR?").startswith("0,"), "one error for the whole overlong line"

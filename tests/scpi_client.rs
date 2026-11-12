@@ -21,7 +21,8 @@ struct Dut {
 async fn dut() -> Dut {
     let port = free_port();
     let (server, store) = load(&format!(
-        "<endpoint>tcp://127.0.0.1:{port}</endpoint><event-logging>/dev/null</event-logging>"
+        "<endpoint>tcp://127.0.0.1:{port}</endpoint><event-logging>/dev/null</event-logging>
+         <hislip-endpoint>none</hislip-endpoint><vxi11-endpoint>none</vxi11-endpoint>"
     ));
     let stop = CancellationToken::new();
     tokio::spawn(server.run(store.clone(), stop.clone()));
@@ -246,4 +247,198 @@ async fn it_works_against_a_foreign_responder_that_ends_lines_with_crlf() {
     let o = scpi(vec![target, "*IDN?".into(), "MEAS:X?".into()], "").await;
     assert_eq!(o.status.code(), Some(0), "{}", err(&o));
     assert_eq!(out(&o), "ACME,STUB,1,1.0\n+1.234E+00\n");
+}
+
+// ---- HiSLIP and VXI-11 resources ---------------------------------------------------------------------------------------------
+
+/// A device with the raw socket, HiSLIP and VXI-11 (portmapper and core on free ports) up.
+struct All {
+    raw: u16,
+    hislip: u16,
+    pm: u16,
+    stop: CancellationToken,
+}
+
+async fn all(inner: &str) -> All {
+    let (raw, hislip, pm, core) = (free_port(), free_port(), free_port(), free_port());
+    let (server, store) = load(&format!(
+        "<endpoint>tcp://127.0.0.1:{raw}</endpoint><hislip-endpoint>tcp://127.0.0.1:{hislip}</hislip-endpoint>
+         <vxi11-endpoint>tcp://127.0.0.1:{pm}</vxi11-endpoint><vxi11-core-endpoint>tcp://127.0.0.1:{core}</vxi11-core-endpoint>
+         <event-logging>/dev/null</event-logging>{inner}"
+    ));
+    let stop = CancellationToken::new();
+    tokio::spawn(server.run(store, stop.clone()));
+    for port in [raw, hislip, pm, core] {
+        for _ in 0..100 {
+            if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    }
+    All {
+        raw,
+        hislip,
+        pm,
+        stop,
+    }
+}
+
+impl All {
+    /// The same instrument as each resource string names it.
+    fn resources(&self) -> [(String, Vec<String>); 4] {
+        let pm = vec!["--portmapper".to_string(), self.pm.to_string()];
+        [
+            (format!("TCPIP::127.0.0.1::{}::SOCKET", self.raw), vec![]),
+            (format!("127.0.0.1:{}", self.raw), vec![]),
+            (
+                format!("TCPIP::127.0.0.1::hislip0,{}::INSTR", self.hislip),
+                vec![],
+            ),
+            ("TCPIP::127.0.0.1::INSTR".to_string(), pm),
+        ]
+    }
+}
+
+fn run(target: &str, extra: &[String], rest: &[&str]) -> Vec<String> {
+    std::iter::once(target.to_string())
+        .chain(extra.iter().cloned())
+        .chain(rest.iter().map(|s| s.to_string()))
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn every_resource_string_reaches_the_same_instrument() {
+    let d = all("").await;
+    for (target, extra) in d.resources() {
+        let o = scpi(
+            run(&target, &extra, &["*IDN?", "MEAS:SCAL:LEVEL?", "*CLS"]),
+            "",
+        )
+        .await;
+        assert!(o.status.success(), "{target}: {}", err(&o));
+        assert_eq!(
+            out(&o),
+            format!("ferrofire,rtu-1,0,{}\n12.5\n", env!("CARGO_PKG_VERSION")),
+            "{target}"
+        );
+        let o = scpi(
+            run(
+                &target,
+                &extra,
+                &["--check", "--json", "SOUR:SETPOINT 100", "MEAS:SCAL:LEVEL?"],
+            ),
+            "",
+        )
+        .await;
+        assert!(o.status.success(), "{target}: {}", err(&o));
+        assert!(
+            out(&o).contains("\"response\":\"12.5\""),
+            "{target}: {}",
+            out(&o)
+        );
+        let o = scpi(run(&target, &extra, &["--check", "SOUR:SETPOINT 5000"]), "").await;
+        assert_eq!(o.status.code(), Some(1), "{target}");
+        assert!(
+            err(&o).contains("-222,Data out of range"),
+            "{target}: {}",
+            err(&o)
+        );
+    }
+    d.stop.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rejected_query_under_check_does_not_cost_the_timeout() {
+    let d = all("").await;
+    for (target, extra) in d.resources() {
+        let t0 = std::time::Instant::now();
+        let o = scpi(
+            run(
+                &target,
+                &extra,
+                &["--check", "--timeout", "30", "NOPE:NOPE?"],
+            ),
+            "",
+        )
+        .await;
+        assert_eq!(o.status.code(), Some(1), "{target}: {}", err(&o));
+        assert!(
+            err(&o).contains("-113,Undefined header;NOPE:NOPE?"),
+            "{target}: {}",
+            err(&o)
+        );
+        assert!(
+            t0.elapsed() < std::time::Duration::from_secs(10),
+            "{target}: {:?}",
+            t0.elapsed()
+        );
+        let o = scpi(
+            run(
+                &target,
+                &extra,
+                &[
+                    "--check",
+                    "--timeout",
+                    "30",
+                    "MEAS:SCAL:LEVEL?;*CLS",
+                    "*IDN?;*IDN?",
+                ],
+            ),
+            "",
+        )
+        .await;
+        assert_eq!(o.status.code(), Some(0), "{target}: {}", err(&o));
+        assert_eq!(out(&o).lines().count(), 2, "{target}");
+    }
+    d.stop.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn resources_that_cannot_be_reached_or_parsed_fail_with_exit_2() {
+    let d = all("").await;
+    let closed = free_port();
+    let o = scpi(
+        vec![format!("TCPIP::127.0.0.1::hislip0,{closed}::INSTR")],
+        "",
+    )
+    .await;
+    assert_eq!(o.status.code(), Some(2), "{}", err(&o));
+    let o = scpi(
+        vec![
+            "TCPIP::127.0.0.1::INSTR".into(),
+            "--portmapper".into(),
+            closed.to_string(),
+            "*IDN?".into(),
+        ],
+        "",
+    )
+    .await;
+    assert_eq!(o.status.code(), Some(2));
+    let o = scpi(
+        vec![
+            "TCPIP::127.0.0.1::gpib0,2::INSTR".into(),
+            "--portmapper".into(),
+            d.pm.to_string(),
+            "*IDN?".into(),
+        ],
+        "",
+    )
+    .await;
+    assert_eq!(o.status.code(), Some(2));
+    assert!(err(&o).contains("no such device `gpib0,2`"), "{}", err(&o));
+    let o = scpi(
+        vec![
+            "TCPIP::127.0.0.1::hislip9::INSTR".replace("::INSTR", &format!(",{}::INSTR", d.hislip)),
+            "*IDN?".into(),
+        ],
+        "",
+    )
+    .await;
+    assert_eq!(o.status.code(), Some(2));
+    assert!(err(&o).contains("no such HiSLIP instrument"), "{}", err(&o));
+    let o = scpi(vec!["TCPIP::127.0.0.1".into(), "*IDN?".into()], "").await;
+    assert_eq!(o.status.code(), Some(2));
+    assert!(err(&o).contains("TCPIP::host::INSTR"), "{}", err(&o));
+    d.stop.cancel();
 }
