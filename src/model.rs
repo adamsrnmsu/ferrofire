@@ -194,11 +194,21 @@ struct PowerDef {
     #[serde(default)]
     enforce_q_lims: bool,
     islands: Option<String>,
+    /// Generator ramp: `rate` MW/s for every generator, `gens` (device name -> MW/s) overriding it.
+    ramp: Option<RampDef>,
     #[allow(dead_code)]
     noise: Option<f64>, // pypower-compat mode only (phase 3)
     #[serde(default)]
     drive: Ordered<Src>,
     inline: Option<case::Inline>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RampDef {
+    rate: Option<f64>,
+    #[serde(default)]
+    gens: Ordered<f64>,
 }
 
 /// One publish endpoint and the tags it carries: listed inline, read from a bennu `config.xml`, or both.
@@ -529,7 +539,7 @@ fn build_power(
     let islands = power_islands(pd)?;
     let cs = power_case(pd, dir)?;
     let (loads, shunts) = drive_devices(pd);
-    let p = Power::new_with(
+    let mut p = Power::new_with(
         cs,
         islands,
         (pd.dc_fallback, pd.enforce_q_lims),
@@ -537,6 +547,10 @@ fn build_power(
         &shunts,
     )
     .map_err(|e| format!("power: {e}"))?;
+    if let Some(r) = &pd.ramp {
+        p.enable_ramp(r.rate, &r.gens.0)
+            .map_err(|e| format!("power: {e}"))?;
+    }
     let slots = (0..p.n_tags())
         .map(|i| syms.add(p.tag_name(i), "power tag"))
         .collect::<Result<_, _>>()?;
@@ -881,6 +895,9 @@ impl Model {
 
     pub fn step(&mut self, dt: f64) {
         self.eval();
+        if let Some(p) = self.power.as_mut() {
+            p.dirty |= p.pw.advance(dt);
+        }
         self.power_update();
         // toward states and bodies read the instant-t values; compute first, commit after the ODE advance
         let tw: Vec<f64> = self
