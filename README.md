@@ -111,6 +111,8 @@ flowchart LR
 | Power | AC Newton-Raphson and DC power flow, ported from PYPOWER 5.1.19 |
 | Power cases | PYPOWER `.py` (literal subset), MATPOWER `.m`, or `inline:` in the model |
 | Coupling | `power.drive`: process values set loads, e.g. pump flow sets a bus load in MW |
+| Generator Q limits | `power: {enforce_q_lims: true}` holds a PV or slack generator to its `mvar_min`/`mvar_max` (PYPOWER `ENFORCE_Q_LIMS`); off by default, as sceptre runs PyPower |
+| Ground-truth page | `ferrofire run --gt-addr 127.0.0.1:8080`: live tag table with value, age and staleness, and `/tags.json`; read-only, off by default (replaces `simulinkgt`) |
 | Islands | `deenergize` (zero the voltage on dead buses) or `fail` (raise `bus-alert`, PyPower behaviour) |
 | Tags | Waterway tags and the full PYPOWER/pybennu tag vocabulary (`bus-N.voltage`, `branch-1_F-T.active`, ...) |
 
@@ -190,6 +192,21 @@ A value that just changed is bold yellow for a second. Keys: `/` filter (substri
 
 `--stale-after SECONDS` (default 2) is how long without an update makes a tag stale, the same for every source. `--once` prints the table and exits (`tag=value age=1.2s ok|STALE`,
 or with `--json` one object per line), for scripts; with `--filter` it prints only the matches.
+
+## Ground-truth page
+
+`simulinkgt` (a closed Go binary that served the Simulink solver's ground truth on `:8080`) is replaced by a page the provider itself serves.
+It is off unless asked for:
+
+    ferrofire run model.yaml --gt-addr 0.0.0.0:8080 [--gt-stale-after 2]
+    simulinksolver --model model.yaml --gt-addr :8080      # the install name takes the same address
+
+`GET /` is a small HTML table (one row per published tag: value, age in seconds, `STALE` once the age reaches `--gt-stale-after`, default 2 s; it
+refreshes itself every 2 s). `GET /tags.json` is `{"stale_after":2,"tags":[{"tag":"lock.height","value":5.0,"age":0.012,"stale":false},...]}`
+(a value that is not a number is `null`). Anything but GET is refused with 405. The page only reads the table `ferrofire top` already keeps
+(one lock per publish cycle, copied and released before anything is rendered or written), so a slow or silent client cannot hold up the
+engine tick: each connection has its own thread and 2 s timeouts, and at most 16 are served at once. It has no authentication; bind it to a
+management address, not a routable one. The tag names are the provider's, so on a power-flow model it lists the `bus-N.voltage` family too.
 
 ## Probe
 
@@ -326,6 +343,7 @@ outputs:
 ```
 
 - Optional `units: m3/s` on an input, state or output is documentation only; `ferrofire explain MODEL.YAML TAG` prints it with the tag's kind (param, input, state, body, output, power tag), type, defining expression (`ode`, `toward`, `expr`, `drive`, or "AC power flow"), `default`/`init`, `min`/`max`, what it `depends on` and what it is `used by`. Offline, nothing is stepped; an unknown tag gets a "did you mean". Power tags get units from their field name (`MW`, `MVAr`, `pu`, `deg`, `kV`).
+- `power:` options: `case` / `inline`, `islands: fail|deenergize`, `dc_fallback`, `drive`, and `enforce_q_lims: true`. With it a generator whose reactive output leaves `[mvar_min, mvar_max]` is held at the limit (its bus becomes PQ for that solve, the voltage deviates to suit) and the flow is re-run until none violates, as PYPOWER's `ENFORCE_Q_LIMS = 1`; if the slack generator is held, the first PV bus becomes the slack and angles are shifted back to the original slack. If every PV and slack generator violates, the solve reports no solution (`bus-alert`). A system with several slacks cannot hold one (an error, as in PYPOWER). The default is off because sceptre's PyPower runs without it; writing `generator-N_bus-M.mvar_max` changes the limit live.
 - Full examples: `models/waterway.yaml`, `models/pump-station.yaml`.
 - Full design: `docs/provider-spec.md` in the [range repo](https://github.com/adamsrnmsu) and `docs/field-device-spec.md` here.
 

@@ -1,5 +1,6 @@
 //! simulinksolver frontend: speaks the modelHooks.c shm/semaphore contract (see CONTRACT.md) and drives a `Model`.
-//! Args (-tf inf, -v, ...) are accepted and ignored, except `--model <file>`.
+//! Args (-tf inf, -v, ...) are accepted and ignored, except `--model <file>` and `--gt-addr HOST:PORT` (the ground-truth page that
+//! replaces `simulinkgt`, docs in the README).
 
 pub mod contract;
 pub mod ipc;
@@ -17,11 +18,7 @@ fn die(msg: &str, e: impl std::fmt::Display) -> ! {
 
 /// `--model <file>`, else ./model.yaml, else the embedded waterway model: (yaml, where it came from).
 fn model_source(args: &[String]) -> (String, String) {
-    let explicit = args
-        .iter()
-        .position(|a| a == "--model")
-        .and_then(|i| args.get(i + 1));
-    if let Some(p) = explicit {
+    if let Some(p) = flag_value(args, "--model") {
         let src = std::fs::read_to_string(p).unwrap_or_else(|e| die(&format!("model {p}"), e));
         return (src, p.clone());
     }
@@ -136,14 +133,24 @@ impl Io {
     }
 }
 
+/// The value after `flag`, if the flag is there.
+fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a String> {
+    args.iter()
+        .position(|a| a == flag)
+        .and_then(|i| args.get(i + 1))
+}
+
 pub fn main(args: &[String]) {
     if args.iter().any(|a| a == "-h" || a == "--help") {
-        println!("simulinksolver [-tf inf ...] [--model model.yaml]  process simulator (modelHooks shm/semaphore contract)");
+        println!("simulinksolver [-tf inf ...] [--model model.yaml] [--gt-addr HOST:PORT]  process simulator (modelHooks shm/semaphore contract)");
         return;
     }
     install_signals();
     crate::log::start("simulink");
     let mut model = load_model(args);
+    let addr = flag_value(args, "--gt-addr").map(String::as_str);
+    let gt = crate::gt::start(addr, crate::gt::STALE_AFTER)
+        .unwrap_or_else(|e| die("ground truth page", e));
     let io = Io::open(read_points(&model));
     io.publish(&model);
     io.publish_sem.post();
@@ -155,6 +162,15 @@ pub fn main(args: &[String]) {
     let mut k: u64 = 0;
     while !STOP.load(Ordering::SeqCst) {
         io.cycle(&mut model);
+        if gt {
+            // ponytail: owned names every cycle, only when the page is on; a borrowed publish in top if that ever shows in a profile
+            let snap: Vec<_> = model
+                .snapshot()
+                .into_iter()
+                .map(|(t, v)| (t.to_string(), v))
+                .collect();
+            crate::top::publish(&snap, Instant::now());
+        }
         model.step(dt);
         k += 1;
         let due = t0 + Duration::from_secs_f64(k as f64 * dt);
