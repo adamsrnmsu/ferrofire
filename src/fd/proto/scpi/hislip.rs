@@ -783,6 +783,33 @@ mod tests {
         assert_eq!(fatal.map(|f| f.0), Some(0));
     }
 
+    #[test]
+    fn exactly_the_pending_limit_is_held_and_one_response_more_is_not() {
+        let mut r = rig();
+        r.ins.idn = "x".repeat(15); // 16 bytes with its newline
+        let responses = MAX_PENDING / 16;
+        let chunk = "*IDN?
+"
+        .repeat(responses / 8);
+        let c = Ctx {
+            ins: &r.ins,
+            store: &r.store,
+            link: &r.link,
+        };
+        for _ in 0..8 {
+            assert!(r
+                .sync
+                .recv(frame(DATA, 0, ID, chunk.as_bytes()), &c)
+                .is_ok());
+        }
+        let more = r.sync.recv(frame(DATA, 0, ID, b"*IDN?\n"), &c);
+        assert_eq!(
+            more.unwrap_err().0,
+            0,
+            "{responses} responses fill it, the next is too many"
+        );
+    }
+
     #[tokio::test]
     async fn the_hub_hands_out_ids_attaches_once_and_holds_one_lock() {
         let hub = Hub::new(Scope::Instrument, shared());
