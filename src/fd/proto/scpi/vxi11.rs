@@ -465,10 +465,11 @@ pub async fn serve_udp(sock: UdpSocket, svc: &Vxi11, stop: &CancellationToken) {
 impl Vxi11 {
     /// A call that arrived by UDP: the portmapper answers, the core and abort programs are not offered (PROG_UNAVAIL).
     pub fn call_udp(&self, rec: &[u8]) -> Option<Vec<u8>> {
-        let [xid, _, _, prog] = Xdr(rec).words()?;
-        match prog {
-            PMAP_PROG => self.call(u64::MAX, rec),
-            _ => Some(accepted(xid, PROG_UNAVAIL, &[])),
+        let [xid, mtype, _, prog] = Xdr(rec).words()?;
+        match (mtype, prog) {
+            (_, PMAP_PROG) => self.call(u64::MAX, rec),
+            (0, _) => Some(accepted(xid, PROG_UNAVAIL, &[])),
+            _ => None,
         }
     }
 }
@@ -959,5 +960,9 @@ mod tests {
         let r = s.call_udp(&call_bytes(7, CORE_PROG, 1, 10, &[])).unwrap();
         assert_eq!(words(&r)[5], PROG_UNAVAIL);
         assert_eq!(s.call_udp(&[1, 2]), None);
+        // a REPLY (or anything else that is not a CALL) is never answered, whatever program it names
+        let mut reply = call_bytes(7, CORE_PROG, 1, 10, &[]);
+        reply[7] = 1;
+        assert_eq!(s.call_udp(&reply), None);
     }
 }
