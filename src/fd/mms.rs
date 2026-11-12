@@ -29,9 +29,9 @@ pub type Due = Vec<(AssocId, Vec<u8>)>;
 
 /// A reply that cannot be written within this long ends the association.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
-/// The association checks its own deadlines (handshake, request timeouts) at this pace; the handler's tick runs at `TICK` (1 ms: GOOSE retransmits at T1, a few ms, and a coarser tick lumps frames together).
 /// How long a closed association waits for the peer's own FIN, see `linger`.
 const LINGER: Duration = Duration::from_secs(1);
+/// The association checks its own deadlines (handshake, request timeouts) at this pace; the handler's tick runs at `TICK` (1 ms: GOOSE retransmits at T1, a few ms, and a coarser tick lumps frames together).
 const POLL: Duration = Duration::from_millis(100);
 const TICK: Duration = Duration::from_millis(1);
 
