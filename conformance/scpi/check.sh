@@ -18,7 +18,7 @@ for p in "pyvisa: \*IDN? names" "pyvisa: MEAS:SCAL:LEVEL[?] = 250.5" "pyvisa: SO
          "pyvisa: SOUR:BREAKER_CMD ON reached the provider write queue" "pyvisa: \*STB[?] after the error" "pyvisa: \*ESR[?] after the error" \
          "pyvisa: SYST:ERR[?] is -222" "pyvisa: the out-of-range write never reached the provider" \
          "lxi: \*IDN[?]" "lxi: MEAS:SCAL:LEVEL[?] = 250.5" "ferrofire scpi: --check script exit 0" "ferrofire scpi: --check exits 1" \
-         "lxi vxi11: \*IDN[?]" "lxi vxi11: MEAS:SCAL:LEVEL[?] = 250.5" \
+         "lxi vxi11: \*IDN[?]" "lxi vxi11: MEAS:SCAL:LEVEL[?] = 250.5" "lxi discover: found the device" \
          "ferrofire scpi: TCPIP::127.0.0.1::hislip0::INSTR --check" "ferrofire scpi: TCPIP::127.0.0.1::INSTR --check" \
          "ferrofire scpi: TCPIP::127.0.0.1::hislip0::INSTR rejected query found at once" "ferrofire scpi: TCPIP::127.0.0.1::INSTR rejected query found at once" \
          "churn: descriptors flat" "plain socket: overlong and garbage"; do

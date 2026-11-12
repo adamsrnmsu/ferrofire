@@ -217,7 +217,8 @@ protocol: it works against real instruments that offer the socket service, HiSLI
 - **HiSLIP**: no overlapped mode, no `AsyncInterrupted`, no shared locks (every lock is exclusive and the lock is not seen by the other transports), no TLS or
   authentication, no vendor messages.
 - **VXI-11**: no locks (`device_lock` is error 8), no interrupt channel, no `DOCMD`, the abort program shares the core port, the core
-  channel is TCP only, the portmapper has no `CALLIT` (so `lxi discover`'s broadcast finds nothing; mDNS and rpcbind are not offered either).
+  channel is TCP only, the portmapper has no `CALLIT` and there is no rpcbind. `lxi discover` works (it broadcasts a GETPORT to UDP 111,
+  which the portmapper answers, and asks `*IDN?` over the core channel; conformance checks it).
   `device_read` with nothing to read is error 15 at once, where a real instrument waits for `io_timeout`.
 - **Raw socket**: -410 and -420 are approximations (above); its responses are not flow-controlled per message.
 - **`*RST`** resets the tags that have a `<default-value>`; it cannot reset what the provider owns.
@@ -225,4 +226,4 @@ protocol: it works against real instruments that offer the socket service, HiSLI
   bit (PON) of the event status register is never set.
 - **Numbers**: hexadecimal, octal, binary, block data and units are not accepted (-104, -131); a mantissa longer than a double holds is -121,
   where IEEE 488.2 allows up to 255 digits and names the condition -124 (Too many digits).
-- **mDNS / LXI discovery** (`_scpi-raw._tcp`, `_hislip._tcp`, the LXI identification XML) is not offered.
+- **mDNS / LXI discovery** (`_scpi-raw._tcp`, `_hislip._tcp`, `_vxi-11._tcp`, the LXI identification XML) is not offered; the VXI-11 broadcast that `lxi discover` uses is.

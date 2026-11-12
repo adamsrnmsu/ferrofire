@@ -499,7 +499,7 @@ not freely executable); `scpi_net.rs` and `scpi_client.rs` use our own client on
   belong to a handshake TCP does not have. HiSLIP and VXI-11 have it and test the real cases (the RMT-delivered rule is our reading of
   IVI-6.1, checked against pyvisa-py, which sets the bit after every response it reads, not against a real instrument).
 - No SRQ (HiSLIP `AsyncServiceRequest`, VXI-11 interrupt channel), no overlapped HiSLIP, no VXI-11 locks, no mDNS or portmapper
-  `CALLIT`, so `lxi discover` finds nothing (field-device-scpi.md lists them). No real instrument, no NI-VISA or Keysight IO Libraries.
+  `CALLIT` (field-device-scpi.md lists them; `lxi discover`'s VXI-11 broadcast works, checked in the conformance run). No real instrument, no NI-VISA or Keysight IO Libraries.
 - No units, hexadecimal or block data, no `STATus`/`OPERation` subsystems (status byte bits 3 and 7 read 0), no `*PSC`, `*DDT` or `*RCL`
   (the save/recall commands) or other optional common commands (they are -113).
 - Mutation runs covered only the new code, not the whole tree (`make mutate` exceeds the Docker VM on a loaded host).

@@ -32,8 +32,10 @@ case "$idn" in ferrofire,rtu-1,CONF-0001,*) echo "PASS lxi vxi11: *IDN?" ;; *) e
 lvl=$(lxi scpi -a 127.0.0.1 'MEAS:SCAL:LEVEL?')
 echo "lxi (VXI-11) MEAS:SCAL:LEVEL? -> $lvl"
 case "$lvl" in 250.5*) echo "PASS lxi vxi11: MEAS:SCAL:LEVEL? = 250.5" ;; *) echo "FAIL lxi vxi11: level -> $lvl"; exit 1 ;; esac
-echo "== lxi discover (VXI-11 broadcast and mDNS; the harness has only the loopback, so a miss is reported, not failed)"
-timeout 20 lxi discover --timeout 3 2>&1 | head -5 || true
+echo "== lxi discover (VXI-11: a GETPORT broadcast to the UDP portmapper, then *IDN? over the core channel)"
+disc=$(timeout 60 lxi discover 2>&1) || true
+echo "$disc"
+case "$disc" in *'Found "ferrofire,rtu-1,CONF-0001,'*) echo "PASS lxi discover: found the device" ;; *) echo "FAIL lxi discover: the device was not found"; exit 1 ;; esac
 echo "== ferrofire scpi on the HiSLIP and VXI-11 resources"
 ferrofire scpi 127.0.0.1 '*CLS'   # the status system is the instrument's: start from an empty queue
 for res in 'TCPIP::127.0.0.1::hislip0::INSTR' 'TCPIP::127.0.0.1::INSTR'; do
@@ -90,7 +92,7 @@ import socket, os, time
 def ask(s, line):
     s.sendall(line + b"\n"); return s.recv(4096).decode().strip()
 s = socket.create_connection(("127.0.0.1", 5025), 5); s.settimeout(5)
-ask(s, b"*CLS")                                         # the queue is the instrument's: the churn left errors in it
+s.sendall(b"*CLS\n")                                    # the queue is the instrument's: the churn left errors in it
 s.sendall(b"A" * 200_000 + b"\n")                       # over max-line (1024): -363, thrown away to the newline
 print("overlong line:", ask(s, b"SYST:ERR?"))
 assert ask(s, b"SYST:ERR?").startswith("0,"), "one error for the whole overlong line"
