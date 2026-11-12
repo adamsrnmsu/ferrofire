@@ -647,8 +647,8 @@ mod tests {
             "the name is not case sensitive"
         );
         assert_eq!(
-            new(b"inst0", 0)[0],
-            OUT_OF_RESOURCES as u32,
+            new(b"inst0", 0),
+            [OUT_OF_RESOURCES as u32, 0, 4881, MAX_RECV],
             "two links at most"
         );
         assert_eq!(new(b"gpib0,3", 0)[0], NOT_ACCESSIBLE as u32);

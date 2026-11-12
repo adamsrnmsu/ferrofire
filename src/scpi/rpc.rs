@@ -130,6 +130,11 @@ mod tests {
         out.clear();
         put_opaque(&mut out, b"abcdef");
         assert_eq!(Xdr(&out).opaque(5), None, "over the maximum");
+        assert_eq!(
+            Xdr(&out).opaque(6),
+            Some(&b"abcdef"[..]),
+            "exactly the maximum"
+        );
         assert_eq!(Xdr(&out[..10]).opaque(10), None, "cut short");
         assert_eq!(Xdr(&out[..8]).opaque(10), None, "padding missing");
         assert_eq!(Xdr(&[0, 0, 0, 1][..]).u32(), Some(1));

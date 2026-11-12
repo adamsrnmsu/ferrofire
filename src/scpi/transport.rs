@@ -338,7 +338,7 @@ fn read_record(s: &mut impl Read) -> std::io::Result<Vec<u8>> {
         let mut head = [0u8; 4];
         s.read_exact(&mut head)?;
         let head = u32::from_be_bytes(head);
-        let mut frag = vec![0; (head & 0x7FFF_FFFF) as usize];
+        let mut frag = vec![u8::default(); (head & 0x7FFF_FFFF) as usize];
         s.read_exact(&mut frag)?;
         rec.extend(frag);
         if head >> 31 == 1 || rec.len() > super::rpc::MAX_RECORD {
@@ -399,7 +399,7 @@ impl<S: Read + Write> Wire for Vxi11<S> {
             let args = ints(&[self.link, 1 << 16, self.wait_ms, self.wait_ms, 0, 0]);
             let r = self.core(12, &args)?;
             let mut x = Xdr(&r);
-            let (error, reason) = (x.u32(), x.u32().unwrap_or(0));
+            let (error, reason) = (x.u32(), x.u32().unwrap_or_default());
             match error {
                 Some(0) => {}
                 Some(15) => return Err(std::io::ErrorKind::TimedOut.into()),
@@ -777,5 +777,167 @@ mod tests {
             .contains("short reply"));
         assert_eq!(millis(Duration::from_millis(1234)), 1234);
         assert_eq!(millis(Duration::from_secs(1 << 40)), u32::MAX);
+    }
+
+    // ---- the handshakes against a scripted peer on a real socket ----
+
+    use std::net::TcpListener;
+
+    fn listener() -> (TcpListener, u16) {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        (l, port)
+    }
+
+    const WAIT: Duration = Duration::from_secs(5);
+
+    /// A HiSLIP peer: answers the handshake of both channels with `replies` (InitializeResponse, AsyncInitializeResponse, the maximum
+    /// message size response, as many as the client gets to ask for) and hands back the frames it was sent.
+    fn hislip_peer(replies: Vec<Frame>) -> (u16, std::thread::JoinHandle<Vec<Frame>>) {
+        let (l, port) = listener();
+        let t = std::thread::spawn(move || {
+            let (mut sent, mut replies) = (vec![], replies.into_iter());
+            let (mut sync, _) = l.accept().unwrap();
+            let mut r = Reader::default();
+            sent.push(next(&mut sync, &mut r).unwrap());
+            let Some(first) = replies.next() else {
+                return sent;
+            };
+            sync.write_all(&first.encode()).unwrap();
+            let Ok((mut asy, _)) = l.accept() else {
+                return sent;
+            };
+            let mut ar = Reader::default();
+            while let Some(reply) = replies.next() {
+                sent.push(next(&mut asy, &mut ar).unwrap());
+                asy.write_all(&reply.encode()).unwrap();
+            }
+            sent
+        });
+        (port, t)
+    }
+
+    #[test]
+    fn hislip_opens_the_sync_channel_then_the_async_one_and_asks_for_the_maximum_size() {
+        let (port, peer) = hislip_peer(vec![
+            frame(INITIALIZE_RESPONSE, 0, 0x0100_0007, b""),
+            frame(ASYNC_INITIALIZE_RESPONSE, 0, 0x4646, b""),
+            frame(ASYNC_MAX_SIZE_RESPONSE, 0, 0, &4096u64.to_be_bytes()),
+        ]);
+        let h = Hislip::open("127.0.0.1", port, "hislip0", WAIT).unwrap();
+        assert_eq!((h.max, h.id, h.rmt), (4096, ID, 0));
+        let sent = peer.join().unwrap();
+        assert_eq!(
+            sent,
+            [
+                frame(INITIALIZE, 0, 0x0100_4646, b"hislip0"),
+                frame(ASYNC_INITIALIZE, 0, 7, b""),
+                frame(ASYNC_MAX_SIZE, 0, 0, &(1u64 << 20).to_be_bytes()),
+            ]
+        );
+        let (port, peer) = hislip_peer(vec![
+            frame(INITIALIZE_RESPONSE, 0, 0x0100_0007, b""),
+            frame(ASYNC_INITIALIZE_RESPONSE, 0, 0, b""),
+            frame(ASYNC_MAX_SIZE_RESPONSE, 0, 0, b"short"),
+        ]);
+        assert_eq!(
+            Hislip::open("127.0.0.1", port, "hislip0", WAIT)
+                .unwrap()
+                .max,
+            272
+        );
+        peer.join().unwrap();
+    }
+
+    #[test]
+    fn hislip_open_reports_what_the_peer_refused() {
+        let open = |replies: Vec<Frame>| {
+            // the peer thread may be left waiting for a second connection that a refused client never makes
+            let (port, _peer) = hislip_peer(replies);
+            Hislip::open("127.0.0.1", port, "hislip7", WAIT)
+                .err()
+                .unwrap()
+        };
+        let e = open(vec![frame(FATAL_ERROR, 0, 0, b"no such HiSLIP instrument")]);
+        assert_eq!(e, "HiSLIP initialize: no such HiSLIP instrument (code 0)");
+        let e = open(vec![
+            frame(INITIALIZE_RESPONSE, 0, 0x0100_0007, b""),
+            frame(FATAL_ERROR, 3, 0, b"nope"),
+        ]);
+        assert_eq!(e, "HiSLIP async initialize: nope (code 3)");
+        let e = open(vec![
+            frame(INITIALIZE_RESPONSE, 0, 0x0100_0007, b""),
+            frame(ASYNC_INITIALIZE_RESPONSE, 0, 0, b""),
+        ]);
+        assert!(e.starts_with("HiSLIP maximum message size:"), "{e}");
+    }
+
+    /// A VXI-11 portmapper that answers one call with `results`.
+    fn portmapper(results: Vec<u8>) -> (u16, std::thread::JoinHandle<()>) {
+        let (l, port) = listener();
+        let t = std::thread::spawn(move || {
+            let (mut s, _) = l.accept().unwrap();
+            read_record(&mut s).unwrap();
+            s.write_all(&answer(1, &results)).unwrap();
+        });
+        (port, t)
+    }
+
+    #[test]
+    fn vxi11_asks_the_portmapper_then_creates_a_link_on_the_core_channel() {
+        // the portmapper answers with the core channel's port, known only once both listeners exist
+        let ((pml, pm_port), (corel, core_port)) = (listener(), listener());
+        let peer = std::thread::spawn(move || {
+            let mut sent = vec![];
+            let (mut s, _) = pml.accept().unwrap();
+            sent.push(read_record(&mut s).unwrap());
+            s.write_all(&answer(1, &ints(&[u32::from(core_port)])))
+                .unwrap();
+            let (mut s, _) = corel.accept().unwrap();
+            sent.push(read_record(&mut s).unwrap());
+            let created = ints(&[0, 9, u32::from(core_port), 4096]);
+            s.write_all(&answer(1, &created)).unwrap();
+            sent
+        });
+        let v = Vxi11::open("127.0.0.1", (pm_port, "inst0"), WAIT).unwrap();
+        assert_eq!((v.link, v.max, v.wait_ms, v.xid), (9, 4096, 5000, 2));
+        let sent = peer.join().unwrap();
+        let call = |prog, vers, proc, args: &[u8]| {
+            record(
+                &[
+                    ints(&[1, 0, 2, prog, vers, proc, 0, 0, 0, 0]),
+                    args.to_vec(),
+                ]
+                .concat(),
+            )[4..]
+                .to_vec()
+        };
+        assert_eq!(sent[0], call(PMAP_PROG, 2, 3, &ints(&[CORE_PROG, 1, 6, 0])));
+        assert_eq!(
+            sent[1],
+            call(
+                CORE_PROG,
+                1,
+                10,
+                &[ints(&[1, 0, 0]), opaque(b"inst0")].concat()
+            )
+        );
+        drop(v);
+    }
+
+    #[test]
+    fn vxi11_open_reports_what_the_portmapper_and_the_device_refused() {
+        let (pm_port, peer) = portmapper(ints(&[0]));
+        let e = Vxi11::open("127.0.0.1", (pm_port, "inst0"), WAIT)
+            .err()
+            .unwrap();
+        assert!(e.contains("does not know the core channel"), "{e}");
+        peer.join().unwrap();
+        let (l, port) = listener();
+        drop(l);
+        let e = Vxi11::open("127.0.0.1", (port, "inst0"), WAIT)
+            .err()
+            .unwrap();
+        assert!(e.contains("connect 127.0.0.1"), "{e}");
     }
 }

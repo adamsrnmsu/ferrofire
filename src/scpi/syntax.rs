@@ -300,6 +300,12 @@ mod tests {
     }
 
     #[test]
+    fn a_string_needs_its_opening_quote() {
+        assert_eq!(string(""), Err(-102));
+        assert_eq!(string("\"a\""), Ok("a".to_string()));
+    }
+
+    #[test]
     fn number_len_is_the_longest_number_prefix() {
         for (s, n) in [
             ("12", 2),
