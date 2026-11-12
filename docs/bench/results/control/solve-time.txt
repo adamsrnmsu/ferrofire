@@ -1,0 +1,10 @@
+date 2026-11-12T03:02:58Z
+host_load 6.54 5.63 5.60
+docker_vm cpus=18 mem=8317202432
+binary sha256 1a8ac023e35c203c mtime 2026-11-11T20:02:22 (built outside this script; the commit is not recorded)
+rep 1 none_ms 37 seq200_ms 1927 open1001_ms 68 gens_off_ms 53
+rep 2 none_ms 33 seq200_ms 1985 open1001_ms 79 gens_off_ms 57
+rep 3 none_ms 33 seq200_ms 1992 open1001_ms 80 gens_off_ms 53
+rep 4 none_ms 33 seq200_ms 1975 open1001_ms 69 gens_off_ms 46
+rep 5 none_ms 31 seq200_ms 1961 open1001_ms 76 gens_off_ms 53
+per_solve_ms 9.7 (mean seq200 minus mean none, over 200 solves, 5 reps)

@@ -88,3 +88,13 @@ raw data are untouched (the new report only reads them for the "before" age numb
 summary, `_ff.seq` gaps), `trk.py` (Modbus vs provider READ), `ovsb.sh` (OVS port counters), `fault.py`/`inject.py`/`misspell.sh`/`fdlog.sh` (fault injection and device-log health),
 `provrtu.sh`/`rtudg.sh` (per-RTU groups, restore), `rtu2.sh` (pull-bridge), `matrix.sh` + `matrix_table.py` (the 4 x 3 push/pull matrix). Results: section G of
 `docs/bench/datagram-v1-bench.md`. Pollers must keep one Modbus connection open (stock bennu leaks an fd per closed connection, ww-1p6).
+
+## Control-latency grid (ww-1df.23.1)
+
+`python3 bench/gen_grid.py OUTDIR` builds the synthetic grid of the breaker/generator control bench: 250 buses, 1250 breakers (branches),
+10 commandable generators plus the slack, partitioned round-robin over R = 1, 2, 5, 10 RTUs. It writes `OUTDIR/case.py` (PYPOWER, shared by
+ferrofire and stock pybennu-power-solver), `OUTDIR/R<R>/model.yaml` (ferrofire, per-RTU publish slices), `config.ini` (stock), `ferrofire/rtu-N.xml` and
+`bennu/rtu-N.xml` (field-device configs) and `scada.json` (Modbus register map and the safe `flip_order`; see the script's docstring for the
+islanding rule). `python3 bench/test_gen_grid.py` checks sizes, partition, determinism and config consistency. `bench/solve_time.sh BIN GRIDDIR`
+measures the re-solve time at 1250 branches: [docs/bench/results/control/solve-time.txt](../docs/bench/results/control/solve-time.txt)
+(about 9.7 ms per solve, ferrofire in a container on a contended host; pybennu is not installed offline, so its solve time is not measured).
