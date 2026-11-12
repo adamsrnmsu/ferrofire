@@ -98,3 +98,27 @@ ferrofire and stock pybennu-power-solver), `OUTDIR/R<R>/model.yaml` (ferrofire, 
 islanding rule). `python3 bench/test_gen_grid.py` checks sizes, partition, determinism and config consistency. `bench/solve_time.sh BIN GRIDDIR`
 measures the re-solve time at 1250 branches: [docs/bench/results/control/solve-time.txt](../docs/bench/results/control/solve-time.txt)
 (about 9.7 ms per solve, ferrofire in a container on a contended host; pybennu is not installed offline, so its solve time is not measured).
+
+## Control-latency harness (ww-1df.23.3)
+
+`make bench-control STACK=ferrofire` (`bench/run_control.py`, about 2 h on a quiet host) runs breaker flips {1,5,10,50,100,1000} and generator spin-down + spin-up
+{1,2,5,10} across R = 1, 2, 5, 10 RTUs, in sequential and simultaneous mode, 5 reps, in docker on the default daemon (needs the grid of `gen_grid.py`, which the
+script generates into `target-linux/control-grid/`). Per (rep, R): a provider container (`ferrofire run --stamp-writes`), R `ferrofire field-device` containers
+and one `ffcontrol` container (`bench/control/`, a standalone cargo package: the SCADA driver, Modbus/TCP plus a stream listener, one process and one wall clock)
+on the network `ffcontrol`. Raw output per run in `docs/bench/results/control/<stack>/R<R>_rep<k>.*`: `cmds.csv` (a row per command), `cells.csv` (a row per phase),
+`driver.log`, `prov.log.gz` (the provider's `Applied:` stamps), `fd.log.gz`, `env.txt` (commit, binary hash, host load, other containers, contention).
+`bench/control_join.py` adds the provider stamps to the command rows. Knobs: env of `run_control.py`; `ffcontrol --help` is the source docstring of `bench/control/src/main.rs`.
+
+Per command (unix ns, one clock): `t_cmd` write sent, `t_ack` write answered, `t_echo` first read-back (discrete input, polled every 2 ms on its own connection) showing
+the new state, `t_stream` first datagram carrying the new state on the RTU's multicast group, `t_visible` first read-back showing it at or after `t_stream`,
+`t_setpoint` (generators) PG input register within 1% of the setpoint, and from the provider `t_apply_ns` (engine applied the write) and `t_solved_ns` (the step that re-solved it finished).
+`t_echo` is kept apart because the field device (like the stock one, SPEC 3.2) sets a point when the provider ACKs the WRITE, which is before the provider has applied it:
+the read-back flips early and a still-old datagram can flip it back (`flaps`). A command is *done* at `t_visible` (and `t_setpoint` for a generator); sequential mode issues the
+next command when the previous is done. Spread over RTUs: n commands, no RTU over ceil(n/R) (a shortfall is taken from the others), issued round-robin over the RTUs in
+sequential mode, one concurrent Modbus client per RTU in simultaneous mode.
+
+- **Lost**: not done within 10 s of `t_cmd` (12 s for a generator, which also has to ramp). 10 s is above the field device's 5 s provider timeout, so one retried WRITE shows as tail latency, not loss.
+- **Wrong**, per phase: `wrong_final` = commands that were done but whose point (or PG) is not at the target after a 1 s settle; `wrong_provider` = done commands whose tag the provider READs back
+  at a different value; `wrong_collateral` = points nobody commanded that changed; `order_violations` = adjacent commands of one RTU that became visible in the opposite order; `flaps` = read-backs that showed the new state and then took it back.
+- **Generator**: spin-down (status off after PG ramps 40 MW to 0 at 40 MW/s, `power.ramp` in the generated model) then spin-up (status on, PG ramps back), each a measured phase; breakers: open the first n of `flip_order`, then restore (unmeasured, checked).
+- The provider stamp joins the first unused `Applied:` line of the command's tag and value at or after `t_cmd`; a provider other than ferrofire only has to log lines of that shape.

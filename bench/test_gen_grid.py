@@ -105,6 +105,13 @@ class T(unittest.TestCase):
                 for pt in ET.fromstring(ff).findall("field-device/input/*/name"):
                     self.assertIn(pt.text, y)
 
+    def test_ferrofire_model_ramps_generators_and_the_stock_config_does_not(self):
+        for nr in RTUS:
+            self.assertIn("  ramp:\n    rate: 40.0\n", pathlib.Path(self.path(f"R{nr}", "model.yaml")).read_text())
+        with tempfile.TemporaryDirectory() as d:
+            G.emit(self.g, d, [1], ramp=12.5)
+            self.assertIn("rate: 12.5", pathlib.Path(d, "R1", "model.yaml").read_text())
+
 
 if __name__ == "__main__":
     unittest.main()

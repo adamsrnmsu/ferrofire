@@ -1,0 +1,15 @@
+[package]
+name = "ffcontrol"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# SCADA driver of the control-latency bench (ww-1df.23.3): standalone, not part of ferrofire's build or gates.
+[workspace]
+
+[dependencies]
+ferrofire = { path = "../.." }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
