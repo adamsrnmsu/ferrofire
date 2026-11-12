@@ -6,12 +6,22 @@ use super::load_as;
 use ferrofire::fd::proto::scpi::Server;
 use ferrofire::fd::store::Store;
 
+/// A port nothing listens on, and that no other test of this process was given: the kernel may hand the same one to two callers that
+/// close their probe before their server binds it, and a client would then talk to the wrong test's server.
 pub fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
+    static GIVEN: std::sync::Mutex<Vec<u16>> = std::sync::Mutex::new(Vec::new());
+    loop {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let mut given = GIVEN.lock().unwrap();
+        if !given.contains(&port) {
+            given.push(port);
+            return port;
+        }
+    }
 }
 
 /// `inner`: keys of `<scpi-server>` other than the points, which are always the same five.
