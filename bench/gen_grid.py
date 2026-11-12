@@ -15,7 +15,7 @@ A driver that opens something else owns the consequence (ferrofire publishes VM 
 Partition over R RTUs: breaker k -> RTU k % R, generator j -> RTU j % R (round-robin). Output per R in OUTDIR/R<R>/: model.yaml
 (ferrofire provider, per-RTU publish slices), config.ini (stock pybennu-power-solver), ferrofire/rtu-N.xml and bennu/rtu-N.xml
 (field-device configs; they differ only in the input endpoint, a per-RTU group for ferrofire's slices, one shared group for stock),
-scada.json (register map). OUTDIR/case.py (PYPOWER format, shared by both providers) and OUTDIR/grid.json (topology, flip_order)."""
+scada.json (register map; config.ini names the case /etc/sceptre/case_control.py, since pypower's loadcase calls the function named like the file). OUTDIR/case.py (PYPOWER format, shared by both providers) and OUTDIR/grid.json (topology, flip_order)."""
 import argparse, json, os, random
 
 FAMILIES = [(1, 0), (0, 1), (1, 1), (1, -1), (0, 2)]
@@ -172,7 +172,7 @@ def emit(g, out, rtus, rate=0.1, provider_host="provider", rtu_host="rtu-{n}", r
                                  | {a["point"] for a in m["aux"]}))
         write(f"{d}/model.yaml", model_yaml(slices, rate, ramp))
         write(f"{d}/config.ini", "[power-solver-service]\nsolver-type = PyPower\ndebug = false\nserver-endpoint = tcp://0.0.0.0:5555\n"
-                                 "publish-endpoint = udp://*;239.0.0.1:40000\ncase-file = /etc/sceptre/case.py\n")
+                                 "publish-endpoint = udp://*;239.0.0.1:40000\ncase-file = /etc/sceptre/case_control.py\n")
         write(f"{d}/scada.json", json.dumps({"R": nr, "seed": g["seed"], "port": 502, "rtus": [m | {"host": rtu_host.format(n=r + 1)} for r, m in enumerate(maps)],
                                               "flip_order": g["flip_order"], "gen_order": list(range(N_GENS)),
                                               "gen_setpoint": GEN_PG}, indent=1))

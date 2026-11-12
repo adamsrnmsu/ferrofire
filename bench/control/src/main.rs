@@ -10,7 +10,7 @@
 //! The provider's own apply/solve stamps (`ferrofire run --stamp-writes`) are joined afterwards by bench/control_join.py.
 //!
 //! `ffcontrol --scada R5/scada.json --provider tcp://provider:5555 --stream 'udp://*;239.0.1.{n}:40000' --cells breaker:seq:5,gen:sim:2 --out /out/run`
-//! writes `/out/run.cmds.csv` (one row per command) and `/out/run.cells.csv` (one row per phase). Exit 3: a restore failed.
+//! `--read-per 1 --legacy --status-only --fresh` for stock bennu: one tag per provider READ, stream bodies without the NUL ferrofire adds, generators are status flips (no PG ramp to wait for), one cell per stack so no restore afterwards. Writes `/out/run.cmds.csv` (one row per command) and `/out/run.cells.csv` (one row per phase). Exit 3: a restore failed.
 mod modbus;
 use ferrofire::bennu::{group_for, parse_udp};
 use ferrofire::datagram::Receiver;
@@ -297,6 +297,12 @@ struct Ctx {
     writers: Vec<Mb>,
     pollers: Vec<Mb>,
     prov: Box<dyn Requester>,
+    /// Tags per provider READ (--read-per; 100, or 1 for stock bennu).
+    read_per: usize,
+    /// Stream bodies without the NUL terminator (stock bennu; --legacy).
+    legacy: bool,
+    /// One cell per stack (--fresh): no restore afterwards.
+    fresh: bool,
     socks: Vec<(String, UdpSocket)>,
     poll: Duration,
     timeout_ns: u64,
@@ -355,12 +361,20 @@ fn listen(
     cmds: &[Cmd],
     by_tag: &HashMap<&str, usize>,
     stop: &AtomicBool,
+    legacy: bool,
 ) {
     let mut rx = Receiver::new(group, by_tag.keys().copied());
     let mut buf = vec![0u8; 65536];
     while !stop.load(Relaxed) {
         let Ok(n) = sock.recv(&mut buf) else { continue };
         let now = now_ns();
+        // stock bennu's RADIO bodies carry no terminating NUL (ferrofire's do): add it so the Receiver takes them
+        let n = if legacy && n < buf.len() && buf[n - 1] != 0 {
+            buf[n] = 0;
+            n + 1
+        } else {
+            n
+        };
         for (tag, v) in rx.accept(&buf[..n]).unwrap_or_default() {
             if let Some(&i) = by_tag.get(tag.as_str()) {
                 on_pair(&cmds[i], now, v);
@@ -395,6 +409,7 @@ fn run_phase(ctx: &mut Ctx, cmds: &[Cmd], sim: bool) -> (u32, u32) {
         writers,
         pollers,
         socks,
+        legacy,
         poll,
         timeout_ns,
         settle,
@@ -422,8 +437,8 @@ fn run_phase(ctx: &mut Ctx, cmds: &[Cmd], sim: bool) -> (u32, u32) {
             sc.spawn(move || poll_rtu(mb, cmds, mine, every, stop, errs));
         }
         for (ep, sock) in socks.iter() {
-            let (stop, by_tag, group) = (&stop, &by_tag, group_for(ep));
-            sc.spawn(move || listen(sock, &group, cmds, by_tag, stop));
+            let (stop, by_tag, group, legacy) = (&stop, &by_tag, group_for(ep), *legacy);
+            sc.spawn(move || listen(sock, &group, cmds, by_tag, stop, legacy));
         }
         std::thread::sleep(Duration::from_millis(100)); // pollers and listeners are up before the first command
         if sim {
@@ -478,11 +493,12 @@ fn snapshot(ctx: &mut Ctx) -> Vec<(Vec<bool>, Vec<f64>)> {
         .collect()
 }
 
-fn prov_read(p: &mut dyn Requester, tags: &[&str]) -> HashMap<String, String> {
+/// READ in requests of `per` tags (`READ=a,b,`); stock bennu answers one tag per READ, so `per` = 1 sends `READ=a`.
+fn prov_read(p: &mut dyn Requester, tags: &[&str], per: usize) -> HashMap<String, String> {
     let mut out = HashMap::new();
-    for chunk in tags.chunks(100) {
+    for chunk in tags.chunks(per) {
         let r = p
-            .call(format!("READ={},", chunk.join(",")).as_bytes())
+            .call(format!("READ={}{}", chunk.join(","), if per > 1 { "," } else { "" }).as_bytes())
             .expect("provider READ");
         let r = String::from_utf8_lossy(&r)
             .trim_end_matches('\0')
@@ -505,7 +521,7 @@ fn baseline_ok(s: &Scada, snap: &[(Vec<bool>, Vec<f64>)]) -> bool {
             && r.gens
                 .iter()
                 .enumerate()
-                .all(|(i, _)| pg_ok(pg[i], s.sp, true))
+                .all(|(i, g)| g.pg.is_none() || pg_ok(pg[i], s.sp, true))
     })
 }
 
@@ -576,7 +592,7 @@ fn run_cell(
         let (werr, perr) = run_phase(ctx, &cmds, sim);
         let (t_end, after) = (now_ns(), snapshot(ctx));
         let tags: Vec<&str> = cmds.iter().map(|c| c.tag.as_str()).collect();
-        let prov = prov_read(&mut *ctx.prov, &tags);
+        let prov = prov_read(&mut *ctx.prov, &tags, ctx.read_per);
         let (mut ok, mut lost, mut wrong, mut wrong_prov, mut flaps) = (0, 0, 0, 0, 0);
         let mut touched: Vec<Vec<bool>> =
             before.iter().map(|(b, _)| vec![false; b.len()]).collect();
@@ -676,6 +692,9 @@ fn run_cell(
         cells_csv.flush().unwrap();
         eprintln!("{} {dir}: {ok}/{} done, lost {lost}, wrong {wrong}/{wrong_prov}, flaps {flaps}, {span:.2} s", m.label, cmds.len());
     }
+    if ctx.fresh {
+        return true; // the stack is thrown away after this cell: nothing to restore
+    }
     // restore: every commanded point back to its baseline (breaker closed, generator on at the setpoint), unrecorded
     let cmds = plan(&ctx.s, gen, n, true);
     run_phase(ctx, &cmds, true);
@@ -734,7 +753,11 @@ fn parse_cell(c: &str) -> (&'static str, &'static str, usize) {
 
 fn main() {
     let a: Vec<String> = std::env::args().collect();
-    let s = load_scada(&arg(&a, "--scada", "scada.json"));
+    let mut s = load_scada(&arg(&a, "--scada", "scada.json"));
+    if a.iter().any(|x| x == "--status-only") {
+        // generators are status flips only: no PG register is polled or required (stock pybennu has no ramp and keeps PG at 0 after a spin-down)
+        s.rtus.iter_mut().flat_map(|r| &mut r.gens).for_each(|g| g.pg = None);
+    }
     let nr = s.rtus.len();
     let stream = arg(&a, "--stream", "udp://*;239.0.1.{n}:40000");
     let eps: BTreeMap<String, ()> = (0..nr)
@@ -746,6 +769,9 @@ fn main() {
         pollers: connect_all(&s),
         prov: requester(&arg(&a, "--provider", "tcp://provider:5555"), 5000)
             .expect("provider endpoint"),
+        legacy: a.iter().any(|x| x == "--legacy"),
+        fresh: a.iter().any(|x| x == "--fresh"),
+        read_per: arg(&a, "--read-per", "100").parse().expect("--read-per"),
         socks: eps.keys().map(|e| (e.clone(), open_stream(e))).collect(),
         poll: Duration::from_micros(
             (arg(&a, "--poll-ms", "2").parse::<f64>().expect("--poll-ms") * 1000.0) as u64,
