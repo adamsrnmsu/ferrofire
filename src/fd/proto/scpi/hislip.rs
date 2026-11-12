@@ -45,7 +45,12 @@ pub struct Link {
 }
 
 impl Link {
-    fn new(status: Shared) -> Link {
+    /// The client's maximum message size, header included.
+    pub fn max_out(&self) -> u64 {
+        self.max_out.load(SeqCst)
+    }
+
+    pub fn new(status: Shared) -> Link {
         Link {
             status,
             max_out: AtomicU64::new(DEFAULT_CLIENT_MAX),

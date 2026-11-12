@@ -23,7 +23,7 @@ code with our own reading of a standard shows consistency, not correctness; the 
 | ICCP / TASE.2 server | `mms_utility` browse and read; our thin ICCP client; tshark `mms`; fuzz; igs-iec-tase2 and telcon-tase2 as clients and as servers | Two independent, young TASE.2 stacks (igs, telcon) plus two real captures (checked by the parsers); libiec61850 and tshark for the MMS layer | Better: three readings of the standard agree on most of block 1; known disagreements are marked (below). Still no oracle |
 | ICCP parsers (Zeek, Wireshark) | btest baselines and field goldens over `tests/pcaps/iccp`; the two real captures when fetched | tshark's own MMS dissector underneath; the Wireshark wiki `mms.pcap` and the chaugan capture (real ICCP) | Tested on synthetic captures and, locally, on two real ones |
 | MQTT client + Sparkplug B | Unit tests of the engine and the payload codec; integration tests against a real Mosquitto child process; conformance with mosquitto_pub/sub, Eclipse Paho, an Eclipse Tahu host, tshark and Zeek; fuzz of the NCMD decoder | Mosquitto (broker), Paho and mosquitto clients (MQTT), Tahu (Sparkplug payload codec), tshark `mqtt`, Zeek `mqtt_*` logs. No stock oracle: bennu has no MQTT | Covered for the subset in [field-device-mqtt.md](field-device-mqtt.md); Sparkplug host behaviour is only as good as one Tahu run |
-| SCPI instrument server + `ferrofire scpi` client | Unit tests of the syntax, the status model and the routes; a transcript golden (`tests/golden/scpi.transcript`); socket tests; the client binary against the server; conformance with PyVISA, lxi-tools and our client; fuzz of the line buffer and parser | PyVISA 1.16.2 + pyvisa-py 0.8.1 and lxi-tools 2.8-1 (independent clients), tshark and Zeek as TCP observers. No dissector or stock oracle: bennu has no SCPI, and the expected texts are our reading of SCPI-99 and IEEE 488.2 | Covered for the subset in [field-device-scpi.md](field-device-scpi.md); the standards are not independently executable, so the transcript is consistency with our reading, plus what two client stacks accept |
+| SCPI instrument server (raw socket, HiSLIP, VXI-11) + `ferrofire scpi` client | Unit tests of the syntax, the status model, the routes, the HiSLIP state machine and the XDR/RPC service; a transcript golden (`tests/golden/scpi.transcript`); socket tests per transport (`scpi_net`, `scpi_hislip`, `scpi_vxi11`); the client binary against all three; conformance with PyVISA (socket, HiSLIP, VXI-11), lxi-tools (raw and VXI-11) and our client; fuzz of the line buffer and parser, the HiSLIP header and state machine, the RPC record reader and XDR decoder | PyVISA 1.16.2 + pyvisa-py 0.8.1 and lxi-tools 2.8-1 (independent clients, and independent HiSLIP and ONC RPC implementations), tshark (its HiSLIP, portmap and VXI-11 dissectors judge the framing) and Zeek as observers. No stock oracle: bennu has no SCPI, and the expected texts are our reading of SCPI-99 and IEEE 488.2 | Covered for the subset in [field-device-scpi.md](field-device-scpi.md); the standards are not independently executable, so the transcript is consistency with our reading, plus what two client stacks accept |
 | Ground truth to Elasticsearch/OpenSearch (`ferrofire groundtruth`, the provider `[elastic]` export) | Unit tests of every pure piece; a fake-server test file; real Elasticsearch 8, OpenSearch 2 and a secured Elasticsearch 8 in containers; a field-by-field differential against the stock `groundtruth_monitor.py`; the SCORCH `providerdata` check | Stock pybennu (monitor, mapping), the servers themselves, the SCORCH component's own code | Covered for the documented subset; see [ground-truth-elastic.md](ground-truth-elastic.md); the stock side runs with two shims (below) |
 | Whole system | Burger range boards, live range runs | Stock bennu, phēnix, OVS | Covers stock bennu fixes and ferrofire runs; see below |
 
@@ -428,13 +428,16 @@ and `mqtt_net.rs` use `rumqttc` on both sides.
 
 ## SCPI instrument server and client
 
-`<scpi-server>` and `ferrofire scpi` ([field-device-scpi.md](field-device-scpi.md)); `src/scpi/` (message syntax, shared, and the client)
-and `src/fd/proto/scpi/` (config and sockets in `mod.rs`, the I/O-free instrument in `device.rs`).
+`<scpi-server>` and `ferrofire scpi` ([field-device-scpi.md](field-device-scpi.md)); `src/scpi/` (message syntax, the HiSLIP frame format and
+the ONC RPC/XDR code, shared, and the client with its HiSLIP and VXI-11 wires in `transport.rs`) and `src/fd/proto/scpi/` (config and the raw
+socket in `mod.rs`, the I/O-free instrument in `device.rs`, the HiSLIP and VXI-11 servers in `hislip.rs` and `vxi11.rs`).
 
 **Strategy.** The syntax (`syntax.rs`) and the instrument (`device.rs`: line framing, status registers, error queue, routes) are pure and
 need no socket. `tests/scpi_golden.rs` replays a transcript (`tests/golden/scpi.transcript`: request lines, exact responses, the write queue,
-a new connection) with no sockets; `tests/scpi_net.rs` runs the server on real sockets; `tests/scpi_client.rs` runs the real
-`ferrofire scpi` binary against it; `make conformance PROTO=scpi` runs the two independent client stacks.
+a new connection, a second session of the same instrument) with no sockets; `tests/scpi_net.rs` runs the raw socket on real sockets,
+`tests/scpi_hislip.rs` and `tests/scpi_vxi11.rs` the other two (HiSLIP frames and ONC RPC records built by hand, so a wrong header is a
+test and not a client's guess); `tests/scpi_client.rs` runs the real `ferrofire scpi` binary against all three; `make conformance
+PROTO=scpi` runs the independent client stacks.
 
 **Checked, and by what.**
 - Syntax: units split at `;` outside quotes, headers (short and long forms in any case, suffix 1 only, rooted and relative paths, `*` commands
@@ -453,7 +456,22 @@ a new connection) with no sockets; `tests/scpi_net.rs` runs the server on real s
   `/proc/<pid>/fd` of the device: 5 before, 5 after) leave no descriptor; a bind failure is logged and the rest of the device runs; stopping
   closes the clients. Fuzz target `fd_scpi` (60 s locally, 800,000 runs, no finding; 10 s per target in `make fuzz-smoke`): no panic, buffer and
   queue bounds, response bound.
-- Client: the query rule, the `SYST:ERR?` loop and its limit, the timeout and the closed-connection messages, target parsing, scripts, the
+- Status scope and `*RST`: `instrument` (default) shares one error queue and one set of registers between sessions of one transport (golden
+  `@ session`), between transports (raw socket and HiSLIP, raw and VXI-11, in the socket tests; HiSLIP, VXI-11 and the raw socket
+  through PyVISA in the conformance run) and `connection` keeps them apart; `*RST` queues the defaults of the writable tags and leaves
+  SESE, SRE, SESR and the queue as they were (unit test and golden).
+- HiSLIP: header cutting from one byte at a time and from garbage (a bad prologue and an oversized payload are FatalError 1); the
+  handshake of both channels over sockets; data in several frames, responses cut to the client's maximum message size; **-410** exact
+  (a message started with RMT-delivered clear over an unread response, `Interrupted` sent, the new message still run) and **-420**
+  exact (a message without its END abandoned by another message or by the channel closing; a command in it dropped silently); device
+  clear (async clear, sync complete, dropped messages in between, no error raised); the one lock (grant, timeout, release, a waiting
+  request, a waiting `Data`, a lock dying with its session); status query with and without RMT-delivered; the fatal errors and the
+  non-fatal one. Fuzz target `fd_hislip`.
+- VXI-11: XDR opaque padding and bounds, record fragments, the portmapper (GETPORT for TCP and not UDP, DUMP, SET, rpcbind v3/v4 mismatch,
+  UDP), every RPC error class, create_link (device name, lock, limit), write/read with every read reason (size, termination
+  character, end, both at once), **-410** and **-420** exact from the write/read order, readstb with MAV, clear, the refused calls, links
+  dying with their connection. Fuzz target `fd_vxi11`.
+- Client: the resource strings (every form, case, board number, bad ones), the query rule, the `SYST:ERR?` loop and its limit, the timeout and the closed-connection messages, target parsing, scripts, the
   REPL loop (unit tests with in-memory streams); the exit statuses, files, stdin, `--json` and `--check` against the real server
   (`scpi_client.rs`); insta snapshots of the text and JSON formats (`tests/snapshots.rs`).
 - Wire (conformance run): 15,804 packets on port 5025, at least 2000 handshakes, 0 malformed, `expert,warn` empty after allowing connection
@@ -477,13 +495,13 @@ not freely executable); `scpi_net.rs` and `scpi_client.rs` use our own client on
 - No stock oracle and no real instrument: the expected texts follow the standards as we read them, and where they leave room (short
   forms of tag mnemonics, units, what `*RST` does, per-connection status) docs/field-device-scpi.md says what was chosen. A real
   instrument's behaviour on a rejected query (no response, or an empty line) may differ.
-- -410 and -420 are reached by an output cap and by a half-closed unterminated query; the 488.2 conditions of the same names belong to a
-  handshake TCP does not have, so the genuine cases are not testable here.
-- No HiSLIP (4880) and no VXI-11; PyVISA's `TCPIP::...::INSTR` resources and `lxi scpi` without `--raw` cannot reach the device.
+- On the raw socket -410 and -420 are still reached by an output cap and by a half-closed unterminated query; the genuine 488.2 conditions
+  belong to a handshake TCP does not have. HiSLIP and VXI-11 have it and test the real cases (the RMT-delivered rule is our reading of
+  IVI-6.1, checked against pyvisa-py, which sets the bit after every response it reads, not against a real instrument).
+- No SRQ (HiSLIP `AsyncServiceRequest`, VXI-11 interrupt channel), no overlapped HiSLIP, no VXI-11 locks, no mDNS or portmapper
+  `CALLIT`, so `lxi discover` finds nothing (field-device-scpi.md lists them). No real instrument, no NI-VISA or Keysight IO Libraries.
 - No units, hexadecimal or block data, no `STATus`/`OPERation` subsystems (status byte bits 3 and 7 read 0), no `*PSC`, `*DDT` or `*RCL`
   (the save/recall commands) or other optional common commands (they are -113).
-- Status is per connection, so a controller that opens a second session does not see the first one's errors; a real instrument usually
-  shares one status system across sessions.
 - Mutation runs covered only the new code, not the whole tree (`make mutate` exceeds the Docker VM on a loaded host).
 - IPv6 is untested (a `[::1]` target is parsed, not connected to).
 
@@ -683,4 +701,4 @@ Limits: each board is one run on one host; none exercises ferrofire's own field 
 8. Mutation results do not yet cover the field-device modules in the recorded numbers.
 9. MQTT is checked against Mosquitto, Paho and Tahu only; see the MQTT section for what a commercial Sparkplug host might still dislike.
 10. The drop-in pypower and stock conformance scripts need the Lima VM and are run by hand.
-11. SCPI is checked against two clients (PyVISA, lxi-tools) and our reading of SCPI-99 and IEEE 488.2; no real instrument, no HiSLIP or VXI-11, status is per connection (see its section).
+11. SCPI is checked against two clients (PyVISA, lxi-tools), tshark's HiSLIP and VXI-11 dissectors and our reading of SCPI-99, IEEE 488.2 and IVI-6.1; no real instrument, no SRQ (see its section).

@@ -3,7 +3,7 @@
 //! `--timeout` on every read and write.
 
 use super::hislip::{frame, t::*, Frame, Reader, HEADER};
-use super::rpc::{put, put_opaque, record, Xdr, CORE_PROG, PMAP_PROG};
+use super::rpc::{ints, put, put_opaque, record, Xdr, CORE_PROG, PMAP_PROG};
 use std::io::{BufRead, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
@@ -299,12 +299,6 @@ fn read_record(s: &mut TcpStream) -> std::io::Result<Vec<u8>> {
             return Ok(rec);
         }
     }
-}
-
-fn ints(xs: &[u32]) -> Vec<u8> {
-    let mut out = vec![];
-    xs.iter().for_each(|x| put(&mut out, *x));
-    out
 }
 
 impl Vxi11 {

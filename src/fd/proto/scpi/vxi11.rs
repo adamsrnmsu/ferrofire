@@ -15,7 +15,7 @@ use tokio::net::{TcpStream, UdpSocket};
 use tokio_util::sync::CancellationToken;
 
 pub use crate::scpi::rpc::{
-    put, put_opaque, record, Records, Xdr, ABORT_PROG, CORE_PROG, PMAP_PROG,
+    ints, put, put_opaque, record, Records, Xdr, ABORT_PROG, CORE_PROG, PMAP_PROG,
 };
 const IPPROTO_TCP: u32 = 6;
 /// `max_recv_size` of create_link: the most one device_write may carry.
@@ -71,12 +71,6 @@ fn denied(xid: u32) -> Vec<u8> {
 
 fn int(x: i32) -> Vec<u8> {
     x.to_be_bytes().to_vec()
-}
-
-fn ints(xs: &[u32]) -> Vec<u8> {
-    let mut out = vec![];
-    xs.iter().for_each(|x| put(&mut out, *x));
-    out
 }
 
 type Results = Result<Vec<u8>, u32>;
@@ -342,16 +336,19 @@ impl Link {
 /// device_read(link, requestSize, io_timeout, lock_timeout, flags, termChar): up to `requestSize` bytes of the response, ending at the
 /// termination character when the flags ask. The reason says why it stopped: the size (1), the character (2), the end of the
 /// response (4, which is every response's last byte). Reading while a message is half written is UNTERMINATED (-420): the message is
-/// dropped and there is nothing to read. Nothing to read is io_timeout (the instrument does not make a client wait).
+/// dropped and there is nothing to read. So is reading with nothing to say (IEEE 488.2 6.3.2.2: addressed to talk, no query
+/// pending). Either way the answer is io_timeout, at once (the instrument does not make a client wait).
 fn read(l: &mut Link, mut x: Xdr) -> Results {
     let (size, _, _, flags, term) = (x.u32(), x.u32(), x.u32(), x.i32(), x.i32());
     let (Some(size), Some(flags), Some(term)) = (size, flags, term) else {
         return Err(GARBAGE_ARGS);
     };
-    if std::mem::take(&mut l.open) {
-        l.session.abandon();
-    }
+    let said = std::mem::take(&mut l.open) && l.session.abandon();
     if l.out.is_empty() {
+        // addressed to talk with nothing to say: UNTERMINATED, unless the unterminated query was just reported
+        if !said {
+            l.session.push_error(-420, "");
+        }
         return Ok(ints(&[IO_TIMEOUT as u32, 0, 0]));
     }
     let want = (size as usize).min(l.out.len());
@@ -768,7 +765,39 @@ mod tests {
             "a half-written command is dropped by a read, not run"
         );
         write(&s, l, 8, b"SYST:ERR:COUN?");
-        assert_eq!(read_reply(&s, l, 100, 0, 0).1, b"0\n", "and is no error");
+        assert_eq!(
+            read_reply(&s, l, 100, 0, 0).1,
+            b"1\n",
+            "the half-written command was a read of nothing: one -420"
+        );
+    }
+
+    #[test]
+    fn reading_with_nothing_to_say_is_unterminated() {
+        let s = svc(Scope::Instrument, 4);
+        let l = create(&s);
+        assert_eq!(read_reply(&s, l, 100, 0, 0).0[0], IO_TIMEOUT as u32);
+        write(&s, l, 8, b"SYST:ERR?");
+        assert_eq!(
+            read_reply(&s, l, 100, 0, 0).1,
+            b"-420,\"Query UNTERMINATED\"\n"
+        );
+        write(&s, l, 8, b"*ESE 1");
+        read_reply(&s, l, 100, 0, 0);
+        write(&s, l, 8, b"SYST:ERR:COUN?");
+        assert_eq!(
+            read_reply(&s, l, 100, 0, 0).1,
+            b"1\n",
+            "one for a read of nothing after a command"
+        );
+        write(&s, l, 8, b"*IDN?");
+        read_reply(&s, l, 100, 0, 0);
+        write(&s, l, 8, b"SYST:ERR:COUN?");
+        assert_eq!(
+            read_reply(&s, l, 100, 0, 0).1,
+            b"1\n",
+            "a read that was answered raises nothing"
+        );
     }
 
     #[test]
@@ -793,8 +822,8 @@ mod tests {
         write(&s, l, 8, b"SYST:ERR:COUN?");
         assert_eq!(
             read_reply(&s, l, 100, 0, 0).1,
-            b"2\n",
-            "-113 and the -410 of the write over the unread response; the clear raised none"
+            b"3\n",
+            "-113, the -410 of the write over the unread response, the -420 of reading nothing; the clear raised none"
         );
         for p in [14, 16, 17] {
             assert_eq!(words(&core(&s, p, &ints(&[l, 0, 0, 0]))), [0], "proc {p}");

@@ -178,6 +178,11 @@ async fn a_link_writes_reads_reads_the_status_byte_clears_and_is_destroyed() {
         [0, 4],
         "the error queue is not empty"
     );
+    assert_eq!(
+        c.ask(link, "SYST:ERR?").await,
+        "-420,\"Query UNTERMINATED\"\n",
+        "the read of nothing above"
+    );
     assert!(c.ask(link, "SYST:ERR?").await.starts_with("-222,"));
     c.write(link, 8, b"*IDN?").await;
     assert_eq!(c.read(link, 7, 0, 0).await, (0, 1, b"ferrofi".to_vec()));

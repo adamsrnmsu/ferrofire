@@ -54,7 +54,7 @@ bench-dg: image   # datagram v1 matrix (age, netem loss, per-RTU fan-out, restar
 	python3 bench/run_dg.py
 bench-dg-report:   # docs/bench/datagram-v1-bench.md from the datagram v1 raw results
 	python3 bench/dg_report.py
-FUZZ_TARGETS := request datagram expr model fd_datagram fd_config fd_modbus fd_dnp3 fd_iec61850 fd_iccp fd_mqtt fd_scpi
+FUZZ_TARGETS := request datagram expr model fd_datagram fd_config fd_modbus fd_dnp3 fd_iec61850 fd_iccp fd_mqtt fd_scpi fd_hislip fd_vxi11
 FUZZ_SECS ?= 10
 fuzz-smoke: image   # every fuzz target for $(FUZZ_SECS)s each (CI); crashes land in fuzz/artifacts, turn each into a test
 	$(IN) bash -c 'cd fuzz && for t in $(FUZZ_TARGETS); do cargo +nightly fuzz run $$t -- -max_total_time=$(FUZZ_SECS) -max_len=4096 || exit 1; done'

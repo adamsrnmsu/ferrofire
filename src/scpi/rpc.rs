@@ -42,6 +42,13 @@ pub fn put(out: &mut Vec<u8>, x: u32) {
     out.extend(x.to_be_bytes());
 }
 
+/// XDR words, one `u32` each.
+pub fn ints(xs: &[u32]) -> Vec<u8> {
+    let mut out = vec![];
+    xs.iter().for_each(|x| put(&mut out, *x));
+    out
+}
+
 pub fn put_opaque(out: &mut Vec<u8>, data: &[u8]) {
     put(out, data.len() as u32);
     out.extend(data);

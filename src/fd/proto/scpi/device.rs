@@ -431,13 +431,15 @@ impl Session {
     }
 
     /// A message that was never ended (the client started another, or went): a query in the unterminated rest is -420 and is not
-    /// run, IEEE 488.2 6.3.2.2. Anything else in it is dropped.
-    pub fn abandon(&mut self) {
+    /// run, IEEE 488.2 6.3.2.2. Anything else in it is dropped. True when it was a query, and -420 was queued.
+    pub fn abandon(&mut self) -> bool {
         let line = line_text(&std::mem::take(&mut self.buf));
         self.skipping = false;
-        if syntax::is_query(&line) {
+        let query = syntax::is_query(&line);
+        if query {
             self.push_error(-420, "");
         }
+        query
     }
 
     /// Throw away the input being collected (a device clear): no error, nothing run.
@@ -1340,6 +1342,12 @@ mod tests {
         assert!(!r.store.is_queued("lvl"));
         assert_eq!(r.ask("*RST"), "");
         assert!(r.store.is_queued("lvl"), "lvl has DEF 5");
+        r.store.apply_internal();
+        assert_eq!(
+            r.store.get_f64("lvl"),
+            Some(5.0),
+            "the default is what was queued"
+        );
         assert!(
             !r.store.is_queued("free") && !r.store.is_queued("sw"),
             "no default, no reset"

@@ -230,6 +230,9 @@
 > *FOO
 > *RST
 @ queued setpoint
+@ drain
+> SOUR:SETPOINT?
+< 500
 > *ESE?
 < 33
 > *SRE?
@@ -238,8 +241,6 @@
 < 1
 > *ESR?
 < 32
-> SOUR:SETPOINT?
-< 1000
 > SYST:ERR?
 < -113,"Undefined header;*FOO"
 
