@@ -940,4 +940,17 @@ mod tests {
             .unwrap();
         assert!(e.contains("connect 127.0.0.1"), "{e}");
     }
+
+    #[test]
+    fn a_raw_socket_response_may_be_an_empty_line_and_its_end_is_the_instrument_closing() {
+        let mut l = Lines {
+            rd: Cursor::new(b"\nab\r\n".to_vec()),
+            wr: vec![],
+        };
+        l.send("*IDN?").unwrap();
+        assert_eq!(l.wr, b"*IDN?\n");
+        assert_eq!(l.recv().unwrap(), Some(String::new()));
+        assert_eq!(l.recv().unwrap(), Some("ab".to_string()));
+        assert_eq!(l.recv().unwrap(), None);
+    }
 }
