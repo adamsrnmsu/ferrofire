@@ -6,22 +6,14 @@ use super::load_as;
 use ferrofire::fd::proto::scpi::Server;
 use ferrofire::fd::store::Store;
 
-/// A port nothing listens on, that no other test of this process was given, and that the kernel will not hand to a client as its source
-/// port before the server has bound it (what asking the kernel for port 0 and closing it again risked: the next `connect` of another
-/// test could take the same port, and the server's bind failed). The ports are below the kernel's ephemeral range (32768 up); the
-/// process id picks a block of 100, so that test binaries running at the same time (mutation workers) do not meet.
+/// A port for a test's server: from a block of 100 below the kernel's ephemeral range (32768 up), where no client's source port can take
+/// it, and chosen by the process id so that test binaries running at the same time (mutation workers) do not meet. Nothing is bound
+/// to check it: a probe socket open while another test forks a child is copied into the child, and keeps the port busy (and even
+/// accepting connections) until that child execs, which made the server's own bind fail with "address in use".
 pub fn free_port() -> u16 {
     static NEXT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
     let base = 12_000 + (std::process::id() % 200) as u16 * 100;
-    loop {
-        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let port = base + n % 100;
-        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
-            && std::net::UdpSocket::bind(("127.0.0.1", port)).is_ok()
-        {
-            return port;
-        }
-    }
+    base + NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst) % 100
 }
 
 /// `inner`: keys of `<scpi-server>` other than the points, which are always the same five.

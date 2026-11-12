@@ -145,6 +145,8 @@ async fn the_status_system_is_the_instruments_unless_the_scope_is_the_connection
     let d = start("");
     let (mut a, mut b) = (connect(d.port).await, connect(d.port).await);
     a.write_all(b"*ESE 32\nFOO\n").await.unwrap();
+    // a is another connection: give the server time to have read it before b asks
+    tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(ask(&mut b, "*ESE?").await, "32\n");
     assert_eq!(
         ask(&mut b, "SYST:ERR?").await,
@@ -159,6 +161,8 @@ async fn the_status_system_is_the_instruments_unless_the_scope_is_the_connection
     let d = start("<status-scope>connection</status-scope>");
     let (mut a, mut b) = (connect(d.port).await, connect(d.port).await);
     a.write_all(b"*ESE 32\nFOO\n").await.unwrap();
+    // a is another connection: give the server time to have read it before b asks
+    tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(ask(&mut b, "*ESE?").await, "0\n");
     assert_eq!(ask(&mut b, "SYST:ERR:COUN?").await, "0\n");
     assert_eq!(ask(&mut a, "SYST:ERR:COUN?").await, "1\n");
@@ -258,8 +262,16 @@ async fn clients_coming_and_going_leave_no_descriptors_behind() {
     let mut s = connect(d.port).await;
     assert_eq!(ask(&mut s, "*OPC?").await, "1\n");
     drop(s);
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    if let (Some(before), Some(after)) = (before, open_fds()) {
+    // the count is the whole process's, tests running at the same time included: wait for theirs to go
+    let mut after = open_fds();
+    for _ in 0..30 {
+        if before.zip(after).is_none_or(|(b, a)| a <= b + 3) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        after = open_fds();
+    }
+    if let (Some(before), Some(after)) = (before, after) {
         assert!(after <= before + 3, "descriptors {before} -> {after}");
     }
     d.stop.cancel();
