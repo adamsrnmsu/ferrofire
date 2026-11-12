@@ -357,6 +357,8 @@ pub struct Association {
     /// was hard-coded — the exact self-consistency trap the reference-capture tests exist to
     /// avoid.
     peer_ref: u16,
+    /// The `now` of the last bytes read: a Conclude arrives without one and arms a deadline from it.
+    now: Instant,
 }
 
 /// The password inside an ACSE `authentication-value`: its `[0] GraphicString` choice.
@@ -408,6 +410,7 @@ impl Association {
             acse_context: ACSE_CONTEXT,
             mms_context: MMS_CONTEXT,
             peer_ref: 0,
+            now: Instant::ZERO,
         }
     }
 
@@ -463,6 +466,7 @@ impl Association {
         if matches!(self.state, State::Closed) {
             return;
         }
+        self.now = now;
         self.reader.push(bytes);
         loop {
             let tpdu = match self.reader.next_tpdu() {
@@ -981,9 +985,13 @@ impl Association {
             // It refused: the request is *still* outstanding and must keep its slot.
             Mms::CancelError { invoke_id, .. } => AssociationEvent::CancelRefused { invoke_id: *invoke_id },
             Mms::ConcludeRequest => {
-                // The MMS-level orderly release. Answer it and go.
+                // ISO 9506 Conclude only agrees that the association may end; the ACSE release (RLRQ, ISO 8650) follows
+                // from the concluding side, and it is answered with an RLRE before the transport goes (`on_peer_finish`).
+                // Closing here would meet the RLRQ with a reset. A peer that never releases is cut off after the
+                // handshake budget (`on_timeout`).
                 let _ = self.send_pdu_unchecked(&Mms::ConcludeResponse);
-                self.close(CloseReason::PeerReleased);
+                self.state = State::Releasing;
+                self.connect_deadline = Some(self.now.plus_millis(self.cfg.connect_timeout_ms));
                 return;
             }
             Mms::ConcludeResponse => {
@@ -1612,6 +1620,39 @@ mod tests {
         assert_eq!(events(&mut s).as_slice(), [AssociationEvent::Closed(CloseReason::PeerReleased)]);
         assert_eq!(events(&mut c).as_slice(), [AssociationEvent::Closed(CloseReason::Released)]);
         assert_eq!(c.state(), State::Closed);
+    }
+
+    /// ISO 9506 Conclude is answered but does not end the transport: the ACSE release that follows gets its RLRE
+    /// (igs-iec-tase2 sends the RLRQ after the Conclude response; closing at once met it with a reset).
+    #[test]
+    fn a_conclude_is_answered_and_the_release_after_it_gets_its_response() {
+        let (mut c, mut s) = connect();
+        let (_, _) = (events(&mut c), events(&mut s));
+        c.send(&Mms::ConcludeRequest).unwrap();
+        while let Some(p) = c.poll_transmit() {
+            let p = p.to_vec();
+            s.on_bytes(Instant::ZERO, &p);
+        }
+        assert!(s.poll_transmit().is_some(), "the Conclude response");
+        assert_eq!(s.state(), State::Releasing, "still open after the Conclude response");
+        assert!(events(&mut s).is_empty());
+        c.release(Instant::ZERO).unwrap();
+        pump(&mut c, &mut s, Instant::ZERO);
+        assert_eq!(events(&mut s).as_slice(), [AssociationEvent::Closed(CloseReason::PeerReleased)]);
+        assert_eq!(events(&mut c).as_slice(), [AssociationEvent::Closed(CloseReason::Released)], "the RLRE came back");
+    }
+
+    #[test]
+    fn a_conclude_the_peer_never_follows_with_a_release_times_out() {
+        let (mut c, mut s) = connect();
+        let (_, _) = (events(&mut c), events(&mut s));
+        c.send(&Mms::ConcludeRequest).unwrap();
+        while let Some(p) = c.poll_transmit() {
+            let p = p.to_vec();
+            s.on_bytes(Instant::ZERO, &p);
+        }
+        s.on_timeout(Instant::ZERO.plus_millis(10_000));
+        assert_eq!(s.state(), State::Closed);
     }
 
     #[test]

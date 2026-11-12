@@ -62,12 +62,22 @@ type TPKT = unit {
 public type Stream = unit {
     var segs: bytes;
     var seen: bool = False;
+    var off: bool = False;
     tpkts: TPKT[];
+    # TPKT/COTP desync ends this direction (Spicy also raises its own analyzer violation); say why in weird.log
+    on %error(msg: string) { zeek::weird("iccp_tpkt_error", msg); }
     on tpkts foreach {
-        if ( ! $$.is_dt )
+        if ( ! $$.is_dt || self.off )
             return;
         if ( ! self.seen ) {
             self.seen = True;
+            # the first data TPDU of MMS is a session CONNECT/ACCEPT or DATA SPDU; anything else sharing tcp/102 (S7comm starts with
+            # 0x32) is not ICCP: step aside instead of claiming it (ww-otj.52)
+            if ( ! ( $$.data.starts_with(b"\x01") || $$.data.starts_with(b"\x0d") || $$.data.starts_with(b"\x0e") ) ) {
+                self.off = True;
+                zeek::reject_protocol("first data TPDU is not a session SPDU");
+                return;
+            }
             zeek::confirm_protocol();
         }
         self.segs += $$.data;
@@ -131,6 +141,9 @@ type Spdu = unit {
                 }
             }
         }
+        # a session data/connect SPDU that carried no MMS PDU or ACSE release/abort we could place
+        if ( (self?.gt || self?.cn) && self.kind == "" )
+            zeek::weird("iccp_unparsed_spdu");
     }
 };
 
@@ -151,8 +164,10 @@ type Other = unit {
     : skip bytes &size=self.len.v;
 };
 
+# one reassembled COTP message; a BER/session/ASN.1 failure inside it is dropped with that message, but not silently
 public type Session = unit {
     spdus: Spdu[];
+    on %error(msg: string) { zeek::weird("iccp_parse_error", msg); }
 };
 
 # ---- MMS / TASE.2 interpretation ---------------------------------------------------------------------------

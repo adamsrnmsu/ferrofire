@@ -16,7 +16,17 @@ Logs
   define_dataset, start_transfer_set), `scope`, `domain`, `name`, `class` (bilateral_table_id, tase2_version,
   supported_features, transfer_set, dataset, infomsg, data ...), `vtype` (real, realq, discrete, discreteq, state, stateq,
   bitstring, struct ...), `value`, `quality`, `result`, `transfer_set`, `ds_conditions`, `timetag`, and the connection's
-  `bilateral_table_id`, `tase2_version`, `supported_features` once read.
+  `bilateral_table_id`, `tase2_version`, `supported_features` once read, and `supported_blocks` (the set bits of the 12-bit
+  Supported_Features as block names in bit order, bit n = block n+1: BasicServices, ExtendedConditions, BlockedTransfers,
+  InformationMessages, DeviceControl, Programs, Events, AdditionalEvents, TimeSeries; bits past nine show as `Bit10` ...; the
+  block names are recalled, see Assumptions). Wireshark: `iccp.supported_blocks`.
+- `weird.log`: a message the analyzer drops is not silent: `iccp_parse_error` (BER/session failure inside one reassembled COTP
+  message, the connection goes on), `iccp_tpkt_error` (TPKT/COTP desync, that direction ends), `iccp_unparsed_spdu` (a session
+  data/connect SPDU with no MMS PDU or ACSE release/abort in it). `tests/suite/weirds.zeek` counts them over the fuzz and malformed
+  corpora and checks that valid captures raise none.
+- Coexistence on tcp/102 (ww-otj.52): the analyzer confirms a flow only when its first data TPDU is a session SPDU (CONNECT, ACCEPT,
+  DATA); S7comm (starts 0x32) is rejected, so `conn.log` says `iccp` for ICCP and, with CISA ICSNPP s7comm loaded, `s7comm` for
+  S7. ICSNPP's COTP logger also tags ICCP flows `cotp`. `make zeek-iccp-coexist` checks it in the testpeers image.
 - `conn.log` gets service `iccp`.
 
 Install

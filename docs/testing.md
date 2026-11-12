@@ -305,8 +305,11 @@ client writes an integer; our server takes both). The 12- and 13-member DSTransf
 `src/fd/proto/iccp/mod.rs` that replay the real captures' client requests (mms.pcap frame 80, chaugan frames 81, 100 and 125, with the
 captures' domain names) and assert the structure of the server's answers against the captures (frames 101 and 515: unsigned scope,
 `variableListName`, one result per member). The captures themselves are not committed, so the requests are transcribed.
-Observed, not marked: after a Conclude response our stack closes the TCP connection, and igs sends an ACSE release request after the
-Conclude that meets an RST (tshark: "Connection reset", an undecoded zero-byte MMS PDU and OID; allowed in `proto.env`, ww-otj.73).
+Conclude and release (ww-otj.73): ISO 9506 Conclude only agrees that the association may end; the ACSE release (RLRQ, ISO 8650) follows from the
+concluding side and gets an RLRE, so the server no longer closes on the Conclude (the vendored `iec61850-rs` waits for the RLRQ, or the handshake
+budget). igs also sends one more session SPDU (an abort with the transport-disconnect bit) after our RLRE, so `src/fd/mms.rs` closes with a FIN and
+reads until the peer's FIN (`linger`, at most 1 s) instead of dropping the socket, which answered it with a reset. `proto.env` no longer allows
+'Connection reset'; it still allows the Wireshark decode gaps ('zero-byte MMS PDU', 'OID not implemented' on the peers' RLRQ data SPDU).
 `make conformance PROTO=iec61850` fails its GOOSE-subscriber step on the Lima daemon with the old binary and image too (ww-otj.72); the MMS steps pass.
 `Bilateral_Table_ID` is domain-scoped on the wire in both real captures and in igs; we serve it in the VMD scope as well (a superset).
 

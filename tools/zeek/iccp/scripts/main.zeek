@@ -58,6 +58,8 @@ export {
 		bilateral_table_id: string &log &optional;
 		tase2_version:      string &log &optional;
 		supported_features: string &log &optional;
+		## Block names of the set bits in supported_features, e.g. BasicServices, ExtendedConditions.
+		supported_blocks:   vector of string &log &optional;
 	};
 
 	global log_mms: event(rec: MmsInfo);
@@ -75,6 +77,13 @@ const bit_classes: set[string] = { "supported_features", "dsconditions_detected"
 # DSConditions_Detected bit string, bit 0 first.
 const ds_condition_bits: vector of string = {
 	"Interval", "Integrity", "ObjectChange", "OperatorRequest", "OtherExternalEvent",
+} &redef;
+
+# Supported_Features bit string, bit n is conformance block n+1 (IEC 60870-6-503; docs/field-device-iccp.md, ww-otj.62).
+# Set bits past the named ones show as "Bit<n>".
+const supported_block_names: vector of string = {
+	"BasicServices", "ExtendedConditions", "BlockedTransfers", "InformationMessages", "DeviceControl",
+	"Programs", "Events", "AdditionalEvents", "TimeSeries",
 } &redef;
 
 # The first three values of a transfer report against a named variable list carry no names on the wire.
@@ -137,6 +146,20 @@ function name_class(st: State, item: string): string
 	return st$is_tase2 && /\// in item ? "data" : "";
 	}
 
+# In bit order (a vector: a set would log in a different order from run to run).
+function bit_names(bitstr: string, names: vector of string): vector of string
+	{
+	local r: vector of string;
+	local i = 0;
+	while ( i < |bitstr| )
+		{
+		if ( sub_bytes(bitstr, i + 1, 1) == "1" )
+			r += i < |names| ? names[i] : fmt("Bit%d", i + 1);
+		++i;
+		}
+	return r;
+	}
+
 function conditions(bitstr: string): set[string]
 	{
 	local r: set[string];
@@ -178,7 +201,11 @@ function row(c: connection, st: State, inv: int, op: string, scope: string, doma
 	if ( result != "" ) r$result = result;
 	if ( st?$bt ) r$bilateral_table_id = st$bt;
 	if ( st?$version ) r$tase2_version = st$version;
-	if ( st?$features ) r$supported_features = st$features;
+	if ( st?$features )
+		{
+		r$supported_features = st$features;
+		r$supported_blocks = bit_names(st$features, supported_block_names);
+		}
 	return r;
 	}
 

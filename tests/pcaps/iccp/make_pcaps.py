@@ -1,7 +1,7 @@
 """Synthetic TASE.2 (ICCP) captures for the parsers in tools/zeek/iccp and tools/wireshark/iccp.lua.
 
 Hand-built bytes, stdlib only: Ethernet/IPv4/TCP, TPKT, COTP, OSI session, presentation and ACSE wrapped around MMS
-BER PDUs. Writes tase2_assoc.pcap, tase2_report.pcap, malformed.pcap and fuzz.pcap (150 seeded mutants) into the directory given as argv[1].
+BER PDUs. Writes tase2_assoc.pcap, tase2_report.pcap, malformed.pcap, fuzz.pcap (150 seeded mutants) and s7comm.pcap (not ICCP) into the directory given as argv[1].
 Run: python3 -I make_pcaps.py <outdir>
 
 TASE.2 object names and encodings below follow IEC 60870-6-503/802 as remembered, NOT checked against a licensed copy
@@ -418,7 +418,21 @@ def malformed():
     return p
 
 
+def s7comm():
+    """Siemens S7comm on tcp/102 (TPKT/COTP, no session layer): the ICCP analyzer must not claim it (ww-otj.52)."""
+    p = Pcap()
+    c = Conn(p, 50021)
+    c.c(CR)
+    c.s(CC)
+    c.c(dt(bytes.fromhex("32010000000100080000f0000001000101e0")))      # setup communication
+    c.s(dt(bytes.fromhex("320300000001000800000000f0000001000101e0")))  # its ack
+    c.c(dt(bytes.fromhex("32010000000200 0e00000401120a10020001000083000000".replace(" ", ""))))  # read one byte of DB1
+    c.s(dt(bytes.fromhex("3203000000020002000500000402ff04000800")))
+    c.fin()
+    return p
+
+
 if __name__ == "__main__":
     out = sys.argv[1]
-    for name, fn in (("tase2_assoc", assoc), ("tase2_report", report), ("malformed", malformed), ("fuzz", fuzz)):
+    for name, fn in (("tase2_assoc", assoc), ("tase2_report", report), ("malformed", malformed), ("fuzz", fuzz), ("s7comm", s7comm)):
         fn().write(f"{out}/{name}.pcap")

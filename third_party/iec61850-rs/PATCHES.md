@@ -12,6 +12,12 @@ upstream releases the fix (bead ww-otj.68).
    `tests/iccp_net.rs`. (`localDetail` and the outstanding-call limits were already
    negotiated down by 0.4.0.)
 
+2. `src/proto/mms/association.rs`, `deliver_mms`: a Conclude request was answered and the association closed on the spot, so the ACSE release
+   (RLRQ) that follows it (igs-iec-tase2) met a closed socket. The server now answers the Conclude, enters `Releasing` with the handshake budget
+   as deadline (`on_timeout` closes a peer that never releases) and the RLRQ gets its RLRE through `on_peer_finish` as before. Tests:
+   `a_conclude_is_answered_and_the_release_after_it_gets_its_response`, `a_conclude_the_peer_never_follows_with_a_release_times_out`.
+   The client side still closes on a Conclude response.
+
 Not patched here, corrected in ferrofire (`src/fd/mms.rs`, `encode`): `Answer::NOT_FOUND` carries DataAccessError 10 in the ServiceError
 `access` class, where object-non-existent is 2.
 
