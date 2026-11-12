@@ -345,6 +345,24 @@ async fn one_session_holds_the_lock_and_the_others_wait_for_it() {
 }
 
 #[tokio::test]
+async fn a_client_that_leaves_while_waiting_for_the_lock_gives_its_connection_back() {
+    // 4 connections: a (2) holds the lock, b (2) queues a message behind it and goes away; c must still fit
+    let d = start("<max-connections>4</max-connections>");
+    let mut a = open(d.hislip).await;
+    assert_eq!(a.asy.call(frame(ASYNC_LOCK, 1, 1000, b"")).await.ctl, 1);
+    let mut b = open(d.hislip).await;
+    b.send("*IDN?", 1).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    drop(b);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let mut c = timeout(Duration::from_secs(5), open(d.hislip))
+        .await
+        .expect("c opens: b's connections are free");
+    assert_eq!(c.asy.call(frame(ASYNC_LOCK_INFO, 0, 0, &[])).await.ctl, 1);
+    d.stop.cancel();
+}
+
+#[tokio::test]
 async fn bad_headers_and_bad_sequences_are_fatal_and_odd_messages_an_error() {
     let d = start("");
     let fatal = |f: &Frame, code: u8| assert_eq!((f.ty, f.ctl), (FATAL_ERROR, code), "{f:?}");

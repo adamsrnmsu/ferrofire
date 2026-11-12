@@ -453,7 +453,12 @@ impl Server {
             if !link.async_up.load(SeqCst) {
                 break Some(Fatal(2, "the asynchronous channel is not established"));
             }
-            self.hub.wait_unblocked(id).await;
+            // ponytail: only the async channel closing ends a wait; a client that drops just this channel is seen when the lock frees
+            tokio::select! {
+                _ = self.hub.wait_unblocked(id) => {}
+                _ = self.stop.cancelled() => break None,
+                _ = link.closed.cancelled() => break None,
+            }
             match sync.recv(f, &c) {
                 Ok(out) if send(s, &out).await => {}
                 Ok(_) => break None,

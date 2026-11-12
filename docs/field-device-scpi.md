@@ -134,7 +134,7 @@ IVI-6.1 version 1.0, `TCPIP::host::hislip0::INSTR` (sub-address `hislip0`; anoth
 | `Data`, `DataEND` | one SCPI program message in any number of frames of one MessageID; it runs at the `DataEND`. The response carries the query's MessageID and is cut into frames no longer than the client's maximum message size (272 bytes until `AsyncMaximumMessageSize`), the last one a `DataEND`. Larger than 1 MiB in one frame is a FatalError |
 | `AsyncMaximumMessageSize` | the client's size is kept (never below 272), the server's (1 MiB) returned |
 | `AsyncStatusQuery` | the status byte in the control code; MAV (16) while a response has not been read |
-| `AsyncLock`, `AsyncLockInfo` | one exclusive lock for the whole instrument: a request waits up to its timeout (ms) for the holder; every lock request is granted as exclusive, a shared-lock string is not distinguished. While another session holds it, a session's `Data` waits (raw socket and VXI-11 clients are not subject to the HiSLIP lock). A lock dies with its session |
+| `AsyncLock`, `AsyncLockInfo` | one exclusive lock for the whole instrument: a request waits up to its timeout (ms) for the holder; every lock request is granted as exclusive, a shared-lock string is not distinguished. While another session holds it, a session's `Data` waits (raw socket and VXI-11 clients are not subject to the HiSLIP lock); a waiting session ends, its connection freed, when its asynchronous channel closes. A lock dies with its session |
 | `AsyncDeviceClear`, `DeviceClearComplete` | drops the message being collected and the unread response with no error, then `DeviceClearAcknowledge`; messages in between are dropped |
 | `AsyncRemoteLocalControl` | accepted, does nothing |
 | `Trigger` | accepted, does nothing |
