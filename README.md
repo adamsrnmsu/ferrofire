@@ -358,11 +358,14 @@ How each component and protocol is tested, against what, and where the gaps are:
 ## Releases
 
 - **Cutting a version:** [Releasaurus](https://releasaurus.rgon.io) keeps a release PR open on `main` (next version from the conventional commits, changelog, `Cargo.toml` bump). Merging it tags `vX.Y.Z`, publishes the GitHub Release and attaches the binaries. Nothing else cuts a version.
-- **Binaries:** the [Releases page](https://github.com/adamsrnmsu/ferrofire/releases) has `ferrofire-<version>-x86_64-linux-musl.tar.gz` and `ferrofire-<version>-aarch64-linux-musl.tar.gz` (the binary, README, LICENSE, NOTICE) plus `SHA256SUMS`. They are fully static (musl), so no glibc or other library is needed.
+- **Binaries:** the [Releases page](https://github.com/adamsrnmsu/ferrofire/releases) has, for `x86_64` and `aarch64`, a `-linux-musl` and a `-linux-gnu` archive (`ferrofire-<version>-x86_64-linux-musl.tar.gz`, `ferrofire-<version>-x86_64-linux-gnu.tar.gz`, and the same for `aarch64`; each holds the binary, README, LICENSE, NOTICE) plus `SHA256SUMS`.
+- **Which archive:**
+  - `musl`: fully static, runs on any Linux of that CPU with no libc. It cannot do `simulink` mode against a glibc bennu provider (musl's POSIX shared-memory and semaphore layout differs).
+  - `gnu`: dynamically linked against glibc only, built for glibc 2.17, so it runs on glibc >= 2.17 (CentOS 7, Debian 9, Ubuntu 16.04 and newer). Use it for `simulink` mode with the stock bennu simulink provider.
 - **`nightly`:** a prerelease rebuilt every Monday (or by hand) from `main` HEAD. It is an **untested** build of that commit, not a version; the release title names the commit. Use a `vX.Y.Z` release for anything that matters.
-- **Verify:** download the archive and `SHA256SUMS` into one directory and run `sha256sum --ignore-missing -c SHA256SUMS`.
-- **Runs on:** any Linux kernel with the matching CPU (no libc needed). aarch64 was run (`--version`, `check --help`) on CentOS 7 (glibc 2.17), Debian 9, Ubuntu 16.04, Alpine and BusyBox. x86_64 is built and smoke-tested (`--version`) on every release run by CI, but has not been run on old distros.
-- **Not shipped:** `simulinksolver` is `ferrofire` run under that name (`ln -s ferrofire simulinksolver`), but musl's POSIX semaphores do not share with the glibc bennu simulink provider, so for `simulink` mode on a range use `make linux` (glibc) instead.
+- **Verify:** download the archive and `SHA256SUMS` into one directory and run `sha256sum --ignore-missing -c SHA256SUMS` (it lists every archive in the release; `--ignore-missing` skips the ones you did not download).
+- **Runs on:** `musl`: any Linux kernel with the matching CPU (no libc needed); aarch64 was run (`--version`, `check --help`) on CentOS 7 (glibc 2.17), Debian 9, Ubuntu 16.04, Alpine and BusyBox. `gnu`: needs glibc >= 2.17 (CI checks that no symbol newer than `GLIBC_2.17` is required); `--version` was run on CentOS 7, Debian 9 and Ubuntu 16.04 for both arches (x86_64 under emulation). Both x86_64 builds are smoke-tested (`--version`) on every release run by CI.
+- **`simulinksolver`:** not a separate download; it is `ferrofire` run under that name (`ln -s ferrofire simulinksolver`). Use the `gnu` archive (or `make linux`) for `simulink` mode on a range.
 
 ## Status
 
