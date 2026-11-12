@@ -13,6 +13,7 @@ pub mod expr;
 pub mod fd;
 #[cfg(feature = "elastic")]
 pub mod groundtruth;
+pub mod gt;
 pub mod hint;
 pub mod log;
 pub mod model;

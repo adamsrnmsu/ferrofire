@@ -162,6 +162,16 @@ pub fn publish(snap: &[(String, Value)], now: Instant) {
     }
 }
 
+/// Every tag with its value and the age of that value at `now`, by name. The lock is held for the copy only.
+pub fn tags(now: Instant) -> Vec<(String, f64, f64)> {
+    let st = lock(&TAGS);
+    let age = |at: Instant| now.saturating_duration_since(at).as_secs_f64();
+    st.map
+        .iter()
+        .map(|(n, (v, _, at))| (n.clone(), *v, age(*at)))
+        .collect()
+}
+
 /// The tags updated after `since`, as wire lines ending in `F` (nothing when none), and the newest seq.
 fn frame(st: &Store, since: u64, now: Instant) -> (String, u64) {
     let mut out = String::new();

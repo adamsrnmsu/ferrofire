@@ -190,6 +190,9 @@ struct PowerDef {
     max_interval: Option<f64>,
     #[serde(default)]
     dc_fallback: bool,
+    /// Hold generators to their Qmin/Qmax (PYPOWER ENFORCE_Q_LIMS); off by default, as sceptre runs PyPower.
+    #[serde(default)]
+    enforce_q_lims: bool,
     islands: Option<String>,
     #[allow(dead_code)]
     noise: Option<f64>, // pypower-compat mode only (phase 3)
@@ -526,8 +529,14 @@ fn build_power(
     let islands = power_islands(pd)?;
     let cs = power_case(pd, dir)?;
     let (loads, shunts) = drive_devices(pd);
-    let p = Power::new(cs, islands, pd.dc_fallback, &loads, &shunts)
-        .map_err(|e| format!("power: {e}"))?;
+    let p = Power::new_with(
+        cs,
+        islands,
+        (pd.dc_fallback, pd.enforce_q_lims),
+        &loads,
+        &shunts,
+    )
+    .map_err(|e| format!("power: {e}"))?;
     let slots = (0..p.n_tags())
         .map(|i| syms.add(p.tag_name(i), "power tag"))
         .collect::<Result<_, _>>()?;

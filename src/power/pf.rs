@@ -17,6 +17,8 @@ pub struct Opts {
     pub dc: bool,
     /// Drop buses the reference buses cannot reach (and type-4 buses) and publish VM = VA = 0 for them.
     pub deenergize: bool,
+    /// PYPOWER's ENFORCE_Q_LIMS = 1: a PV/slack gen whose Qg leaves [Qmin, Qmax] is held at the limit as a PQ injection and the flow re-run.
+    pub enforce_q_lims: bool,
 }
 impl Default for Opts {
     fn default() -> Self {
@@ -25,6 +27,7 @@ impl Default for Opts {
             max_it: 10,
             dc: false,
             deenergize: false,
+            enforce_q_lims: false,
         }
     } // ppoption PF_TOL, PF_MAX_IT
 }
@@ -125,13 +128,18 @@ fn ext2int(case: &Case, off: &[bool]) -> Result<Net, String> {
     })
 }
 
-/// (ref, pv, pq). Gens are all in service here, so "has a gen" is "has any gen".
+/// (ref, pv, pq).
 type BusSets = (Vec<usize>, Vec<usize>, Vec<usize>);
+
+/// A gen the Q-limit loop has not switched off (all of them, outside that loop).
+fn on(g: &GenRow) -> bool {
+    g[GEN_STATUS] > 0.0
+}
 
 fn bustypes(n: &Net) -> Result<BusSets, String> {
     let mut has = vec![false; n.bus.len()];
-    for &g in &n.gbus {
-        has[g] = true;
+    for (g, &b) in n.gen.iter().zip(&n.gbus) {
+        has[b] |= on(g);
     }
     let pick = |f: &dyn Fn(usize) -> bool| (0..n.bus.len()).filter(|&i| f(i)).collect::<Vec<_>>();
     let mut r = pick(&|i| n.bus[i][BUS_TYPE] == REF && has[i]);
@@ -205,7 +213,9 @@ fn make_sbus(n: &Net) -> Vec<C> {
         .map(|b| -C::new(b[PD], b[QD]) / n.base)
         .collect();
     for (g, &b) in n.gen.iter().zip(&n.gbus) {
-        s[b] += C::new(g[PG], g[QG]) / n.base;
+        if on(g) {
+            s[b] += C::new(g[PG], g[QG]) / n.base;
+        }
     }
     s
 }
@@ -384,15 +394,16 @@ fn bus_results(n: &mut Net, v: &[C]) {
 /// Gens on one bus share its reactive output in proportion to their Q ranges.
 fn share_reactive(n: &mut Net) {
     let (nb, ng) = (n.bus.len(), n.gen.len());
+    let live: Vec<usize> = (0..ng).filter(|&k| on(&n.gen[k])).collect();
     let mut cnt = vec![0.0; nb];
-    for &b in &n.gbus {
-        cnt[b] += 1.0;
+    for &k in &live {
+        cnt[n.gbus[k]] += 1.0;
     }
-    for k in 0..ng {
+    for &k in &live {
         n.gen[k][QG] /= cnt[n.gbus[k]];
     }
     let (mut tot, mut mn, mut mx) = (vec![0.0; nb], vec![0.0; nb], vec![0.0; nb]);
-    for k in 0..ng {
+    for &k in &live {
         let b = n.gbus[k];
         tot[b] += n.gen[k][QG];
         mn[b] += n.gen[k][QMIN];
@@ -400,8 +411,8 @@ fn share_reactive(n: &mut Net) {
     }
     let eps = f64::EPSILON;
     let saved: Vec<f64> = (0..ng).map(|k| n.gen[k][QG]).collect();
-    for (k, &sv) in saved.iter().enumerate() {
-        let b = n.gbus[k];
+    for &k in &live {
+        let (sv, b) = (saved[k], n.gbus[k]);
         n.gen[k][QG] = if mn[b] == mx[b] {
             sv
         } else {
@@ -414,7 +425,9 @@ fn share_reactive(n: &mut Net) {
 /// The reference bus's first gen picks up the slack: its Pg is what the bus needs minus the other gens there.
 fn slack_pg(n: &mut Net, sg: &[C], ref_: &[usize]) {
     for &r in ref_ {
-        let rg: Vec<usize> = (0..n.gen.len()).filter(|&k| n.gbus[k] == r).collect();
+        let rg: Vec<usize> = (0..n.gen.len())
+            .filter(|&k| n.gbus[k] == r && on(&n.gen[k]))
+            .collect();
         if let Some(&g0) = rg.first() {
             let mut pg = sg[g0].re * n.base + n.bus[r][PD];
             for &g in &rg[1..] {
@@ -443,7 +456,9 @@ fn pfsoln(n: &mut Net, ybus: &[C], y: &[[C; 4]], v: &[C], ref_: &[usize]) {
     let ib = matvec(ybus, v);
     let sg: Vec<C> = n.gbus.iter().map(|&b| v[b] * ib[b].conj()).collect();
     for (k, s) in sg.iter().enumerate() {
-        n.gen[k][QG] = s.im * n.base + n.bus[n.gbus[k]][QD];
+        if on(&n.gen[k]) {
+            n.gen[k][QG] = s.im * n.base + n.bus[n.gbus[k]][QD];
+        }
     }
     if n.gen.len() > 1 {
         share_reactive(n);
@@ -584,19 +599,128 @@ fn initial_voltages(n: &Net, pq: &[usize]) -> Vec<C> {
     v0
 }
 
-/// AC solve of `net` in place; false when Newton did not converge.
-fn solve_ac(
+/// Newton solve and pfsoln for the current bus types and gen statuses.
+fn newton_pass(
     net: &mut Net,
+    (ybus, y, v0): (&[C], &[[C; 4]], &[C]),
     (ref_, pv, pq): (&[usize], &[usize], &[usize]),
     o: &Opts,
 ) -> Result<bool, String> {
-    let v0 = initial_voltages(net, pq);
+    let sbus = make_sbus(net);
+    let (v, ok) = newtonpf(ybus, &sbus, v0, (pv, pq), o)?;
+    pfsoln(net, ybus, y, &v, ref_);
+    Ok(ok)
+}
+
+/// In-service gens whose Qg is above Qmax (first) or below Qmin (second) by more than OPF_VIOLATION (1e-5).
+fn q_violations(n: &Net) -> (Vec<usize>, Vec<usize>) {
+    const TOL: f64 = 1e-5;
+    let pick = |f: &dyn Fn(&GenRow) -> bool| {
+        (0..n.gen.len())
+            .filter(|&k| on(&n.gen[k]) && f(&n.gen[k]))
+            .collect::<Vec<_>>()
+    };
+    (
+        pick(&|g| g[QG] > g[QMAX] + TOL),
+        pick(&|g| g[QG] < g[QMIN] - TOL),
+    )
+}
+
+/// True when every in-service gen at a PV or reference bus violates its limit (PYPOWER then reports no solution).
+fn all_remaining_violate(n: &Net, mx: &[usize], mn: &[usize]) -> bool {
+    let live = (0..n.gen.len()).filter(|&k| {
+        let t = n.bus[n.gbus[k]][BUS_TYPE];
+        on(&n.gen[k]) && (t == PV || t == REF)
+    });
+    let mut bad: Vec<usize> = mx.iter().chain(mn).copied().collect();
+    bad.sort_unstable();
+    bad.dedup();
+    live.count() == bad.len()
+}
+
+/// Hold gen `k` at the limit it hit: off as a generator, its P and fixed Q taken out of the bus load, the bus PQ.
+fn pin_to_limit(n: &mut Net, k: usize, q: f64) {
+    n.gen[k][QG] = q;
+    n.gen[k][GEN_STATUS] = 0.0;
+    let b = n.gbus[k];
+    n.bus[b][PD] -= n.gen[k][PG];
+    n.bus[b][QD] -= q;
+}
+
+/// Pin every violating gen (over-max then under-min, as PYPOWER orders them) and re-derive the bus sets; when the slack bus lost its
+/// gen the first PV bus becomes the slack (and the bus types follow).
+fn pin_violators(
+    net: &mut Net,
+    sets: &mut BusSets,
+    (mx, mn): (&[usize], &[usize]),
+) -> Result<(), String> {
+    let bound: Vec<(usize, f64)> = mx
+        .iter()
+        .map(|&k| (k, net.gen[k][QMAX]))
+        .chain(mn.iter().map(|&k| (k, net.gen[k][QMIN])))
+        .collect();
+    let slack_pinned = bound
+        .iter()
+        .any(|&(k, _)| net.bus[net.gbus[k]][BUS_TYPE] == REF);
+    if sets.0.len() > 1 && slack_pinned {
+        return Err(
+            "cannot enforce Q limits for a slack bus in a system with multiple slacks".into(),
+        );
+    }
+    for &(k, q) in &bound {
+        pin_to_limit(net, k, q);
+        let b = net.gbus[k];
+        net.bus[b][BUS_TYPE] = PQ;
+    }
+    let before = std::mem::replace(sets, bustypes(net)?).0;
+    if sets.0 != before {
+        net.bus[sets.0[0]][BUS_TYPE] = REF;
+        sets.1.iter().for_each(|&b| net.bus[b][BUS_TYPE] = PV);
+    }
+    Ok(())
+}
+
+/// The runpf ENFORCE_Q_LIMS loop around Newton: solve, pin the violators, solve again from the same starting voltages, until none
+/// violates. A pinned gen stays off (the case reports its Pg and fixed Qg); if the slack moved, angles are shifted back to the
+/// original slack bus's.
+fn solve_with_q_limits(
+    net: &mut Net,
+    (ybus, y, v0): (&[C], &[[C; 4]], &[C]),
+    mut sets: BusSets,
+    o: &Opts,
+) -> Result<bool, String> {
+    let (ref0, va_ref0) = (sets.0.clone(), net.bus[sets.0[0]][VA]);
+    let mut pinned = false;
+    let ok = loop {
+        let ok = newton_pass(net, (ybus, y, v0), (&sets.0, &sets.1, &sets.2), o)?;
+        let (mx, mn) = q_violations(net);
+        if mx.is_empty() && mn.is_empty() {
+            break ok;
+        }
+        if all_remaining_violate(net, &mx, &mn) {
+            break false;
+        }
+        pin_violators(net, &mut sets, (&mx, &mn))?;
+        pinned = true;
+    };
+    if pinned && sets.0 != ref0 {
+        let shift = va_ref0 - net.bus[ref0[0]][VA];
+        net.bus.iter_mut().for_each(|b| b[VA] += shift);
+    }
+    Ok(ok)
+}
+
+/// AC solve of `net` in place; false when Newton did not converge.
+fn solve_ac(net: &mut Net, sets: BusSets, o: &Opts) -> Result<bool, String> {
+    let v0 = initial_voltages(net, &sets.2);
     let y = branch_y(net);
     let ybus = make_ybus(net, &y);
-    let sbus = make_sbus(net);
-    let (v, ok) = newtonpf(&ybus, &sbus, &v0, (pv, pq), o)?;
-    pfsoln(net, &ybus, &y, &v, ref_);
-    Ok(ok)
+    let prep = (&ybus[..], &y[..], &v0[..]);
+    if o.enforce_q_lims {
+        solve_with_q_limits(net, prep, sets, o)
+    } else {
+        newton_pass(net, prep, (&sets.0, &sets.1, &sets.2), o)
+    }
 }
 
 /// Switch off the buses the reference buses cannot reach and rebuild the network without them.
@@ -678,12 +802,11 @@ pub fn runpf(case: &Case, o: &Opts) -> Result<Solved, String> {
     if o.deenergize {
         (net, sets) = drop_unreachable(case, &mut off, net, sets)?;
     }
-    let (ref_, pv, pq) = (&sets.0[..], &sets.1[..], &sets.2[..]);
     let success = if o.dc {
-        dc(&mut net, (ref_, pv, pq))?;
+        dc(&mut net, (&sets.0, &sets.1, &sets.2))?;
         true
     } else {
-        solve_ac(&mut net, (ref_, pv, pq), o)?
+        solve_ac(&mut net, sets, o)?
     };
     Ok(Solved {
         case: int2ext(case, &net, &off, o.deenergize),
