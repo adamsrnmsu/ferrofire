@@ -141,15 +141,15 @@ fn other(msg: impl Into<String>) -> std::io::Error {
 // ---- HiSLIP ------------------------------------------------------------------------------------------------------------------
 
 /// A HiSLIP session: the synchronous channel carries messages, the asynchronous one only the handshake here.
-pub struct Hislip {
-    sync: TcpStream,
+pub struct Hislip<S = TcpStream> {
+    sync: S,
     rd: Reader,
     id: u32,
     /// The last response was read to its end (the RMT-delivered bit of the next message).
     rmt: u8,
     /// The most the instrument takes in one frame, header included.
     max: u64,
-    _asy: TcpStream,
+    _asy: Option<TcpStream>,
 }
 
 impl Hislip {
@@ -176,9 +176,9 @@ impl Hislip {
             sync,
             rd,
             id: 0xFFFF_FF00,
-            rmt: 0,
+            rmt: u8::default(),
             max,
-            _asy: asy,
+            _asy: Some(asy),
         })
     }
 }
@@ -191,12 +191,12 @@ fn describe(f: &Frame) -> String {
 }
 
 /// Send `f` and read the one frame that answers it.
-fn exchange(s: &mut TcpStream, rd: &mut Reader, f: &Frame) -> std::io::Result<Frame> {
+fn exchange(s: &mut (impl Read + Write), rd: &mut Reader, f: &Frame) -> std::io::Result<Frame> {
     s.write_all(&f.encode())?;
     next(s, rd)
 }
 
-fn next(s: &mut TcpStream, rd: &mut Reader) -> std::io::Result<Frame> {
+fn next(s: &mut impl Read, rd: &mut Reader) -> std::io::Result<Frame> {
     let mut buf = [0u8; 4096];
     loop {
         if let Some(f) = rd.take().map_err(|e| other(e.1))? {
@@ -209,7 +209,7 @@ fn next(s: &mut TcpStream, rd: &mut Reader) -> std::io::Result<Frame> {
     }
 }
 
-impl Wire for Hislip {
+impl<S: Read + Write> Wire for Hislip<S> {
     fn send(&mut self, msg: &str) -> std::io::Result<()> {
         let data = format!("{msg}\n");
         let step = (self.max as usize).saturating_sub(HEADER).max(1);
@@ -263,8 +263,8 @@ fn line(text: &[u8]) -> String {
 // ---- VXI-11 ------------------------------------------------------------------------------------------------------------------
 
 /// A VXI-11 link on the core channel. The link is destroyed when this is dropped.
-pub struct Vxi11 {
-    s: TcpStream,
+pub struct Vxi11<S: Read + Write = TcpStream> {
+    s: S,
     xid: u32,
     link: u32,
     /// The most one device_write may carry.
@@ -278,14 +278,37 @@ fn core_port(host: &str, portmapper: u16, wait: Duration) -> Result<u16, String>
     let get = ints(&[CORE_PROG, 1, 6, 0]);
     let r =
         rpc(&mut pm, 1, (PMAP_PROG, 2, 3), &get).map_err(|e| format!("VXI-11 portmapper: {e}"))?;
-    let port = Xdr(&r).u32().and_then(|p| u16::try_from(p).ok());
+    core_port_in(&r)
+}
+
+/// The port in a GETPORT reply; 0 is the portmapper saying it does not know the program.
+fn core_port_in(reply: &[u8]) -> Result<u16, String> {
+    let port = Xdr(reply).u32().and_then(|p| u16::try_from(p).ok());
     port.filter(|p| *p != 0)
         .ok_or_else(|| "VXI-11: the portmapper does not know the core channel".into())
 }
 
+/// The link and the largest write in a create_link reply.
+fn created(reply: &[u8], device: &str) -> Result<(u32, usize), String> {
+    let [error, link, _abort, max] = Xdr(reply)
+        .words()
+        .ok_or("VXI-11 create_link: short reply")?;
+    match error {
+        0 => Ok((link, max.max(1) as usize)),
+        e => Err(format!(
+            "VXI-11 create_link: error {e} (3 is no such device `{device}`)"
+        )),
+    }
+}
+
+/// A timeout in whole milliseconds, as far as a `u32` goes.
+fn millis(d: Duration) -> u32 {
+    u32::try_from(d.as_millis()).unwrap_or(u32::MAX)
+}
+
 /// One RPC call and the results of its reply.
 fn rpc(
-    s: &mut TcpStream,
+    s: &mut (impl Read + Write),
     xid: u32,
     (prog, vers, proc): (u32, u32, u32),
     args: &[u8],
@@ -300,15 +323,16 @@ fn rpc(
     let mut x = Xdr(&reply);
     let head = (x.u32(), x.u32(), x.u32(), x.u32(), x.opaque(400), x.u32());
     match head {
-        (Some(id), Some(1), Some(0), Some(_), Some(_), Some(0)) if id == xid => Ok(x.0.to_vec()),
-        (_, _, _, _, _, Some(stat)) => {
+        (Some(id), ..) if id != xid => Err(other("an RPC reply to another call")),
+        (_, Some(1), Some(0), Some(_), Some(_), Some(0)) => Ok(x.0.to_vec()),
+        (_, Some(1), Some(0), Some(_), Some(_), Some(stat)) => {
             Err(other(format!("RPC call {prog:#x}/{proc} refused ({stat})")))
         }
         _ => Err(other("not an RPC reply")),
     }
 }
 
-fn read_record(s: &mut TcpStream) -> std::io::Result<Vec<u8>> {
+fn read_record(s: &mut impl Read) -> std::io::Result<Vec<u8>> {
     let mut rec = vec![];
     loop {
         let mut head = [0u8; 4];
@@ -335,29 +359,25 @@ impl Vxi11 {
         put_opaque(&mut args, device.as_bytes());
         let r = rpc(&mut s, 1, (CORE_PROG, 1, 10), &args)
             .map_err(|e| format!("VXI-11 create_link: {e}"))?;
-        let [error, link, _abort, max] =
-            Xdr(&r).words().ok_or("VXI-11 create_link: short reply")?;
-        match error {
-            0 => Ok(Vxi11 {
-                s,
-                xid: 2,
-                link,
-                max: max.max(1) as usize,
-                wait_ms: wait.as_millis().min(u128::from(u32::MAX)) as u32,
-            }),
-            e => Err(format!(
-                "VXI-11 create_link: error {e} (3 is no such device `{device}`)"
-            )),
-        }
+        let (link, max) = created(&r, device)?;
+        Ok(Vxi11 {
+            s,
+            xid: 2,
+            link,
+            max,
+            wait_ms: millis(wait),
+        })
     }
+}
 
+impl<S: Read + Write> Vxi11<S> {
     fn core(&mut self, proc: u32, args: &[u8]) -> std::io::Result<Vec<u8>> {
         self.xid += 1;
         rpc(&mut self.s, self.xid, (CORE_PROG, 1, proc), args)
     }
 }
 
-impl Wire for Vxi11 {
+impl<S: Read + Write> Wire for Vxi11<S> {
     fn send(&mut self, msg: &str) -> std::io::Result<()> {
         let data = format!("{msg}\n");
         let mut chunks = data.as_bytes().chunks(self.max).peekable();
@@ -393,7 +413,7 @@ impl Wire for Vxi11 {
     }
 }
 
-impl Drop for Vxi11 {
+impl<S: Read + Write> Drop for Vxi11<S> {
     fn drop(&mut self) {
         let _ = self.core(23, &ints(&[self.link]));
     }
@@ -402,6 +422,7 @@ impl Drop for Vxi11 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scpi::rpc::Records;
 
     fn sock(h: &str, p: u16) -> Result<Target, String> {
         Ok(Target::Socket(h.into(), p))
@@ -454,5 +475,307 @@ mod tests {
         assert!(parse_target("TCPIP::lab")
             .unwrap_err()
             .contains("TCPIP::host::hislip0::INSTR"));
+    }
+
+    // ---- the wires over a scripted stream ----
+
+    use std::cell::RefCell;
+    use std::io::Cursor;
+    use std::rc::Rc;
+
+    type Out = Rc<RefCell<Vec<u8>>>;
+
+    /// A stream that reads from a script `step` bytes at a time and records what is written.
+    struct Pipe {
+        input: Cursor<Vec<u8>>,
+        step: usize,
+        out: Out,
+    }
+
+    impl Read for Pipe {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let n = buf.len().min(self.step);
+            self.input.read(&mut buf[..n])
+        }
+    }
+
+    impl Write for Pipe {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.out.borrow_mut().extend(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn pipe(input: Vec<u8>, step: usize) -> (Pipe, Out) {
+        let out = Out::default();
+        let p = Pipe {
+            input: Cursor::new(input),
+            step,
+            out: out.clone(),
+        };
+        (p, out)
+    }
+
+    const ID: u32 = 0xFFFF_FF00;
+
+    fn hislip(frames: &[Frame], step: usize, max: u64) -> (Hislip<Pipe>, Out) {
+        let (sync, out) = pipe(frames.iter().flat_map(Frame::encode).collect(), step);
+        let h = Hislip {
+            sync,
+            rd: Reader::default(),
+            id: ID,
+            rmt: 0,
+            max,
+            _asy: None,
+        };
+        (h, out)
+    }
+
+    /// The frames in what was written.
+    fn frames_in(out: &Out) -> Vec<Frame> {
+        let mut r = Reader::default();
+        r.push(&out.borrow());
+        std::iter::from_fn(|| r.take().unwrap()).collect()
+    }
+
+    #[test]
+    fn a_hislip_message_is_one_dataend_with_the_next_message_id_each_time() {
+        let (mut h, out) = hislip(&[], 1, 272);
+        h.send("*IDN?").unwrap();
+        h.send("*CLS").unwrap();
+        assert_eq!(
+            frames_in(&out),
+            [
+                frame(DATA_END, 0, ID, b"*IDN?\n"),
+                frame(DATA_END, 0, ID + 2, b"*CLS\n")
+            ]
+        );
+    }
+
+    #[test]
+    fn a_long_hislip_message_is_cut_to_the_maximum_message_size_under_one_message_id() {
+        let (mut h, out) = hislip(&[], 1, 20);
+        h.send("abcdefghi").unwrap();
+        h.send("x").unwrap();
+        assert_eq!(
+            frames_in(&out),
+            [
+                frame(DATA, 0, ID, b"abcd"),
+                frame(DATA, 0, ID, b"efgh"),
+                frame(DATA_END, 0, ID, b"i\n"),
+                frame(DATA_END, 0, ID + 2, b"x\n"),
+            ]
+        );
+        let (mut h, out) = hislip(&[], 1, 0);
+        h.send("a").unwrap();
+        assert_eq!(
+            frames_in(&out),
+            [frame(DATA, 0, ID, b"a"), frame(DATA_END, 0, ID, b"\n")],
+            "a size that leaves no room still moves one byte at a time"
+        );
+    }
+
+    #[test]
+    fn a_hislip_response_is_read_to_its_dataend_and_then_acknowledged_by_the_next_message() {
+        let replies = [
+            frame(DATA, 0, ID, b"ab"),
+            frame(ASYNC_LOCK_RESPONSE, 0, 0, b""),
+            frame(DATA_END, 0, ID, b"c\r\n"),
+        ];
+        let (mut h, out) = hislip(&replies, 1, 272);
+        assert_eq!(h.recv().unwrap(), Some("abc".to_string()));
+        h.send("*OPC?").unwrap();
+        assert_eq!(
+            frames_in(&out)[0].ctl,
+            1,
+            "RMT-delivered once a response was read"
+        );
+        assert_eq!(
+            h.recv().unwrap(),
+            None,
+            "the end of the stream is the instrument closing"
+        );
+    }
+
+    #[test]
+    fn hislip_errors_end_the_query_with_their_text() {
+        let err = |f: Frame| {
+            let (mut h, _) = hislip(&[f], 4096, 272);
+            h.recv().unwrap_err().to_string()
+        };
+        assert!(err(frame(INTERRUPTED, 0, ID, b"")).contains("interrupted the query (-410)"));
+        assert!(err(frame(ERROR, 3, 0, b"too big")).contains("too big (code 3)"));
+        assert!(err(frame(FATAL_ERROR, 1, 0, b"bad")).contains("bad (code 1)"));
+        let (mut h, _) = hislip(&[], 4096, 272);
+        h.sync = pipe(b"GET / HTTP/1.1\r\n\r\n".to_vec(), 4096).0;
+        assert!(h.recv().unwrap_err().to_string().contains("poorly formed"));
+        assert_eq!(
+            describe(&frame(DATA, 0, 0, b"")),
+            "unexpected message type 6"
+        );
+    }
+
+    #[test]
+    fn frames_are_read_from_a_stream_that_gives_one_byte_at_a_time() {
+        let (mut p, _) = pipe(frame(DATA_END, 1, 7, b"xyz").encode(), 1);
+        let mut rd = Reader::default();
+        assert_eq!(
+            next(&mut p, &mut rd).unwrap(),
+            frame(DATA_END, 1, 7, b"xyz")
+        );
+        let e = next(&mut p, &mut rd).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::UnexpectedEof);
+    }
+
+    /// The reply record of the call with this xid: accepted, the results.
+    fn answer(xid: u32, results: &[u8]) -> Vec<u8> {
+        record(&[ints(&[xid, 1, 0, 0, 0, 0]), results.to_vec()].concat())
+    }
+
+    fn vxi(replies: &[Vec<u8>], step: usize, max: usize) -> (Vxi11<Pipe>, Out) {
+        let (s, out) = pipe(replies.concat(), step);
+        let v = Vxi11 {
+            s,
+            xid: 2,
+            link: 7,
+            max,
+            wait_ms: 1500,
+        };
+        (v, out)
+    }
+
+    /// (procedure, arguments) of every call in what was written.
+    fn calls_in(out: &Out) -> Vec<(u32, Vec<u8>)> {
+        let mut r = Records::default();
+        r.push(&out.borrow());
+        std::iter::from_fn(|| r.take().unwrap())
+            .map(|c| {
+                let mut x = Xdr(&c);
+                let [_, _, _, _, _, proc] = x.words().unwrap();
+                x.skip_auth().unwrap();
+                x.skip_auth().unwrap();
+                (proc, x.0.to_vec())
+            })
+            .collect()
+    }
+
+    fn opaque(data: &[u8]) -> Vec<u8> {
+        let mut o = vec![];
+        put_opaque(&mut o, data);
+        o
+    }
+
+    #[test]
+    fn a_vxi11_message_is_written_in_pieces_the_last_with_end() {
+        let ok = |n: u32| answer(3 + n, &ints(&[0, 4]));
+        let (mut v, out) = vxi(&[ok(0), ok(1)], 1, 4);
+        v.send("abcdef").unwrap();
+        let calls = calls_in(&out);
+        let want = |flags, data: &[u8]| [ints(&[7, 1500, 1500, flags]), opaque(data)].concat();
+        assert_eq!(calls[0], (11, want(0, b"abcd")));
+        assert_eq!(calls[1], (11, want(8, b"ef\n")));
+        let (mut v, _) = vxi(&[answer(3, &ints(&[17, 0]))], 4096, 4);
+        let e = v.send("a").unwrap_err().to_string();
+        assert!(e.contains("device_write: error Some(17)"), "{e}");
+    }
+
+    #[test]
+    fn a_vxi11_response_is_read_until_the_end_reason() {
+        let data = |xid, reason, d: &[u8]| answer(xid, &[ints(&[0, reason]), opaque(d)].concat());
+        let (mut v, out) = vxi(&[data(3, 1, b"ab"), data(4, 4, b"c\r\n")], 1, 100);
+        assert_eq!(v.recv().unwrap(), Some("abc".to_string()));
+        let calls = calls_in(&out);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0], (12, ints(&[7, 1 << 16, 1500, 1500, 0, 0])));
+        let (mut v, _) = vxi(&[answer(3, &ints(&[15, 0, 0]))], 4096, 100);
+        assert_eq!(v.recv().unwrap_err().kind(), std::io::ErrorKind::TimedOut);
+        let (mut v, _) = vxi(&[answer(3, &ints(&[4, 0, 0]))], 4096, 100);
+        let e = v.recv().unwrap_err();
+        assert_ne!(e.kind(), std::io::ErrorKind::TimedOut);
+        assert!(e.to_string().contains("device_read: error Some(4)"));
+    }
+
+    #[test]
+    fn a_dropped_vxi11_link_is_destroyed() {
+        let (v, out) = vxi(&[answer(3, &ints(&[0]))], 4096, 100);
+        drop(v);
+        assert_eq!(calls_in(&out), [(23, ints(&[7]))]);
+    }
+
+    #[test]
+    fn rpc_replies_are_checked_and_records_read_whole() {
+        let call = |reply: Vec<u8>| {
+            let (mut p, _) = pipe(reply, 1);
+            rpc(&mut p, 9, (CORE_PROG, 1, 0), &[])
+        };
+        let msg = |r: Vec<u8>| call(r).unwrap_err().to_string();
+        assert_eq!(call(answer(9, &ints(&[5]))).unwrap(), ints(&[5]));
+        assert!(msg(record(&ints(&[9, 1, 0, 0, 0, 3]))).contains("refused (3)"));
+        assert!(
+            msg(answer(8, &[])).contains("to another call"),
+            "another xid"
+        );
+        assert!(
+            msg(record(&ints(&[9, 0, 0, 0, 0, 0]))).contains("not an RPC reply"),
+            "not a reply"
+        );
+        assert!(
+            msg(record(&ints(&[9, 1, 1, 0, 2, 2]))).contains("not an RPC reply"),
+            "denied"
+        );
+        let mut two = vec![0, 0, 0, 2, 1, 2];
+        two.extend(record(&[3, 4]));
+        let (mut p, _) = pipe(two, 1);
+        assert_eq!(read_record(&mut p).unwrap(), [1, 2, 3, 4]);
+        let (mut p, _) = pipe(vec![0, 0, 0, 5, 1], 4096);
+        assert_eq!(
+            read_record(&mut p).unwrap_err().kind(),
+            std::io::ErrorKind::UnexpectedEof
+        );
+        let half = crate::scpi::rpc::MAX_RECORD / 2;
+        let fragment = |n: usize| [&(n as u32).to_be_bytes()[..], &vec![0; n]].concat();
+        let (mut p, _) = pipe([fragment(half + 1), fragment(half + 1)].concat(), 4096);
+        assert_eq!(
+            read_record(&mut p).unwrap().len(),
+            2 * half + 2,
+            "a record that grows past the limit is handed over, not read for ever"
+        );
+        let (mut p, _) = pipe([fragment(half), fragment(half)].concat(), 4096);
+        assert_eq!(
+            read_record(&mut p).unwrap_err().kind(),
+            std::io::ErrorKind::UnexpectedEof,
+            "exactly the limit is still within it: the next fragment is awaited"
+        );
+    }
+
+    #[test]
+    fn the_portmapper_and_create_link_replies_are_read() {
+        assert_eq!(core_port_in(&ints(&[4881])), Ok(4881));
+        for bad in [ints(&[0]), ints(&[70000]), vec![]] {
+            assert!(core_port_in(&bad)
+                .unwrap_err()
+                .contains("does not know the core channel"));
+        }
+        assert_eq!(core_port_in(&ints(&[65535])), Ok(65535));
+        assert_eq!(
+            created(&ints(&[0, 7, 4881, 1 << 20]), "inst0"),
+            Ok((7, 1 << 20))
+        );
+        assert_eq!(
+            created(&ints(&[0, 7, 4881, 0]), "inst0"),
+            Ok((7, 1)),
+            "a size of 0 still moves a byte"
+        );
+        assert!(created(&ints(&[3, 0, 0, 0]), "gpib0")
+            .unwrap_err()
+            .contains("error 3 (3 is no such device `gpib0`)"));
+        assert!(created(&ints(&[0, 7]), "inst0")
+            .unwrap_err()
+            .contains("short reply"));
+        assert_eq!(millis(Duration::from_millis(1234)), 1234);
+        assert_eq!(millis(Duration::from_secs(1 << 40)), u32::MAX);
     }
 }

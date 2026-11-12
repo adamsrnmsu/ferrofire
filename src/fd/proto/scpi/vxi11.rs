@@ -812,6 +812,15 @@ mod tests {
     }
 
     #[test]
+    fn link_ids_wrap_from_the_largest_to_one_never_to_zero_or_below() {
+        let s = svc(Scope::Instrument, 4);
+        s.links().next = i32::MAX;
+        assert_eq!(create(&s), i32::MAX as u32);
+        assert_eq!(create(&s), 1);
+        assert_eq!(create(&s), 2);
+    }
+
+    #[test]
     fn reading_with_nothing_to_say_is_unterminated() {
         let s = svc(Scope::Instrument, 4);
         let l = create(&s);

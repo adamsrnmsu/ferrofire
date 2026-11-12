@@ -6,19 +6,19 @@ use super::load_as;
 use ferrofire::fd::proto::scpi::Server;
 use ferrofire::fd::store::Store;
 
-/// A port nothing listens on, and that no other test of this process was given: the kernel may hand the same one to two callers that
-/// close their probe before their server binds it, and a client would then talk to the wrong test's server.
+/// A port nothing listens on, that no other test of this process was given, and that the kernel will not hand to a client as its source
+/// port before the server has bound it (what asking the kernel for port 0 and closing it again risked: the next `connect` of another
+/// test could take the same port, and the server's bind failed). The ports are below the kernel's ephemeral range (32768 up); the
+/// process id picks a block of 100, so that test binaries running at the same time (mutation workers) do not meet.
 pub fn free_port() -> u16 {
-    static GIVEN: std::sync::Mutex<Vec<u16>> = std::sync::Mutex::new(Vec::new());
+    static NEXT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
+    let base = 12_000 + (std::process::id() % 200) as u16 * 100;
     loop {
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-        let mut given = GIVEN.lock().unwrap();
-        if !given.contains(&port) {
-            given.push(port);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let port = base + n % 100;
+        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
+            && std::net::UdpSocket::bind(("127.0.0.1", port)).is_ok()
+        {
             return port;
         }
     }

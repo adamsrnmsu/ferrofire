@@ -106,7 +106,7 @@ async fn pipelined_split_and_crlf_lines_are_all_answered_in_order() {
     for byte in b"*OPC?\n" {
         s.write_all(&[*byte]).await.unwrap();
         s.flush().await.unwrap();
-        tokio::time::sleep(Duration::from_millis(2)).await;
+        tokio::time::sleep(Duration::from_millis(40)).await; // long enough for the server to read each byte alone
     }
     assert_eq!(
         drain(&mut s, Duration::from_millis(300)).await,

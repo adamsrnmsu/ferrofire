@@ -376,7 +376,7 @@ impl Transports {
         let Some(core_l) = self.bind(core, "vxi11 core").await else {
             return;
         };
-        let port = core_l.local_addr().map_or(0, |a| a.port());
+        let port = core_l.local_addr().map(|a| a.port()).unwrap_or_default();
         let svc = Arc::new(vxi11::Vxi11::new(
             ins,
             store,
