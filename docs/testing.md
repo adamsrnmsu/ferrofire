@@ -478,6 +478,86 @@ PROTO=scpi` runs the independent client stacks.
   resets and the window closing during the 200 KB flood (flow control; `proto.env` says why); the requests and the responses are found as
   bytes in the capture (`*IDN?` and its answer, the -222 and -363 responses, the `;`-joined answer of a compound query); Zeek's `conn.log` has
   the connections (no analyzer exists).
+- Mutation, scoped to the SCPI code (the whole-tree `make mutate` relinks every test binary per mutant, which took over 3 minutes a
+  mutant here): `mutator --max-workers 2 --no-coverage --test-command 'cargo test --lib scpi && cargo test --test scpi_golden --test
+  scpi_transport_golden --test scpi_hislip --test scpi_vxi11 --test scpi_net --test scpi_client' src/scpi src/fd/proto/scpi` with
+  `CARGO_PROFILE_DEV_OPT_LEVEL=0 CARGO_PROFILE_DEV_DEBUG=0` (a separate target dir; the tests do not need the optimized build):
+  **482 sites, 482 killed, 0 survived, 0 uncovered** (device.rs, hislip.rs, vxi11.rs, mod.rs, syntax.rs, rpc.rs, client.rs, transport.rs).
+  Things the survivors taught: `cargo test --lib scpi` filters by name every target it is given, so the integration tests have to
+  be a second `cargo test` or they run nothing; a hung mutant (a loop that never ends, 2 GB of RSS) costs its timeout, a few minutes;
+  concurrent workers can leave cargo with the previous build (a false survivor, killed when rerun alone: the final numbers are from
+  reruns); a literal that nothing can observe (an initial `false` that the first call overwrites) is written `Default::default()` so
+  that it is not a site, and a flag nothing reads was removed (`Link::clear` in VXI-11). The earlier runs' survivors became tests: the
+  queue-overflow bit when the lost entry was another class, the zero padding of XDR opaque data, a termination character without its
+  flag, the exact -420 / -410 reply shapes, the wrap of link ids, the `maxRecvSize` boundary of `opaque`, one-byte reads, an empty
+  response line, and the first frames a client sends in each handshake (a scripted peer on a real socket).
+
+**Oracles.** Independent: Mosquitto (broker semantics, retained messages, wills), Paho and the mosquitto clients (a client not written by
+us reading and commanding), Tahu (the Sparkplug payload codec), tshark and Zeek (the MQTT framing). Not independent: the engine tests
+and `mqtt_net.rs` use `rumqttc` on both sides.
+
+**Gaps.**
+- No stock oracle and no second broker: Mosquitto only (no EMQX / HiveMQ / VerneMQ).
+- Tahu is used as a codec and a thin host; no Ignition or other commercial Sparkplug host has been tried, and the primary-host `STATE`
+  topic, DBIRTH / DDATA and Sparkplug metric types other than Int64 / Double / Boolean on output are not implemented.
+- MQTT 3.1.1 only (no MQTT 5 properties); QoS 2 is passed through to the library and not specifically tested.
+- `ssl://` needs `<tls-ca>`: the system trust store is not used. TLS is tested against Mosquitto only, with RSA certificates.
+- A tag name containing `/` cannot be commanded in the plain scheme.
+- Retained messages on a command topic are ignored, so a command cannot be made persistent through the broker either.
+- Network faults between device and broker (loss, delay) are not injected; only a refused connection, a restart and a kill.
+
+## SCPI instrument server and client
+
+`<scpi-server>` and `ferrofire scpi` ([field-device-scpi.md](field-device-scpi.md)); `src/scpi/` (message syntax, the HiSLIP frame format and
+the ONC RPC/XDR code, shared, and the client with its HiSLIP and VXI-11 wires in `transport.rs`) and `src/fd/proto/scpi/` (config and the raw
+socket in `mod.rs`, the I/O-free instrument in `device.rs`, the HiSLIP and VXI-11 servers in `hislip.rs` and `vxi11.rs`).
+
+**Strategy.** The syntax (`syntax.rs`) and the instrument (`device.rs`: line framing, status registers, error queue, routes) are pure and
+need no socket. `tests/scpi_golden.rs` replays a transcript (`tests/golden/scpi.transcript`: request lines, exact responses, the write queue,
+a new connection, a second session of the same instrument) with no sockets; `tests/scpi_net.rs` runs the raw socket on real sockets,
+`tests/scpi_transport_golden.rs` replays the HiSLIP and VXI-11 transcripts with no sockets; `tests/scpi_hislip.rs` and `tests/scpi_vxi11.rs` run the other two (HiSLIP frames and ONC RPC records built by hand, so a wrong header is a
+test and not a client's guess); `tests/scpi_client.rs` runs the real `ferrofire scpi` binary against all three; `make conformance
+PROTO=scpi` runs the independent client stacks.
+
+**Checked, and by what.**
+- Syntax: units split at `;` outside quotes, headers (short and long forms in any case, suffix 1 only, rooted and relative paths, `*` commands
+  leave the path alone), numbers (NR1 to NR3, signs, exponents, the three number errors), keywords, strings with doubled quotes: unit tests
+  and the transcript.
+- Status model: SESR class bits from the error number, clear on read and on `*CLS`; the status byte bits EAV, MAV (also the
+  `*IDN?;*STB?` case), ESB, MSS and `*SRE` bit 6; the error queue's first-in first-out order, the 16-entry bound and -350 as the last entry:
+  unit tests and the transcript, and through PyVISA in the conformance run (`*STB?` 36, `*ESR?` 16, `*STB?` 4, `SYST:ERR?` -222,
+  `*STB?` 0).
+- Writes: only a `<writable>` tag has a `SOURce` path; the type, finiteness and limits are `Point::check`, shared with MQTT; what passes is in
+  the store's write queue and not in the store (unit test, golden, `scpi_net.rs`, and a stand-in provider receiving `WRITE=` in the conformance
+  run); out-of-range is -222, a wrong type -104 or -224, `MIN`/`MAX`/`DEF` without a limit -221.
+- Robustness: a line over `<max-line>` is -363 and discarded to its newline, with the buffer never holding more than the limit; random bytes
+  and a 200 KB line leave the connection answering; the connection limit closes the extra client and serves the rest; an idle client is
+  dropped and never holds up another; 300 connections of four kinds (in `scpi_net.rs`) and **2000** (in the conformance run, read from
+  `/proc/<pid>/fd` of the device: 5 before, 5 after) leave no descriptor; a bind failure is logged and the rest of the device runs; stopping
+  closes the clients. Fuzz target `fd_scpi` (60 s locally, 800,000 runs, no finding; 10 s per target in `make fuzz-smoke`): no panic, buffer and
+  queue bounds, response bound.
+- Status scope and `*RST`: `instrument` (default) shares one error queue and one set of registers between sessions of one transport (golden
+  `@ session`), between transports (raw socket and HiSLIP, raw and VXI-11, in the socket tests; HiSLIP, VXI-11 and the raw socket
+  through PyVISA in the conformance run) and `connection` keeps them apart; `*RST` queues the defaults of the writable tags and leaves
+  SESE, SRE, SESR and the queue as they were (unit test and golden).
+- HiSLIP: header cutting from one byte at a time and from garbage (a bad prologue and an oversized payload are FatalError 1); the
+  handshake of both channels over sockets; data in several frames, responses cut to the client's maximum message size; **-410** exact
+  (a message started with RMT-delivered clear over an unread response, `Interrupted` sent, the new message still run) and **-420**
+  exact (a message without its END abandoned by another message or by the channel closing; a command in it dropped silently); device
+  clear (async clear, sync complete, dropped messages in between, no error raised); the one lock (grant, timeout, release, a waiting
+  request, a waiting `Data`, a lock dying with its session); status query with and without RMT-delivered; the fatal errors and the
+  non-fatal one. Fuzz target `fd_hislip`.
+- VXI-11: XDR opaque padding and bounds, record fragments, the portmapper (GETPORT for TCP and not UDP, DUMP, SET, rpcbind v3/v4 mismatch,
+  UDP), every RPC error class, create_link (device name, lock, limit), write/read with every read reason (size, termination
+  character, end, both at once), **-410** and **-420** exact from the write/read order, readstb with MAV, clear, the refused calls, links
+  dying with their connection. Fuzz target `fd_vxi11`.
+- Client: the resource strings (every form, case, board number, bad ones), the query rule, the `SYST:ERR?` loop and its limit, the timeout and the closed-connection messages, target parsing, scripts, the
+  REPL loop (unit tests with in-memory streams); the exit statuses, files, stdin, `--json` and `--check` against the real server
+  (`scpi_client.rs`); insta snapshots of the text and JSON formats (`tests/snapshots.rs`).
+- Wire (conformance run): 15,804 packets on port 5025, at least 2000 handshakes, 0 malformed, `expert,warn` empty after allowing connection
+  resets and the window closing during the 200 KB flood (flow control; `proto.env` says why); the requests and the responses are found as
+  bytes in the capture (`*IDN?` and its answer, the -222 and -363 responses, the `;`-joined answer of a compound query); Zeek's `conn.log` has
+  the connections (no analyzer exists).
 - Mutation, scoped to the new code (the whole-tree `make mutate` relinks every test binary per mutant, which took over 3 minutes a
   mutant here): `mutator --max-workers 2 --no-coverage --test-command 'cargo test --lib --test scpi_golden --test scpi_net' src/fd/proto/scpi
   src/fd/proto/point.rs` and the same with `--test-command 'cargo test --lib --test scpi_client --test snapshots' src/scpi`: **252 sites, 252 killed,
@@ -502,7 +582,7 @@ not freely executable); `scpi_net.rs` and `scpi_client.rs` use our own client on
   `CALLIT` (field-device-scpi.md lists them; `lxi discover`'s VXI-11 broadcast works, checked in the conformance run). No real instrument, no NI-VISA or Keysight IO Libraries.
 - No units, hexadecimal or block data, no `STATus`/`OPERation` subsystems (status byte bits 3 and 7 read 0), no `*PSC`, `*DDT` or `*RCL`
   (the save/recall commands) or other optional common commands (they are -113).
-- Mutation runs covered only the new code, not the whole tree (`make mutate` exceeds the Docker VM on a loaded host).
+- Mutation runs covered the SCPI code only, not the whole tree (`make mutate` exceeds the Docker VM on a loaded host).
 - IPv6 is untested (a `[::1]` target is parsed, not connected to).
 
 ## Ground truth to Elasticsearch and OpenSearch
