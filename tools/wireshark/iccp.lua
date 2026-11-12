@@ -30,6 +30,7 @@ local F = {
   bt        = ProtoField.string("iccp.bilateral_table_id", "Bilateral table ID"),
   version   = ProtoField.string("iccp.tase2_version", "TASE.2 version"),
   features  = ProtoField.string("iccp.supported_features", "Supported features"),
+  blocks    = ProtoField.string("iccp.supported_blocks", "Supported blocks"),
 }
 for _, v in pairs(F) do p.fields[#p.fields + 1] = v end
 
@@ -40,6 +41,9 @@ local special = {
 }
 local bit_classes = { supported_features = true, dsconditions_detected = true }
 local ds_condition_bits = { "Interval", "Integrity", "ObjectChange", "OperatorRequest", "OtherExternalEvent" }
+-- Supported_Features: bit n is conformance block n+1 (IEC 60870-6-503; docs/field-device-iccp.md, ww-otj.62); set bits past the names show as Bit<n>
+local supported_block_names = { "BasicServices", "ExtendedConditions", "BlockedTransfers", "InformationMessages", "DeviceControl",
+                                "Programs", "Events", "AdditionalEvents", "TimeSeries" }
 local report_header = { "Transfer_Set_Name", "Transfer_Set_Time_Stamp", "DSConditions_Detected" }
 
 -- The MMS dissector's PDU content fields: field name -> { PDU name, BER tag of the PDU CHOICE }.
@@ -307,11 +311,13 @@ local function last_member(v)
   return last
 end
 
-local function conditions(b)
+local function bit_names(b, names)
   local t = {}
-  for i, name in ipairs(ds_condition_bits) do if b:sub(i, i) == "1" then t[#t + 1] = name end end
+  for i = 1, #b do if b:sub(i, i) == "1" then t[#t + 1] = names[i] or ("Bit" .. i) end end
   return table.concat(t, ",")
 end
+
+local function conditions(b) return bit_names(b, ds_condition_bits) end
 
 local function mark(st, names, target)
   for _, n in ipairs(names) do if special[bare(n)] then st.tase2 = true end end
@@ -450,7 +456,10 @@ function p.dissector(tvb, pinfo, tree)
   local st = out.st
   if st.bt then t:add(F.bt, st.bt):set_generated() end
   if st.version then t:add(F.version, st.version):set_generated() end
-  if st.features then t:add(F.features, st.features):set_generated() end
+  if st.features then
+    t:add(F.features, st.features):set_generated()
+    t:add(F.blocks, bit_names(st.features, supported_block_names)):set_generated()
+  end
   if out.dataset then t:add(F.dataset, out.dataset):set_generated() end
   if out.tset then t:add(F.tset, out.tset):set_generated() end
   if out.conds and out.conds ~= "" then t:add(F.conds, out.conds):set_generated() end

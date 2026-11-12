@@ -30,6 +30,8 @@ pub type Due = Vec<(AssocId, Vec<u8>)>;
 /// A reply that cannot be written within this long ends the association.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 /// The association checks its own deadlines (handshake, request timeouts) at this pace; the handler's tick runs at `TICK` (1 ms: GOOSE retransmits at T1, a few ms, and a coarser tick lumps frames together).
+/// How long a closed association waits for the peer's own FIN, see `linger`.
+const LINGER: Duration = Duration::from_secs(1);
 const POLL: Duration = Duration::from_millis(100);
 const TICK: Duration = Duration::from_millis(1);
 
@@ -316,6 +318,19 @@ async fn connection<H: Handler>(
     // a final flush lets a release response or an abort reach the peer
     let _ = flush(&mut assoc, &mut stream).await;
     mms.leave(id);
+    linger(stream).await;
+}
+
+/// Close the way a peer that is still talking expects (ww-otj.73). After an ACSE release igs-iec-tase2 sends one more
+/// SPDU (a session abort with the transport-disconnect bit) after our RLRE; dropping the socket with bytes unread
+/// answers them with a reset. So: FIN, then read until the peer's FIN or `LINGER`, whichever comes first.
+async fn linger(mut stream: TcpStream) {
+    let _ = stream.shutdown().await;
+    let mut sink = [0u8; 512];
+    let _ = tokio::time::timeout(LINGER, async {
+        while matches!(stream.read(&mut sink).await, Ok(n) if n > 0) {}
+    })
+    .await;
 }
 
 #[cfg(test)]
@@ -469,6 +484,28 @@ mod tests {
     fn defaults_are_an_ieds_few_slots() {
         let c = Config::default();
         assert_eq!((c.max_associations, c.outbound_queue), (16, 256));
+    }
+
+    #[tokio::test]
+    async fn bytes_that_arrive_after_our_close_are_read_not_answered_with_a_reset() {
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut client = TcpStream::connect(l.local_addr().unwrap()).await.unwrap();
+        let (server, _) = l.accept().await.unwrap();
+        let closing = tokio::spawn(linger(server));
+        let mut b = [0u8; 8];
+        // the server has shut down its side; the late SPDU is still delivered and read
+        assert_eq!(client.read(&mut b).await.unwrap(), 0, "FIN, not RST");
+        client.write_all(&[0x19, 3, 0x11, 1, 5]).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        client
+            .write_all(&[0])
+            .await
+            .expect("a reset would fail this write");
+        drop(client);
+        tokio::time::timeout(Duration::from_secs(2), closing)
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]

@@ -8,7 +8,7 @@ corp="$here/../../tests/pcaps/iccp"
 lua="$here/iccp.lua"
 upd="${1:-}"
 fields=(-e frame.number -e iccp.op -e iccp.object -e iccp.class -e iccp.type -e iccp.value -e iccp.quality -e iccp.result
-        -e iccp.transfer_set -e iccp.ds_conditions -e iccp.timetag -e iccp.bilateral_table_id -e iccp.tase2_version -e iccp.supported_features)
+        -e iccp.transfer_set -e iccp.ds_conditions -e iccp.timetag -e iccp.bilateral_table_id -e iccp.tase2_version -e iccp.supported_features -e iccp.supported_blocks)
 ts() { tshark -r "$1" -X "lua_script:$lua" "${@:2}" 2>"$err"; }
 err="$(mktemp)"; trap 'rm -f "$err"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }

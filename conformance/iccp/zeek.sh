@@ -16,6 +16,7 @@ if [ "${ZEEK_OK:-0}" = 1 ]; then
   want_zeek iccp value '{2000;8}'
   [ "$(zeek-cut supported_features < "$out/zeek/iccp.log" | grep -v -x -- '-' | awk '{print length($0)}' | sort -u | tr '\n' ' ')" = "12 " ] \
     && pass "zeek: Supported_Features is 12 bits on every association" || fail "zeek: Supported_Features is not always 12 bits"
+  zeek-cut supported_blocks < "$out/zeek/iccp.log" | grep -q 'BasicServices' && pass "zeek: Supported_Features decoded to block names" || fail "zeek: no block names in supported_blocks"
   # the peers' servers (10102, 10103) are parsed too
   zeek-cut id.resp_p < "$out/zeek/iccp.log" | grep -q -x 10102 && pass "zeek parses the igs server's port (10102)" || fail "zeek logged nothing for port 10102"
   zeek-cut id.resp_p < "$out/zeek/iccp.log" | grep -q -x 10103 && pass "zeek parses the telcon server's port (10103)" || fail "zeek logged nothing for port 10103"

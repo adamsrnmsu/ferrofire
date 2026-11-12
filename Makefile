@@ -10,7 +10,7 @@ DRY_MIN := 0.8
 # ponytail: pid lock; a kill -9 of make leaves a stale file that src-free ignores because the pid is gone.
 MUTATE_LOCK := .mutate.lock
 
-.PHONY: differential diff-dnp3 diff-modbus testpeers conformance conformance-selftest src-free help wireshark zeek-iccp bench bench-report bench-dg bench-dg-report charts image fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
+.PHONY: differential diff-dnp3 diff-modbus testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report charts image fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
 help:    # list targets
 	@grep -E '^[a-z-]+:.*#' $(MAKEFILE_LIST) | sed -E 's/^([a-z-]+):[^#]*#/\1\t/'
 src-free:   # fail fast while make mutate is rewriting src/
@@ -32,6 +32,8 @@ wireshark:   # tshark + Lua: datagram v1 test vector, and iccp.lua over tests/pc
 	tools/wireshark/test.sh
 zeek-iccp:   # build the ICCP Spicy analyzer and run its btest suite on tests/pcaps/iccp in the ff-zeek container (--update: ZEEK_ICCP_FLAGS=--update)
 	tools/zeek/iccp/test.sh $(ZEEK_ICCP_FLAGS)
+zeek-iccp-coexist:   # ICCP analyzer next to CISA ICSNPP s7comm on tcp/102: DPD gives each its own flows (needs the testpeers image, Lima docker)
+	tools/zeek/iccp/test-coexist.sh
 linux: src-free   # glibc aarch64 binaries -> dist/ferrofire, dist/simulinksolver
 	./build-linux.sh
 crap: golden image src-free   # crapper: CRAP score per function, fails above $(CRAP_MAX); writes .metrics/crap.edn
