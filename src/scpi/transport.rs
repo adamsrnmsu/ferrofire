@@ -808,7 +808,7 @@ mod tests {
                 return sent;
             };
             let mut ar = Reader::default();
-            while let Some(reply) = replies.next() {
+            for reply in replies {
                 sent.push(next(&mut asy, &mut ar).unwrap());
                 asy.write_all(&reply.encode()).unwrap();
             }
