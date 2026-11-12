@@ -111,6 +111,8 @@ flowchart LR
 | Power | AC Newton-Raphson and DC power flow, ported from PYPOWER 5.1.19 |
 | Power cases | PYPOWER `.py` (literal subset), MATPOWER `.m`, or `inline:` in the model |
 | Coupling | `power.drive`: process values set loads, e.g. pump flow sets a bus load in MW |
+| Generator Q limits | `power: {enforce_q_lims: true}` holds a PV or slack generator to its `mvar_min`/`mvar_max` (PYPOWER `ENFORCE_Q_LIMS`); off by default, as sceptre runs PyPower |
+| Ground-truth page | `ferrofire run --gt-addr 127.0.0.1:8080`: live tag table with value, age and staleness, and `/tags.json`; read-only, off by default (replaces `simulinkgt`) |
 | Islands | `deenergize` (zero the voltage on dead buses) or `fail` (raise `bus-alert`, PyPower behaviour) |
 | Tags | Waterway tags and the full PYPOWER/pybennu tag vocabulary (`bus-N.voltage`, `branch-1_F-T.active`, ...) |
 
@@ -190,6 +192,21 @@ A value that just changed is bold yellow for a second. Keys: `/` filter (substri
 
 `--stale-after SECONDS` (default 2) is how long without an update makes a tag stale, the same for every source. `--once` prints the table and exits (`tag=value age=1.2s ok|STALE`,
 or with `--json` one object per line), for scripts; with `--filter` it prints only the matches.
+
+## Ground-truth page
+
+`simulinkgt` (a closed Go binary that served the Simulink solver's ground truth on `:8080`) is replaced by a page the provider itself serves.
+It is off unless asked for:
+
+    ferrofire run model.yaml --gt-addr 0.0.0.0:8080 [--gt-stale-after 2]
+    simulinksolver --model model.yaml --gt-addr :8080      # the install name takes the same address
+
+`GET /` is a small HTML table (one row per published tag: value, age in seconds, `STALE` once the age reaches `--gt-stale-after`, default 2 s; it
+refreshes itself every 2 s). `GET /tags.json` is `{"stale_after":2,"tags":[{"tag":"lock.height","value":5.0,"age":0.012,"stale":false},...]}`
+(a value that is not a number is `null`). Anything but GET is refused with 405. The page only reads the table `ferrofire top` already keeps
+(one lock per publish cycle, copied and released before anything is rendered or written), so a slow or silent client cannot hold up the
+engine tick: each connection has its own thread and 2 s timeouts, and at most 16 are served at once. It has no authentication; bind it to a
+management address, not a routable one. The tag names are the provider's, so on a power-flow model it lists the `bus-N.voltage` family too.
 
 ## Probe
 
@@ -326,6 +343,7 @@ outputs:
 ```
 
 - Optional `units: m3/s` on an input, state or output is documentation only; `ferrofire explain MODEL.YAML TAG` prints it with the tag's kind (param, input, state, body, output, power tag), type, defining expression (`ode`, `toward`, `expr`, `drive`, or "AC power flow"), `default`/`init`, `min`/`max`, what it `depends on` and what it is `used by`. Offline, nothing is stepped; an unknown tag gets a "did you mean". Power tags get units from their field name (`MW`, `MVAr`, `pu`, `deg`, `kV`).
+- `power:` options: `case` / `inline`, `islands: fail|deenergize`, `dc_fallback`, `drive`, and `enforce_q_lims: true`. With it a generator whose reactive output leaves `[mvar_min, mvar_max]` is held at the limit (its bus becomes PQ for that solve, the voltage deviates to suit) and the flow is re-run until none violates, as PYPOWER's `ENFORCE_Q_LIMS = 1`; if the slack generator is held, the first PV bus becomes the slack and angles are shifted back to the original slack. If every PV and slack generator violates, the solve reports no solution (`bus-alert`). A system with several slacks cannot hold one (an error, as in PYPOWER). The default is off because sceptre's PyPower runs without it; writing `generator-N_bus-M.mvar_max` changes the limit live.
 - Full examples: `models/waterway.yaml`, `models/pump-station.yaml`.
 - Full design: `docs/provider-spec.md` in the [range repo](https://github.com/adamsrnmsu) and `docs/field-device-spec.md` here.
 
@@ -358,11 +376,14 @@ How each component and protocol is tested, against what, and where the gaps are:
 ## Releases
 
 - **Cutting a version:** [Releasaurus](https://releasaurus.rgon.io) keeps a release PR open on `main` (next version from the conventional commits, changelog, `Cargo.toml` bump). Merging it tags `vX.Y.Z`, publishes the GitHub Release and attaches the binaries. Nothing else cuts a version.
-- **Binaries:** the [Releases page](https://github.com/adamsrnmsu/ferrofire/releases) has `ferrofire-<version>-x86_64-linux-musl.tar.gz` and `ferrofire-<version>-aarch64-linux-musl.tar.gz` (the binary, README, LICENSE, NOTICE) plus `SHA256SUMS`. They are fully static (musl), so no glibc or other library is needed.
+- **Binaries:** the [Releases page](https://github.com/adamsrnmsu/ferrofire/releases) has, for `x86_64` and `aarch64`, a `-linux-musl` and a `-linux-gnu` archive (`ferrofire-<version>-x86_64-linux-musl.tar.gz`, `ferrofire-<version>-x86_64-linux-gnu.tar.gz`, and the same for `aarch64`; each holds the binary, README, LICENSE, NOTICE) plus `SHA256SUMS`.
+- **Which archive:**
+  - `musl`: fully static, runs on any Linux of that CPU with no libc. It cannot do `simulink` mode against a glibc bennu provider (musl's POSIX shared-memory and semaphore layout differs).
+  - `gnu`: dynamically linked against glibc only, built for glibc 2.17, so it runs on glibc >= 2.17 (CentOS 7, Debian 9, Ubuntu 16.04 and newer). Use it for `simulink` mode with the stock bennu simulink provider.
 - **`nightly`:** a prerelease rebuilt every Monday (or by hand) from `main` HEAD. It is an **untested** build of that commit, not a version; the release title names the commit. Use a `vX.Y.Z` release for anything that matters.
-- **Verify:** download the archive and `SHA256SUMS` into one directory and run `sha256sum --ignore-missing -c SHA256SUMS`.
-- **Runs on:** any Linux kernel with the matching CPU (no libc needed). aarch64 was run (`--version`, `check --help`) on CentOS 7 (glibc 2.17), Debian 9, Ubuntu 16.04, Alpine and BusyBox. x86_64 is built and smoke-tested (`--version`) on every release run by CI, but has not been run on old distros.
-- **Not shipped:** `simulinksolver` is `ferrofire` run under that name (`ln -s ferrofire simulinksolver`), but musl's POSIX semaphores do not share with the glibc bennu simulink provider, so for `simulink` mode on a range use `make linux` (glibc) instead.
+- **Verify:** download the archive and `SHA256SUMS` into one directory and run `sha256sum --ignore-missing -c SHA256SUMS` (it lists every archive in the release; `--ignore-missing` skips the ones you did not download).
+- **Runs on:** `musl`: any Linux kernel with the matching CPU (no libc needed); aarch64 was run (`--version`, `check --help`) on CentOS 7 (glibc 2.17), Debian 9, Ubuntu 16.04, Alpine and BusyBox. `gnu`: needs glibc >= 2.17 (CI checks that no symbol newer than `GLIBC_2.17` is required); `--version` was run on CentOS 7, Debian 9 and Ubuntu 16.04 for both arches (x86_64 under emulation). Both x86_64 builds are smoke-tested (`--version`) on every release run by CI.
+- **`simulinksolver`:** not a separate download; it is `ferrofire` run under that name (`ln -s ferrofire simulinksolver`). Use the `gnu` archive (or `make linux`) for `simulink` mode on a range.
 
 ## Status
 

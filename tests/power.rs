@@ -530,3 +530,105 @@ fn a_case_without_a_reference_bus_promotes_its_first_pv_bus() {
     let e = pf::runpf(&c, &pf::Opts::default()).err().unwrap();
     assert!(e.contains("no reference or PV bus"));
 }
+
+// ---- ENFORCE_Q_LIMS (bead ww-1df.2) -------------------------------------------------------------------------
+
+const QLIM_CASES: [&str; 4] = [
+    "case9_qlim",
+    "case9_qlim_slack",
+    "case14_qlim",
+    "case30_qlim",
+];
+
+/// The golden's case with the (tightened) Q limits the golden was generated with.
+fn qlim_case(g: &serde_json::Value) -> Case {
+    let mut c = case_of(g["case"].as_str().unwrap());
+    for (row, (mx, mn)) in c
+        .gen
+        .iter_mut()
+        .zip(col(g, "QMAX").into_iter().zip(col(g, "QMIN")))
+    {
+        row[QMAX] = mx;
+        row[QMIN] = mn;
+    }
+    c
+}
+
+fn qlim_opts() -> pf::Opts {
+    pf::Opts {
+        enforce_q_lims: true,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn enforce_q_lims_matches_pypower_goldens() {
+    for name in QLIM_CASES {
+        let g = golden(name);
+        let s = pf::runpf(&qlim_case(&g), &qlim_opts()).unwrap();
+        assert_eq!(
+            s.success,
+            g["success"].as_i64() == Some(1),
+            "{name} success"
+        );
+        compare(name, &s.case, &g, true);
+    }
+}
+
+#[test]
+fn q_limits_are_off_unless_asked_and_then_hold() {
+    for name in QLIM_CASES {
+        let g = golden(name);
+        let c = qlim_case(&g);
+        let off = pf::runpf(&c, &pf::Opts::default()).unwrap().case;
+        let on = pf::runpf(&c, &qlim_opts()).unwrap().case;
+        let over = |s: &Case| {
+            s.gen
+                .iter()
+                .any(|r| r[QG] > r[QMAX] + 1e-4 || r[QG] < r[QMIN] - 1e-4)
+        };
+        assert!(
+            over(&off),
+            "{name}: the limits must bind or the case proves nothing"
+        );
+        assert!(!over(&on), "{name}: a gen is still outside its Q limits");
+    }
+}
+
+#[test]
+fn enforce_q_lims_reports_no_solution_when_every_gen_is_out_of_range() {
+    let mut c = case_of("case9");
+    for r in c.gen.iter_mut() {
+        r[QMAX] = -50.0; // every gen's Qg is above this
+        r[QMIN] = -60.0;
+    }
+    assert!(!pf::runpf(&c, &qlim_opts()).unwrap().success);
+}
+
+#[test]
+fn enforce_q_lims_refuses_a_pinned_slack_among_several() {
+    let mut c = case_of("case9");
+    c.bus[1][BUS_TYPE] = REF; // bus 2 is a second slack
+    c.gen[0][QMAX] = 10.0; // the first slack gen is over its limit
+    let e = pf::runpf(&c, &qlim_opts()).err().unwrap();
+    assert!(e.contains("multiple slacks"), "{e}");
+}
+
+#[test]
+fn power_applies_the_model_option_and_live_limit_writes() {
+    let g = golden("case9_qlim");
+    let mut p = Power::new_with(qlim_case(&g), Islands::Fail, (false, true), &[], &[]).unwrap();
+    let (q, max) = (
+        p.tag_index("generator-1_bus-2.mvar").unwrap(),
+        p.tag_index("generator-1_bus-2.mvar_max").unwrap(),
+    );
+    assert!(
+        (p.get(q) - 10.0).abs() < 1e-4,
+        "held at the limit: {}",
+        p.get(q)
+    );
+    p.set(max, 300.0); // loosening the limit frees the generator
+    p.solve();
+    // gen 3 stays pinned at its lower limit, so the freed gen settles at 12.62, not the unconstrained 14.46
+    assert!((p.get(q) - 12.62).abs() < 0.01 && !p.alert, "{}", p.get(q));
+}

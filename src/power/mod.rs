@@ -127,6 +127,8 @@ pub struct Power {
     pub case: Case,
     pub islands: Islands,
     pub dc_fallback: bool,
+    /// PYPOWER's ENFORCE_Q_LIMS (off in sceptre's PyPower, hence off unless the model asks).
+    pub enforce_q_lims: bool,
     pub alert: bool,
     tags: Vec<Tag>,
     by_name: HashMap<String, usize>,
@@ -197,12 +199,30 @@ impl Power {
         extra_loads: &[i64],
         extra_shunts: &[i64],
     ) -> Result<Power, String> {
+        Self::new_with(
+            case,
+            islands,
+            (dc_fallback, false),
+            extra_loads,
+            extra_shunts,
+        )
+    }
+
+    /// `new` with the options as `(dc_fallback, enforce_q_lims)`.
+    pub fn new_with(
+        case: Case,
+        islands: Islands,
+        (dc_fallback, enforce_q_lims): (bool, bool),
+        extra_loads: &[i64],
+        extra_shunts: &[i64],
+    ) -> Result<Power, String> {
         let nb = case.bus.len();
         let rows = bus_rows(&case);
         check_extras(&rows, extra_loads, extra_shunts)?;
         let mut p = Power {
             islands,
             dc_fallback,
+            enforce_q_lims,
             alert: false,
             tags: vec![],
             by_name: HashMap::new(),
@@ -440,6 +460,7 @@ impl Power {
         let eff = self.effective();
         let o = pf::Opts {
             deenergize: self.islands == Islands::Deenergize,
+            enforce_q_lims: self.enforce_q_lims,
             ..Default::default()
         };
         let r = pf::runpf(&eff, &o);

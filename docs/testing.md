@@ -37,12 +37,24 @@ in the `ferrofire-testpeers` image (`make testpeers`, about 10 minutes the first
 - Waterway: `tests/waterway.rs` replays 600 s of the closed loop against `tests/golden/waterway_trace.csv` (every 5 s, 15 tags)
   and runs a full boat transit with the RTU logic.
 - Power flow: `tests/power.rs` compares bus voltage and angle, generator P and Q and branch flows with PYPOWER 5.1.19 on case9,
-  14, 30, 57, 118 and 300 (AC), case9 and case30 (DC) and case9 with branch 4-5 out. Tolerances in the test: VM 1e-6, everything
+  14, 30, 57, 118 and 300 (AC), case9 and case30 (DC), case9 with branch 4-5 out, and four `ENFORCE_Q_LIMS` cases where limits bind
+  (case9 with two PV gens held at opposite limits, case9 with the slack gen held so the slack moves, case14 with its stock limits, case30
+  with three tightened limits). Tolerances in the test: VM 1e-6, everything
   else 1e-4. `tests/power_tags.rs` round-trips every tag of case30 through set and get. Properties: per-bus power balance,
   barrier behaviour, write latching, a tank against its closed form.
 - Drop-in: `tests/pypower-conformance.sh` installs ferrofire as `pybennu-power-solver` in a `bennu:arm64` container and compares
   it with the stock pybennu `PyPower` class on case9 and the soap case300 (needs a Lima VM; `make linux` first). Also
   `tests/conformance.sh`.
+- Q limits (bead ww-1df.2): `tests/power.rs` checks the four goldens, that the unconstrained solve violates the limits while the enforced one does
+  not (so each case proves something), the "every generator out of range" no-solution result, the multi-slack refusal, and a live `mvar_max` write
+  through `Power`. **PYPOWER 5.1.19 cannot run its own Q-limit branch** (it indexes arrays with float bus numbers, so the first violation raises
+  `IndexError`; the slack-conversion line sets a bus type to a bus index; `a == PV | b == REF` is a chained comparison). `gen_pypower.py` therefore runs
+  `runpf` with exactly those lines repaired (index casts, parentheses, `PV`), asserting each replaced line exists; the algorithm is PYPOWER's. The golden
+  files carry the tightened `QMAX`/`QMIN` they were made with, and the Rust test applies those. Not covered: `ENFORCE_Q_LIMS = 2` (one gen per pass).
+- Ground-truth page (bead ww-1df.3): unit tests of the routes, HTML and JSON (escaping, staleness at the limit, `null` for non-finite values) in
+  `src/gt.rs`; `tests/gt.rs` serves a real listener over the live table, checks 404/405, that silent clients do not stop other clients or
+  `top::publish`, and that a real `ferrofire run --gt-addr` lists its own tags. No stock oracle: `simulinkgt` has no source and is x86 only, so the page
+  is specified by what this task needed (value, age, staleness, JSON), not diffed against it.
 - Binaries: `tests/cli.rs` drives `ferrofire run` (REP, UDP, SIGTERM) and `check`; `tests/simulink.rs` drives `simulinksolver`
   against real SysV shm, POSIX semaphores and the updates FIFO.
 
@@ -55,7 +67,8 @@ committed). Stock pybennu for the drop-in test.
 - The waterway trace golden was captured from ferrofire's earlier hand-written `physics.rs`. It proves the YAML model reproduces
   that code, not that the physics is right.
 - PYPOWER is a port of MATPOWER. Agreeing with it shows the solver matches that implementation on those cases, not that the
-  model matches a real grid. Only Newton AC and the DC approximation are compared; no OPF.
+  model matches a real grid. Only Newton AC and the DC approximation are compared; no OPF. The Q-limit reference is PYPOWER with three lines
+  repaired (above), not PYPOWER as shipped.
 - The drop-in test is manual and needs the Lima VM, so it is not in `make check`.
 
 **Ideas.** Cross-check the same cases against pandapower or MATPOWER/Octave, which are independent code bases. Compare a

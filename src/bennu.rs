@@ -332,7 +332,7 @@ pub fn udp_sender(iface: Option<&str>, dest: SocketAddr) -> Result<UdpSocket, St
     Ok(s)
 }
 
-const USAGE: &str = "ferrofire run [model.yaml | --model model.yaml] [--server tcp://0.0.0.0:5555] [--publish 'udp://*;239.0.0.1:40000'] [--publish-tags 'ENDPOINT=a,b,c' | 'ENDPOINT=@config.xml']... [--rate 0.1]";
+const USAGE: &str = "ferrofire run [model.yaml | --model model.yaml] [--server tcp://0.0.0.0:5555] [--publish 'udp://*;239.0.0.1:40000'] [--publish-tags 'ENDPOINT=a,b,c' | 'ENDPOINT=@config.xml']... [--rate 0.1] [--gt-addr HOST:PORT [--gt-stale-after 2]]";
 
 pub fn main(args: RunArgs) {
     exit_on_err("run", USAGE, run(args));
@@ -372,6 +372,12 @@ pub struct RunArgs {
     #[cfg(feature = "elastic")]
     #[arg(long, value_name = "CONFIG.INI")]
     pub config: Option<String>,
+    /// Serve the read-only ground-truth page (tag table with value, age, staleness; /tags.json) on HOST:PORT; off unless given
+    #[arg(long, value_name = "HOST:PORT")]
+    pub gt_addr: Option<String>,
+    /// Seconds without a publish after which the ground-truth page shows a tag as stale
+    #[arg(long, value_name = "SECONDS", default_value_t = crate::gt::STALE_AFTER, value_parser = crate::gt::positive)]
+    pub gt_stale_after: f64,
 }
 
 impl RunArgs {
@@ -585,25 +591,26 @@ fn elastic_target(_: &RunArgs) -> Result<Option<Target>, String> {
     Ok(None)
 }
 
+/// The model's publish slices followed by the `--publish-tags` ones, each resolved against the model's directory.
+fn resolved_slices(
+    a: &RunArgs,
+    model: &Model,
+    base: Option<&std::path::Path>,
+) -> Result<Vec<Slice>, String> {
+    let cli = a.slices.iter().map(|s| parse_slice(s));
+    let specs = model.publish_slices.iter().cloned().map(Ok).chain(cli);
+    specs
+        .map(|s: Result<SliceSpec, String>| resolve_slice(&s?, base))
+        .collect()
+}
+
 fn run(a: RunArgs) -> Result<(), String> {
     let mut model = load_model(a.path())?;
     let period = publish_period(a.rate, &model)?;
     let meta = Meta::of(&model);
     let base = a.path().and_then(|p| std::path::Path::new(p).parent());
 
-    let specs = model.publish_slices.iter().cloned();
-    let specs: Vec<SliceSpec> = specs
-        .chain(
-            a.slices
-                .iter()
-                .map(|s| parse_slice(s))
-                .collect::<Result<Vec<_>, _>>()?,
-        )
-        .collect();
-    let slices = specs
-        .iter()
-        .map(|s| resolve_slice(s, base))
-        .collect::<Result<Vec<_>, _>>()?;
+    let slices = resolved_slices(&a, &model, base)?;
     let mut targets = targets_of(plan(a.publish.as_deref(), slices, &meta.tags)?)?;
     targets.extend(elastic_target(&a)?);
     let sh = Arc::new(Mutex::new(Shared {
@@ -612,6 +619,7 @@ fn run(a: RunArgs) -> Result<(), String> {
     }));
     install_signals();
     crate::log::start("run");
+    crate::gt::start(a.gt_addr.as_deref(), a.gt_stale_after)?;
 
     let sh2 = sh.clone();
     let rep_t = transport::serve(&a.server, Box::new(move |req| handle(req, &meta, &sh2)))?;
