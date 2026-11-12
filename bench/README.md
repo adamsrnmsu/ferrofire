@@ -122,3 +122,22 @@ sequential mode, one concurrent Modbus client per RTU in simultaneous mode.
   at a different value; `wrong_collateral` = points nobody commanded that changed; `order_violations` = adjacent commands of one RTU that became visible in the opposite order; `flaps` = read-backs that showed the new state and then took it back.
 - **Generator**: spin-down (status off after PG ramps 40 MW to 0 at 40 MW/s, `power.ramp` in the generated model) then spin-up (status on, PG ramps back), each a measured phase; breakers: open the first n of `flip_order`, then restore (unmeasured, checked).
 - The provider stamp joins the first unused `Applied:` line of the command's tag and value at or after `t_cmd`; a provider other than ferrofire only has to log lines of that shape.
+
+## Control-latency on the live range (ww-1df.23.5)
+
+The same driver, grid, cells and raw layout on real VMs: `bench/range/run_range.py` (host, stdlib) + `bench/range/vm.sh` (inside the VMs). Topology: `topologies/control-bench-arm64`
+of phenix-waterway-range (provider VM that also runs `ffcontrol`, so every timestamp is on the provider's one clock; `rtu-1..5`; one flat ICS VLAN `10.1.1.0/24`, no router; 4 vCPU / 3 GB provider,
+2 vCPU / 1 GB RTUs; all from `bennu-ferrofire-arm64.qc2`, which holds stock pybennu + `bennu-field-deviced` and ferrofire, so the stock stack runs only stock binaries). No scenario: nothing
+autostarts and the bench drives the VMs through minimega `cc`. The flat VLAN has no default route, so `vm.sh setup` adds `224.0.0.0/4` (multicast join and RADIO need a route) and `/etc/hosts` names.
+
+```
+python3 bench/range/run_range.py up      # phenix exp create/start, boot batch 1 (provider, rtu-1, rtu-2), then batch 2 (rtu-3..5), wait for 6 cc clients, ship the bundle (grid, ferrofire, ffcontrol)
+python3 bench/range/run_range.py run     # RS=1,2,5 REPS=3 STACKS=ferrofire,stock CELLS=breaker:{seq,sim}:{1,10,100},gen:{seq,sim}:{1,5}; finished runs are skipped
+python3 bench/range/run_range.py down    # exp stop + delete, then `namespace vm info` must be empty
+```
+
+Raw output: `docs/bench/results/control/range/<stack>/R<R>_rep<k>.*`, the same files as the docker runs (`control_join.py`, `control_summary.py`, `control_check.py` read them unchanged).
+Ferrofire: one stack per (rep, R) runs every cell; stock: a fresh stack per cell (a stock provider that falls behind keeps a backlog), as in docker. `env.txt` records host load,
+guest load and whether anything else was running. Gotchas found: phenix cannot boot a `do_not_boot` VM later (`vm restart` / `vm redeploy` do not find it in minimega), so `up` replays
+the experiment's own mm-script stanza for rtu-3..5; `cc send` never overwrites a file the guest already has (each ship uses a new file name); stock `bennu-field-deviced` needs a relative
+`--file` path and leaves a pid file that `vm.sh stop` removes.
