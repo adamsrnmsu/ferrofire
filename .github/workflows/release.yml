@@ -1,7 +1,7 @@
 name: Release
 
 # Versioning is Releasaurus: a push to main opens/updates the release PR (next version from conventional commits, plus the
-# changelog); merging that PR tags vX.Y.Z and publishes the GitHub Release. Then the static musl binaries are built and attached.
+# changelog); merging that PR tags vX.Y.Z and publishes the GitHub Release. Then the static musl and the glibc binaries are built and attached.
 #
 # Why the build lives in this same workflow run: tags and releases created with the default GITHUB_TOKEN do NOT trigger other
 # workflows, so an `on: push: tags` / `on: release` workflow would never fire for a Releasaurus release. `release` therefore
@@ -9,8 +9,9 @@ name: Release
 # `push: tags` path below. No PAT or App secret is used.
 #
 # Also weekly (and by hand): the same build as one rolling `nightly` prerelease, recreated at main HEAD each time.
-# Only `ferrofire` is shipped. `simulinksolver` is the same binary run under that argv[0] name, and the musl build cannot
-# share POSIX semaphores with the glibc bennu provider, so use `make linux` (glibc) for simulink mode on a range.
+# Only `ferrofire` is shipped. `simulinksolver` is the same binary run under that argv[0] name. The musl build cannot
+# share POSIX semaphores with the glibc bennu provider, so the glibc (gnu) archives, built against glibc 2.17, are the
+# ones for simulink mode on a range.
 on:
   push:
     branches: ["main"]
@@ -112,6 +113,9 @@ jobs:
         include:
           - { runner: ubuntu-24.04, target: x86_64-unknown-linux-musl, short: x86_64-linux-musl }
           - { runner: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, short: aarch64-linux-musl }
+          # zig's ".2.17" target suffix links against glibc 2.17 headers/symbols, so the binary runs on any glibc >= 2.17.
+          - { runner: ubuntu-24.04, target: x86_64-unknown-linux-gnu, zigtarget: x86_64-unknown-linux-gnu.2.17, short: x86_64-linux-gnu }
+          - { runner: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, zigtarget: aarch64-unknown-linux-gnu.2.17, short: aarch64-linux-gnu }
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -137,14 +141,30 @@ jobs:
       # rust-toolchain.toml pins the compiler; adding the target here installs that toolchain first.
       - run: rustup target add ${{ matrix.target }}
       - name: Build
-        run: cargo zigbuild --release --locked --bin ferrofire --target ${{ matrix.target }}
+        run: cargo zigbuild --release --locked --bin ferrofire --target ${{ matrix.zigtarget || matrix.target }}
       - name: Verify static and runnable
+        if: ${{ !endsWith(matrix.target, '-gnu') }}
         run: |
           bin=target/${{ matrix.target }}/release/ferrofire
           file "$bin" | tee /dev/stderr | grep -E 'statically linked|static-pie linked'
           out=$(ldd "$bin" 2>&1 || true)
           echo "$out"
           echo "$out" | grep -q -E 'not a dynamic executable|statically linked'
+          "$bin" --version
+      - name: Verify glibc 2.17 and runnable
+        if: ${{ endsWith(matrix.target, '-gnu') }}
+        run: |
+          bin=target/${{ matrix.target }}/release/ferrofire
+          file "$bin" | tee /dev/stderr | grep -q 'dynamically linked'
+          # Only glibc system libraries may be needed.
+          needed=$(readelf -d "$bin" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p')
+          echo "needed: $needed"
+          bad=$(echo "$needed" | grep -v -E '^(libc|libm|libpthread|libdl|librt)\.so\.[0-9]+$|^ld-linux-(x86-64|aarch64)\.so\.[0-9]+$' || true)
+          [ -z "$bad" ] || { echo "unexpected libraries: $bad" >&2; exit 1; }
+          # Highest GLIBC_ version required must be <= 2.17.
+          max=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
+          echo "max symbol version: $max"
+          [ -n "$max" ] && [ "$(printf '%s\n' "${max#GLIBC_}" 2.17 | sort -V | tail -1)" = 2.17 ]
           "$bin" --version
       - name: Package
         env:
