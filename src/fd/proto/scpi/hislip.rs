@@ -729,7 +729,10 @@ mod tests {
             r.recv(frame(DEVICE_CLEAR_COMPLETE, 0, 0, &[])),
             [frame(DEVICE_CLEAR_ACK, 0, 0, &[])]
         );
-        assert_eq!(r.recv(frame(DEVICE_CLEAR_COMPLETE, 0, 0, &[]))[0].ty, ERROR);
+        assert_eq!(
+            r.recv(frame(DEVICE_CLEAR_COMPLETE, 0, 0, &[])),
+            [error(0, "no device clear is in progress")]
+        );
         assert_eq!(
             r.query(FIRST_MESSAGE_ID, "*OPC?"),
             [frame(DATA_END, 0, FIRST_MESSAGE_ID, b"1\n")],
@@ -793,7 +796,10 @@ mod tests {
         assert!(hub.attach(60000).is_none());
         assert_eq!(hub.lock_info(), frame(ASYNC_LOCK_INFO_RESPONSE, 0, 0, &[]));
         let req = |ms| frame(ASYNC_LOCK, 1, ms, &[]);
-        assert_eq!(hub.lock(a, &req(0)).await.ctl, 1);
+        assert_eq!(
+            hub.lock(a, &req(0)).await,
+            frame(ASYNC_LOCK_RESPONSE, 1, 0, &[])
+        );
         assert_eq!(hub.lock(a, &req(0)).await.ctl, 1, "again: still yours");
         assert_eq!(
             hub.lock(b, &req(30)).await.ctl,

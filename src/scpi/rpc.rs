@@ -125,6 +125,9 @@ mod tests {
             assert_eq!(Xdr(&out).opaque(10), Some(d));
         }
         out.clear();
+        put_opaque(&mut out, b"a");
+        assert_eq!(out, [0, 0, 0, 1, b'a', 0, 0, 0], "padded with zeros");
+        out.clear();
         put_opaque(&mut out, b"abcdef");
         assert_eq!(Xdr(&out).opaque(5), None, "over the maximum");
         assert_eq!(Xdr(&out[..10]).opaque(10), None, "cut short");

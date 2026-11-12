@@ -241,7 +241,7 @@ impl Vxi11 {
         let link = Link {
             session,
             out: vec![],
-            open: false,
+            open: Default::default(),
             conn,
         };
         links.map.insert(id, link);
@@ -361,7 +361,6 @@ impl Link {
     fn clear(&mut self) {
         self.session.clear_input();
         self.out.clear();
-        self.open = false;
     }
 }
 
@@ -468,7 +467,7 @@ impl Vxi11 {
     pub fn call_udp(&self, rec: &[u8]) -> Option<Vec<u8>> {
         let [xid, _, _, prog] = Xdr(rec).words()?;
         match prog {
-            PMAP_PROG => self.call(0, rec),
+            PMAP_PROG => self.call(u64::MAX, rec),
             _ => Some(accepted(xid, PROG_UNAVAIL, &[])),
         }
     }
@@ -720,6 +719,13 @@ mod tests {
     fn a_read_stops_at_the_size_or_the_termination_character() {
         let s = svc(Scope::Instrument, 4);
         let l = create(&s);
+        write(&s, l, 8, b"*IDN?");
+        let (head, data) = read_reply(&s, l, 100, 0, u32::from(b','));
+        assert_eq!(
+            (head, data.len()),
+            (vec![0, RX_END as u32], 18),
+            "a termination character without the flag is ignored"
+        );
         write(&s, l, 8, b"*IDN?");
         let (head, data) = read_reply(&s, l, 5, 0, 0);
         assert_eq!((head, data), (vec![0, RX_REQCNT as u32], b"ferro".to_vec()));

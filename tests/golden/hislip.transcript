@@ -55,6 +55,16 @@
 > sync DATA_END 1 FFFFFF00 "SYST:ERR:COUN?"
 < DATA_END 0 FFFFFF00 "0\n"
 
+# A clear also forgets the response nobody read: the next message, RMT-delivered clear, is not an interruption.
+> sync DATA_END 1 FFFFFF02 "*OPC?"
+< DATA_END 0 FFFFFF02 "1\n"
+> async ASYNC_DEVICE_CLEAR 0 0 ""
+< ASYNC_DEVICE_CLEAR_ACK 0 0 ""
+> sync DEVICE_CLEAR_COMPLETE 0 0 ""
+< DEVICE_CLEAR_ACK 0 0 ""
+> sync DATA_END 0 FFFFFF00 "SYST:ERR:COUN?"
+< DATA_END 0 FFFFFF00 "0\n"
+
 # Messages the server does not know are an Error, not the end; remote/local is accepted.
 > sync ASYNC_LOCK 0 0 ""
 < ERROR 1 0 "unrecognized message type"

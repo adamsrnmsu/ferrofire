@@ -1313,6 +1313,25 @@ mod tests {
     }
 
     #[test]
+    fn a_lost_entry_sets_the_queue_overflow_bit_besides_its_own() {
+        let mut r = rig();
+        for _ in 0..ERR_CAP {
+            r.ask("*FOO");
+        }
+        assert_eq!(
+            r.ask("*ESR?"),
+            "32\n",
+            "command errors only while the queue has room"
+        );
+        r.ask("*FOO");
+        assert_eq!(
+            r.ask("*ESR?"),
+            "40\n",
+            "the 17th is lost: its own bit and the queue overflow's (device-specific, 8)"
+        );
+    }
+
+    #[test]
     fn sessions_that_share_a_status_system_see_one_error_queue_and_one_set_of_registers() {
         let mut r = rig();
         let mut other = Session::sharing(r.s.status().clone());
