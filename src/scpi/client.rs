@@ -215,22 +215,27 @@ impl<T: Wire> Link<T> {
         Ok(out)
     }
 
-    /// Run one command; with `check`, its errors too. A query is sent with `;*OPC?` after it, so that an instrument which rejects the
-    /// query still answers (with the `1`) and is not waited out; a timeout is then a silent instrument, which fails the run unless
-    /// its error queue says why.
-    pub fn run(&mut self, cmd: &str, check: bool) -> Result<Outcome, String> {
+    /// Send `cmd`, and for a query read its response. Under `check` a query goes out as `QUERY;*OPC?`, so that an instrument which
+    /// rejects it still answers (with the `1`) and is not waited out. A timeout is then a silent instrument: `Ok` with the reason
+    /// as the second part, for `run` to hold against an empty error queue.
+    fn ask(&mut self, cmd: &str, check: bool) -> Result<(Option<String>, Option<String>), String> {
         let query = check && is_query(cmd);
         let sent = if query {
             format!("{cmd};*OPC?")
         } else {
             cmd.to_string()
         };
-        let (response, late) = match self.exchange(cmd, &sent) {
-            Ok(r) if query => (r.and_then(without_opc), None),
-            Ok(r) => (r, None),
-            Err(f) if f.timeout && check => (None, Some(f.msg)),
-            Err(f) => return Err(f.msg),
-        };
+        match self.exchange(cmd, &sent) {
+            Ok(r) if query => Ok((r.and_then(without_opc), None)),
+            Ok(r) => Ok((r, None)),
+            Err(f) if f.timeout && check => Ok((None, Some(f.msg))),
+            Err(f) => Err(f.msg),
+        }
+    }
+
+    /// Run one command; with `check`, its errors too. A silent instrument fails the run unless its error queue says why.
+    pub fn run(&mut self, cmd: &str, check: bool) -> Result<Outcome, String> {
+        let (response, late) = self.ask(cmd, check)?;
         let errors = if check { self.errors()? } else { vec![] };
         match (errors.is_empty(), late) {
             (true, Some(msg)) => Err(msg),

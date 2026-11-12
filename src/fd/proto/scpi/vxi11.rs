@@ -140,31 +140,25 @@ impl Vxi11 {
 
     /// The reply record to a call record; `None` for bytes that are not a call at all (nothing is said back).
     pub fn call(&self, conn: u64, rec: &[u8]) -> Option<Vec<u8>> {
-        let mut x = Xdr(rec);
-        let (xid, kind, rpcvers) = (x.u32()?, x.u32()?, x.u32()?);
-        if kind != 0 {
-            return None;
+        let c = Call::parse(rec)?;
+        match c.rpcvers {
+            2 => Some(self.dispatch(conn, c)),
+            _ => Some(denied(c.xid)),
         }
-        let (prog, vers, proc) = (x.u32()?, x.u32()?, x.u32()?);
-        // credentials and verifier: flavor and body, which AUTH_NONE (and AUTH_SYS) callers send and we do not look at
-        for _ in 0..2 {
-            x.u32()?;
-            x.opaque(400)?;
-        }
-        if rpcvers != 2 {
-            return Some(denied(xid));
-        }
-        let done = match (prog, vers) {
-            (PMAP_PROG, 2) => self.portmap(proc, x),
-            (CORE_PROG | ABORT_PROG, 1) => self.core(conn, prog, proc, x),
-            (PMAP_PROG, _) => return Some(mismatch(xid, 2, 2)),
-            (CORE_PROG | ABORT_PROG, _) => return Some(mismatch(xid, 1, 1)),
+    }
+
+    fn dispatch(&self, conn: u64, c: Call) -> Vec<u8> {
+        let done = match (c.prog, c.vers) {
+            (PMAP_PROG, 2) => self.portmap(c.proc, c.args),
+            (CORE_PROG | ABORT_PROG, 1) => self.core(conn, c.prog, c.proc, c.args),
+            (PMAP_PROG, _) => return mismatch(c.xid, 2, 2),
+            (CORE_PROG | ABORT_PROG, _) => return mismatch(c.xid, 1, 1),
             _ => Err(PROG_UNAVAIL),
         };
-        Some(match done {
-            Ok(body) => accepted(xid, 0, &body),
-            Err(stat) => accepted(xid, stat, &[]),
-        })
+        match done {
+            Ok(body) => accepted(c.xid, 0, &body),
+            Err(stat) => accepted(c.xid, stat, &[]),
+        }
     }
 
     /// The portmapper: GETPORT and DUMP tell where the core channel is, SET and UNSET are refused (false).
@@ -201,35 +195,24 @@ impl Vxi11 {
     }
 
     /// The core (and abort) program: `proc` per VXI-11 table B.1. Arguments that do not decode are GARBAGE_ARGS.
-    fn core(&self, conn: u64, prog: u32, proc: u32, mut x: Xdr) -> Results {
+    fn core(&self, conn: u64, prog: u32, proc: u32, x: Xdr) -> Results {
         if proc == 0 {
             return Ok(vec![]);
         }
-        let bad = || GARBAGE_ARGS;
         let mut links = self.links();
-        if prog == ABORT_PROG {
-            // device_abort(link): the nearest a link has to an abort is a clear
-            return match proc {
-                1 => with_link(&mut links, (x.i32().ok_or_else(bad)?, proc), |l| {
-                    l.clear();
-                    Ok(int(OK))
-                }),
-                _ => Err(PROC_UNAVAIL),
-            };
+        match prog {
+            ABORT_PROG => abort(&mut links, proc, x),
+            _ => self.core_proc(&mut links, conn, proc, x),
         }
+    }
+
+    fn core_proc(&self, links: &mut Links, conn: u64, proc: u32, mut x: Xdr) -> Results {
         match proc {
-            10 => self.create_link(&mut links, conn, x),
-            23 => {
-                let id = x.i32().ok_or_else(bad)?;
-                Ok(int(if links.map.remove(&id).is_some() {
-                    OK
-                } else {
-                    BAD_LINK
-                }))
-            }
+            10 => self.create_link(links, conn, x),
+            23 => destroy_link(links, x),
             11..=22 => {
-                let id = x.i32().ok_or_else(bad)?;
-                with_link(&mut links, (id, proc), |l| self.on_link(l, proc, x))
+                let id = x.i32().ok_or(GARBAGE_ARGS)?;
+                with_link(links, (id, proc), |l| self.on_link(l, proc, x))
             }
             25 | 26 => Ok(int(NOT_SUPPORTED)),
             _ => Err(PROC_UNAVAIL),
@@ -308,6 +291,55 @@ impl Vxi11 {
     }
 }
 
+/// device_abort(link): the nearest a link has to an abort is a clear.
+fn abort(links: &mut Links, proc: u32, mut x: Xdr) -> Results {
+    match proc {
+        1 => with_link(links, (x.i32().ok_or(GARBAGE_ARGS)?, proc), |l| {
+            l.clear();
+            Ok(int(OK))
+        }),
+        _ => Err(PROC_UNAVAIL),
+    }
+}
+
+fn destroy_link(links: &mut Links, mut x: Xdr) -> Results {
+    let id = x.i32().ok_or(GARBAGE_ARGS)?;
+    Ok(int(match links.map.remove(&id) {
+        Some(_) => OK,
+        None => BAD_LINK,
+    }))
+}
+
+/// A call: the RPC header and the arguments after it.
+struct Call<'a> {
+    xid: u32,
+    rpcvers: u32,
+    prog: u32,
+    vers: u32,
+    proc: u32,
+    args: Xdr<'a>,
+}
+
+impl<'a> Call<'a> {
+    /// `None` for bytes that are not a call: too short, a reply, credentials longer than 400 bytes.
+    fn parse(rec: &'a [u8]) -> Option<Call<'a>> {
+        let mut x = Xdr(rec);
+        let [xid, kind, rpcvers, prog, vers, proc] = x.words()?;
+        (kind == 0).then_some(())?;
+        // credentials and verifier, which AUTH_NONE (and AUTH_SYS) callers send and we do not look at
+        x.skip_auth()?;
+        x.skip_auth()?;
+        Some(Call {
+            xid,
+            rpcvers,
+            prog,
+            vers,
+            proc,
+            args: x,
+        })
+    }
+}
+
 /// Run `f` on the link `id`; an unknown id is error 4, in the shape of the reply `proc` has (error, then the zero results).
 fn with_link(
     links: &mut Links,
@@ -376,26 +408,28 @@ fn read(l: &mut Link, mut x: Xdr) -> Results {
 
 // ---- the sockets -----------------------------------------------------------------------------------------------------------
 
+/// Answer the records that are whole in `recs`; false when the connection is to end (a bad record, a socket that cannot be written).
+async fn answer(s: &mut TcpStream, recs: &mut Records, svc: &Vxi11, conn: u64) -> bool {
+    loop {
+        match recs.take() {
+            Ok(Some(rec)) => {
+                if let Some(reply) = svc.call(conn, &rec) {
+                    if !send(s, &record(&reply)).await {
+                        return false;
+                    }
+                }
+            }
+            Ok(None) => return true,
+            Err(_) => return false,
+        }
+    }
+}
+
 /// One TCP connection: RPC records in, replies out, until the client goes, goes quiet or the device stops. Its links die with it.
 pub async fn serve_tcp(mut s: TcpStream, svc: &Vxi11, idle: Duration, stop: &CancellationToken) {
     crate::fd::net::keepalive(&s);
     let (conn, mut recs, mut buf) = (svc.connection(), Records::default(), [0u8; 4096]);
-    'conn: loop {
-        loop {
-            match recs.take() {
-                Ok(Some(rec)) => {
-                    let sent = match svc.call(conn, &rec) {
-                        Some(reply) => send(&mut s, &record(&reply)).await,
-                        None => true,
-                    };
-                    if !sent {
-                        break 'conn;
-                    }
-                }
-                Ok(None) => break,
-                Err(_) => break 'conn,
-            }
-        }
+    while answer(&mut s, &mut recs, svc, conn).await {
         let read = tokio::select! {
             _ = stop.cancelled() => break,
             r = tokio::time::timeout(idle, s.read(&mut buf)) => r,
@@ -432,8 +466,7 @@ pub async fn serve_udp(sock: UdpSocket, svc: &Vxi11, stop: &CancellationToken) {
 impl Vxi11 {
     /// A call that arrived by UDP: the portmapper answers, the core and abort programs are not offered (PROG_UNAVAIL).
     pub fn call_udp(&self, rec: &[u8]) -> Option<Vec<u8>> {
-        let mut x = Xdr(rec);
-        let (xid, _, _, prog) = (x.u32()?, x.u32()?, x.u32()?, x.u32()?);
+        let [xid, _, _, prog] = Xdr(rec).words()?;
         match prog {
             PMAP_PROG => self.call(0, rec),
             _ => Some(accepted(xid, PROG_UNAVAIL, &[])),

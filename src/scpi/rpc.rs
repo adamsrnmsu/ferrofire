@@ -22,6 +22,20 @@ impl<'a> Xdr<'a> {
         Some(u32::from_be_bytes(self.take(4)?.try_into().ok()?))
     }
 
+    /// `N` words at once.
+    pub fn words<const N: usize>(&mut self) -> Option<[u32; N]> {
+        let b = self.take(4 * N)?;
+        Some(std::array::from_fn(|i| {
+            u32::from_be_bytes(b[4 * i..4 * i + 4].try_into().expect("4 bytes"))
+        }))
+    }
+
+    /// An RPC credential or verifier: a flavor and a body of at most 400 bytes, which are skipped.
+    pub fn skip_auth(&mut self) -> Option<()> {
+        self.u32()?;
+        self.opaque(400).map(|_| ())
+    }
+
     pub fn i32(&mut self) -> Option<i32> {
         self.u32().map(|x| x as i32)
     }

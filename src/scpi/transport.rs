@@ -234,19 +234,30 @@ impl Wire for Hislip {
                 Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
                 f => f?,
             };
-            match f.ty {
-                DATA | DATA_END => text.extend(&f.payload),
-                INTERRUPTED => return Err(other("the instrument interrupted the query (-410)")),
-                FATAL_ERROR | ERROR => return Err(other(describe(&f))),
-                _ => {}
-            }
-            if f.ty == DATA_END {
+            if absorb(&f, &mut text)? {
                 self.rmt = 1;
-                let line = String::from_utf8_lossy(&text);
-                return Ok(Some(line.trim_end_matches(['\r', '\n']).to_string()));
+                return Ok(Some(line(&text)));
             }
         }
     }
+}
+
+/// Take the data of a frame of a response; true when it was the last (DataEND). An `Interrupted` or an error is the end of the query.
+fn absorb(f: &Frame, text: &mut Vec<u8>) -> std::io::Result<bool> {
+    match f.ty {
+        DATA | DATA_END => text.extend(&f.payload),
+        INTERRUPTED => return Err(other("the instrument interrupted the query (-410)")),
+        FATAL_ERROR | ERROR => return Err(other(describe(f))),
+        _ => {}
+    }
+    Ok(f.ty == DATA_END)
+}
+
+/// The response line: the text without its terminator.
+fn line(text: &[u8]) -> String {
+    String::from_utf8_lossy(text)
+        .trim_end_matches(['\r', '\n'])
+        .to_string()
 }
 
 // ---- VXI-11 ------------------------------------------------------------------------------------------------------------------
@@ -259,6 +270,17 @@ pub struct Vxi11 {
     /// The most one device_write may carry.
     max: usize,
     wait_ms: u32,
+}
+
+/// The port of the core channel, from the portmapper at `portmapper` (GETPORT, TCP).
+fn core_port(host: &str, portmapper: u16, wait: Duration) -> Result<u16, String> {
+    let mut pm = connect_to(host, portmapper, wait)?;
+    let get = ints(&[CORE_PROG, 1, 6, 0]);
+    let r =
+        rpc(&mut pm, 1, (PMAP_PROG, 2, 3), &get).map_err(|e| format!("VXI-11 portmapper: {e}"))?;
+    let port = Xdr(&r).u32().and_then(|p| u16::try_from(p).ok());
+    port.filter(|p| *p != 0)
+        .ok_or_else(|| "VXI-11: the portmapper does not know the core channel".into())
 }
 
 /// One RPC call and the results of its reply.
@@ -307,31 +329,25 @@ impl Vxi11 {
         (portmapper, device): (u16, &str),
         wait: Duration,
     ) -> Result<Vxi11, String> {
-        let fail = |what: &str, e: std::io::Error| format!("VXI-11 {what}: {e}");
-        let mut pm = connect_to(host, portmapper, wait)?;
-        let get = ints(&[CORE_PROG, 1, 6, 0]);
-        let port = rpc(&mut pm, 1, (PMAP_PROG, 2, 3), &get).map_err(|e| fail("portmapper", e))?;
-        let port = Xdr(&port)
-            .u32()
-            .filter(|p| *p != 0 && *p <= 0xFFFF)
-            .ok_or("VXI-11: the portmapper does not know the core channel")?;
-        let mut s = connect_to(host, port as u16, wait)?;
+        let port = core_port(host, portmapper, wait)?;
+        let mut s = connect_to(host, port, wait)?;
         let mut args = ints(&[1, 0, 0]);
         put_opaque(&mut args, device.as_bytes());
-        let r = rpc(&mut s, 1, (CORE_PROG, 1, 10), &args).map_err(|e| fail("create_link", e))?;
-        let mut x = Xdr(&r);
-        match (x.u32(), x.u32(), x.u32(), x.u32()) {
-            (Some(0), Some(link), Some(_), Some(max)) => Ok(Vxi11 {
+        let r = rpc(&mut s, 1, (CORE_PROG, 1, 10), &args)
+            .map_err(|e| format!("VXI-11 create_link: {e}"))?;
+        let [error, link, _abort, max] =
+            Xdr(&r).words().ok_or("VXI-11 create_link: short reply")?;
+        match error {
+            0 => Ok(Vxi11 {
                 s,
                 xid: 2,
                 link,
                 max: max.max(1) as usize,
-                wait_ms: wait.as_millis().min(u32::MAX as u128) as u32,
+                wait_ms: wait.as_millis().min(u128::from(u32::MAX)) as u32,
             }),
-            (Some(e), ..) => Err(format!(
+            e => Err(format!(
                 "VXI-11 create_link: error {e} (3 is no such device `{device}`)"
             )),
-            _ => Err("VXI-11 create_link: short reply".into()),
         }
     }
 
@@ -371,8 +387,7 @@ impl Wire for Vxi11 {
             }
             text.extend(x.opaque(usize::MAX).unwrap_or_default());
             if reason & 4 != 0 {
-                let line = String::from_utf8_lossy(&text);
-                return Ok(Some(line.trim_end_matches(['\r', '\n']).to_string()));
+                return Ok(Some(line(&text)));
             }
         }
     }
