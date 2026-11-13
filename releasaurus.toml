@@ -1,5 +1,13 @@
-# Releasaurus (https://releasaurus.rgon.io) opens the release PR on pushes to main; merging it tags vX.Y.Z and
+# Releasaurus (https://releasaurus.rgon.io) opens the release PR on pushes to main; merging it tags the release and
 # publishes the GitHub Release (.github/workflows/release.yml). `rust` bumps Cargo.toml and Cargo.lock.
+# CalVer like sceptre-bennu, but unpadded (v2026.1.5, not v2026.01.05): Cargo versions must be semver, and semver
+# forbids leading zeros. One release per day; a same-day re-run reports nothing to release.
+[defaults.versioning]
+version_type = "year.month.day"
+
+[defaults.changelog]
+include_pr_link = true
+
 [[package]]
 path = "."
 release_type = "rust"

@@ -1,7 +1,7 @@
 name: Release
 
 # Versioning is Releasaurus: a push to main opens/updates the release PR (next version from conventional commits, plus the
-# changelog); merging that PR tags vX.Y.Z and publishes the GitHub Release. Then the static musl and the glibc binaries are built and attached.
+# changelog); merging that PR tags vYYYY.M.D and publishes the GitHub Release. Then the static musl and the glibc binaries are built and attached.
 #
 # Why the build lives in this same workflow run: tags and releases created with the default GITHUB_TOKEN do NOT trigger other
 # workflows, so an `on: push: tags` / `on: release` workflow would never fire for a Releasaurus release. `release` therefore
@@ -21,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing release tag (vX.Y.Z) to rebuild and re-upload assets for, using this workflow. Empty: nightly build (published only from main)."
+        description: "Existing release tag (vYYYY.M.D) to rebuild and re-upload assets for, using this workflow. Empty: nightly build (published only from main)."
         required: false
         type: string
 
@@ -92,7 +92,7 @@ jobs:
         run: |
           kind=none tag='' ref="$SHA" version=''
           if [ -n "$INPUT_TAG" ]; then
-            case "$INPUT_TAG" in v[0-9]*) kind=release tag="$INPUT_TAG" ;; *) echo "tag must look like vX.Y.Z" >&2; exit 1 ;; esac
+            case "$INPUT_TAG" in v[0-9]*) kind=release tag="$INPUT_TAG" ;; *) echo "tag must look like vYYYY.M.D" >&2; exit 1 ;; esac
           elif [ "$EVENT" = push ] && [ "$REF_TYPE" = tag ]; then
             kind=release tag="$REF_NAME"
           elif [ "$EVENT" = push ]; then
@@ -214,5 +214,5 @@ jobs:
           gh release delete nightly --cleanup-tag --yes || true
           gh release create nightly --target "$SHA" --prerelease --latest=false \
             --title "nightly: untested weekly build of ${SHA::7}" \
-            --notes "Untested weekly build of commit $SHA from main. Not a version: no tests ran on these binaries beyond a --version smoke test. Use a vX.Y.Z release for anything that matters." \
+            --notes "Untested weekly build of commit $SHA from main. Not a version: no tests ran on these binaries beyond a --version smoke test. Use a vYYYY.M.D release for anything that matters." \
             ferrofire-*.tar.gz SHA256SUMS
