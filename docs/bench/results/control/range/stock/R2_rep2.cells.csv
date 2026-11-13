@@ -1,0 +1,15 @@
+stack,R,rep,cell,mode,kind,dir,n,issued,ok,lost,wrong_final,wrong_provider,wrong_collateral,order_violations,flaps,write_errors,span_s,wall_s,per_s,poll_errors,vm_load1_start_end
+stock,2,2,breaker:seq:1,seq,breaker,open,1,1,1,0,0,0,0,0,0,0,1.082,2.185,0.92,0,0.26/0.26
+stock,2,2,breaker:sim:1,sim,breaker,open,1,1,1,0,0,0,0,0,0,0,0.074,1.178,13.58,0,0.39/0.39
+stock,2,2,breaker:seq:10,seq,breaker,open,10,10,10,0,0,0,0,0,0,0,9.442,10.548,1.06,0,0.23/0.19
+stock,2,2,breaker:sim:10,sim,breaker,open,10,10,10,0,0,0,0,3,0,0,2.169,3.286,4.61,0,0.26/0.26
+stock,2,2,breaker:seq:100,seq,breaker,open,100,100,100,0,0,0,0,0,0,0,102.067,103.172,0.98,0,0.19/0.53
+stock,2,2,breaker:sim:100,sim,breaker,open,100,100,38,62,0,0,0,19,0,0,10.174,11.182,3.73,0,0.39/0.56
+stock,2,2,gen:seq:1,seq,gen,down,1,1,1,0,0,0,0,0,0,0,1.088,2.206,0.92,0,0.40/0.40
+stock,2,2,gen:seq:1,seq,gen,up,1,1,1,0,0,0,0,0,0,0,0.848,1.953,1.18,0,0.40/0.36
+stock,2,2,gen:sim:1,sim,gen,down,1,1,1,0,0,0,0,0,0,0,1.041,2.147,0.96,0,0.33/0.33
+stock,2,2,gen:sim:1,sim,gen,up,1,1,1,0,0,0,0,0,0,0,0.895,2.008,1.12,0,0.33/0.31
+stock,2,2,gen:seq:5,seq,gen,down,5,5,5,0,0,0,0,0,0,0,5.093,6.204,0.98,0,0.36/0.33
+stock,2,2,gen:seq:5,seq,gen,up,5,5,5,0,0,0,0,0,0,0,4.976,6.080,1.00,0,0.33/0.30
+stock,2,2,gen:sim:5,sim,gen,down,5,5,5,0,0,0,0,0,0,0,1.973,3.077,2.53,0,0.26/0.26
+stock,2,2,gen:sim:5,sim,gen,up,5,5,5,0,0,0,0,0,0,0,1.923,3.027,2.60,0,0.26/0.24
