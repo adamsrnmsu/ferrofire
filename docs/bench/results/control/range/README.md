@@ -9,3 +9,5 @@ Raw data of `bench/range/run_range.py` (see bench/README.md, "Control-latency on
   Ferrofire: one stack per (rep, R); stock: a fresh stack per cell. Stock gens are status flips only (no ramp), as in the docker runs.
 - Contention: every run's `env.txt` says `contended_at_start False` (no other VM or started phenix experiment; the host load average at run start was 4.5 at most). One earlier phenix experiment (`kp-offline`, one VM) was stopped before the first run.
 - Clock: the driver and the provider run on the same VM, so every stamp is on one clock.
+
+- ww-1df.32 re-run (2026-11-13, merged main c41569d, ferrofire only, 3 reps, same cells): `ferrofire/` and `summary-ferrofire.md`; the earlier ferrofire runs (2026-11-12, before the field-device ACK hold) are kept in `ferrofire-before-ww-1df.32/` and `summary-ferrofire-before-ww-1df.32.md`. Stock is unchanged. All 9 runs `contended_at_start False`.

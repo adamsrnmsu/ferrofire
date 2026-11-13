@@ -28,7 +28,8 @@ Differences that matter when reading the numbers:
 - Every cell of the Docker matrix ran on both stacks; nothing was skipped. The range ran the subset above only: no R = 10, no 5, 50 or 1000 flips, no 2 or 10 generators.
 - Contention: no run started with another cargo, ff-rust or mutator container present (`contended_at_start False` in all 40 Docker and 18 range `env.txt` files). The Docker host was not idle: its 1-minute load average at run start
   ranged from 3.1 to 17.1 (`host_load_start` in each `.env.txt`, `vm_load1_start_end` in each `.cells.csv`) on an 18-vCPU VM, and stock uses about one CPU, so Docker latencies include some host noise. The range host's load at run start was at most 4.5.
-- Ferrofire's read-back can flip early and flip back: a field device sets a point when the provider ACKs the write, before the provider applies it, and a still-old datagram can take it back (**flaps**, section 7).
+- Ferrofire's read-back can flip early and flip back: a field device sets a point when the provider ACKs the write, before the provider applies it, and a still-old datagram could take it back (**flaps**, section 7).
+  Since ww-1df.32 the field device holds an ACKed point for up to 2 s against stream values that differ from it, so the flaps are gone (0 in the re-run); the "before ww-1df.32" rows are the earlier run kept in `results/control/ferrofire-before-ww-1df.32/`.
   The driver counts a command as done only when the state is also seen on the stream, so a flap is not an error, but a SCADA polling at 2 ms sees it.
 
 Solve time of the power flow at 1 250 branches, ferrofire in a container on a contended host: about {{table:09i-solve}} ms per solve ([solve-time.txt](results/control/solve-time.txt)). Pybennu is not installed offline, so
@@ -75,7 +76,7 @@ Same phases as section 3. Unit: flips done per second between the first write an
 
 {{table:09d-breaker-sim-throughput}}
 
-Ferrofire's rate grows with the burst (about 8 700 per s for 1 000 flips on 1 RTU, 7 500 on 10); stock stays at about 2 per s on 1 RTU and about 20 per s on 10 RTUs, one command per RTU per publish.
+Ferrofire's rate grows with the burst (about 7 100 per s for 1 000 flips on 1 RTU, 8 300 on 10); stock stays at about 2 per s on 1 RTU and about 20 per s on 10 RTUs, one command per RTU per publish.
 
 ## 5. Generator spin-up and spin-down
 
@@ -86,7 +87,7 @@ Unit: milliseconds from the SCADA write to the status being on (spin-up), PG wit
 
 {{table:09e-gen}}
 
-Ferrofire reports the unit on after about 108 ms and has PG at the setpoint 1.1 s later (the ramp); it turns the status off only when the ramp reaches 0 (1.1 s). Stock's status changes at its publish (about 1 s) in both directions and PG never ramps,
+Ferrofire reports the unit on after about 110 ms and has PG at the setpoint 1.1 s later (the ramp); it turns the status off only when the ramp reaches 0 (1.1 s). Stock's status changes at its publish (about 1 s) in both directions and PG never ramps,
 so there is no stock number for the setpoint. Simultaneous generator commands (10 at once on 10 RTUs) are the same: ferrofire p50 78 ms (status on) and 1 076 ms (status off), stock 907 and 709 ms, none lost ([09h-control-all-cells.csv](../img/charts/09h-control-all-cells.csv)).
 
 ## 6. Docker vs live range
@@ -97,7 +98,7 @@ so there is no stock number for the setpoint. Simultaneous generator commands (1
 
 {{table:09f-docker-vs-range}}
 
-The range gives the same sequential p50s as Docker for both stacks (ferrofire 99 ms, stock 1 017 to 1 020 ms), so the Docker matrix is a fair stand-in for the range; the range's simultaneous ferrofire p95 is higher (122 to 156 ms against 92 to 103 ms).
+The range gives the same sequential p50s as Docker for both stacks (ferrofire 99 ms, stock 1 017 to 1 020 ms), so the Docker matrix is a fair stand-in for the range; the range's simultaneous ferrofire p95 is higher (135 to 150 ms against 99 to 109 ms).
 For simultaneous flips only the completed flips are timed (stock: 59, 114, 295 of 300 per R = 1, 2, 5 on the range, 94, 184, 464 of 500 in Docker): its p50 of about 5 s says how late the flips that did arrive were.
 
 ## 7. Lost and wrong commands
@@ -108,11 +109,13 @@ Every phase of every run, ferrofire vs stock bennu, Docker (full matrix) and ran
 
 - **Lost**: ferrofire none. Stock lost 4 635 of 7 320 simultaneous breaker commands in Docker and 432 of 999 on the range, none of the sequential ones.
 - **Wrong final state, wrong at the provider, wrong collateral, write errors**: none in any phase of either stack.
-- **Order violations** (adjacent commands of one RTU that became visible in the opposite order, simultaneous mode only): ferrofire 200 in Docker (180 on 1 RTU, 19 on 2, 1 on 5, none on 10) and 110 on the range; stock 1 190 and 240. The cause is not established here.
-- **Flaps** (ferrofire only): the read-back showed the new state, then the old, then the new again: 3 831 in the simultaneous breaker phases, 1 in a sequential breaker phase and 720 in the generator phases (360 sequential, 360 simultaneous) in Docker; 194 and 108 on the range. Stock has none in any phase.
+- **Order violations** (adjacent commands of one RTU that became visible in the opposite order, simultaneous mode only): ferrofire before ww-1df.32 200 in Docker (180 on 1 RTU, 19 on 2, 1 on 5, none on 10) and 110 on the range (57, 42, 11); after the hold 110 in Docker (18 on 1 RTU, 5 on 2, 24 on 5, 63 on 10) and 105 on the range (53, 47, 5); stock 1 190 and 240.
+  The ACK hold did not remove them (it changed where they fall, not how many in total), so they do not share the flap cause. The cause is not established here (follow-up bead).
+- **Flaps** (ferrofire only): the read-back showed the new state, then the old, then the new again. Before ww-1df.32: 3 831 in the simultaneous breaker phases, 1 in a sequential breaker phase and 720 in the generator phases (360 sequential, 360 simultaneous) in Docker; 194 and 108 on the range. After the ACK hold (field device ignores a differing stream value for up to 2 s after a provider ACK, ww-1df.32): none in any phase, Docker or range. Stock has none in any phase.
+  Latency did not change beyond run-to-run noise: sequential breaker p50 98.7 ms before and 98.5 ms after in Docker (99 and 99 on the range), p95 109.6 and 114.4 (108.5 and 108.2); simultaneous p95 141.3 and 133.5 (150.6 and 145.2). The sequential p95 rise in Docker is in the stream stamp (driver-side, before the field device), not in visible minus stream. An A/B of the 1 000-flip simultaneous cell with the pre-fix and the fixed binary on the same host (alternating runs) showed no difference.
 
 ## What the numbers do not say
 
 - Stock bennu is measured as the repo's phenix overlay ships it (publish once a second); its seconds-level latency tracks that interval (its provider applies a command in about 26 ms), not Modbus or the solver. Neither stack's publish rate was tuned.
-- No generator number for stock includes the ramp (stock has none). The generator comparison is therefore: ferrofire spin-up status 108 ms and PG at setpoint 1.1 s, against stock status at 1.0 s with PG left at 0.
+- No generator number for stock includes the ramp (stock has none). The generator comparison is therefore: ferrofire spin-up status 110 ms and PG at setpoint 1.1 s, against stock status at 1.0 s with PG left at 0.
 - The Docker runs share one VM with the host's other workloads (load 3 to 17 at the start of a run); the range host's load at run start was at most 4.5. The range numbers agree with Docker's.

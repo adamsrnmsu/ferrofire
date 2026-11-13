@@ -9,7 +9,8 @@ import control_join as J  # noqa: E402
 
 CTL = HERE.parent / "docs/bench/results/control"
 DIRS = {("docker", "ferrofire"): CTL / "ferrofire", ("docker", "stock"): CTL / "stock",
-        ("range", "ferrofire"): CTL / "range/ferrofire", ("range", "stock"): CTL / "range/stock"}
+        ("range", "ferrofire"): CTL / "range/ferrofire", ("range", "stock"): CTL / "range/stock",
+        ("docker", "ferrofire-before"): CTL / "ferrofire-before-ww-1df.32", ("range", "ferrofire-before"): CTL / "range/ferrofire-before-ww-1df.32"}
 STAGES = (("ack", "t_ack"), ("stream", "t_stream"), ("visible", "t_visible"), ("setpoint", "t_setpoint"))
 
 

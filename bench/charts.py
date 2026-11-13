@@ -542,11 +542,11 @@ def chart_control():
     # 9g lost and wrong, all phases
     rows = []
     for e in ("docker", "range"):
-        for s in ("ferrofire", "stock"):
+        for s in ("ferrofire-before", "ferrofire", "stock"):
             for kind, mode in (("breaker", "seq"), ("breaker", "sim"), ("gen", "seq"), ("gen", "sim")):
                 ph = [q for q in phs(e, s) if q["cell"].startswith(f"{kind}:{mode}:")]
                 t = lambda k: int(sum(q[k] for q in ph))
-                rows.append((e, SNAME[s], f"{kind} {mode}", t("issued"), t("lost"), t("wrong_final"), t("wrong_provider"), t("wrong_collateral"), t("order_violations"), t("flaps"), t("write_errors"), len(ph)))
+                rows.append((e, SNAME.get(s, "ferrofire before ww-1df.32"), f"{kind} {mode}", t("issued"), t("lost"), t("wrong_final"), t("wrong_provider"), t("wrong_collateral"), t("order_violations"), t("flaps"), t("write_errors"), len(ph)))
     TABLES["09g-lost-wrong"] = "\n".join(["| where | stack | family | commands | lost | wrong final | wrong at provider | wrong collateral | order violations | flaps | write errors | phases |", "|" + "---|" * 12] + ["| " + " | ".join(map(str, r)) + " |" for r in rows])
     # 9h per-cell numbers (CSV only): every (where, stack, cell, direction, R)
     with open(OUT / "09h-control-all-cells.csv", "w", newline="") as fh:

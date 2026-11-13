@@ -1,10 +1,10 @@
 stack,RTUs,flips issued at once,phases,median flips per s
-ferrofire,1,1,5,11.6
-ferrofire,1,5,5,57.9
-ferrofire,1,10,5,109.5
-ferrofire,1,50,5,533.7
-ferrofire,1,100,5,1070.8
-ferrofire,1,1000,5,8669.9
+ferrofire,1,1,5,11.0
+ferrofire,1,5,5,57.1
+ferrofire,1,10,5,119.5
+ferrofire,1,50,5,542.9
+ferrofire,1,100,5,1006.0
+ferrofire,1,1000,5,7128.1
 stock bennu,1,1,5,1.2
 stock bennu,1,5,5,1.8
 stock bennu,1,10,5,2.1
@@ -12,11 +12,11 @@ stock bennu,1,50,5,1.8
 stock bennu,1,100,5,1.9
 stock bennu,1,1000,1,1.7
 ferrofire,10,1,5,13.3
-ferrofire,10,5,5,59.4
-ferrofire,10,10,5,115.6
-ferrofire,10,50,5,574.8
-ferrofire,10,100,5,1149.3
-ferrofire,10,1000,5,7506.2
+ferrofire,10,5,5,63.6
+ferrofire,10,10,5,110.5
+ferrofire,10,50,5,562.1
+ferrofire,10,100,5,1129.6
+ferrofire,10,1000,5,8318.3
 stock bennu,10,1,5,1.4
 stock bennu,10,5,5,5.5
 stock bennu,10,10,5,11.2

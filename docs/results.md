@@ -252,10 +252,10 @@ Full method, every figure, lost and wrong counts, and what stock cannot run (no 
 
 | stack | RTUs | flips done | p50 ms | p95 ms | p99 ms | max ms |
 |---|---|---|---|---|---|---|
-| ferrofire | 1 | 500 | 98 | 110 | 114 | 123 |
-| ferrofire | 2 | 500 | 99 | 111 | 118 | 122 |
-| ferrofire | 5 | 500 | 99 | 110 | 114 | 123 |
-| ferrofire | 10 | 500 | 99 | 108 | 113 | 120 |
+| ferrofire | 1 | 500 | 98 | 118 | 125 | 128 |
+| ferrofire | 2 | 500 | 98 | 117 | 125 | 126 |
+| ferrofire | 5 | 500 | 99 | 112 | 119 | 126 |
+| ferrofire | 10 | 500 | 99 | 110 | 114 | 115 |
 | stock bennu | 1 | 500 | 1025 | 1033 | 1035 | 1036 |
 | stock bennu | 2 | 500 | 1023 | 1032 | 1035 | 1037 |
 | stock bennu | 5 | 500 | 1022 | 1035 | 1041 | 1046 |

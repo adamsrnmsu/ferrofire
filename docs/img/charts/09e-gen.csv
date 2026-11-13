@@ -1,7 +1,7 @@
 stack,event,generators done,p50 ms,p95 ms,p99 ms,max ms
-ferrofire,status on,360,108,116,119,121
-ferrofire,PG at setpoint,360,1098,1106,1108,1111
-ferrofire,status off,360,1098,1105,1109,1135
+ferrofire,status on,360,110,118,123,127
+ferrofire,PG at setpoint,360,1098,1106,1109,1110
+ferrofire,status off,360,1098,1107,1115,1134
 stock bennu,status on,360,1020,1031,1035,1038
 stock bennu,PG at setpoint,0,,,,
 stock bennu,status off,360,1020,1033,1037,1048
