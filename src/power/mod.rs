@@ -51,6 +51,20 @@ enum F {
     ShActual,
     /// Reads RATE_C, writes all three rating columns, as pybennu does.
     BrMva,
+    /// Generator ramp tags (only present once `enable_ramp` ran), read-only.
+    RampState,
+    RampTarget,
+}
+
+/// Generator ramp (ww-1df.23.2). Per generator: `rate` MW/s (0 = instant, the PYPOWER behaviour), the `setpoint`
+/// spin-up returns to, and the move in progress (`target`; `to_off` = status drops when PG reaches 0).
+#[derive(Debug)]
+struct Ramp {
+    rate: Vec<f64>,
+    setpoint: Vec<f64>,
+    target: Vec<f64>,
+    moving: Vec<bool>,
+    to_off: Vec<bool>,
 }
 
 #[derive(Debug)]
@@ -130,6 +144,8 @@ pub struct Power {
     /// PYPOWER's ENFORCE_Q_LIMS (off in sceptre's PyPower, hence off unless the model asks).
     pub enforce_q_lims: bool,
     pub alert: bool,
+    ramp: Option<Ramp>,
+    gen_dev: Vec<String>,
     tags: Vec<Tag>,
     by_name: HashMap<String, usize>,
     bus_active: Vec<bool>,
@@ -224,6 +240,8 @@ impl Power {
             dc_fallback,
             enforce_q_lims,
             alert: false,
+            ramp: None,
+            gen_dev: vec![],
             tags: vec![],
             by_name: HashMap::new(),
             bus_active: case.bus.iter().map(|b| b[BUS_TYPE] != NONE).collect(),
@@ -300,6 +318,132 @@ impl Power {
             *c += 1;
             let dev = format!("generator-{}_bus-{}", c, bus);
             self.add_device(&dev, r, &GEN_FIELDS);
+            self.gen_dev.push(dev);
+        }
+    }
+
+    /// Turn the generator ramp on: `global` MW/s for every generator, `per_gen` (device name, MW/s) overriding it;
+    /// a generator with no rate (or 0) keeps the instant PYPOWER behaviour. Adds `ramp_state` (0 idle, 1 rising,
+    /// 2 falling) and `ramp_target` (MW) to every generator. PG of a PV generator is the ramp's; the slack's PG
+    /// is the solver's balance, so ramp PV generators.
+    pub fn enable_ramp(
+        &mut self,
+        global: Option<f64>,
+        per_gen: &[(String, f64)],
+    ) -> Result<(), String> {
+        if self.ramp.is_some() {
+            return Err("ramp: already enabled".into());
+        }
+        let ok = |x: f64| x.is_finite() && x >= 0.0;
+        if !global.is_none_or(ok) || !per_gen.iter().all(|g| ok(g.1)) {
+            return Err("ramp: rate must be a finite MW/s >= 0".into());
+        }
+        let mut rate = vec![global.unwrap_or(0.0); self.gen_dev.len()];
+        for (name, x) in per_gen {
+            let r = (self.gen_dev.iter().position(|d| d == name))
+                .ok_or(format!("ramp: no generator {name}"))?;
+            rate[r] = *x;
+        }
+        let sp: Vec<f64> = self.case.gen.iter().map(|g| g[PG]).collect();
+        let n = sp.len();
+        self.ramp = Some(Ramp {
+            rate,
+            target: sp.clone(),
+            setpoint: sp,
+            moving: vec![false; n],
+            to_off: vec![false; n],
+        });
+        for r in 0..n {
+            let dev = self.gen_dev[r].clone();
+            self.add(format!("{dev}.ramp_state"), AN, F::RampState, r, false);
+            self.add(format!("{dev}.ramp_target"), AN, F::RampTarget, r, false);
+        }
+        Ok(())
+    }
+
+    fn ramps(&self, r: usize) -> bool {
+        self.ramp.as_ref().is_some_and(|rp| rp.rate[r] > 0.0)
+    }
+
+    /// A status command on a ramped generator: spin-up turns status on and rises from the current PG (0 when it was
+    /// off) to the setpoint; spin-down falls to 0, then drops status. Mid-ramp commands retarget from the current PG.
+    fn ramp_status(&mut self, r: usize, on: bool) {
+        let was_on = self.case.gen[r][GEN_STATUS] > 0.0;
+        let pg = self.case.gen[r][PG];
+        let Some(rp) = self.ramp.as_mut() else { return };
+        if on && !was_on {
+            self.case.gen[r][GEN_STATUS] = 1.0;
+            self.case.gen[r][PG] = 0.0;
+        } else if !on && was_on && pg <= 0.0 {
+            self.case.gen[r][GEN_STATUS] = 0.0;
+        }
+        if on {
+            rp.target[r] = rp.setpoint[r];
+            rp.to_off[r] = false;
+            rp.moving[r] = self.case.gen[r][PG] != rp.setpoint[r];
+        } else if was_on && pg > 0.0 {
+            rp.target[r] = 0.0;
+            rp.to_off[r] = true;
+            rp.moving[r] = true;
+        }
+    }
+
+    /// Status and PG writes on a ramped generator are commands, not assignments. True when handled.
+    fn ramp_write(&mut self, f: F, r: usize, x: f64) -> bool {
+        match f {
+            F::Flag(Flag::GenOn) if self.ramps(r) => self.ramp_status(r, f2(x)),
+            F::Cell(Tab::Gen, PG) if self.ramps(r) => self.ramp_setpoint(r, x),
+            _ => return false,
+        }
+        true
+    }
+
+    /// A PG write on a ramped generator is its new setpoint; a running generator ramps to it (unless it is
+    /// spinning down, which keeps the setpoint for the next spin-up).
+    fn ramp_setpoint(&mut self, r: usize, x: f64) {
+        let live = self.case.gen[r][GEN_STATUS] > 0.0;
+        let pg = self.case.gen[r][PG];
+        let Some(rp) = self.ramp.as_mut() else { return };
+        rp.setpoint[r] = x;
+        if live && !rp.to_off[r] {
+            rp.target[r] = x;
+            rp.moving[r] = pg != x;
+        }
+    }
+
+    /// Move every ramping generator `rate * dt` toward its target. True when anything moved (re-solve).
+    pub fn advance(&mut self, dt: f64) -> bool {
+        let Some(rp) = self.ramp.as_mut() else {
+            return false;
+        };
+        let mut moved = false;
+        for r in 0..rp.rate.len() {
+            if !rp.moving[r] {
+                continue;
+            }
+            moved = true;
+            let g = &mut self.case.gen[r];
+            let step = rp.rate[r] * dt;
+            g[PG] += (rp.target[r] - g[PG]).clamp(-step, step);
+            if g[PG] == rp.target[r] {
+                rp.moving[r] = false;
+                if std::mem::take(&mut rp.to_off[r]) {
+                    g[GEN_STATUS] = 0.0;
+                }
+            }
+        }
+        moved
+    }
+
+    fn ramp_get(&self, f: F, r: usize) -> f64 {
+        let Some(rp) = self.ramp.as_ref() else {
+            return 0.0;
+        };
+        match f {
+            F::RampTarget => rp.target[r],
+            _ if !rp.moving[r] => 0.0,
+            _ if rp.target[r] > self.case.gen[r][PG] => 1.0,
+            _ => 2.0,
         }
     }
 
@@ -393,13 +537,14 @@ impl Power {
             F::ShActual if self.shunt_on[r] => self.case.bus[r][BS],
             F::ShActual => 0.0,
             F::BrMva => self.case.branch[r][RATE_C],
+            F::RampState | F::RampTarget => self.ramp_get(t.f, r),
         }
     }
 
     /// Edit the case. Read-only tags are ignored. Binary fields take any nonzero as true.
     pub fn set(&mut self, i: usize, x: f64) {
         let (f, r, writable) = (self.tags[i].f, self.tags[i].row, self.tags[i].writable);
-        if !writable {
+        if !writable || self.ramp_write(f, r, x) {
             return;
         }
         match f {
@@ -411,7 +556,7 @@ impl Power {
                     self.case.branch[r][col] = x;
                 }
             } // pybennu writes all three rating columns
-            F::GenSum(_) => {}
+            F::GenSum(_) | F::RampState | F::RampTarget => {}
         }
     }
 

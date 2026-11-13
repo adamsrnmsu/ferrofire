@@ -1,0 +1,9 @@
+stack,stage,commands,p50 ms,p95 ms,p99 ms,max ms
+ferrofire,ack,500,0,0,0,0
+ferrofire,applied,500,46,94,98,105
+ferrofire,stream,500,97,108,113,123
+ferrofire,visible,500,99,110,114,123
+stock bennu,ack,500,0,0,0,0
+stock bennu,applied,500,26,48,52,58
+stock bennu,stream,500,1021,1034,1039,1044
+stock bennu,visible,500,1022,1035,1041,1046

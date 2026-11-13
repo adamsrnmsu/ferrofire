@@ -18,6 +18,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import dg_report as dg  # noqa: E402  (stdlib only)
 import report  # noqa: E402  (matplotlib only inside its own chart functions)
+import control_report as cr  # noqa: E402  (stdlib only)
 
 ROOT, RES = dg.ROOT, dg.RES
 OUT = ROOT / "docs/img/charts"
@@ -399,15 +400,180 @@ def chart_bennu():
     TABLES["08c-robust-matrix"] = "\n".join(["| check | what it requires | stock | fixed |", "|---|---|---|---|"] + [f"| {' | '.join(map(str, r))} |" for r in rows])
 
 
+# --- 9. control latency: breaker flips and generator spin up/down, ferrofire vs stock bennu, Docker vs range ---------------------
+FF, STK = C["fixed"], C["stock"]   # ferrofire blue, stock grey (as in section 8); range = same colour, hatched
+HATCH = {"docker": "", "range": "////"}
+SERIES = [(s, e) for e in ("docker", "range") for s in ("ferrofire", "stock")]
+SNAME = {"ferrofire": "ferrofire", "stock": "stock bennu"}
+_CMD, _PH = {}, {}
+
+
+def cmds(env, stack):
+    if (env, stack) not in _CMD:
+        _CMD[env, stack] = cr.commands(env, stack)
+    return _CMD[env, stack]
+
+
+def phs(env, stack):
+    if (env, stack) not in _PH:
+        _PH[env, stack] = cr.phases(env, stack)
+    return _PH[env, stack]
+
+
+def lat(env, stack, field, kind, mode, n=None, R=None, dir=None):
+    """Sorted `field` (ms from t_cmd) of the done commands of a family (and n, R, dir if given)."""
+    return sorted(c[field] for c in cmds(env, stack) if c["done"] and c[field] is not None and c["kind"] == kind and c["mode"] == mode
+                  and n in (None, c["n"]) and R in (None, c["R"]) and dir in (None, c["dir"]))
+
+
+def sw(label, color, hatch=""):
+    return plt.Rectangle((0, 0), 1, 1, fc=color, ec=SURFACE if hatch else "none", hatch=hatch, label=label)
+
+
+def handles(envs):
+    return [sw(f"{SNAME[s]}, {e}" if len(envs) > 1 else SNAME[s], FF if s == "ferrofire" else STK, HATCH[e]) for s, e in SERIES if e in envs]
+
+
+def cbars(ax, cats, series, fmt="{:.0f}", log=False):
+    """series = [(colour, hatch, [value or None])]; None = the stack could not produce that number ('n/a' at the foot)."""
+    n, w = len(series), 0.8 / len(series)
+    top = max(v for _, _, vs in series for v in vs if v is not None)
+    for i, (col, h, vals) in enumerate(series):
+        xs = [x + (i - (n - 1) / 2) * w for x in range(len(cats))]
+        ax.bar([x for x, v in zip(xs, vals) if v is not None], [v for v in vals if v is not None], width=w * 0.9, color=col, ec=SURFACE, lw=1, hatch=h or None)
+        for x, v in zip(xs, vals):
+            ax.text(x, v if v is not None else (1.2 if log else 0), fmt.format(v) if v is not None else "n/a", ha="center", va="bottom", fontsize=7, color=INK2, rotation=0 if n <= 2 else 90)
+    ax.set_xticks(range(len(cats)), cats)
+    if log:
+        ax.set_yscale("log")
+        ax.set_ylim(1, top * 4)
+    else:
+        ax.set_ylim(0, top * (1.12 if n <= 2 else 1.3))
+    ax.tick_params(length=0)
+
+
+def p(v, q):
+    x = cr.pct(v, q)
+    return "" if x is None else f"{x:.0f}"
+
+
+def chart_control():
+    f0 = lambda x: f"{x:.0f}"
+    # 9a sequential breaker flips, visible at the SCADA, by R
+    Rs, rows, bars = [1, 2, 5, 10], [], []
+    for s in ("ferrofire", "stock"):
+        v = {R: lat("docker", s, "visible", "breaker", "seq", 100, R) for R in Rs}
+        bars.append((FF if s == "ferrofire" else STK, "", [cr.pct(v[R], .5) for R in Rs]))
+        rows += [(SNAME[s], R, len(v[R]), p(v[R], .5), p(v[R], .95), p(v[R], .99), f0(v[R][-1])) for R in Rs]
+    fig, (ax,) = fig_ax()
+    cbars(ax, [f"{R} RTU" + ("s" if R > 1 else "") for R in Rs], bars)
+    finish(fig, "09a-breaker-seq", rows, ["stack", "RTUs", "flips done", "p50 ms", "p95 ms", "p99 ms", "max ms"],
+           "Sequential breaker flips: ferrofire vs stock bennu, Docker", "SCADA write sent to read-back showing the new state, p50, ms", ax, handles(["docker"]),
+           note="Each flip waits for the previous one to be visible. 5 reps per (stack, R); the rows are the 500 flips of each (stack, R).")
+    # 9b where the time goes: ack, applied, stream, visible; sequential 100 flips, 5 RTUs
+    stages, rows, bars = ["ack", "applied", "stream", "visible"], [], []
+    for s in ("ferrofire", "stock"):
+        v = {k: lat("docker", s, k, "breaker", "seq", 100, 5) for k in stages}
+        bars.append((FF if s == "ferrofire" else STK, "", [cr.pct(v[k], .5) for k in stages]))
+        rows += [(SNAME[s], k, len(v[k]), p(v[k], .5), p(v[k], .95), p(v[k], .99), f0(v[k][-1])) for k in stages]
+    fig, (ax,) = fig_ax()
+    cbars(ax, ["write answered\n(SCADA)", "provider applied\nthe write", "first datagram at\nthe RTU", "read-back at\nthe SCADA"], bars)
+    finish(fig, "09b-stages", rows, ["stack", "stage", "commands", "p50 ms", "p95 ms", "p99 ms", "max ms"],
+           "Where a sequential breaker flip spends its time: ferrofire vs stock bennu, Docker", "time since the write was sent, p50, ms", ax, handles(["docker"]),
+           note="5 reps, 500 flips per stack. Provider-applied is the provider's own stamp (ferrofire: --stamp-writes; stock: bench/stock_provider.py), on the SCADA driver's host clock.")
+    # 9c simultaneous breaker flips: how many were done in time, by n, R = 1 and 10
+    ns, rows = [1, 5, 10, 50, 100, 1000], []
+    fig, axs = fig_ax(ncols=2)
+    for ax, R in zip(axs, (1, 10)):
+        bars = []
+        for s in ("ferrofire", "stock"):
+            ph = [q for q in phs("docker", s) if q["R"] == R and q["cell"].startswith("breaker:sim:")]
+            by = {n: [q for q in ph if q["n"] == n] for n in ns}
+            bars.append((FF if s == "ferrofire" else STK, "", [100 * sum(q["ok"] for q in by[n]) / sum(q["issued"] for q in by[n]) for n in ns]))
+            rows += [(SNAME[s], R, n, int(sum(q["issued"] for q in by[n])), int(sum(q["ok"] for q in by[n])), int(sum(q["lost"] for q in by[n])), len(by[n])) for n in ns]
+        cbars(ax, [str(n) for n in ns], bars, fmt="{:.0f}")
+        ax.set_title(f"{R} RTU" + ("s" if R > 1 else ""), fontsize=8.5, color=INK2, loc="left")
+        ax.set_xlabel("flips issued at once", color=INK2)
+    finish(fig, "09c-breaker-sim-done", rows, ["stack", "RTUs", "flips issued at once", "commands issued", "done within 10 s", "lost", "phases"],
+           "Simultaneous breaker flips done in time: ferrofire vs stock bennu, Docker", "share of the flips visible at the SCADA within 10 s, %", axs[0], handles(["docker"]),
+           note="All flips of a phase sent at once, one Modbus client per RTU. 5 reps; the n = 1000 phases of stock bennu ran once (1 rep).")
+    # 9d simultaneous throughput
+    rows, fig = [], None
+    fig, axs = fig_ax(ncols=2)
+    for ax, R in zip(axs, (1, 10)):
+        bars = []
+        for s in ("ferrofire", "stock"):
+            ph = [q for q in phs("docker", s) if q["R"] == R and q["cell"].startswith("breaker:sim:")]
+            by = {n: [q["per_s"] for q in ph if q["n"] == n] for n in ns}
+            bars.append((FF if s == "ferrofire" else STK, "", [st.median(by[n]) for n in ns]))
+            rows += [(SNAME[s], R, n, len(by[n]), f"{st.median(by[n]):.1f}") for n in ns]
+        cbars(ax, [str(n) for n in ns], bars, fmt="{:,.0f}", log=True)
+        ax.set_title(f"{R} RTU" + ("s" if R > 1 else ""), fontsize=8.5, color=INK2, loc="left")
+        ax.set_xlabel("flips issued at once", color=INK2)
+    finish(fig, "09d-breaker-sim-throughput", rows, ["stack", "RTUs", "flips issued at once", "phases", "median flips per s"],
+           "Simultaneous breaker flips per second: ferrofire vs stock bennu, 1 and 10 RTUs, Docker", "flips done per second of the phase, median over reps (log scale)", axs[0], handles(["docker"]),
+           note="Done within 10 s over the time from the first write to the last read-back; lost flips are not counted, so a stock phase that lost most of its flips shows what it did serve.")
+    # 9e generators: spin-up and spin-down, sequential, all n and R pooled
+    cats = ["spin-up: status on\nat the SCADA", "spin-up: PG within 1%\nof the setpoint", "spin-down: status off\nat the SCADA"]
+    rows, bars = [], []
+    for s in ("ferrofire", "stock"):
+        g = [("status on", lat("docker", s, "visible", "gen", "seq", dir="up")), ("PG at setpoint", lat("docker", s, "setpoint", "gen", "seq", dir="up")), ("status off", lat("docker", s, "visible", "gen", "seq", dir="down"))]
+        bars.append((FF if s == "ferrofire" else STK, "", [cr.pct(v, .5) for _, v in g]))
+        rows += [(SNAME[s], k, len(v), p(v, .5), p(v, .95), p(v, .99), f0(v[-1]) if v else "") for k, v in g]
+    fig, (ax,) = fig_ax()
+    cbars(ax, cats, bars)
+    finish(fig, "09e-gen", rows, ["stack", "event", "generators done", "p50 ms", "p95 ms", "p99 ms", "max ms"],
+           "Generator spin-up and spin-down: ferrofire (ramp) vs stock bennu (no ramp), Docker", "SCADA write sent to the event, p50, ms", ax, handles(["docker"]),
+           note="Generators 1, 2, 5, 10 on 1, 2, 5, 10 RTUs pooled, 5 reps. Ferrofire spin-down: PG ramps 40 MW to 0 first, status goes off at the end. Stock has no ramp and no PG readback to wait on (n/a).")
+    # 9f Docker vs range
+    Rr, rows = [1, 2, 5], []
+    fig, axs = fig_ax(ncols=2)
+    for ax, mode in zip(axs, ("seq", "sim")):
+        bars = []
+        for s, e in SERIES:
+            v = {R: lat(e, s, "visible", "breaker", mode, 100, R) for R in Rr}
+            bars.append((FF if s == "ferrofire" else STK, HATCH[e], [cr.pct(v[R], .5) for R in Rr]))
+            rows += [(SNAME[s], e, mode, R, len(v[R]), p(v[R], .5), p(v[R], .95), p(v[R], .99), f0(v[R][-1])) for R in Rr]
+        cbars(ax, [f"{R} RTU" + ("s" if R > 1 else "") for R in Rr], bars, log=True)
+        ax.set_title({"seq": "sequential", "sim": "simultaneous (completed flips only)"}[mode], fontsize=8.5, color=INK2, loc="left")
+    finish(fig, "09f-docker-vs-range", rows, ["stack", "where", "mode", "RTUs", "flips done", "p50 ms", "p95 ms", "p99 ms", "max ms"],
+           "100 breaker flips: Docker vs live range, ferrofire vs stock bennu", "SCADA write sent to read-back showing the new state, p50, ms (log scale)", axs[0], handles(["docker", "range"]),
+           note="Docker: 5 reps, 18 vCPU VM. Range: 3 reps, arm64 KVM VMs (provider and SCADA driver on one VM). Stock simultaneous flips that were lost are not in the p50.")
+    # 9g lost and wrong, all phases
+    rows = []
+    for e in ("docker", "range"):
+        for s in ("ferrofire", "stock"):
+            for kind, mode in (("breaker", "seq"), ("breaker", "sim"), ("gen", "seq"), ("gen", "sim")):
+                ph = [q for q in phs(e, s) if q["cell"].startswith(f"{kind}:{mode}:")]
+                t = lambda k: int(sum(q[k] for q in ph))
+                rows.append((e, SNAME[s], f"{kind} {mode}", t("issued"), t("lost"), t("wrong_final"), t("wrong_provider"), t("wrong_collateral"), t("order_violations"), t("flaps"), t("write_errors"), len(ph)))
+    TABLES["09g-lost-wrong"] = "\n".join(["| where | stack | family | commands | lost | wrong final | wrong at provider | wrong collateral | order violations | flaps | write errors | phases |", "|" + "---|" * 12] + ["| " + " | ".join(map(str, r)) + " |" for r in rows])
+    # 9h per-cell numbers (CSV only): every (where, stack, cell, direction, R)
+    with open(OUT / "09h-control-all-cells.csv", "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["where", "stack", "kind", "mode", "n", "dir", "RTUs", "commands", "done", "lost", "visible p50 ms", "p95", "p99", "max", "applied p50 ms", "setpoint p50 ms"])
+        for s, e in SERIES:
+            g = {}
+            for c in cmds(e, s):
+                g.setdefault((c["kind"], c["mode"], c["n"], c["dir"], c["R"]), []).append(c)
+            for k in sorted(g, key=lambda k: (k[0], k[1], k[2], k[3], k[4])):
+                cs = g[k]
+                v, a, sp = (sorted(c[f] for c in cs if c["done"] and c[f] is not None) for f in ("visible", "applied", "setpoint"))
+                w.writerow([e, s, *k[:4], k[4], len(cs), len(v), len(cs) - len(v), p(v, .5), p(v, .95), p(v, .99), f0(v[-1]) if v else "", p(a, .5), p(sp, .5)])
+    sv = dict(l.split(" ", 1) for l in (cr.CTL / "solve-time.txt").read_text().splitlines() if l.startswith(("per_solve_ms", "host_load", "docker_vm")))
+    TABLES["09i-solve"] = sv["per_solve_ms"].split(" (")[0]
+
+
 def main():
-    for f in (chart_age, chart_loss, chart_reorder, chart_stale, chart_fanout, chart_nng, chart_live, chart_ovs, chart_bennu):
+    for f in (chart_age, chart_loss, chart_reorder, chart_stale, chart_fanout, chart_nng, chart_live, chart_ovs, chart_bennu, chart_control):
         f()
-    text = (HERE / "results.md.in").read_text()
-    for k, v in TABLES.items():
-        text = text.replace("{{table:" + k + "}}", v)
-    left = re.findall(r"\{\{[^}]+\}\}", text)
-    assert not left, left
-    (ROOT / "docs/results.md").write_text(text)
+    for tin, tout in (("results.md.in", ROOT / "docs/results.md"), ("control_latency.md.in", ROOT / "docs/bench/control-latency.md")):
+        text = (HERE / tin).read_text()
+        for k, v in TABLES.items():
+            text = text.replace("{{table:" + k + "}}", v)
+        left = re.findall(r"\{\{[^}]+\}\}", text)
+        assert not left, left
+        tout.write_text(text)
     print("wrote", len(list(OUT.glob("*.svg"))), "charts and docs/results.md")
 
 

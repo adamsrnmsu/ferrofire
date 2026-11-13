@@ -37,6 +37,81 @@ fn terminate(mut c: Child) -> (bool, String) {
     (status.success(), out)
 }
 
+/// `run --stamp-writes` (ww-1df.23.3): one `Applied:` line per accepted write with the wall clock (unix ns) after the
+/// engine applied the batch and after the step that re-solved it; without the flag, no such line.
+fn stamped_run(flag: &[&str]) -> String {
+    let server = format!("tcp://127.0.0.1:{}", free_port());
+    let child = Command::new(BIN)
+        .args([
+            "run",
+            MODEL,
+            "--server",
+            &server,
+            "--publish",
+            "udp://*;127.0.0.1:45999",
+        ])
+        .args(["--rate", "0.05"])
+        .args(flag)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    assert_eq!(
+        req(&server, "WRITE=lowervalve.open:1,uppergate.open:true"),
+        "ACK="
+    );
+    for _ in 0..50 {
+        if req(&server, "READ=lowervalve.open") == "ACK=1" {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    terminate(child).1
+}
+
+#[test]
+fn stamp_writes_logs_when_each_write_was_applied_and_solved() {
+    let out = stamped_run(&["--stamp-writes"]);
+    let lines: Vec<Vec<u64>> = out
+        .lines()
+        .filter(|l| l.starts_with("Applied: "))
+        .map(|l| {
+            let f: Vec<&str> = l.split(' ').collect();
+            assert_eq!(f[1].split('=').next(), Some("t_apply_ns"), "{l}");
+            assert_eq!(f[2].split('=').next(), Some("t_solved_ns"), "{l}");
+            assert_eq!(
+                &f[3..],
+                [
+                    if l.contains("lowervalve") {
+                        "tag=lowervalve.open"
+                    } else {
+                        "tag=uppergate.open"
+                    },
+                    if l.contains("lowervalve") {
+                        "val=1"
+                    } else {
+                        "val=true"
+                    }
+                ],
+                "{l}"
+            );
+            f[1..3]
+                .iter()
+                .map(|x| x.split('=').nth(1).unwrap().parse().unwrap())
+                .collect()
+        })
+        .collect();
+    assert_eq!(lines.len(), 2, "{out}");
+    for l in &lines {
+        assert!(l[0] > 1_700_000_000_000_000_000 && l[1] >= l[0], "{l:?}");
+    }
+    assert_eq!(lines[0][0], lines[1][0], "one batch, one tick, one stamp");
+}
+
+#[test]
+fn without_stamp_writes_nothing_is_logged_per_write() {
+    assert!(!stamped_run(&[]).contains("Applied:"));
+}
+
 #[test]
 fn run_serves_requests_publishes_and_stops_on_sigterm() {
     let rx = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();

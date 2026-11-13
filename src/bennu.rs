@@ -332,7 +332,7 @@ pub fn udp_sender(iface: Option<&str>, dest: SocketAddr) -> Result<UdpSocket, St
     Ok(s)
 }
 
-const USAGE: &str = "ferrofire run [model.yaml | --model model.yaml] [--server tcp://0.0.0.0:5555] [--publish 'udp://*;239.0.0.1:40000'] [--publish-tags 'ENDPOINT=a,b,c' | 'ENDPOINT=@config.xml']... [--rate 0.1] [--gt-addr HOST:PORT [--gt-stale-after 2]]";
+const USAGE: &str = "ferrofire run [model.yaml | --model model.yaml] [--server tcp://0.0.0.0:5555] [--publish 'udp://*;239.0.0.1:40000'] [--publish-tags 'ENDPOINT=a,b,c' | 'ENDPOINT=@config.xml']... [--rate 0.1] [--gt-addr HOST:PORT [--gt-stale-after 2]] [--stamp-writes]";
 
 pub fn main(args: RunArgs) {
     exit_on_err("run", USAGE, run(args));
@@ -378,6 +378,9 @@ pub struct RunArgs {
     /// Seconds without a publish after which the ground-truth page shows a tag as stale
     #[arg(long, value_name = "SECONDS", default_value_t = crate::gt::STALE_AFTER, value_parser = crate::gt::positive)]
     pub gt_stale_after: f64,
+    /// Print an `Applied:` line per accepted write: when it was applied and when the step that re-solved it finished (unix ns)
+    #[arg(long)]
+    pub stamp_writes: bool,
 }
 
 impl RunArgs {
@@ -515,16 +518,53 @@ fn owned_snapshot(model: &Model) -> Vec<(String, Value)> {
         .collect()
 }
 
+/// `--stamp-writes`: log when each accepted write was applied and solved (ww-1df.23.3).
+static STAMP: AtomicBool = AtomicBool::new(false);
+
+fn unix_ns() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64)
+}
+
+/// One `Applied:` line per accepted write (`rejected` tags are left out): the wall clock (unix ns) after the engine applied the
+/// batch and after the step that re-solved it, then the tag and value. A bench joins these to its own send times (one clock when
+/// it shares the host).
+pub fn stamp_lines(
+    applied: u64,
+    solved: u64,
+    writes: &[(String, Value)],
+    rejected: &[String],
+) -> Vec<String> {
+    writes
+        .iter()
+        .filter(|(t, _)| !rejected.contains(t))
+        .map(|(t, v)| {
+            format!(
+                "Applied: t_apply_ns={applied} t_solved_ns={solved} tag={t} val={}",
+                fmt_value(*v)
+            )
+        })
+        .collect()
+}
+
 /// One engine tick: apply queued writes, store the snapshot for the REP side, then advance the model.
 /// Returns the snapshot taken before the step.
 fn engine_tick(model: &mut Model, sh: &Mutex<Shared>) -> Vec<(String, Value)> {
     let writes = std::mem::take(&mut lock(sh).queue);
-    for tag in model.apply_writes(&writes) {
+    let rejected = model.apply_writes(&writes);
+    let applied = unix_ns();
+    for tag in &rejected {
         println!("Warn: write to {tag} rejected");
     }
     let snap = owned_snapshot(model);
     lock(sh).snap = snap.clone();
     model.step(model.dt);
+    if STAMP.load(Ordering::Relaxed) {
+        for l in stamp_lines(applied, unix_ns(), &writes, &rejected) {
+            println!("{l}");
+        }
+    }
     snap
 }
 
@@ -605,6 +645,7 @@ fn resolved_slices(
 }
 
 fn run(a: RunArgs) -> Result<(), String> {
+    STAMP.store(a.stamp_writes, Ordering::Relaxed);
     let mut model = load_model(a.path())?;
     let period = publish_period(a.rate, &model)?;
     let meta = Meta::of(&model);

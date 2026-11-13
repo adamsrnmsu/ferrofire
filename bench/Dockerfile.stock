@@ -1,0 +1,6 @@
+FROM ubuntu:22.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libzmq5 python3 libsodium23 libfreetype6 liblapack3 libboost-system1.74.0 libboost-filesystem1.74.0 libboost-thread1.74.0 libboost-serialization1.74.0 libboost-date-time1.74.0 libboost-program-options1.74.0 libboost-iostreams1.74.0 libunwind8 libusb-1.0-0 iproute2 && rm -rf /var/lib/apt/lists/*
+# build context: images/overlays/bennu-arm64/usr/local of phenix-waterway-range copied to ./local (arm64 bennu 6.0.0, pybennu 6.0.0, pypower 5.1.19)
+COPY local/ /usr/local/
+RUN echo /usr/local/lib > /etc/ld.so.conf.d/usr-local.conf && echo /usr/local/lib/aarch64-linux-gnu >> /etc/ld.so.conf.d/usr-local.conf && ldconfig

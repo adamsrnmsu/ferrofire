@@ -1,0 +1,15 @@
+stack,R,rep,cell,mode,kind,dir,n,issued,ok,lost,wrong_final,wrong_provider,wrong_collateral,order_violations,flaps,write_errors,span_s,wall_s,per_s,poll_errors,vm_load1_start_end
+ferrofire,2,3,breaker:seq:1,seq,breaker,open,1,1,1,0,0,0,0,0,0,0,0.081,1.195,12.37,0,0.03/0.03
+ferrofire,2,3,breaker:sim:1,sim,breaker,open,1,1,1,0,0,0,0,0,0,0,0.068,1.191,14.76,0,0.03/0.03
+ferrofire,2,3,breaker:seq:10,seq,breaker,open,10,10,10,0,0,0,0,0,0,0,0.959,2.082,10.42,0,0.03/0.03
+ferrofire,2,3,breaker:sim:10,sim,breaker,open,10,10,10,0,0,0,0,0,0,0,0.050,1.166,200.02,0,0.03/0.03
+ferrofire,2,3,breaker:seq:100,seq,breaker,open,100,100,100,0,0,0,0,0,0,0,9.973,11.095,10.03,0,0.02/0.26
+ferrofire,2,3,breaker:sim:100,sim,breaker,open,100,100,100,0,0,0,0,6,0,0,0.166,1.294,603.26,0,0.26/0.26
+ferrofire,2,3,gen:seq:1,seq,gen,down,1,1,1,0,0,0,0,0,1,0,1.066,2.188,0.94,0,0.24/0.24
+ferrofire,2,3,gen:seq:1,seq,gen,up,1,1,1,0,0,0,0,0,0,0,1.068,2.195,0.94,0,0.24/0.24
+ferrofire,2,3,gen:sim:1,sim,gen,down,1,1,1,0,0,0,0,0,1,0,1.071,2.195,0.93,0,0.22/0.22
+ferrofire,2,3,gen:sim:1,sim,gen,up,1,1,1,0,0,0,0,0,0,0,1.067,2.187,0.94,0,0.22/0.28
+ferrofire,2,3,gen:seq:5,seq,gen,down,5,5,5,0,0,0,0,0,5,0,5.471,6.595,0.91,0,0.28/0.26
+ferrofire,2,3,gen:seq:5,seq,gen,up,5,5,5,0,0,0,0,0,0,0,5.467,6.596,0.91,0,0.26/0.24
+ferrofire,2,3,gen:sim:5,sim,gen,down,5,5,5,0,0,0,0,0,5,0,1.069,2.194,4.68,0,0.22/0.22
+ferrofire,2,3,gen:sim:5,sim,gen,up,5,5,5,0,0,0,0,0,0,0,1.068,2.186,4.68,0,0.22/0.22

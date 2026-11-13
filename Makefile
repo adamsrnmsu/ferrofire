@@ -10,7 +10,7 @@ DRY_MIN := 0.8
 # ponytail: pid lock; a kill -9 of make leaves a stale file that src-free ignores because the pid is gone.
 MUTATE_LOCK := .mutate.lock
 
-.PHONY: differential diff-dnp3 diff-modbus testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report charts image fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
+.PHONY: differential diff-dnp3 diff-modbus testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report bench-control charts image fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
 help:    # list targets
 	@grep -E '^[a-z-]+:.*#' $(MAKEFILE_LIST) | sed -E 's/^([a-z-]+):[^#]*#/\1\t/'
 src-free:   # fail fast while make mutate is rewriting src/
@@ -52,6 +52,9 @@ charts:   # docs/img/charts/*.svg (+ CSVs) and docs/results.md from the committe
 	uv run --with matplotlib python bench/charts.py
 bench-dg: image   # datagram v1 matrix (age, netem loss, per-RTU fan-out, restarts, faults; about 1.5 h) -> docs/bench/results/raw-datagram-v1
 	python3 bench/run_dg.py
+STACK ?= ferrofire
+bench-control: image   # control-latency matrix (breaker flips, generator spin up/down, 1-10 RTUs; hours) -> docs/bench/results/control/$(STACK); STACK=ferrofire (see bench/run_control.py for the env knobs)
+	STACK=$(STACK) python3 bench/run_control.py
 bench-dg-report:   # docs/bench/datagram-v1-bench.md from the datagram v1 raw results
 	python3 bench/dg_report.py
 FUZZ_TARGETS := request datagram expr model fd_datagram fd_config fd_modbus fd_dnp3 fd_iec61850 fd_iccp fd_mqtt fd_scpi fd_hislip fd_vxi11

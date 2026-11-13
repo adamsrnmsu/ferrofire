@@ -476,3 +476,23 @@ fn writes_are_checked_against_type_and_limits() {
         "rejected writes queue nothing"
     );
 }
+
+#[test]
+fn stamp_lines_carry_both_clocks_the_tag_and_the_value_and_skip_rejected_writes() {
+    use ferrofire::bennu::stamp_lines;
+    let w = [
+        ("a.b".to_string(), Value::Binary(false)),
+        ("c".to_string(), Value::Analog(2.5)),
+        ("bad".to_string(), Value::Analog(1.0)),
+    ];
+    let rejected = ["bad".to_string()];
+    assert_eq!(
+        stamp_lines(7, 9, &w, &rejected),
+        [
+            "Applied: t_apply_ns=7 t_solved_ns=9 tag=a.b val=false",
+            "Applied: t_apply_ns=7 t_solved_ns=9 tag=c val=2.5"
+        ]
+    );
+    assert_eq!(stamp_lines(7, 9, &w, &[]).len(), 3);
+    assert!(stamp_lines(7, 9, &[], &[]).is_empty());
+}
