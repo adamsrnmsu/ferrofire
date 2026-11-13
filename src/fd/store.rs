@@ -7,11 +7,26 @@ use crate::hint::lock;
 use crate::model::{Kind, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+/// How long a point the provider ACKed keeps the ACKed value against a stream value that differs (ww-1df.32). The provider ACKs
+/// when it queues a write and applies it at its next engine tick, so datagrams published in between still carry the old value.
+const ACK_HOLD: Duration = Duration::from_secs(2);
 
 struct Point {
     value: Value,
     /// Unix seconds of the last provider update; 0 until the first.
     ts: u64,
+    /// The ACKed value still waiting for the stream to show it, and when that wait ends.
+    hold: Option<(Value, Instant)>,
+}
+
+/// The same value; a NaN is the same value as itself (a register of zero span unscales to NaN).
+fn same(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Analog(x), Value::Analog(y)) => x == y || (x.is_nan() && y.is_nan()),
+        _ => a == b,
+    }
 }
 
 #[derive(Default)]
@@ -80,6 +95,7 @@ impl Store {
             s.points.entry(name.clone()).or_insert(Point {
                 value: zero(kind),
                 ts: 0,
+                hold: None,
             });
             if let Some(o) = owner {
                 s.owner.entry(name).or_insert(o);
@@ -144,22 +160,34 @@ impl Store {
     /// A number the provider published for `point` (`true`/`false` arrive as 1/0). A number that is not 0 or 1 for a binary
     /// point, or any value for an unknown point, is dropped and counted.
     /// ponytail: the datagram receiver hands over f64, so `true` for an analog point lands as 1.0 instead of being dropped.
+    ///
+    /// A point the provider just ACKed keeps the ACKed value until the stream shows it (which ends the wait) or `ACK_HOLD` runs out;
+    /// a different value in between is stale and ignored (neither value nor timestamp changes), though not counted as dropped.
     pub fn publish(&self, point: &str, x: f64, now: u64) -> bool {
+        self.publish_at(point, x, now, Instant::now())
+    }
+
+    /// `publish` with the clock the hold runs on passed in.
+    pub fn publish_at(&self, point: &str, x: f64, now: u64, at: Instant) -> bool {
         let mut s = lock(&self.0);
-        let v = s
-            .points
-            .get(point)
-            .and_then(|p| from_wire(kind_of(p.value), x));
-        match v {
-            Some(value) => {
-                s.points.insert(point.to_string(), Point { value, ts: now });
-                true
+        let Some(p) = s.points.get_mut(point) else {
+            s.dropped += 1;
+            return false;
+        };
+        let Some(value) = from_wire(kind_of(p.value), x) else {
+            s.dropped += 1;
+            return false;
+        };
+        match p.hold.take() {
+            Some((held, until)) if at < until && !same(&held, &value) => {
+                p.hold = Some((held, until))
             }
-            None => {
-                s.dropped += 1;
-                false
+            _ => {
+                p.value = value;
+                p.ts = now;
             }
         }
+        true
     }
 
     /// Published values dropped so far (unknown point or wrong kind).
@@ -190,11 +218,18 @@ impl Store {
     }
 
     /// The provider accepted `v` for `tag`: set the point, and clear the queue entry unless a newer write replaced it.
+    /// The point then holds `v` against stale stream values (see `publish`); a newer ACK replaces the hold.
     pub fn ack(&self, tag: &str, v: Value) {
+        self.ack_at(tag, v, Instant::now());
+    }
+
+    /// `ack` with the clock the hold runs on passed in.
+    pub fn ack_at(&self, tag: &str, v: Value, at: Instant) {
         let mut s = lock(&self.0);
         if let Some(point) = s.alias.get(tag).cloned() {
             if let Some(p) = s.points.get_mut(&point) {
                 p.value = v;
+                p.hold = Some((v, at + ACK_HOLD));
             }
         }
         s.forget(tag, v);
@@ -228,13 +263,9 @@ impl Inner {
         }
     }
 
-    /// Erase the queue entry iff it still holds `v` (compare-and-erase, SPEC 3.2). A NaN is the same value as itself: a register of
-    /// zero span unscales to NaN, and an entry that never compares equal would be sent to the provider for ever.
+    /// Erase the queue entry iff it still holds `v` (compare-and-erase, SPEC 3.2). An entry that never compared equal (a NaN) would
+    /// be sent to the provider for ever.
     fn forget(&mut self, tag: &str, v: Value) {
-        let same = |a: &Value, b: &Value| match (a, b) {
-            (Value::Analog(x), Value::Analog(y)) => x == y || (x.is_nan() && y.is_nan()),
-            _ => a == b,
-        };
         if self.queue.get(tag).is_some_and(|q| same(q, &v)) {
             self.queue.remove(tag);
         }
@@ -418,5 +449,82 @@ mod tests {
         assert!(s.is_queued("ta"));
         s.reject("ta", Value::Analog(1.0));
         assert!(!s.is_queued("ta"));
+    }
+
+    fn ms(base: Instant, n: u64) -> Instant {
+        base + Duration::from_millis(n)
+    }
+
+    #[test]
+    fn a_stale_publish_after_the_ack_keeps_the_acked_value_and_timestamp() {
+        let (s, t0) = (store(), Instant::now());
+        s.publish("out.a", 1.0, 5);
+        s.ack_at("to", Value::Analog(2.0), t0);
+        assert!(s.publish_at("out.a", 1.0, 6, ms(t0, 100)));
+        assert_eq!((s.get_f64("to"), s.timestamp("to")), (Some(2.0), Some(5)));
+        assert_eq!(s.dropped(), 0);
+        assert!(s.publish_at("out.a", 1.0, 7, ms(t0, 1999)));
+        assert_eq!(s.get_f64("to"), Some(2.0));
+    }
+
+    #[test]
+    fn a_confirming_publish_clears_the_hold() {
+        let (s, t0) = (store(), Instant::now());
+        s.ack_at("to", Value::Analog(2.0), t0);
+        s.publish_at("out.a", 2.0, 6, ms(t0, 100));
+        assert_eq!((s.get_f64("to"), s.timestamp("to")), (Some(2.0), Some(6)));
+        s.publish_at("out.a", 3.0, 7, ms(t0, 200)); // another writer, not held any more
+        assert_eq!(s.get_f64("to"), Some(3.0));
+    }
+
+    #[test]
+    fn after_the_deadline_the_stream_wins() {
+        let (s, t0) = (store(), Instant::now());
+        s.ack_at("to", Value::Analog(2.0), t0);
+        s.publish_at("out.a", 1.0, 6, ms(t0, 2000));
+        assert_eq!((s.get_f64("to"), s.timestamp("to")), (Some(1.0), Some(6)));
+        s.ack_at("to", Value::Analog(2.0), t0);
+        s.publish_at("out.a", 1.0, 7, ms(t0, 1999));
+        assert_eq!(s.get_f64("to"), Some(2.0));
+    }
+
+    #[test]
+    fn a_newer_ack_replaces_the_hold() {
+        let (s, t0) = (store(), Instant::now());
+        s.ack_at("to", Value::Analog(2.0), t0);
+        s.ack_at("to", Value::Analog(3.0), ms(t0, 1500));
+        s.publish_at("out.a", 2.0, 6, ms(t0, 2500)); // the old hold would have ended; the new one has not
+        assert_eq!(s.get_f64("to"), Some(3.0));
+        s.publish_at("out.a", 2.0, 7, ms(t0, 3500));
+        assert_eq!(s.get_f64("to"), Some(2.0));
+    }
+
+    #[test]
+    fn a_nan_stream_value_confirms_a_nan_ack() {
+        let (s, t0) = (store(), Instant::now());
+        s.ack_at("to", Value::Analog(f64::NAN), t0);
+        s.publish_at("out.a", f64::NAN, 6, ms(t0, 100));
+        assert_eq!(s.timestamp("to"), Some(6));
+        s.publish_at("out.a", 4.0, 7, ms(t0, 200));
+        assert_eq!(s.get_f64("to"), Some(4.0));
+    }
+
+    #[test]
+    fn a_binary_point_is_held_too_and_a_bad_value_is_still_dropped() {
+        let s = Store::new(Layout {
+            points: vec![("p".into(), Kind::Binary, Some(0))],
+            external: vec![("c".into(), "p".into())],
+            internal: vec![],
+        });
+        let t0 = Instant::now();
+        s.ack_at("c", Value::Binary(true), t0);
+        s.publish_at("p", 0.0, 1, ms(t0, 10));
+        assert_eq!(s.get_bool("c"), Some(true));
+        assert!(!s.publish_at("p", 7.0, 2, ms(t0, 10)));
+        assert_eq!(s.dropped(), 1);
+        assert_eq!(s.get_bool("c"), Some(true));
+        s.publish_at("p", 1.0, 3, ms(t0, 20));
+        s.publish_at("p", 0.0, 4, ms(t0, 30));
+        assert_eq!(s.get_bool("c"), Some(false));
     }
 }
