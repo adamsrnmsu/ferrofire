@@ -243,6 +243,26 @@ the fixed build did all 1 500 and stayed at 5.
 Stock bennu fails all five checks (the field device dies on a truncated Modbus frame; an IEC-104 master starves when a second connects; a DNP3 outstation never accepts again after an accept error; fds leak; the watcher floods its log); with the fixes all five pass.
 Not covered: GOOSE, Windows nodes, the real rig.
 
+## 9. Control latency: breaker flips and generator spin-up and spin-down
+
+ferrofire vs stock bennu (pybennu + stock field devices), same grid (1 250 branches, 10 generators) and SCADA driver, 1 to 10 RTUs, sequential and simultaneous commands, Docker (5 reps, full matrix) and the live range (3 reps, 1, 2, 5 RTUs). Unit: milliseconds from the SCADA write to the read-back showing the new state, p50 (100 sequential flips on 1, 2, 5, 10 RTUs, Docker).
+Full method, every figure, lost and wrong counts, and what stock cannot run (no generator ramp): [control-latency.md](bench/control-latency.md); raw: [results/control/](bench/results/control/).
+
+![Sequential breaker flips, ferrofire vs stock bennu](img/charts/09a-breaker-seq.svg)
+
+| stack | RTUs | flips done | p50 ms | p95 ms | p99 ms | max ms |
+|---|---|---|---|---|---|---|
+| ferrofire | 1 | 500 | 98 | 110 | 114 | 123 |
+| ferrofire | 2 | 500 | 99 | 111 | 118 | 122 |
+| ferrofire | 5 | 500 | 99 | 110 | 114 | 123 |
+| ferrofire | 10 | 500 | 99 | 108 | 113 | 120 |
+| stock bennu | 1 | 500 | 1025 | 1033 | 1035 | 1036 |
+| stock bennu | 2 | 500 | 1023 | 1032 | 1035 | 1037 |
+| stock bennu | 5 | 500 | 1022 | 1035 | 1041 | 1046 |
+| stock bennu | 10 | 500 | 1022 | 1044 | 1051 | 1060 |
+
+Ferrofire shows a flip in about 100 ms, stock bennu in about 1 020 ms; with 100 flips at once on 1 RTU stock loses 81% within 10 s and ferrofire loses none.
+
 ## Other results on the bench and the live range
 
 These have no chart: each is a single measured event rather than a comparison across settings.

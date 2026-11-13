@@ -1,0 +1,25 @@
+stack,where,mode,RTUs,flips done,p50 ms,p95 ms,p99 ms,max ms
+ferrofire,docker,seq,1,500,98,110,114,123
+ferrofire,docker,seq,2,500,99,111,118,122
+ferrofire,docker,seq,5,500,99,110,114,123
+stock bennu,docker,seq,1,500,1025,1033,1035,1036
+stock bennu,docker,seq,2,500,1023,1032,1035,1037
+stock bennu,docker,seq,5,500,1022,1035,1041,1046
+ferrofire,range,seq,1,300,99,104,110,113
+ferrofire,range,seq,2,300,99,111,119,122
+ferrofire,range,seq,5,300,99,110,113,117
+stock bennu,range,seq,1,300,1017,1062,1080,2031
+stock bennu,range,seq,2,300,1019,1047,1060,1074
+stock bennu,range,seq,5,300,1020,1046,1058,1061
+ferrofire,docker,sim,1,500,91,103,103,104
+ferrofire,docker,sim,2,500,87,92,92,92
+ferrofire,docker,sim,5,500,87,103,103,103
+stock bennu,docker,sim,1,94,5017,9130,9996,9996
+stock bennu,docker,sim,2,184,4981,9093,9096,9096
+stock bennu,docker,sim,5,464,4976,9081,9952,9953
+ferrofire,range,sim,1,300,95,156,161,163
+ferrofire,range,sim,2,300,60,122,129,132
+ferrofire,range,sim,5,300,122,156,168,172
+stock bennu,range,sim,1,59,5483,9741,9848,9848
+stock bennu,range,sim,2,114,5249,9334,9390,9397
+stock bennu,range,sim,5,295,5191,9797,9874,9882
