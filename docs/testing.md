@@ -94,7 +94,11 @@ waterway transit against the original Simulink model output where it exists.
 **Oracle.** Stock bennu RTUs (they accept the datagrams and publish the values over Modbus, which a Modbus client reads); `tc
 netem` for loss (the injected rate is the reference for the measured one); tshark.
 
-**Run.** `make test` (vector, receiver); `make wireshark` (dissector; host tshark, not in `check`); `make bench-dg` (about 1.5 h,
+- Sender (ww-1df.27): `tests/bennu.rs` (`*` sets IP_MULTICAST_IF, `send_all` waits on EAGAIN with a bounded budget and counts drops, a full 8112-tag cycle
+  loses nothing) and `tests/netns.rs`: a private network namespace holding one TUN interface address and no multicast or default route; the
+  publish must leave through it. It needs CAP_SYS_ADMIN, so `make netns` runs it in a privileged container (plain `make test` skips it).
+
+**Run.** `make test` (vector, receiver); `make netns` (sender namespace test); `make wireshark` (dissector; host tshark, not in `check`); `make bench-dg` (about 1.5 h,
 then `make bench-dg-report` writes the report from the raw files); the live range runs are described in section G of the bench
 report, with captures in `docs/live-tools/`.
 

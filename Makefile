@@ -10,7 +10,7 @@ DRY_MIN := 0.8
 # ponytail: pid lock; a kill -9 of make leaves a stale file that src-free ignores because the pid is gone.
 MUTATE_LOCK := .mutate.lock
 
-.PHONY: differential diff-dnp3 diff-modbus testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report bench-control charts image fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
+.PHONY: netns differential diff-dnp3 diff-modbus testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report bench-control charts image fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
 help:    # list targets
 	@grep -E '^[a-z-]+:.*#' $(MAKEFILE_LIST) | sed -E 's/^([a-z-]+):[^#]*#/\1\t/'
 src-free:   # fail fast while make mutate is rewriting src/
@@ -28,6 +28,8 @@ golden:  # PYPOWER 5.1.19 reference results -> target/golden (needs uv; generate
 	uv run --python 3.11 --with PYPOWER==5.1.19 --with 'numpy<2' --with 'scipy<1.14' python -I -W ignore tests/golden/gen_pypower.py target/golden
 test: golden image src-free   # unit + integration tests in the container (no cargo needed on the host)
 	$(IN) cargo test
+netns: image src-free   # ww-1df.27: RADIO publisher in a private netns with one interface address (needs a privileged container: CAP_SYS_ADMIN, /dev/net/tun)
+	$(subst docker run --rm,docker run --rm --privileged,$(IN)) cargo test --test netns -- --nocapture
 wireshark:   # tshark + Lua: datagram v1 test vector, and iccp.lua over tests/pcaps/iccp (field goldens, 0 malformed; host tool, not in check)
 	tools/wireshark/test.sh
 zeek-iccp:   # build the ICCP Spicy analyzer and run its btest suite on tests/pcaps/iccp in the ff-zeek container (--update: ZEEK_ICCP_FLAGS=--update)
