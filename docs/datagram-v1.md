@@ -96,8 +96,16 @@ not refreshed and the entries age out).
 ## Failure behaviour
 
 Sender (provider):
-- The send socket is non-blocking. A refused `send_to` (ENOBUFS, network unreachable, interface down, ...) costs that datagram: it is
+- The send socket is non-blocking. A full send buffer (EAGAIN) does not cost a datagram: the sender raises `SO_SNDBUF` to what one whole cycle
+  needs (payload plus about 768 bytes of kernel overhead per datagram, requested size capped at 4 MiB, and an unprivileged process is held
+  to `net.core.wmem_max` anyway), and when the buffer is still full it waits for writability (`poll`) for at most 10 ms per publish cycle in
+  total, so the engine tick is never blocked unboundedly. A 8112-tag cycle (about 160 datagrams) goes out with the default buffers.
+- What cannot be sent in that budget, or is refused outright (ENOBUFS, network unreachable, interface down, ...), costs that datagram: it is
   counted (`Publisher::dropped`), logged at most once per 10 s, and the engine tick goes on. `seq` still advances, so receivers see the gap.
+- Interface `*` (`udp://*;239.0.0.1:40000`) sets `IP_MULTICAST_IF` to the first non-loopback IPv4 address that is up, as libzmq's udp_engine
+  does, so a flat VLAN host with only an interface address (no 224.0.0.0/4 route, no default route) sends instead of failing ENETUNREACH.
+  The chosen address is logged once at start-up. An explicit interface address in the endpoint (`udp://10.1.1.2;...`) is authoritative.
+  With no usable interface the kernel's own routing decides, as before.
 - Datagram bytes are produced and sent from the engine thread right after each tick (`publish_all`): there is no queue to back up.
 
 Receiver (`ferrofire::datagram::Receiver`; the rules for the bench client and the Rust field device). A datagram is ignored, never fatal, when it is:

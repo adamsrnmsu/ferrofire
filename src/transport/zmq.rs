@@ -1,6 +1,10 @@
 use super::{Handler, Publisher, Requester};
-use crate::bennu::{datagrams_msg, group_for, parse_udp, udp_sender, with_nul, STOP};
+use crate::bennu::{
+    cycle_bytes, datagrams_msg, group_for, grow_sndbuf, parse_udp, send_all, udp_sender, with_nul,
+    STOP,
+};
 use crate::hint::{show, RateLimit};
+use crate::sys::wait_writable;
 use ::zeromq::{Socket, SocketRecv, SocketSend};
 use std::net::{SocketAddr, UdpSocket};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -12,6 +16,8 @@ use tokio::time::timeout;
 const IO_TIMEOUT: Duration = Duration::from_millis(1000);
 /// At most one "UDP send failed" line per this long.
 const SEND_WARN_EVERY: Duration = Duration::from_secs(10);
+/// Longest one publish cycle waits in total for a full send buffer to drain before dropping the rest.
+const SEND_WAIT: Duration = Duration::from_millis(10);
 
 /// The pure-Rust `zeromq` crate is async; each socket owner drives it from its own single-threaded runtime.
 fn runtime() -> Result<tokio::runtime::Runtime, String> {
@@ -157,15 +163,20 @@ impl Publisher for Radio {
         let seq0 = self.seq.load(Ordering::SeqCst);
         let ds = datagrams_msg(&self.group, msg, seq0, cyc, t_ns);
         self.seq.fetch_add(ds.len() as u64, Ordering::SeqCst);
-        for d in ds {
-            if let Err(e) = self.sock.send_to(&d, self.dest) {
-                let n = self.dropped.fetch_add(1, Ordering::SeqCst) + 1;
-                if self.warn.allow(Instant::now()) {
-                    tracing::warn!(
-                        "{}: UDP send failed ({e}); {n} datagrams dropped so far",
-                        self.endpoint
-                    );
-                }
+        grow_sndbuf(&self.sock, cycle_bytes(&ds));
+        let (n, err) = send_all(
+            &ds,
+            |d| self.sock.send_to(d, self.dest),
+            |t| wait_writable(&self.sock, t),
+            SEND_WAIT,
+        );
+        if let Some(e) = err {
+            let total = self.dropped.fetch_add(n, Ordering::SeqCst) + n;
+            if self.warn.allow(Instant::now()) {
+                tracing::warn!(
+                    "{}: UDP send failed ({e}); {total} datagrams dropped so far",
+                    self.endpoint
+                );
             }
         }
     }

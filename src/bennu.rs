@@ -317,10 +317,25 @@ pub fn parse_udp(ep: &str) -> Result<(Option<String>, SocketAddr), String> {
 fn multicast_setup(s: &UdpSocket, iface: Option<&str>) -> Result<(), String> {
     s.set_multicast_ttl_v4(1).map_err(|e| e.to_string())?; // libzmq multicast_hops default
     s.set_multicast_loop_v4(true).map_err(|e| e.to_string())?; // same-host subscribers work
-    let Some(i) = iface else { return Ok(()) };
-    let a: Ipv4Addr = i
-        .parse()
-        .map_err(|_| format!("interface `{i}`: only IPv4 addresses are supported"))?;
+    let a: Ipv4Addr = match iface {
+        Some(i) => i
+            .parse()
+            .map_err(|_| format!("interface `{i}`: only IPv4 addresses are supported"))?,
+        // `*`: like libzmq, send out of the first non-loopback IPv4 interface that is up, so a flat VLAN with no 224/4
+        // or default route still works. Nothing found: the kernel's own pick, as before.
+        None => match crate::sys::first_up_ipv4() {
+            Some(a) => {
+                tracing::info!(
+                    "multicast interface `*` -> {a} (first non-loopback IPv4 that is up)"
+                );
+                a
+            }
+            None => {
+                tracing::warn!("multicast interface `*`: no non-loopback IPv4 interface is up; the kernel picks");
+                return Ok(());
+            }
+        },
+    };
     crate::sys::set_multicast_if(s, a)
 }
 
@@ -330,6 +345,59 @@ pub fn udp_sender(iface: Option<&str>, dest: SocketAddr) -> Result<UdpSocket, St
         multicast_setup(&s, iface)?;
     }
     Ok(s)
+}
+
+/// Largest SO_SNDBUF we ask for (the kernel doubles it, and an unprivileged process is held to net.core.wmem_max anyway).
+pub const SNDBUF_CAP: usize = 4 << 20;
+/// Kernel cost of one queued datagram beyond its payload (sk_buff, headers), generous; the kernel's doubling covers the rest.
+const SKB_OVERHEAD: usize = 768;
+
+/// Make the send buffer hold a whole cycle of `need` bytes (capped at SNDBUF_CAP); returns the size now in effect.
+/// A buffer already big enough is left alone. A bigger cycle than the cap/wmem_max allows falls back on `send_all`'s wait.
+pub fn grow_sndbuf(s: &UdpSocket, need: usize) -> usize {
+    let r = socket2::SockRef::from(s);
+    let have = r.send_buffer_size().unwrap_or(0);
+    if have >= need {
+        return have;
+    }
+    // best effort: a refused setsockopt leaves the old size and `send_all` handles the rest
+    let _ = r.set_send_buffer_size(need.min(SNDBUF_CAP));
+    r.send_buffer_size().unwrap_or(have)
+}
+
+/// Bytes the kernel needs to queue every datagram of one cycle.
+pub fn cycle_bytes(ds: &[Vec<u8>]) -> usize {
+    ds.iter().map(|d| d.len() + SKB_OVERHEAD).sum()
+}
+
+/// Send every datagram in order. A full send buffer (EAGAIN) waits for writability, at most `budget` for the whole call,
+/// so the engine tick never blocks unboundedly. Anything still unsent (budget out, or a hard error such as ENETUNREACH)
+/// is dropped and counted: returns the number dropped and the last error. Each datagram keeps its seq, so receivers see the gap.
+pub fn send_all(
+    ds: &[Vec<u8>],
+    mut send: impl FnMut(&[u8]) -> std::io::Result<usize>,
+    mut wait: impl FnMut(Duration) -> bool,
+    budget: Duration,
+) -> (u64, Option<std::io::Error>) {
+    let (t0, mut dropped, mut last) = (Instant::now(), 0, None);
+    for d in ds {
+        loop {
+            match send(d) {
+                Ok(_) => break,
+                Err(e) => {
+                    let blocked = e.kind() == std::io::ErrorKind::WouldBlock;
+                    let left = budget.saturating_sub(t0.elapsed());
+                    if blocked && !left.is_zero() && wait(left) {
+                        continue;
+                    }
+                    dropped += 1;
+                    last = Some(e);
+                    break;
+                }
+            }
+        }
+    }
+    (dropped, last)
 }
 
 const USAGE: &str = "ferrofire run [model.yaml | --model model.yaml] [--server tcp://0.0.0.0:5555] [--publish 'udp://*;239.0.0.1:40000'] [--publish-tags 'ENDPOINT=a,b,c' | 'ENDPOINT=@config.xml']... [--rate 0.1] [--gt-addr HOST:PORT [--gt-stale-after 2]] [--stamp-writes]";

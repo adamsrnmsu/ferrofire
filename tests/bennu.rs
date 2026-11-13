@@ -2,6 +2,7 @@
 use ferrofire::bennu::*;
 use ferrofire::model::{Model, Value};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 #[test]
 fn group_hash_matches_libstdcxx() {
@@ -495,4 +496,173 @@ fn stamp_lines_carry_both_clocks_the_tag_and_the_value_and_skip_rejected_writes(
     );
     assert_eq!(stamp_lines(7, 9, &w, &[]).len(), 3);
     assert!(stamp_lines(7, 9, &[], &[]).is_empty());
+}
+
+// ---- RADIO sender: interface choice for '*' and backpressure (ww-1df.27) ------------------------------------
+
+fn multicast_if_of(s: &std::net::UdpSocket) -> std::net::Ipv4Addr {
+    use std::os::fd::AsRawFd;
+    let mut a = libc::in_addr { s_addr: 0 };
+    let mut len = std::mem::size_of::<libc::in_addr>() as libc::socklen_t;
+    // SAFETY: `a` and `len` outlive the call and `len` is exactly the size of `a`; the fd is live (borrowed).
+    let rc = unsafe {
+        libc::getsockopt(
+            s.as_raw_fd(),
+            libc::IPPROTO_IP,
+            libc::IP_MULTICAST_IF,
+            &mut a as *mut _ as *mut libc::c_void,
+            &mut len,
+        )
+    };
+    assert_eq!(rc, 0);
+    std::net::Ipv4Addr::from(u32::from_be(a.s_addr))
+}
+
+#[test]
+fn pick_up_ipv4_skips_loopback_and_down_interfaces() {
+    use ferrofire::sys::pick_up_ipv4;
+    let up = libc::IFF_UP as u32;
+    let lo = libc::IFF_LOOPBACK as u32;
+    let a = |n: u8| std::net::Ipv4Addr::new(10, 0, 0, n);
+    assert_eq!(
+        pick_up_ipv4([(up | lo, a(1)), (up, a(2)), (up, a(3))]),
+        Some(a(2))
+    );
+    assert_eq!(pick_up_ipv4([(0, a(1)), (up, a(2))]), Some(a(2)));
+    assert_eq!(pick_up_ipv4([(up | lo, a(1)), (0, a(2))]), None);
+    assert_eq!(pick_up_ipv4([]), None);
+}
+
+#[test]
+fn wildcard_interface_sets_multicast_if_to_the_first_up_non_loopback_address() {
+    let mc = parse_udp("udp://239.0.0.1:9").unwrap().1;
+    let want = ferrofire::sys::first_up_ipv4().expect("the test container has a non-loopback IPv4");
+    assert!(!want.is_loopback());
+    assert_eq!(multicast_if_of(&udp_sender(None, mc).unwrap()), want);
+    // an explicit interface stays authoritative
+    let s = udp_sender(Some("127.0.0.1"), mc).unwrap();
+    assert_eq!(multicast_if_of(&s), std::net::Ipv4Addr::LOCALHOST);
+}
+
+#[test]
+fn grow_sndbuf_raises_a_small_buffer_to_the_need_and_caps_it() {
+    use socket2::SockRef;
+    let s = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    SockRef::from(&s).set_send_buffer_size(4096).unwrap();
+    let small = SockRef::from(&s).send_buffer_size().unwrap();
+    let got = grow_sndbuf(&s, 100_000);
+    assert!(got > small && got >= 100_000, "{small} -> {got}");
+    assert_eq!(got, SockRef::from(&s).send_buffer_size().unwrap());
+    // already big enough: untouched
+    assert_eq!(grow_sndbuf(&s, 1000), got);
+    // absurd need: request capped at SNDBUF_CAP (the kernel doubles it)
+    assert!(grow_sndbuf(&s, usize::MAX / 4) <= 2 * SNDBUF_CAP);
+}
+
+fn would_block() -> std::io::Error {
+    std::io::ErrorKind::WouldBlock.into()
+}
+
+#[test]
+fn send_all_waits_for_writability_on_eagain_and_drops_nothing() {
+    // a send buffer that holds 3 datagrams until the wait drains it
+    let ds: Vec<Vec<u8>> = (0..10u8).map(|i| vec![i; 4]).collect();
+    let (room, mut sent, mut waits) = (std::cell::Cell::new(3), Vec::new(), 0);
+    let (dropped, err) = send_all(
+        &ds,
+        |d| {
+            if room.get() == 0 {
+                return Err(would_block());
+            }
+            room.set(room.get() - 1);
+            sent.push(d.to_vec());
+            Ok(d.len())
+        },
+        |_| {
+            waits += 1;
+            room.set(3);
+            true
+        },
+        Duration::from_secs(5),
+    );
+    assert_eq!((dropped, err.is_none()), (0, true));
+    assert_eq!(sent, ds, "in order, none lost");
+    assert_eq!(waits, 3);
+}
+
+#[test]
+fn send_all_drops_and_counts_what_it_cannot_send_within_the_budget() {
+    let ds: Vec<Vec<u8>> = vec![vec![1], vec![2], vec![3]];
+    // never writable: every datagram is dropped, none waits more than once
+    let mut waits = 0;
+    let (dropped, err) = send_all(
+        &ds,
+        |_| Err(would_block()),
+        |_| {
+            waits += 1;
+            false
+        },
+        Duration::from_secs(5),
+    );
+    assert_eq!(dropped, 3);
+    assert_eq!(err.unwrap().kind(), std::io::ErrorKind::WouldBlock);
+    assert_eq!(waits, 3);
+    // an exhausted budget does not even wait
+    let (dropped, _) = send_all(
+        &ds,
+        |_| Err(would_block()),
+        |_| panic!("no time left to wait"),
+        Duration::ZERO,
+    );
+    assert_eq!(dropped, 3);
+    // writable but still full: bounded by the budget, not by the wait's answer
+    let t = std::time::Instant::now();
+    let (dropped, _) = send_all(
+        &ds[..1],
+        |_| Err(would_block()),
+        |_| true,
+        Duration::from_millis(20),
+    );
+    assert_eq!(dropped, 1);
+    assert!(t.elapsed() >= Duration::from_millis(20) && t.elapsed() < Duration::from_secs(2));
+}
+
+#[test]
+fn send_all_keeps_going_after_a_hard_error_and_reports_it() {
+    let ds: Vec<Vec<u8>> = vec![vec![1], vec![2], vec![3]];
+    let mut n = 0;
+    let (dropped, err) = send_all(
+        &ds,
+        |d| {
+            n += 1;
+            if n == 2 {
+                Err(std::io::ErrorKind::NetworkUnreachable.into())
+            } else {
+                Ok(d.len())
+            }
+        },
+        |_| panic!("a hard error is not waited on"),
+        Duration::from_secs(1),
+    );
+    assert_eq!((dropped, n), (1, 3));
+    assert_eq!(err.unwrap().kind(), std::io::ErrorKind::NetworkUnreachable);
+}
+
+#[test]
+fn a_full_8112_tag_cycle_through_the_real_publisher_loses_no_datagram() {
+    let rx = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    socket2::SockRef::from(&rx)
+        .set_recv_buffer_size(8 << 20)
+        .unwrap();
+    rx.set_read_timeout(Some(Duration::from_millis(500)))
+        .unwrap();
+    let ep = format!("udp://127.0.0.1:{}", rx.local_addr().unwrap().port());
+    let p = ferrofire::transport::publisher(&ep).unwrap();
+    let msg = snapshot_msg(&big_snap(8112));
+    let want = datagrams_msg("g", &msg, 0, 0, 0).len();
+    assert!(want > 100, "a cycle is many datagrams: {want}");
+    p.publish(&msg);
+    let mut buf = [0u8; 2048];
+    let got = std::iter::from_fn(|| rx.recv(&mut buf).ok()).count();
+    assert_eq!((p.dropped(), got), (0, want));
 }
