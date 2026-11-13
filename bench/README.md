@@ -119,7 +119,7 @@ sequential mode, one concurrent Modbus client per RTU in simultaneous mode.
 
 - **Lost**: not done within 10 s of `t_cmd` (12 s for a generator, which also has to ramp). 10 s is above the field device's 5 s provider timeout, so one retried WRITE shows as tail latency, not loss.
 - **Wrong**, per phase: `wrong_final` = commands that were done but whose point (or PG) is not at the target after a 1 s settle; `wrong_provider` = done commands whose tag the provider READs back
-  at a different value; `wrong_collateral` = points nobody commanded that changed; `order_violations` = adjacent commands of one RTU that became visible in the opposite order; `flaps` = read-backs that showed the new state and then took it back.
+  at a different value; `wrong_collateral` = points nobody commanded that changed; `order_violations` = adjacent commands of one RTU that became visible in the opposite order (the raw driver column, which includes same-publish chunk skew; the report splits it into `reordered` and `chunk_skew` from t_stream, threshold half the publish period); `flaps` = read-backs that showed the new state and then took it back.
 - **Generator**: spin-down (status off after PG ramps 40 MW to 0 at 40 MW/s, `power.ramp` in the generated model) then spin-up (status on, PG ramps back), each a measured phase; breakers: open the first n of `flip_order`, then restore (unmeasured, checked).
 - The provider stamp joins the first unused `Applied:` line of the command's tag and value at or after `t_cmd`; a provider other than ferrofire only has to log lines of that shape.
 

@@ -42,3 +42,48 @@ def phases(env, stack):
         for r in csv.DictReader(open(f)):
             out.append({k: (float(v) if k in ("n", "issued", "ok", "lost", "wrong_final", "wrong_provider", "wrong_collateral", "order_violations", "flaps", "write_errors", "span_s", "wall_s", "per_s", "poll_errors", "R", "rep") else v) for k, v in r.items()})
     return out
+
+
+# Publish period of the stack's provider: ferrofire runs the grid at dt 0.05 s (bench/gen_grid.py), stock bennu publishes once a second.
+PUBLISH_S = {"ferrofire": 0.05, "ferrofire-before": 0.05, "stock": 1.0}
+
+
+def order_split(rows, period_s):
+    """(reordered, chunk_skew) for one RTU's commands of one phase. Of the adjacent pairs (issue order) whose t_visible is inverted (the driver's
+    order_violations), `reordered` = t_stream inverted by >= half a publish period (the later command's state reached the stream a publish earlier),
+    or t_stream missing; `chunk_skew` = the rest (both states in one publish, polled between its datagrams)."""
+    v = [r for r in sorted(rows, key=lambda r: int(r["seq"])) if int(r["t_visible"])]
+    re = sk = 0
+    for a, b in zip(v, v[1:]):
+        if int(b["t_visible"]) < int(a["t_visible"]):
+            sa, sb = int(a["t_stream"]), int(b["t_stream"])
+            if not (sa and sb) or sa - sb >= period_s * 1e9 / 2:
+                re += 1
+            else:
+                sk += 1
+    return re, sk
+
+
+def order_counts(env, stack):
+    """{(R, 'kind:mode'): [reordered, chunk_skew]} summed over reps, directions and RTUs of the stack's cmds.csv files."""
+    out = {}
+    for f in sorted(glob.glob(f"{DIRS[env, stack]}/R*_rep*.cmds.csv")):
+        g = {}
+        for r in csv.DictReader(open(f)):
+            g.setdefault((r["cell"], r["dir"], r["rtu"]), []).append(r)
+        for (cell, _, _), rows in g.items():
+            kind, mode, _ = cell.split(":")
+            o = out.setdefault((int(rows[0]["R"]), f"{kind}:{mode}"), [0, 0])
+            for i, x in enumerate(order_split(rows, PUBLISH_S[stack])):
+                o[i] += x
+    return out
+
+
+if __name__ == "__main__":  # self-check: python3 bench/control_report.py
+    mk = lambda seq, vis, st: {"seq": str(seq), "t_visible": str(vis), "t_stream": str(st)}
+    # a inverted within 3 ms of stream (skew), b inverted by 1 s of stream (reorder), c no stream stamp (reorder), d not inverted
+    assert order_split([mk(0, 10, 100), mk(1, 5, 98_000_000)], 0.05) == (0, 1)
+    assert order_split([mk(0, 10, 1_000_000_000), mk(1, 5, 5)], 1.0) == (1, 0)
+    assert order_split([mk(0, 10, 0), mk(1, 5, 7)], 0.05) == (1, 0)
+    assert order_split([mk(0, 5, 100), mk(1, 10, 1), mk(2, 0, 1)], 0.05) == (0, 0)
+    print("ok")
