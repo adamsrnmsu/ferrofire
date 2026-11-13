@@ -161,6 +161,13 @@ or `sbo`, so v1 supports exactly the defaults in §4.2 and rejects the rest with
   2. internal tags in the queues are applied to the internal store and erased (`updateInternalData`, `DataManager.hpp:239`).
   Consequence (`O:`): a Modbus write followed by a read returns the **old** value until the provider round trip completes or the next cycle ends; with
   the provider down the read-back never changes (`FC6 40000=32768` then `FC3 40000` → still `4020`).
+- **ACK hold (Rust, ww-1df.32).** The stock device sets the point on ACK and then takes whatever the stream publishes next; stock bennu
+  publishes once a second, so the stale value rarely shows. The Rust provider ACKs when it *queues* the write and applies it at its
+  next engine tick, and the datagram stream is faster, so one published before the apply would put the old value back and the next
+  one the new value (read-back flaps, `docs/bench/control-latency.md` §7). Still set on ACK, but `Store::ack` also records the point as
+  awaiting confirmation for `ACK_HOLD` (2 s, `src/fd/store.rs`): a stream value equal to the ACKed one (NaN equals NaN) confirms it and ends
+  the hold; a different one inside the hold is ignored (value and timestamp stay); after the hold the stream wins again (a write the model
+  refused, a trip, another writer). A newer ACK on the point replaces the hold. Field device only: no wire or provider change.
 - Provider failure handling to keep: batch all pending outputs in one `WRITE=`; on `ERR=` retry per point and drop rejected points; ≥ 5 s REQ timeout × 3, then
   recreate the socket ("lazy pirate", `P:` §2.1, `B:src/bennu/distributed/Client.cpp:11-12,54-127`; `O:` log `Client send: no response from server, retrying...`).
 

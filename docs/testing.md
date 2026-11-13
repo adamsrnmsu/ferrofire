@@ -162,7 +162,7 @@ range; they are not repeated in CI. `doctor` was shown on the three faults above
 
 The core is the config loader, datastore, logic, provider link and module registry (`src/fd`), shared by all protocol modules.
 
-**Checked.** `tests/fielddevice.rs`, `tests/fd_robust.rs` (hostile configs and inputs), fuzz targets `fd_config` and `fd_datagram`,
+**Checked.** `tests/fielddevice.rs`, `tests/fd_robust.rs` (hostile configs and inputs), `tests/fd_flap.rs` (a stale datagram after the provider's ACK must not flap the Modbus read-back, ww-1df.32), fuzz targets `fd_config` and `fd_datagram`,
 and the gates below. Semantics come from [field-device-spec.md](field-device-spec.md), which records what the stock bennu field
 device does, with probes in `conformance/stock/` (`probe_modbus.py`, `probe_modbus_overflow.py`, `probe_dnp3.py`, `probe_104.py`,
 `logic_corpus.xml`) run against `bennu:arm64` by `conformance/stock/run-stock.sh`.

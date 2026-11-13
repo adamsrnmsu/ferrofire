@@ -12,7 +12,7 @@ use ferrofire::fd::proto::dnp3::{link, transport, Commands};
 use ferrofire::fd::store::Store;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Default)]
 struct Buf(Arc<Mutex<Vec<u8>>>);
@@ -33,6 +33,8 @@ struct Rig {
     conn: Conn,
     log: EventLog,
     logged: Buf,
+    /// The store's hold clock starts here; `now` is the virtual time since.
+    t0: Instant,
     now: Duration,
     next_sweep: Duration,
     out: Vec<u8>,
@@ -59,6 +61,7 @@ fn rig(xml: &str) -> Rig {
         conn: Conn::new(),
         log,
         logged,
+        t0: Instant::now(),
         now: Duration::ZERO,
         next_sweep: Duration::ZERO,
         out: vec![],
@@ -76,7 +79,7 @@ impl Rig {
             self.conn.tick(&mut self.dev, self.now);
             // the provider acknowledges queued writes within a scan cycle (the probes run a stand-in REP socket that does)
             for (tag, _, v) in self.store.pending(0) {
-                self.store.ack(&tag, v);
+                self.store.ack_at(&tag, v, self.t0 + self.now);
             }
             self.dev.refresh(&self.store);
             self.next_sweep += Duration::from_secs(1);
@@ -100,7 +103,8 @@ impl Rig {
                 "false" => 0.0,
                 n => n.parse().unwrap(),
             };
-            self.store.publish(name, x, 1_794_324_000);
+            self.store
+                .publish_at(name, x, 1_794_324_000, self.t0 + self.now);
         }
     }
 }
