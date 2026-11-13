@@ -14,6 +14,9 @@
             <!-- default paths: MEASure:SCALar:LEVEL?, MEASure:BINary:BRKR?, SOURce:SETPOINT <v>, SOURce:BREAKER_CMD <0|1|ON|OFF> -->
             <scpi-server>
                 <endpoint>tcp://0.0.0.0:5025</endpoint>
+                <hislip-endpoint>tcp://0.0.0.0:4880</hislip-endpoint>
+                <vxi11-endpoint>tcp://0.0.0.0:111</vxi11-endpoint>
+                <vxi11-core-endpoint>tcp://0.0.0.0:4881</vxi11-core-endpoint>
                 <event-logging>rtu-1-scpi.log</event-logging>
                 <manufacturer>ferrofire</manufacturer>
                 <model>rtu-1</model>

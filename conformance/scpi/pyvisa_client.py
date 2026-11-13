@@ -1,6 +1,8 @@
 """PyVISA (with the pure-Python pyvisa-py backend), an SCPI client independent of ferrofire's own: opens the raw socket resource,
-reads the identity and the tags the provider publishes, sets two, provokes errors and reads the status registers. Prints one PASS line
-per check and exits 1 on the first FAIL. argv[1]: the stand-in provider's log (a write that reached it is a line `WRITE=point:value,`)."""
+reads the identity and the tags the provider publishes, sets two, provokes errors and reads the status registers. Then the same
+instrument over HiSLIP (TCPIP::127.0.0.1::hislip0::INSTR) and VXI-11 (TCPIP::127.0.0.1::INSTR): query, status byte, device clear,
+the status system shared between sessions, -410 from an unread response. Prints one PASS line per check and exits 1 on the first FAIL.
+argv[1]: the stand-in provider's log (a write that reached it is a line `WRITE=point:value,`)."""
 import sys, time
 import pyvisa
 
@@ -53,5 +55,56 @@ check("the out-of-range write never reached the provider", not provider_has("999
 dev.write("SOUR:NOPE 1")
 check("an unknown header is -113", dev.query("SYST:ERR?").startswith("-113,"))
 dev.write("*ESE 0")
+dev.write("*CLS")
 dev.close()
+
+def open_on(resource, timeout=5000):
+    d = rm.open_resource(resource, read_termination="\n", write_termination="\n", timeout=timeout)
+    d.write("*CLS")
+    return d
+
+def transport(name, resource):
+    d = open_on(resource)
+    check(f"{name}: *IDN? names ferrofire rtu-1 CONF-0001", d.query("*IDN?").startswith("ferrofire,rtu-1,CONF-0001,"))
+    check(f"{name}: MEAS:SCAL:LEVEL? = 250.5", d.query_ascii_values("MEAS:SCAL:LEVEL?")[0] == 250.5)
+    check(f"{name}: compound query joins with ;", d.query("MEAS:SCAL:LEVEL?;:MEAS:SCAL:FLOW?;*OPC?") == "250.5;-12.25;1")
+    check(f"{name}: SYST:ERR? is empty so far", d.query("SYST:ERR?") == '0,"No error"')
+    d.write("*ESE 16")
+    d.write("SOUR:SETPOINT 99999")
+    stb = d.read_stb()
+    check(f"{name}: status byte after the error has EAV (4) and ESB (32)", stb & 36 == 36, stb)
+    check(f"{name}: *ESR? is the execution error bit", int(d.query("*ESR?")) == 16)
+    check(f"{name}: SYST:ERR? is -222", d.query("SYST:ERR?").startswith("-222,"))
+    check(f"{name}: status byte once the queue is drained", d.read_stb() & 4 == 0)
+    d.write("*ESE 0")
+    d.clear()
+    check(f"{name}: after a device clear the session still answers", d.query("*OPC?") == "1")
+    check(f"{name}: a device clear is no error", d.query("SYST:ERR?") == '0,"No error"')
+    return d
+
+h = transport("hislip", "TCPIP::127.0.0.1::hislip0::INSTR")
+v = transport("vxi11", "TCPIP::127.0.0.1::INSTR")
+# one instrument, one status system: an error made on one session is found on another, over another protocol
+h.write("SOUR:NOPE 1")
+check("shared status: an error made over HiSLIP is read over VXI-11", v.query("SYST:ERR?").startswith("-113,"))
+check("shared status: and is gone for HiSLIP", h.query("SYST:ERR:COUN?") == "0")
+sock = open_on("TCPIP::127.0.0.1::5025::SOCKET")
+v.write("*ESE 32")
+v.write("SOUR:NOPE 2")
+check("shared status: *ESE and the error made over VXI-11 are seen on the raw socket", sock.query("*ESE?") == "32" and sock.query("SYST:ERR?").startswith("-113,"))
+sock.write("*ESE 0")
+sock.close()
+# IEEE 488.2 over HiSLIP, judged by an independent client: pyvisa-py sets the RMT-delivered bit only once it has read a response, so
+# a second message over a response its first session never read is INTERRUPTED (-410), seen from another session (shared status)
+h.write("*CLS")
+h2 = open_on("TCPIP::127.0.0.1::hislip0::INSTR")
+h2.write("*IDN?")
+time.sleep(0.3)
+h2.write("*OPC?")
+time.sleep(0.3)
+check("hislip: a message over a response that was not read is INTERRUPTED (-410), exactly", h.query("SYST:ERR?").startswith("-410,"))
+check("hislip: and only once", h.query("SYST:ERR:COUN?") == "0")
+h.write("*CLS")
+for d in (h, h2, v):
+    d.close()
 print("PYVISA DONE")

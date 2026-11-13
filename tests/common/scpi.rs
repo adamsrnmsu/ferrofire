@@ -6,12 +6,14 @@ use super::load_as;
 use ferrofire::fd::proto::scpi::Server;
 use ferrofire::fd::store::Store;
 
+/// A port for a test's server: from a block of 100 below the kernel's ephemeral range (32768 up), where no client's source port can take
+/// it, and chosen by the process id so that test binaries running at the same time (mutation workers) do not meet. Nothing is bound
+/// to check it: a probe socket open while another test forks a child is copied into the child, and keeps the port busy (and even
+/// accepting connections) until that child execs, which made the server's own bind fail with "address in use".
 pub fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
+    static NEXT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
+    let base = 12_000 + (std::process::id() % 200) as u16 * 100;
+    base + NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst) % 100
 }
 
 /// `inner`: keys of `<scpi-server>` other than the points, which are always the same five.

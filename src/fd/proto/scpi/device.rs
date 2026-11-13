@@ -9,6 +9,7 @@ use crate::hint::show;
 use crate::model::{Kind, Value};
 use crate::scpi::syntax::{self, Param};
 use std::collections::VecDeque;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 /// The error queue holds this many entries; when full the last one becomes -350 and later errors are dropped (SCPI-99 21.8).
 pub const ERR_CAP: usize = 16;
@@ -165,7 +166,7 @@ struct Env<'a> {
     mav: bool,
 }
 
-type Handler = fn(&mut Session, &Env, &[Param]) -> Reply;
+type Handler = fn(&mut Status, &Env, &[Param]) -> Reply;
 
 struct Entry {
     common: bool,
@@ -198,7 +199,10 @@ const fn system(path: &'static [&'static str], run: Handler) -> Entry {
 
 static FIXED: &[Entry] = &[
     common(&["IDN"], true, 0, |_, e, _| Ok(Some(e.ins.idn.clone()))),
-    common(&["RST"], false, 0, |_, _, _| Ok(None)),
+    common(&["RST"], false, 0, |_, e, _| {
+        reset(e);
+        Ok(None)
+    }),
     common(&["CLS"], false, 0, |s, _, _| {
         s.esr = 0;
         s.errors.clear();
@@ -252,14 +256,31 @@ fn byte(a: &[Param]) -> Result<u8, Fault> {
 
 // ---- one connection ------------------------------------------------------------------------------------------------------
 
-pub struct Session {
-    buf: Vec<u8>,
-    /// Throwing away the rest of an overlong line.
-    skipping: bool,
+/// The status system of IEEE 488.2: event status register and its enable, service request enable, the error queue. One per
+/// instrument or one per connection (`<status-scope>`), shared between the sessions that see the same one.
+#[derive(Default)]
+pub struct Status {
     esr: u8,
     ese: u8,
     sre: u8,
     errors: VecDeque<(i32, String)>,
+}
+
+/// A `Status` the sessions of one scope hold. Locked for one message at a time, never across an await.
+pub type Shared = Arc<Mutex<Status>>;
+
+fn lock(s: &Shared) -> MutexGuard<'_, Status> {
+    s.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// One connection: the line being collected, and the status system it reports to.
+pub struct Session {
+    buf: Vec<u8>,
+    /// Throwing away the rest of an overlong line.
+    skipping: bool,
+    st: Shared,
+    /// Responses of one `feed` are cut at `OUT_CAP` with -410 (the raw socket's approximation of an interrupted query).
+    capped: bool,
 }
 
 impl Default for Session {
@@ -268,31 +289,10 @@ impl Default for Session {
     }
 }
 
-impl Session {
-    pub fn new() -> Session {
-        Session {
-            buf: vec![],
-            skipping: false,
-            esr: 0,
-            ese: 0,
-            sre: 0,
-            errors: VecDeque::new(),
-        }
-    }
-
-    /// Bytes of the unfinished line held (never more than `Instrument::max_line`).
-    pub fn buffered(&self) -> usize {
-        self.buf.len()
-    }
-
-    /// Entries in the error queue (never more than `ERR_CAP`).
-    pub fn queued_errors(&self) -> usize {
-        self.errors.len()
-    }
-
+impl Status {
     /// The status byte. `mav`: a response of this message is waiting. Bit 6 is MSS; bits 3 and 7 (questionable, operation) have no
     /// register behind them here.
-    fn stb(&self, mav: bool) -> u8 {
+    pub fn stb(&self, mav: bool) -> u8 {
         let mut b = 0;
         if !self.errors.is_empty() {
             b |= EAV;
@@ -330,11 +330,87 @@ impl Session {
             None => "0,\"No error\"".into(),
         }
     }
+}
 
-    /// Bytes from the client; the responses to every complete line in them.
+/// A status system for the sessions of one scope to share.
+pub fn shared() -> Shared {
+    Shared::default()
+}
+
+/// `<status-scope>`: whether the sessions of an instrument report to one status system, or each connection to its own.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Scope {
+    Instrument,
+    Connection,
+}
+
+impl Scope {
+    /// The status system for a new session (HiSLIP session, VXI-11 link, socket): the instrument's `global` one, or a new one.
+    pub fn status(self, global: &Shared) -> Shared {
+        match self {
+            Scope::Instrument => global.clone(),
+            Scope::Connection => shared(),
+        }
+    }
+}
+
+/// The status byte of `st`; `mav`: a response is waiting to be read.
+pub fn stb_of(st: &Shared, mav: bool) -> u8 {
+    lock(st).stb(mav)
+}
+
+impl Session {
+    /// A session with a status system of its own (`<status-scope>connection</status-scope>`).
+    pub fn new() -> Session {
+        Session::sharing(shared())
+    }
+
+    /// A session reporting to `st`, which other sessions may report to as well (`instrument` scope).
+    pub fn sharing(st: Shared) -> Session {
+        Session {
+            buf: vec![],
+            skipping: false,
+            st,
+            capped: true,
+        }
+    }
+
+    /// No cap on the responses of a message and so no approximate -410: for a transport that has the real thing (HiSLIP, which
+    /// bounds the message it takes instead).
+    pub fn exact(mut self) -> Session {
+        self.capped = false;
+        self
+    }
+
+    /// The status system this session reports to.
+    pub fn status(&self) -> &Shared {
+        &self.st
+    }
+
+    /// Bytes of the unfinished line held (never more than `Instrument::max_line`).
+    pub fn buffered(&self) -> usize {
+        self.buf.len()
+    }
+
+    /// Entries in the error queue (never more than `ERR_CAP`).
+    pub fn queued_errors(&self) -> usize {
+        lock(&self.st).errors.len()
+    }
+
+    /// The status byte as a status query reads it (nothing is being answered, so no MAV).
+    pub fn stb(&self) -> u8 {
+        lock(&self.st).stb(false)
+    }
+
+    /// Queue an error on the session's status system.
+    pub fn push_error(&self, code: i32, detail: &str) {
+        lock(&self.st).push_error(code, detail);
+    }
+
+    /// Bytes from the client; the responses to every complete line in them. A line ends at `\n`, `\r\n` or a bare `\r`.
     pub fn feed(&mut self, ins: &Instrument, store: &Store, bytes: &[u8]) -> Vec<u8> {
         let mut out = vec![];
-        for chunk in bytes.split_inclusive(|&b| b == b'\n') {
+        for chunk in bytes.split_inclusive(|&b| b == b'\n' || b == b'\r') {
             if let Some(line) = self.take_line(ins.max_line, chunk) {
                 self.message(ins, store, &line, &mut out);
             }
@@ -345,22 +421,54 @@ impl Session {
     /// The client closed its sending side: a last line without a terminator is a message too, and answered (a query in it is
     /// -420, the response having no terminator to answer).
     pub fn eof(&mut self, ins: &Instrument, store: &Store) -> Vec<u8> {
+        self.finish(ins, store, true)
+    }
+
+    /// The END of a message that came in pieces (HiSLIP `DataEND`): what is held is the last line, terminated by the END, so it is
+    /// answered with no error.
+    pub fn end(&mut self, ins: &Instrument, store: &Store) -> Vec<u8> {
+        self.finish(ins, store, false)
+    }
+
+    /// A message that was never ended (the client started another, or went): a query in the unterminated rest is -420 and is not
+    /// run, IEEE 488.2 6.3.2.2. Anything else in it is dropped. True when it was a query, and -420 was queued.
+    pub fn abandon(&mut self) -> bool {
+        let line = line_text(&std::mem::take(&mut self.buf));
+        self.skipping = false;
+        let query = syntax::is_query(&line);
+        if query {
+            self.push_error(-420, "");
+        }
+        query
+    }
+
+    /// Throw away the input being collected (a device clear): no error, nothing run.
+    pub fn clear_input(&mut self) {
+        self.buf.clear();
+        self.skipping = false;
+    }
+
+    fn finish(&mut self, ins: &Instrument, store: &Store, raw: bool) -> Vec<u8> {
         let mut out = vec![];
         // skipping an overlong line means the buffer was given up, so what is left of it is not a message
         if !self.buf.is_empty() {
             let line = line_text(&std::mem::take(&mut self.buf));
             self.message(ins, store, &line, &mut out);
-            if syntax::is_query(&line) {
+            if raw && syntax::is_query(&line) {
                 self.push_error(-420, "");
             }
         }
+        self.skipping = false;
         out
     }
 
-    /// Add `chunk` (ending in a newline or not) to the line being collected. An overlong line is -363 and thrown away up to its
-    /// newline; the buffer never holds more than `max` bytes.
+    /// Add `chunk` (ending in a line terminator or not) to the line being collected. An overlong line is -363 and thrown away up to
+    /// its terminator; the buffer never holds more than `max` bytes.
     fn take_line(&mut self, max: usize, chunk: &[u8]) -> Option<String> {
-        let (body, ended) = match chunk.strip_suffix(b"\n") {
+        let (body, ended) = match chunk
+            .strip_suffix(b"\n")
+            .or_else(|| chunk.strip_suffix(b"\r"))
+        {
             Some(b) => (b, true),
             None => (chunk, false),
         };
@@ -383,6 +491,7 @@ impl Session {
         if line.trim().is_empty() {
             return;
         }
+        let mut st = lock(&self.st);
         let (mut replies, mut parent): (Vec<String>, Vec<String>) = (vec![], vec![]);
         for unit in syntax::split(line, ';') {
             let env = Env {
@@ -390,73 +499,78 @@ impl Session {
                 store,
                 mav: !replies.is_empty(),
             };
-            match self.unit(&env, unit, &mut parent) {
+            match unit_of(&mut st, &env, unit, &mut parent) {
                 Ok(Some(r)) => replies.push(r),
                 Ok(None) => {}
-                Err(Fault(code, detail)) => self.push_error(code, &detail),
+                Err(Fault(code, detail)) => st.push_error(code, &detail),
             }
         }
         if !replies.is_empty() {
             let reply = replies.join(";") + "\n";
-            if out.len() + reply.len() > OUT_CAP {
+            if self.capped && out.len() + reply.len() > OUT_CAP {
                 out.clear();
-                self.push_error(-410, "");
+                st.push_error(-410, "");
             }
             out.extend_from_slice(reply.as_bytes());
         }
     }
+}
 
-    /// One program message unit. `parent` is the path the previous unit's header sat under: a header without a leading `:` is
-    /// relative to it, a common command (`*...`) neither uses nor changes it.
-    fn unit(&mut self, env: &Env, unit: &str, parent: &mut Vec<String>) -> Reply {
-        let (h, rest) = syntax::header_rest(unit);
-        let header = syntax::header(h).ok_or_else(|| Fault(-102, show(h)))?;
-        let params = syntax::params(rest).map_err(fault)?;
-        let mut path = header.path.clone();
-        if !header.common && !header.rooted {
-            path.splice(0..0, parent.iter().cloned());
-        }
-        if !header.common {
-            *parent = path[..path.len() - 1].to_vec();
-        }
-        let found = FIXED
-            .iter()
-            .map(|e| (e, entry_match(e, &header, &path)))
-            .find(|(_, m)| *m != Match::No);
-        match found {
-            Some((_, Match::BadSuffix)) => Err(Fault(-114, show(h))),
-            Some((e, _)) => run_fixed(e, self, env, &params),
-            None => self.point(env, &header, &path, &params, h),
+/// One program message unit. `parent` is the path the previous unit's header sat under: a header without a leading `:` is
+/// relative to it, a common command (`*...`) neither uses nor changes it.
+fn unit_of(st: &mut Status, env: &Env, unit: &str, parent: &mut Vec<String>) -> Reply {
+    let (h, rest) = syntax::header_rest(unit);
+    let header = syntax::header(h).ok_or_else(|| Fault(-102, show(h)))?;
+    let params = syntax::params(rest).map_err(fault)?;
+    let mut path = header.path.clone();
+    if !header.common && !header.rooted {
+        path.splice(0..0, parent.iter().cloned());
+    }
+    if !header.common {
+        *parent = path[..path.len() - 1].to_vec();
+    }
+    let found = FIXED
+        .iter()
+        .map(|e| (e, entry_match(e, &header, &path)))
+        .find(|(_, m)| *m != Match::No);
+    match found {
+        Some((_, Match::BadSuffix)) => Err(Fault(-114, show(h))),
+        Some((e, _)) => run_fixed(e, st, env, &params),
+        None => point(env, &header, &path, &params, h),
+    }
+}
+
+/// A tag's own path: `MEASure:...?` reads it, `SOURce:...` sets it, `SOURce:...?` reads the setting back.
+fn point(env: &Env, header: &syntax::Header, path: &[String], params: &[Param], h: &str) -> Reply {
+    let mut suffix = false;
+    for r in &env.ins.routes {
+        let on_read = header.query.then(|| path_match(&r.read, path));
+        let on_write = r.write.as_ref().map(|w| path_match(w, path));
+        match (on_read, on_write) {
+            (Some(Match::Yes), _) => return read(env, r, params),
+            (_, Some(Match::Yes)) => return setting(env, r, header.query, params),
+            (Some(Match::BadSuffix), _) | (_, Some(Match::BadSuffix)) => suffix = true,
+            _ => {}
         }
     }
+    Err(Fault(if suffix { -114 } else { -113 }, show(h)))
+}
 
-    /// A tag's own path: `MEASure:...?` reads it, `SOURce:...` sets it, `SOURce:...?` reads the setting back.
-    fn point(
-        &mut self,
-        env: &Env,
-        header: &syntax::Header,
-        path: &[String],
-        params: &[Param],
-        h: &str,
-    ) -> Reply {
-        let mut suffix = false;
-        for r in &env.ins.routes {
-            let on_read = header.query.then(|| path_match(&r.read, path));
-            let on_write = r.write.as_ref().map(|w| path_match(w, path));
-            match (on_read, on_write) {
-                (Some(Match::Yes), _) => return read(env, r, params),
-                (_, Some(Match::Yes)) => return setting(env, r, header.query, params),
-                (Some(Match::BadSuffix), _) | (_, Some(Match::BadSuffix)) => suffix = true,
-                _ => {}
-            }
+/// `*RST` for this instrument: the device settings go to their defaults. A writable tag with a `<default-value>` is set to it,
+/// through the same checks and write queue as any set command. The status system (error queue, SESR, SESE, SRE) is not touched,
+/// as IEEE 488.2 10.32 says, and neither is the point map: a measurement is not a setting.
+fn reset(env: &Env) {
+    for r in &env.ins.routes {
+        let value = r.default.and_then(|d| r.point.check(Num::Number(d)).ok());
+        if let (Some(v), true) = (value, r.write.is_some()) {
+            // a tag the store no longer holds has nothing to reset
+            let _ = env.store.write(&r.point.tag, v);
         }
-        Err(Fault(if suffix { -114 } else { -113 }, show(h)))
     }
 }
 
 fn line_text(bytes: &[u8]) -> String {
-    let line = String::from_utf8_lossy(bytes);
-    line.strip_suffix('\r').unwrap_or(&line).to_string()
+    String::from_utf8_lossy(bytes).into_owned()
 }
 
 /// A common command has no short form and no numeric suffix: `*IDN1?` is simply not a command.
@@ -470,7 +584,7 @@ fn entry_match(e: &Entry, h: &syntax::Header, path: &[String]) -> Match {
     }
 }
 
-fn run_fixed(e: &Entry, s: &mut Session, env: &Env, params: &[Param]) -> Reply {
+fn run_fixed(e: &Entry, s: &mut Status, env: &Env, params: &[Param]) -> Reply {
     match params.len() {
         n if n < e.args => Err(fault(-109)),
         n if n > e.args => Err(fault(-108)),
@@ -693,7 +807,7 @@ mod tests {
             assert_eq!(r.ask("*ESR?"), format!("{bit}\n"), "{line}");
             assert_eq!(r.ask("*ESR?"), "0\n", "{line}: cleared by the read");
         }
-        let mut s = Session::new();
+        let s = Session::new();
         for (code, bit) in [
             (-100, 32),
             (-199, 32),
@@ -709,9 +823,9 @@ mod tests {
             (-500, 0),
             (1, 0),
         ] {
-            s.esr = 0;
+            s.st.lock().unwrap().esr = 0;
             s.push_error(code, "");
-            assert_eq!(s.esr, bit, "{code}");
+            assert_eq!(s.st.lock().unwrap().esr, bit, "{code}");
         }
     }
 
@@ -807,13 +921,13 @@ mod tests {
             "1\n",
             "room again after the queue was drained"
         );
-        let mut s = Session::new();
+        let s = Session::new();
         for _ in 0..ERR_CAP {
             s.push_error(-350, "");
         }
         s.push_error(-102, "");
         assert_eq!(s.queued_errors(), ERR_CAP);
-        assert_eq!(s.errors.back().map(|e| e.0), Some(-350));
+        assert_eq!(s.st.lock().unwrap().errors.back().map(|e| e.0), Some(-350));
     }
 
     #[test]
@@ -1062,14 +1176,11 @@ mod tests {
         assert_eq!(r.raw(b"N?"), "");
         assert_eq!(r.raw(b"\n*OPC?\n*TST?"), "ferrofire,rtu,0,1\n1\n");
         assert_eq!(r.raw(b"\n"), "0\n");
-        assert_eq!(r.raw(b"*OPC?\r"), "");
-        assert_eq!(r.raw(b"\n\n\r\n"), "1\n");
-        assert_eq!(
-            r.raw(b"*OP\rC?\n"),
-            "",
-            "a carriage return inside a line is not a terminator"
-        );
-        assert!(r.errors()[0].starts_with("-102,"));
+        assert_eq!(r.raw(b"*OPC?\r"), "1\n", "a bare CR ends a line");
+        assert_eq!(r.raw(b"\n\n\r\n"), "", "blank lines are nothing");
+        assert_eq!(r.raw(b"*OPC?\r*TST?\r"), "1\n0\n");
+        assert_eq!(r.raw(b"*OP\rC?\n"), "");
+        assert_eq!(r.errors().len(), 2, "*OP and C? are two lines");
         assert_eq!(r.raw(&[0xFF, 0xFE, b'\n']), "");
         assert!(
             r.errors()[0].starts_with("-102,"),
@@ -1199,5 +1310,120 @@ mod tests {
             path_match(&["A", "B"], &["A".into(), "B".into()]),
             Match::Yes
         );
+    }
+
+    #[test]
+    fn a_lost_entry_sets_the_queue_overflow_bit_besides_its_own() {
+        let mut r = rig();
+        for _ in 0..ERR_CAP {
+            r.ask("*FOO");
+        }
+        assert_eq!(
+            r.ask("*ESR?"),
+            "32\n",
+            "command errors only while the queue has room"
+        );
+        r.ask("*FOO");
+        assert_eq!(
+            r.ask("*ESR?"),
+            "40\n",
+            "the 17th is lost: its own bit and the queue overflow's (device-specific, 8)"
+        );
+    }
+
+    #[test]
+    fn sessions_that_share_a_status_system_see_one_error_queue_and_one_set_of_registers() {
+        let mut r = rig();
+        let mut other = Session::sharing(r.s.status().clone());
+        r.s = Session::sharing(other.status().clone());
+        r.ask("*ESE 36");
+        r.ask("*FOO");
+        let seen = |s: &mut Session, r: &Rig, q: &str| {
+            String::from_utf8(s.feed(&r.ins, &r.store, q.as_bytes())).unwrap()
+        };
+        assert_eq!(seen(&mut other, &r, "*ESE?\n"), "36\n");
+        assert_eq!(seen(&mut other, &r, "*STB?\n"), "36\n");
+        assert_eq!(other.queued_errors(), 1);
+        assert!(seen(&mut other, &r, "SYST:ERR?\n").starts_with("-113,"));
+        assert_eq!(r.ask("SYST:ERR:COUN?"), "0\n", "the other session took it");
+        let mut alone = Session::new();
+        assert_eq!(
+            seen(&mut alone, &r, "*ESE?\n"),
+            "0\n",
+            "a session of its own"
+        );
+    }
+
+    #[test]
+    fn rst_sets_the_defaults_of_writable_tags_and_leaves_the_status_system_alone() {
+        let mut r = rig();
+        r.ask("*ESE 7;*SRE 9;*FOO");
+        assert!(!r.store.is_queued("lvl"));
+        assert_eq!(r.ask("*RST"), "");
+        assert!(r.store.is_queued("lvl"), "lvl has DEF 5");
+        r.store.apply_internal();
+        assert_eq!(
+            r.store.get_f64("lvl"),
+            Some(5.0),
+            "the default is what was queued"
+        );
+        assert!(
+            !r.store.is_queued("free") && !r.store.is_queued("sw"),
+            "no default, no reset"
+        );
+        assert_eq!(r.ask("*ESE?"), "7\n");
+        assert_eq!(r.ask("*SRE?"), "9\n");
+        assert_eq!(
+            r.ask("SYST:ERR:COUN?"),
+            "1\n",
+            "the error queue survives *RST"
+        );
+        r.ask("*ESR?");
+        assert_eq!(r.ask("*ESR?"), "0\n");
+    }
+
+    #[test]
+    fn a_message_in_pieces_is_run_at_its_end_and_an_abandoned_query_is_unterminated() {
+        let mut r = rig();
+        assert_eq!(r.raw(b"*IDN?"), "");
+        assert_eq!(
+            String::from_utf8(r.s.end(&r.ins, &r.store)).unwrap(),
+            "ferrofire,rtu,0,1\n"
+        );
+        assert!(r.errors().is_empty(), "END terminates the message: no -420");
+        r.raw(b"*IDN?");
+        r.s.abandon();
+        assert_eq!(r.errors(), ["-420,\"Query UNTERMINATED\""]);
+        r.raw(b"*ESE 3");
+        r.s.abandon();
+        assert!(r.errors().is_empty(), "a command alone is not a query");
+        assert_eq!(r.ask("*ESE?"), "0\n", "and it was not run");
+        r.raw(b"*IDN?");
+        r.s.clear_input();
+        r.s.abandon();
+        assert!(
+            r.errors().is_empty(),
+            "a device clear drops the input silently"
+        );
+        r.raw(&[b'A'; 100]);
+        r.s.clear_input();
+        assert!(!r.s.skipping);
+        r.raw(&[b'A'; 100]);
+        r.s.abandon();
+        assert!(!r.s.skipping);
+        r.raw(&[b'B'; 100]);
+        r.s.end(&r.ins, &r.store);
+        assert!(!r.s.skipping, "the END ends an overlong line too");
+    }
+
+    #[test]
+    fn an_exact_session_has_no_output_cap() {
+        let mut r = rig();
+        r.s = Session::new().exact();
+        let n = OUT_CAP / "ferrofire,rtu,0,1\n".len() + 10;
+        let out = r.raw(&b"*IDN?\n".repeat(n));
+        assert!(out.len() > OUT_CAP);
+        assert!(r.errors().is_empty());
+        assert_eq!(r.s.stb(), 0);
     }
 }

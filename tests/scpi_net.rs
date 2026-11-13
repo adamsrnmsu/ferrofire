@@ -23,7 +23,8 @@ struct Device {
 fn start(inner: &str) -> Device {
     let port = free_port();
     let (server, store) = load(&format!(
-        "<endpoint>tcp://127.0.0.1:{port}</endpoint><event-logging>/dev/null</event-logging>{inner}"
+        "<endpoint>tcp://127.0.0.1:{port}</endpoint><event-logging>/dev/null</event-logging>
+         <hislip-endpoint>none</hislip-endpoint><vxi11-endpoint>none</vxi11-endpoint>{inner}"
     ));
     let stop = CancellationToken::new();
     let task = tokio::spawn(server.run(store.clone(), stop.clone()));
@@ -105,7 +106,7 @@ async fn pipelined_split_and_crlf_lines_are_all_answered_in_order() {
     for byte in b"*OPC?\n" {
         s.write_all(&[*byte]).await.unwrap();
         s.flush().await.unwrap();
-        tokio::time::sleep(Duration::from_millis(2)).await;
+        tokio::time::sleep(Duration::from_millis(40)).await; // long enough for the server to read each byte alone
     }
     assert_eq!(
         drain(&mut s, Duration::from_millis(300)).await,
@@ -124,6 +125,47 @@ async fn a_message_cut_by_a_half_close_is_answered_before_the_server_closes() {
         drain(&mut s, Duration::from_secs(2)).await,
         (IDN.into(), true)
     );
+    d.stop.cancel();
+}
+
+#[tokio::test]
+async fn a_bare_carriage_return_ends_a_line_too() {
+    let d = start("");
+    let mut s = connect(d.port).await;
+    s.write_all(b"*IDN?\r*OPC?\r*TST?\r\n").await.unwrap();
+    assert_eq!(
+        drain(&mut s, Duration::from_millis(300)).await,
+        (format!("{IDN}1\n0\n"), false)
+    );
+    d.stop.cancel();
+}
+
+#[tokio::test]
+async fn the_status_system_is_the_instruments_unless_the_scope_is_the_connection() {
+    let d = start("");
+    let (mut a, mut b) = (connect(d.port).await, connect(d.port).await);
+    a.write_all(b"*ESE 32\nFOO\n").await.unwrap();
+    // a is another connection: give the server time to have read it before b asks
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(ask(&mut b, "*ESE?").await, "32\n");
+    assert_eq!(
+        ask(&mut b, "SYST:ERR?").await,
+        "-113,\"Undefined header;FOO\"\n"
+    );
+    assert_eq!(
+        ask(&mut a, "SYST:ERR:COUN?").await,
+        "0\n",
+        "b emptied the queue a filled"
+    );
+    d.stop.cancel();
+    let d = start("<status-scope>connection</status-scope>");
+    let (mut a, mut b) = (connect(d.port).await, connect(d.port).await);
+    a.write_all(b"*ESE 32\nFOO\n").await.unwrap();
+    // a is another connection: give the server time to have read it before b asks
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(ask(&mut b, "*ESE?").await, "0\n");
+    assert_eq!(ask(&mut b, "SYST:ERR:COUN?").await, "0\n");
+    assert_eq!(ask(&mut a, "SYST:ERR:COUN?").await, "1\n");
     d.stop.cancel();
 }
 
@@ -220,8 +262,16 @@ async fn clients_coming_and_going_leave_no_descriptors_behind() {
     let mut s = connect(d.port).await;
     assert_eq!(ask(&mut s, "*OPC?").await, "1\n");
     drop(s);
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    if let (Some(before), Some(after)) = (before, open_fds()) {
+    // the count is the whole process's, tests running at the same time included: wait for theirs to go
+    let mut after = open_fds();
+    for _ in 0..30 {
+        if before.zip(after).is_none_or(|(b, a)| a <= b + 3) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        after = open_fds();
+    }
+    if let (Some(before), Some(after)) = (before, after) {
         assert!(after <= before + 3, "descriptors {before} -> {after}");
     }
     d.stop.cancel();
@@ -232,7 +282,8 @@ async fn a_port_already_in_use_is_logged_and_the_task_ends() {
     let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = held.local_addr().unwrap().port();
     let (server, store) = load(&format!(
-        "<endpoint>tcp://127.0.0.1:{port}</endpoint><event-logging>/dev/null</event-logging>"
+        "<endpoint>tcp://127.0.0.1:{port}</endpoint><event-logging>/dev/null</event-logging>
+         <hislip-endpoint>none</hislip-endpoint><vxi11-endpoint>none</vxi11-endpoint>"
     ));
     let task = tokio::spawn(server.run(store, CancellationToken::new()));
     timeout(Duration::from_secs(2), task)

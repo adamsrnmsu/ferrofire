@@ -91,3 +91,15 @@ name = "fd_scpi"
 path = "fuzz_targets/fd_scpi.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "fd_hislip"
+path = "fuzz_targets/fd_hislip.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fd_vxi11"
+path = "fuzz_targets/fd_vxi11.rs"
+test = false
+doc = false
