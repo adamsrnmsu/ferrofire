@@ -1,0 +1,3 @@
+# phenix owns eth*: no DHCP client at boot, only loopback here.
+auto lo
+iface lo inet loopback

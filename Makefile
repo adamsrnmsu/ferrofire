@@ -10,7 +10,7 @@ DRY_MIN := 0.8
 # ponytail: pid lock; a kill -9 of make leaves a stale file that src-free ignores because the pid is gone.
 MUTATE_LOCK := .mutate.lock
 
-.PHONY: netns differential diff-dnp3 diff-modbus testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report bench-control bench-fdmicro charts image fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
+.PHONY: netns differential diff-dnp3 diff-modbus testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report bench-control bench-fdmicro charts image rtu-image rtu-image-smoke fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
 help:    # list targets
 	@grep -E '^[a-z-]+:.*#' $(MAKEFILE_LIST) | sed -E 's/^([a-z-]+):[^#]*#/\1\t/'
 src-free:   # fail fast while make mutate is rewriting src/
@@ -38,6 +38,10 @@ zeek-iccp-coexist:   # ICCP analyzer next to CISA ICSNPP s7comm on tcp/102: DPD 
 	tools/zeek/iccp/test-coexist.sh
 linux: src-free   # glibc aarch64 binaries -> dist/ferrofire, dist/simulinksolver
 	./build-linux.sh
+rtu-image: linux   # Buildroot arm64 RTU image -> image/out/ferrofire-rtu-arm64.qc2 (clean build ~20 min; image/build.sh)
+	image/build.sh
+rtu-image-smoke:   # boot the RTU image in QEMU (container, TCG) and run the SSH/telnet smoke checks
+	image/test/smoke.sh
 crap: golden image src-free   # crapper: CRAP score per function, fails above $(CRAP_MAX); writes .metrics/crap.edn
 	$(IN) crapper --threshold $(CRAP_MAX) src
 dry: image src-free   # dryer: duplicate candidates scoring >= $(DRY_MIN), fails if any (dryer itself always exits 0)

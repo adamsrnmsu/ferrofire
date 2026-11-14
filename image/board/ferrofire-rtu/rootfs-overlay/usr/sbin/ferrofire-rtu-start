@@ -1,0 +1,20 @@
+#!/bin/sh
+# ferrofire-rtu-start [CONFIG]: run from a phenix startup script (as root). Seeds the firmware and config on the
+# data partition once, then keeps `ferrofire watch` running on them. Safe to run any number of times.
+set -eu
+cfg=${1:-/etc/sceptre/config.xml}
+home=/home/sceptre
+pidfile=/run/ferrofire-watch.pid
+
+# cp to .tmp then mv: a power cut mid-copy must not leave a truncated seed that the next boot keeps.
+seed() { [ -e "$2" ] || { cp "$1" "$2.tmp" && mv "$2.tmp" "$2"; }; }
+seed /usr/bin/ferrofire "$home/ferrofire.firmware"
+seed "$cfg" "$home/config.xml"
+chown sceptre:sceptre "$home/ferrofire.firmware" "$home/config.xml"
+
+if [ -r "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+	exit 0
+fi
+nohup /usr/bin/ferrofire watch --firmware "$home/ferrofire.firmware" --file "$home/config.xml" \
+	>/dev/null 2>>/var/log/ferrofire-watch.log </dev/null &
+echo $! >"$pidfile"

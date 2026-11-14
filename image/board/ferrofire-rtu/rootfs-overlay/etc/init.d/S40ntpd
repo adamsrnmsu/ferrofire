@@ -1,0 +1,7 @@
+#!/bin/sh
+# phenix's ntp app writes /etc/ntp.conf; BusyBox ntpd takes its servers as -p arguments.
+[ "$1" = start ] && [ -f /etc/ntp.conf ] || exit 0
+args=$(awk '$1 == "server" { printf " -p %s", $2 }' /etc/ntp.conf)
+# shellcheck disable=SC2086 # one -p per server
+[ -n "$args" ] && ntpd $args
+exit 0

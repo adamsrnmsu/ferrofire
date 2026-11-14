@@ -1,0 +1,8 @@
+#!/bin/sh
+# Persistent data partition (GPT partition 3, label data): /home/sceptre is /data/sceptre.
+[ "$1" = start ] || exit 0
+mount /data
+mkdir -p /data/sceptre /data/ssh
+chown sceptre:sceptre /data/sceptre
+chmod 0700 /data/ssh
+mount --bind /data/sceptre /home/sceptre
