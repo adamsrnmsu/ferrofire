@@ -2,7 +2,7 @@
 # Boot image/out/ferrofire-rtu-arm64.qc2 in QEMU (-M virt -cpu max, AAVMF UEFI, virtio disk/net, user-net
 # hostfwd 2222->22 and 2323->23) and check it over SSH/telnet. Each check prints `ok <name>` or exits 1.
 # The host needs only docker: the script re-runs itself in the ff-buildroot container (TCG, no KVM there).
-# The disk is booted with snapshot=on, so first-boot writes (host keys, /data) never touch the shipped qc2.
+# The shipped qc2 is never written: the VM boots a raw copy.
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 if [ -z "${IN_SMOKE:-}" ]; then
@@ -16,21 +16,45 @@ serial=$tmp/serial.log
 fail() { echo "FAIL $1"; echo "--- serial log tail"; tail -n 40 "$serial" 2>/dev/null; exit 1; }
 [ -f "$qc2" ] || fail "ssh_login: no image at $qc2 (make rtu-image)"
 
-cp /usr/share/AAVMF/AAVMF_VARS.fd "$tmp/vars.fd"
-qemu-system-aarch64 -M virt -cpu max,pauth-impdef=on -smp 2 -m 1024 -display none -monitor none \
-  -drive if=pflash,format=raw,readonly=on,file=/usr/share/AAVMF/AAVMF_CODE.fd \
-  -drive if=pflash,format=raw,file="$tmp/vars.fd" \
-  -drive if=none,id=hd0,format=qcow2,file="$qc2",snapshot=on -device virtio-blk-pci,drive=hd0 \
-  -netdev user,id=n0,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=tcp:127.0.0.1:2323-:23 -device virtio-net-pci,netdev=n0,romfile= \
-  -serial file:"$serial" &
-qemu=$!
-trap 'kill $qemu 2>/dev/null; rm -rf "$tmp"' EXIT
+# The disk under test is a raw copy, so the guest's /data survives the reboots below and partition 2 can be
+# written offline with debugfs, the way phenix injects (partition 2, as root, run by S20phenix at boot).
+raw=$tmp/disk.raw
+qemu-img convert -O raw "$qc2" "$raw"
+off=$(( 512 * $(sfdisk -d "$raw" | sed -n '/2 : start=/ s/.*start= *\([0-9]*\),.*/\1/p') ))
+# inject GUEST_PATH:CONTENT_FILE... (replaces any existing file)
+inject() {
+  : >"$tmp/dbg"
+  for a in "$@"; do printf 'rm %s\nwrite %s %s\n' "${a%%:*}" "${a#*:}" "${a%%:*}" >>"$tmp/dbg"; done
+  debugfs -w -f "$tmp/dbg" "$raw?offset=$off" >/dev/null 2>&1 || true
+  for a in "$@"; do
+    debugfs -R "cat ${a%%:*}" "$raw?offset=$off" 2>/dev/null | cmp -s - "${a#*:}" || fail "inject ${a%%:*}"
+  done
+}
 
 opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5)
 r() { sshpass -p sceptre ssh "${opts[@]}" -p 2222 sceptre@127.0.0.1 "$@"; }
 
+cp /usr/share/AAVMF/AAVMF_VARS.fd "$tmp/vars.fd"
+boot() {
+  qemu-system-aarch64 -M virt -cpu max,pauth-impdef=on -smp 2 -m 1024 -display none -monitor none \
+    -drive if=pflash,format=raw,readonly=on,file=/usr/share/AAVMF/AAVMF_CODE.fd \
+    -drive if=pflash,format=raw,file="$tmp/vars.fd" \
+    -drive if=none,id=hd0,format=raw,file="$raw" -device virtio-blk-pci,drive=hd0 \
+    -netdev user,id=n0,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=tcp:127.0.0.1:2323-:23 -device virtio-net-pci,netdev=n0,romfile= \
+    -serial file:"$serial" &
+  qemu=$!
+  for _ in $(seq 120); do r true 2>/dev/null && return; kill -0 $qemu 2>/dev/null || fail "ssh_login: qemu exited"; sleep 3; done
+  fail ssh_login
+}
+stop() { r sync; kill $qemu; wait $qemu 2>/dev/null || true; }
+trap 'kill $qemu 2>/dev/null; rm -rf "$tmp"' EXIT
+
+cp /src/tests/conformance/rtu-1.xml "$tmp/factory.xml"
+sed 's/<name>rtu-1<\/name>/<!-- injected -->&/' "$tmp/factory.xml" >"$tmp/injected.xml"
+echo '/usr/sbin/ferrofire-rtu-start /etc/sceptre/config.xml' >"$tmp/start.sh"
+inject /etc/sceptre/config.xml:"$tmp/factory.xml" /etc/phenix/startup/sceptre-start.sh:"$tmp/start.sh"
+boot
 # ssh_login: wait for a real login (QEMU's hostfwd accepts TCP before the guest listens).
-for _ in $(seq 120); do r true 2>/dev/null && break; kill -0 $qemu 2>/dev/null || fail "ssh_login: qemu exited"; sleep 3; done
 r true || fail ssh_login
 echo "ok ssh_login"
 
@@ -84,3 +108,37 @@ printf 'put %s sftp.bin\nget sftp.bin %s\nrm sftp.bin\n' "$tmp/put.bin" "$tmp/ge
 sshpass -p sceptre sftp "${opts[@]}" -o BatchMode=no -P 2222 -b "$tmp/batch" sceptre@127.0.0.1 >/dev/null || fail sftp_works
 [ "$(sha256sum <"$tmp/put.bin")" = "$(sha256sum <"$tmp/get.bin")" ] || fail sftp_works
 echo "ok sftp_works"
+
+# RTU: S20phenix ran sceptre-start.sh at boot, which seeded /home/sceptre and started the watcher.
+r 'cmp /usr/bin/ferrofire /home/sceptre/ferrofire.firmware && test -f /home/sceptre/config.xml' || { r 'cat /var/log/phenix-startup.log'; fail rtu_seeds; }
+echo "ok rtu_seeds"
+
+# nc exits 0 on connect (stdin is at EOF); the watcher may still be starting, so poll.
+r 'for _ in $(seq 20); do nc 127.0.0.1 5502 </dev/null && exit 0; sleep 0.5; done; exit 1' || fail rtu_serves
+echo "ok rtu_serves"
+
+# Push as sceptre the way an operator would: upload to .tmp, rename into place, then replace the config.
+printf '#!/bin/sh\n# pushed\nexec /usr/bin/ferrofire "$@"\n' >"$tmp/pushed.fw"
+sed 's/<name>rtu-1<\/name>/<!-- pushed -->&/' "$tmp/factory.xml" >"$tmp/pushed.xml"
+r 'grep -c "watch: firmware sha256=" /var/log/ferrofire-watch.log' >"$tmp/n0"
+r 'cat >ferrofire.firmware.tmp && mv ferrofire.firmware.tmp /home/sceptre/ferrofire.firmware' <"$tmp/pushed.fw"
+r 'cat >config.xml.tmp && mv config.xml.tmp /home/sceptre/config.xml' <"$tmp/pushed.xml"
+r "for _ in \$(seq 20); do [ \$(grep -c 'watch: firmware sha256=' /var/log/ferrofire-watch.log) -gt $(cat "$tmp/n0") ] && exit 0; sleep 1; done; exit 1" ||
+  fail "rtu_push_persists: watcher did not see the new firmware"
+stop
+inject /etc/sceptre/config.xml:"$tmp/injected.xml"
+boot
+want=$(sha256sum <"$tmp/pushed.fw" | cut -d' ' -f1)
+r "cd /home/sceptre && [ \$(sha256sum <ferrofire.firmware | cut -d' ' -f1) = $want ] && grep -q 'pushed' config.xml && ! grep -q injected config.xml &&
+   grep -q 'watch: firmware sha256=$want' /var/log/ferrofire-watch.log" || fail rtu_push_persists
+r 'for _ in $(seq 20); do nc 127.0.0.1 5502 </dev/null && exit 0; sleep 0.5; done; exit 1' || fail "rtu_push_persists: pushed firmware does not serve"
+echo "ok rtu_push_persists"
+
+# A second startup script runs the same line: still exactly one watcher.
+stop
+inject /etc/phenix/startup/sceptre-start2.sh:"$tmp/start.sh"
+boot
+sleep 3
+r 'grep -q sceptre-start2.sh /var/log/phenix-startup.log' || fail "rtu_start_idempotent: start2 never ran"
+[ "$(r "ps | grep -c '[f]errofire watch'")" = 1 ] || fail rtu_start_idempotent
+echo "ok rtu_start_idempotent"
