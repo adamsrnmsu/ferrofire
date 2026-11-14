@@ -122,7 +122,7 @@ Provider CPU, percent of one core:
 | 100 Hz | per-RTU groups | 10.32 | 35.1 | 3 |
 | 100 Hz | pull-bridge | 14.24 | 35.5 | 3 |
 
-The single stream is cheapest for the provider (0.25 MB/s, 4.1 % at 10 Hz) and costliest for every RTU, which receives all of it (252 kB/s at 10 Hz, 2.5 MB/s at 100 Hz) instead of
+The single stream is cheapest for the provider (0.25 MB/s, 4.1 % at 10 Hz; measured with one listener, not 32: the provider's multicast egress does not grow with the number of RTUs that listen) and costliest for every RTU, which receives all of it (252 kB/s at 10 Hz, 2.5 MB/s at 100 Hz) instead of
 its own 32 kB/s or 323 kB/s slice. Per-RTU groups cost the provider 4x the bytes; pull costs 1.4x the groups' bytes and, at 10 Hz, 1.3x the CPU.
 
 ## 5. Historical: ZeroMQ vs NNG
@@ -180,7 +180,7 @@ Inter-arrival time between consecutive datagrams at each capture point, millisec
 | rtu-1 | 35993 | 2454..38446 | 0 | 100.0 | 101.3 | 109.7 |
 | rtu-2 | 35994 | 2453..38446 | 0 | 100.0 | 101.4 | 109.9 |
 
-No datagram was lost, duplicated or reordered between the provider's NIC and either RTU in an hour (rtu-2 started its capture 1 s earlier, hence one more datagram). The p99 excess of up to 1.4 ms and the 105-110 ms maxima are VM scheduling.
+No datagram was lost, duplicated or reordered between the provider's NIC and either RTU in an hour (rtu-2's capture starts one datagram, 100 ms, earlier, at `_ff.seq` 2453 against 2454, hence one more datagram). The p99 excess of up to 1.4 ms and the 105-110 ms maxima are VM scheduling.
 During the hour the RTUs' Modbus registers matched the provider's values in 100 % of 325 samples (max error 0.5 m on a 300 m transit) and the stock device was not affected by the extra `_ff.*` tags.
 
 ## 7. Live range: OVS multicast snooping off vs on
@@ -208,8 +208,9 @@ The RTU figures are higher than the datagram rate because they include the RTU's
 Stock bennu field device and watcher (the `bennu-arm64` range image) against the same code with the fixes proposed in [sandialabs/sceptre-bennu #79](https://github.com/sandialabs/sceptre-bennu/pull/79) (fd leak),
 [#81](https://github.com/sandialabs/sceptre-bennu/pull/81) (robustness) and [#82](https://github.com/sandialabs/sceptre-bennu/pull/82) (watcher log), on the `waterway-arm64` range, checked by
 `everything-burger-with-extra-sauce` boards on rtu-1 and rtu-2. Raw: [bench/results/burger/](bench/results/burger/) (copies of the board reports; the stock fd-leak run is quoted from the #79 PR comment, no raw file was kept).
+"Fixed" is three builds, one per PR, each checked by its own board run, not one build with all three fixes: #79 `afe6ccc841` (fd leak), #81 `64e4bb5d9c` (bad frames, IEC 104 masters, DNP3 accept) and the watcher fix of #82 `400b48c2c5` (watcher log).
 
-**8a. Modbus/TCP server fd leak**: sockets of the field device before and after opening and closing Modbus connections, one per read. Stock stopped answering at connection 1 006 with 1 011 sockets (soft limit 1 024) and wrote 240 MB to stderr;
+**8a. Modbus/TCP server fd leak**: sockets of the field device before and after opening and closing Modbus connections, one per read. Stock stopped answering at connection 1 006 with 1 011 sockets (soft limit 1 024) and wrote 240 MB to stderr (the figure of the #79 PR comment; [datagram-v1-bench.md](bench/datagram-v1-bench.md) G6 gives 6.2 GB in about three minutes for the leak as first hit on the live range, possibly another occurrence; no raw file was kept for either, so the log volume cannot be checked here);
 the fixed build did all 1 500 and stayed at 5.
 
 ![Open sockets of the field device, stock vs fixed](img/charts/08a-fd-leak.svg)
@@ -261,7 +262,7 @@ Full method, every figure, lost and wrong counts, and what stock cannot run (no 
 | stock bennu | 5 | 500 | 1022 | 1035 | 1041 | 1046 |
 | stock bennu | 10 | 500 | 1022 | 1044 | 1051 | 1060 |
 
-Ferrofire shows a flip in about 100 ms, stock bennu in about 1 020 ms; with 100 flips at once on 1 RTU stock loses 81% within 10 s and ferrofire loses none. With stock's publish interval cut to 0.1 s or 0.05 s (Docker, [control-latency.md](bench/control-latency.md) section 8) its sequential flips over 5 or 10 RTUs take 86 to 127 ms, close to ferrofire's 99 ms, but on 1 RTU still about 500 ms, and it still loses 80% of 100 simultaneous flips on 1 RTU: stock's write rate, not its publish interval, limits those.
+Ferrofire shows a flip in about 100 ms, stock bennu in about 1 020 ms; with 100 flips at once on 1 RTU stock bennu 6.0.0 loses 81% within 10 s and ferrofire loses none. With stock's publish interval cut to 0.1 s or 0.05 s (Docker, [control-latency.md](bench/control-latency.md) section 8) its sequential flips over 5 or 10 RTUs take 86 to 127 ms, close to ferrofire's 99 ms, but on 1 RTU still about 500 ms, and it still loses 80% of 100 simultaneous flips on 1 RTU: the write rate of the bennu 6.0.0 field device, not its publish interval, limits those: about two writes per RTU per second, a fixed 500 ms sleep per request that upstream removed with the batched-write fix 91fd137 (release v2026.11.03). The burst, one-RTU and reordering results are therefore for 6.0.0 only; a rerun against current bennu is pending (ww-1df.47). The 1 s publish latency is not affected by that fix.
 
 ## 10. Field device alone: ferrofire vs stock bennu-field-deviced
 
@@ -284,7 +285,7 @@ Full method, Modbus read throughput at 1, 4 and 16 clients, write-forward, drops
 | L 8112 tags, 10 Hz | stock bennu | 3 | 300 | 0 | 0.108 | 0.159 | 0.334 | 0.890 |
 
 Both field devices expose a new value in about a tenth of a millisecond, ferrofire 0.02-0.03 ms sooner on the small and medium devices. Stock wins on delivery of an 8 112-tag stream (ferrofire's device lost 24% of the datagrams at 10 Hz, stock none) and on cpu per Modbus request with several clients (about 4 times as many requests per cpu-second at 16 clients); ferrofire wins on memory
-(12 vs 51 MB on 8 112 tags), Modbus throughput at 16 clients and on large reads, forwarding every write of a quick sequence (stock forwarded about a third), and DNP3 class-0 polls on 800 tags and up (stock 123 ms at p50 on 800 tags, ferrofire 0.4 ms; against a master that confirms each fragment, stock's figure looks like a delayed-ACK stall).
+(12 vs 51 MB on 8 112 tags), Modbus throughput at 16 clients and on large reads, forwarding every write of a quick sequence (stock bennu 6.0.0, before the upstream batched-write fix 91fd137, forwarded about a third; rerun against current bennu pending, ww-1df.47), and DNP3 class-0 polls on 800 tags and up (stock 123 ms at p50 on 800 tags, ferrofire 0.4 ms; against a master that confirms each fragment, stock's figure looks like a delayed-ACK stall).
 
 ## 11. Provider alone: ferrofire vs Sandia's C++ bennu-simulink-provider (stub model)
 

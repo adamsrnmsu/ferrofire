@@ -5,7 +5,7 @@ Harness, phases and how to rerun: [bench/fdmicro/README.md](../../bench/fdmicro/
 
 The control-latency bench ([control-latency.md](control-latency.md)) pairs ferrofire's provider with ferrofire's field devices and stock's with stock's, so it cannot say how much of a difference is the field device. This
 bench removes the provider: **one scripted provider process** (the same bytes for both devices) feeds the datagram stream and answers every `WRITE=` with `ACK=`, and **the same config file** (points, Modbus map, DNP3 map) is
-loaded by `ferrofire field-device` and by stock `bennu-field-deviced` (bennu 6.0.0 from the phenix-waterway-range overlay image). Everything runs on Docker Desktop's Linux VM (18 vCPU, 7.7 GB; an Apple Silicon Mac), device and
+loaded by `ferrofire field-device` and by stock `bennu-field-deviced` (bennu 6.0.0 from the phenix-waterway-range overlay image, which is before the upstream batched-write fix 91fd137, release v2026.11.03; that matters for the write-forward results, where it is stated again). Everything runs on Docker Desktop's Linux VM (18 vCPU, 7.7 GB; an Apple Silicon Mac), device and
 harness in separate containers on one bridge network, 3 reps per cell, the two stacks alternating who runs first.
 
 ## What was measured
@@ -63,9 +63,9 @@ The profile size does not move the one-register numbers; on L the 100-register r
 {{table:12c-fd-write-forward}}
 
 With writes spaced out the devices are the same: a write reaches the provider 26-33 ms at p50 and 57-60 ms at p99 after it was sent, the scan cycle (`cycle-time` 50 ms) and nothing measurable on top; none was lost. The Modbus reply itself takes 0.3-0.4 ms. **Written in quick succession
-(every 60-150 ms) stock forwards about a third of them**: 65 or 66 of 100 writes never produced a `WRITE=` naming their value within 250 ms, in every rep and on every size; ferrofire forwarded all 100 each time. The writes that stock forwards at that rate are not late (p50 29-33 ms). This looks like
+(every 60-150 ms) stock bennu 6.0.0 forwards about a third of them**: 65 or 66 of 100 writes never produced a `WRITE=` naming their value within 250 ms, in every rep and on every size; ferrofire forwarded all 100 each time. The writes that stock forwards at that rate are not late (p50 29-33 ms). This looks like
 stock coalescing a coil that changes again before the previous value has gone out (its update map holds one value per tag) and is consistent with the control bench's burst losses. An ad hoc check outside the harness (a Python REP, not in the raw results) saw the same at 250 ms spacing, and at 2.5 s spacing every write went through, 5-53 ms after it was sent.
-Which stock path drops them (the Modbus server's update map, or the output module's scan) was not traced.
+This is stock bennu 6.0.0, before the upstream batched-write fix 91fd137 (release v2026.11.03): in 6.0.0 `Client::send` sleeps a fixed 500 ms per request, the output module sends one blocking request per tag and the queued writes are a map keyed by tag name; the fix removed the sleep, sends one batched WRITE per scan and added compare-and-erase of queued tags. That fits the loss seen here (read from the source, not from a rerun). It is not claimed for current bennu: a rerun of the stock side is pending (ww-1df.47).
 
 ## 4. Full-cycle streams: delivery, drops, cpu and memory
 
@@ -101,7 +101,7 @@ values Modbus is where the field-device difference shows. Ferrofire also lost da
 ## Where stock wins, where ferrofire wins
 
 Stock wins: delivery of an 8 112-tag stream at 10 Hz (none lost against 23.6%); the cost of a Modbus request once there is more than one client (about 4 times as many requests per cpu-second at 16 clients, and higher throughput at 4 clients on small reads, with a shorter p99 at 4 and 16 clients);
-a DNP3 class-0 poll on the smallest device (p50 0.144 vs 0.169 ms). Ferrofire wins: memory (a fifth of stock's RSS on L: 12 vs 51 MB under the stream); throughput at 16 clients and on large reads; forwarding every write of a quick sequence (stock lost 64-66 of 100); DNP3 class-0 polls on devices of 800 tags and up
+a DNP3 class-0 poll on the smallest device (p50 0.144 vs 0.169 ms). Ferrofire wins: memory (a fifth of stock's RSS on L: 12 vs 51 MB under the stream); throughput at 16 clients and on large reads; forwarding every write of a quick sequence (stock bennu 6.0.0, before the upstream batched-write fix, lost 64-66 of 100; rerun against current bennu pending); DNP3 class-0 polls on devices of 800 tags and up
 (300 times faster at M, 370 times more polls a second at L; against a master that confirms each fragment, see section 5); 0.01-0.03 ms on stream to register. Level: stream to register at L, a spaced write-forward (bounded by the 50 ms cycle in both), the DNP3 refresh period, idle cpu.
 
 ## What the numbers do not say
@@ -110,4 +110,4 @@ a DNP3 class-0 poll on the smallest device (p50 0.144 vs 0.169 ms). Ferrofire wi
 - Latencies are for a device on an idle bridge with a client in the same VM; they measure the devices' software, not a network.
 - Each device carries one protocol server here; a device serving Modbus and DNP3 together was not measured.
 - Three reps per cell. S, M and L were run in order within a rep, so a host drift would hit the stacks alike but sizes unequally; the reps agree within a few percent except where stated (stock DNP3 on L, bimodal).
-- The causes of stock's quick-write coalescing, of its constant 123 ms DNP3 poll on M and of its stalled L polls were observed, not traced in the stock source.
+- Stock's quick-write loss is bennu 6.0.0 behaviour (before the upstream batched-write fix 91fd137; rerun against current bennu pending, ww-1df.47). The causes of its constant 123 ms DNP3 poll on M and of its stalled L polls were observed, not traced in the stock source.

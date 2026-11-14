@@ -13,8 +13,8 @@ and the harness in [bench/profile/](../bench/profile/). Date: 2026-11-13.
   String clones, SipHash) and `top::publish`.
 - Under a 1000-breaker storm: `Power::get` (30 % self, from one full `PowerRt::sync` per write) and dense `lu_solve` (27 %).
 - Measured wins worth doing: **E** QUERY reply cache (provider CPU 43 -> 25 %), **B** one power sync per write batch
-  (storm 17.3 -> 11.7 %), **C** per-target index lists (fast grid 48.7 -> 39.5 %), **A** skip redundant evals (8112 tags
-  26 -> 23 %, marginal). **D** (FNV top store) is marginal; **F** (bounded LU row update) gives nothing.
+  (storm 17.3 -> 11.7 %), **C** per-target index lists (fast grid 48.6 -> 39.3 %, medians of 3), **A** skip redundant evals (8112 tags
+  25.9 -> 23.6 %, marginal). **D** (FNV top store) is marginal; **F** (bounded LU row update) gives nothing.
 - Field-device cost under a Modbus write storm is mostly kernel TCP wakeups; nothing there is worth optimizing for a range.
 
 ## Method
@@ -65,7 +65,7 @@ Provider 10.9-11.4 % of a core (about 5 ms of publish work per tick, no solves).
 | `top::publish` (src/top.rs:150) | 10.8 (21.3 total) | per-tag lookup in a `BTreeMap` under one mutex, `name.clone()` on first insert |
 | `memcmp` | 9.1 | key compares |
 | `_int_malloc` / `_int_free` / `malloc_consolidate` | 8.9 / 5.2 / 2.9 | `owned_snapshot` Strings each tick, `publish_all` slice builders |
-| `publish_all` (bennu.rs:550) | 0 (48.6 total) | per-slice `HashSet` filter plus cloned snapshot parts for each of 10 slices |
+| `publish_all` (bennu.rs:550) | 0 (48.4 total) | per-slice `HashSet` filter plus cloned snapshot parts for each of 10 slices |
 | `Radio::publish` -> `send_all` | 0 (13 total) | UDP `sendmsg`, `nft_do_chain` from the bridge netfilter (a Docker artifact) |
 
 Correction to the first-pass reading: SipHash here comes from `publish_all`'s `HashSet::contains`, not from `top::publish`
@@ -176,7 +176,7 @@ workload (one container at a time, provider CPU, no perf). Patches: [bench/profi
 | E | Cache the QUERY reply in `Meta` (800 tags, 9.6 KB) | QUERY phase CPU 42.9/43.1/43.5 -> 24.2/24.7/24.8 %; 11.7k -> 15.4k/s; p50 79 -> 58 us, p99 about 150 -> 95 us. READ phase (control) unchanged at about 24.5 % | **Worth doing** |
 | B | One power `sync` per write batch, not per write (model.rs) | Storm dt 0.05: 16.9/17.3/17.6 -> 11.7/11.7/11.7 % (-32 %). Fast storm (dt 0.005): 63.0/59.4/57.4 -> 55.8/56.0/56.7 %. 1000-flip span p50 0.081-0.089 -> 0.072 s at fast dt; at dt 0.05 it stays 0.120 s (tick-bound). All cells 1000/1000 | **Worth doing** |
 | C | Per-target snapshot index lists plus `write!` `snapshot_msg` | Fast grid idle: 48.8/48.6/48.6 -> 40.2/38.9/39.3 % (-19 %). Fast storm about 60 -> 47 % (4 of 6 runs read cleanly). m800 at publish 0.01: 8.1/8.5/7.9 -> 7.3/7.5/7.3 % (-9 %) | **Worth doing**; the prototype caches indices and assumes a fixed snapshot order, so resolve at target construction and add an old-vs-new byte-equality test |
-| A | Skip redundant full evals (`fresh` flag: apply_writes, step top, rk4 k1) | 8112 tags: 25.6/25.9/27.3/25.4 -> 22.3/23.6/23.8/22.4 % (about -11 %). 7 evals -> 4 per tick; allocator churn remains. A differential test (2000 steps, random writes, 3 models) is bit-identical | **Marginal to worth doing**. The ODE-cone variant was not built |
+| A | Skip redundant full evals (`fresh` flag: apply_writes, step top, rk4 k1) | 8112 tags: 25.9/27.3/25.4 -> 23.6/23.8/22.4 % (medians 25.9 -> 23.6, -9 %; the three pairs are -9, -13 and -12 %). An earlier fourth pair, 25.6 -> 22.3, is not in the raw log ([campaign.log](../bench/findings/cpu-profiling-raw/campaign.log)) and is left out. 7 evals -> 4 per tick; allocator churn remains. A differential test (2000 steps, random writes, 3 models) is bit-identical | **Marginal to worth doing**. The ODE-cone variant was not built |
 | D | `top::publish` with FNV `HashMap`, sorted on read | Fast grid idle: 48.8/50.4/50.2 -> 43.2/44.4/45.2 % (about -11 %, separate campaigns) | **Marginal**, not worth the complexity alone |
 | F | Bounded row update in `lu_eliminate` (bit-identical) | Storm: 19.2/18.8/19.5 -> 19.6/18.7/18.4 %; fast storm 60.0 vs 60.4 | **Not worth it**: fill-in is dense, so the trailing-zero bound does nothing. A real win needs sparse LU with ordering |
 

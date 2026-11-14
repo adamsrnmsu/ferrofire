@@ -131,7 +131,7 @@ def chart_order(D):
         lab = {-3: "1 µs", -2: "10 µs", -1: "0.1 ms", 0: "1 ms", 1: "10 ms", 2: "100 ms", 3: "1 s", 4: "10 s", 5: "100 s"}[e]
         body += [f'<line class="grid" x1="{X(10 ** e):.1f}" x2="{X(10 ** e):.1f}" y1="70" y2="250"/>', text(X(10 ** e), 266, lab, "mu", "middle")]
     body.append(text((x0 + x1) / 2, 284, "gap between the two commands' stream stamps, per inverted pair (log scale)", "", "middle"))
-    for y, s, cls, name in ((115, "ferrofire", "ff", "ferrofire"), (205, "stock", "stk", "stock bennu")):
+    for y, s, cls, name in ((115, "ferrofire", "ff", "ferrofire"), (205, "stock", "stk", "stock 6.0.0")):
         inv = D["docker", s]["inv"]
         body.append(text(14, y + 4, name, "ink b"))
         for i, (_, gap, _) in enumerate(sorted(inv, key=lambda t: t[1])):
@@ -142,8 +142,8 @@ def chart_order(D):
             body.append(text(X(3000) if kind == "reorder" else X(max(g)), y - 28, lab, "ink", "middle" if kind == "reorder" else "end"))
     fs, ss = D["docker", "ferrofire"], D["docker", "stock"]
     fg, sg = [t[1] for t in fs["inv"]], [t[1] for t in ss["inv"] if t[0] == "reorder"]
-    save("reliability-fixes-2-order.svg", 760, 340, f"ferrofire never reorders commands; stock bennu did {n(len(sg))} times",
-         "Pairs of commands to one RTU that became visible in the opposite order, simultaneous breaker flips, Docker bench.", body,
+    save("reliability-fixes-2-order.svg", 760, 340, f"ferrofire never reorders commands; stock bennu 6.0.0 did {n(len(sg))} times",
+         "Pairs of one RTU visible in the opposite order, simultaneous breaker flips, Docker. Stock = bennu 6.0.0, before upstream fix 91fd137.", body,
          [f"ferrofire: all {len(fg)} pairs left in one publish, stamps at most {max(fg):.1f} ms apart. Stock: gap {min(sg) / 1e3:.2f} to {max(sg) / 1e3:.1f} s, median {st.median(sg) / 1e3:.1f} s.",
           f"Pairs are counted among completed commands: ferrofire {n(fs['fam']['breaker:sim']['ok'])}, stock {n(ss['fam']['breaker:sim']['ok'])} (it lost {n(ss['fam']['breaker:sim']['lost'])})."])
 

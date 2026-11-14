@@ -1,13 +1,16 @@
 # ferrofire: findings on one page
 
 ferrofire against stock bennu as shipped: Docker bench on one VM plus a live phenix range, 2026-11-14.
+"Stock" is stock bennu 6.0.0 (before the upstream batched-write fix 91fd137, release v2026.11.03).
+That fix removed a fixed 500 ms sleep per write in the field device, which explains the burst losses, the reordering and the 0.5 s floor on 1-2 RTUs below.
+Those results are not claimed for current bennu; a rerun against it is pending (ww-1df.47). The 1 s publish latency is unaffected by the fix.
 Every number is recomputed from raw data by [`bench/findings/`](../bench/findings/README.md).
 
 ## In 30 seconds
 
 - A breaker flip is visible in **98 ms** on ferrofire, **1 025 ms** on stock as shipped.
 - Stock tuned to publish at 0.1 s reaches **116 ms**, but only on 5+ RTUs.
-- Of 100 simultaneous flips on 1 RTU, stock misses **81 %**; ferrofire misses **0**.
+- Of 100 simultaneous flips on 1 RTU, stock bennu 6.0.0 misses **81 %**; ferrofire misses **0**.
 - The ACK hold cut ferrofire's flaps from **4 552** to **0**, latency unchanged.
 - One hour on the live range: **35 993** datagrams sent, **0** missing.
 - Stock bennu fails **5 of 5** fault checks; three proposed fixes pass all 5.
@@ -24,10 +27,10 @@ Every number is recomputed from raw data by [`bench/findings/`](../bench/finding
 ![Rate of a 1 000-flip burst](img/findings/headline-3-burst.svg)
 
 - The live range agrees: 99 ms against 1 017-1 020 ms.
-- 100 flips at once: stock misses 81 / 63 / 7 / 0 % on 1 / 2 / 5 / 10 RTUs; ferrofire none.
+- 100 flips at once: stock bennu 6.0.0 misses 81 / 63 / 7 / 0 % on 1 / 2 / 5 / 10 RTUs; ferrofire none.
 - 1 000 flips at once: 7 128-8 318 flips/s against 1.7-18.2.
 
-*Stock is as shipped (1 s publish); tuned stock is in section 2. "Missed" = not visible within 10 s. Stock's 1 000-flip cells are one rep.*
+*Stock is as shipped (1 s publish); tuned stock is in section 2. "Missed" = not visible within 10 s. Stock's 1 000-flip cells are one rep. Burst rows: bennu 6.0.0 only, rerun pending.*
 
 ## 2. Where does the second go?
 
@@ -40,12 +43,12 @@ Stock applies a flip in 26 ms, then waits about 995 ms for its once-a-second pub
 ![Burst loss at faster publish intervals](img/findings/where-time-goes-burst.svg)
 
 - Tuned to 0.1 s, stock reaches 116 ms on 5 RTUs but 512 ms on 1 (never under 468 ms).
-- Bursts are not fixed: 80 % still missed on 1 RTU, 60 % on 2.
-- Stock cannot hold 0.05 s: real period 72-79 ms, idle CPU 2.9 % -> 29.8 % of a core.
+- Bursts are not fixed on bennu 6.0.0: 80 % still missed on 1 RTU, 60 % on 2.
+- Stock cannot hold 0.05 s: real period 72 ms under bench load, 79 ms idle; idle CPU 2.9 % -> 29.8 % of a core.
 
-*Docker only. The 995 ms is a difference of medians.*
+*Docker only. The 995 ms is a difference of medians. The 468 ms floor and the burst loss are the 500 ms sleep of bennu 6.0.0's field device.*
 
-## 3. Provider or field device: which one matters? (interim)
+## 3. Provider or field device: which one matters?
 
 Swapping only the provider gives 49 % of the latency gain on 1 RTU, 79 % on 2, all of it on 5-10.
 
@@ -53,10 +56,10 @@ Swapping only the provider gives 49 % of the latency gain on 1 RTU, 79 % on 2, a
 
 ![Burst loss per pairing](img/findings/provider-vs-fd-2-burst-loss.svg)
 
-- Burst loss follows the field device: a stock FD misses 80-81 % on 1 RTU behind either provider.
+- Burst loss follows the field device: a stock bennu 6.0.0 FD misses 80-81 % on 1 RTU behind either provider.
 - The mixed pairing flaps on generators: 118 of 240 commands.
 
-*Interim, bench still running: snapshot 2026-11-14T08:09:43Z, 2-3 reps (see chart footers). The FD-only swap (stock provider + ferrofire FD) is not run yet.*
+*Docker, 3 reps (stock's 1 000-flip cells: 1). Stock FD = bennu 6.0.0, before upstream fix 91fd137; rerun pending. Stock provider + ferrofire FD cannot run: the FD rejects stock's datagrams.*
 
 ## 4. Is a command ever lost, reordered or flickering?
 
@@ -68,10 +71,10 @@ The ACK hold took ferrofire from 4 552 flaps to 0 over 48 080 commands.
 
 ![Latency before and after the ACK hold](img/findings/reliability-fixes-3-latency.svg)
 
-- Reordered commands: ferrofire 0; stock 1 105 in Docker, 221 on the range.
+- Reordered commands: ferrofire 0; stock bennu 6.0.0 1 105 in Docker, 221 on the range, 1 to 10 s apart.
 - Sequential p50: 98.7 ms before the fix, 98.5 ms after.
 
-*Before and after are separate runs of different builds, not an A/B.*
+*Before and after are separate runs of different builds, not an A/B. Stock's reorders: bennu 6.0.0, before upstream fix 91fd137; rerun pending.*
 
 ## 5. Does the data stream arrive whole?
 
@@ -103,7 +106,7 @@ Stock bennu fails all 5 fault checks on the live range; with proposed fixes #79,
 - A truncated Modbus frame kills the stock device.
 - Stock's idle watcher logs 57 780 B/min, 28x the limit; fixed: 0.
 
-*Patched bennu, not ferrofire. "Fixed" is three builds, one per PR. Stock's leak numbers have no raw file.*
+*Patched bennu, not ferrofire. "Fixed" is three builds, one per PR. Stock's leak numbers have no raw file (its stderr volume is 240 MB in one report, 6.2 GB in another).*
 
 ## 7. What does it cost in CPU?
 
@@ -120,15 +123,15 @@ ferrofire's provider costs 11 % of a core at dt 0.05 s, 49 % at dt 0.005 s.
 
 *One 25 s window per point on a Docker Desktop VM: absolute CPU is noisy, about 2x. Prototypes are throwaway, 3 pairs each.*
 
-## Still running / open
+## Open
 
-- 2x2 cross bench: stock provider + ferrofire FD not run yet.
-- Field-device microbench: not done.
-- C++ provider comparison: not done.
+- Rerun of the stock side against current bennu (v2026.11.03 or later, with 91fd137): pending (ww-1df.47).
+- 2x2 cross bench: stock provider + ferrofire FD cannot run (the FD rejects stock's datagrams, [control latency](bench/control-latency.md) section 9).
+- Field-device microbench and C++ provider comparison: done, not charted here ([field device](bench/field-device.md), [C++ provider](bench/cpp-provider.md)).
 - Maximum publish rate (ww-1df.43): not done.
 
 ## Sources
 
 - Detail: [results](results.md), [control latency](bench/control-latency.md), [datagram bench](bench/datagram-v1-bench.md), [transports](bench/transport-comparison.md), [profiling](profiling.md), [testing](testing.md).
 - Raw data: [`docs/bench/results/`](bench/results/), [`bench/findings/cpu-profiling-raw/`](../bench/findings/cpu-profiling-raw/).
-- Scripts and mismatches with the reports: [`bench/findings/README.md`](../bench/findings/README.md).
+- Scripts and what the raw data cannot settle: [`bench/findings/README.md`](../bench/findings/README.md).

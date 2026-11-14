@@ -12,7 +12,7 @@ from collections import defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 RAW, OUT = f"{ROOT}/docs/bench/results/control", f"{ROOT}/docs/img/findings"
-STACKS = {"ferrofire": "ferrofire", "stock": "stock bennu"}
+STACKS = {"ferrofire": "ferrofire", "stock": "stock bennu 6.0.0"}   # 6.0.0 predates upstream 91fd137 (batched writes); rerun: ww-1df.47
 
 
 def pct(v, p):
@@ -144,9 +144,9 @@ def chart_latency(n):
 
 def chart_loss(n):
     d = n["docker"]
-    return bars(n, "100 flips at once: ferrofire lands all, stock bennu misses up to 81 %",
+    return bars(n, "100 flips at once: ferrofire lands all, stock bennu 6.0.0 misses 81 %",
                 "Share of 100 simultaneous breaker flips not visible at the RTU within 10 s",
-                f"Docker: {d['stock']['sim100'][1]['issued']} flips per bar (5 x 100). Live range: 300 per point. Stock bennu as shipped (1 s publish); it loses fewer as RTUs are added.",
+                f"Docker: {d['stock']['sim100'][1]['issued']} flips per bar (5 x 100). Live range: 300 per point. Stock loses fewer as RTUs are added. Stock = bennu 6.0.0, before upstream fix 91fd137; rerun pending.",
                 100, 20, "% missed", lambda e, R: e["sim100"][R]["pct"], lambda e, R: f"{e['sim100'][R]['pct']:.0f} %",
                 lambda s, R, env: f"{STACKS[s]}, {R} RTU, {env}: lost {n[env.lower()][s]['sim100'][R]['lost']} of {n[env.lower()][s]['sim100'][R]['issued']}", (1, 2, 5))
 
@@ -163,13 +163,13 @@ def chart_burst(n):
         y, f, s = y1 + 12 + 40 * i, d["ferrofire"]["sim1000"][R], d["stock"]["sim1000"][R]
         b += [text(x0 - 12, y + 4, f"{R} RTU{'s' if R > 1 else ''}", "s", "end"),
               f'<line x1="{X(s["per_s"]):.1f}" x2="{X(f["per_s"]):.1f}" y1="{y}" y2="{y}" class="ln"/>',
-              f'<circle cx="{X(s["per_s"]):.1f}" cy="{y}" r="6" class="st ring"><title>stock bennu, {R} RTU: {s["per_s"]} flips/s, lost {s["lost"]} of {s["issued"]}</title></circle>',
+              f'<circle cx="{X(s["per_s"]):.1f}" cy="{y}" r="6" class="st ring"><title>stock bennu 6.0.0, {R} RTU: {s["per_s"]} flips/s, lost {s["lost"]} of {s["issued"]}</title></circle>',
               f'<circle cx="{X(f["per_s"]):.1f}" cy="{y}" r="6" class="ff ring"><title>ferrofire, {R} RTU: {f["per_s"]} flips/s, lost {f["lost"]} of {f["issued"]}</title></circle>',
               text(X(s["per_s"]), y - 12, f"{s['per_s']:.1f}", "v", "middle"), text(X(f["per_s"]) + 12, y + 4, num(f["per_s"]), "v")]
     lo, hi = d["stock"]["sim1000"], d["ferrofire"]["sim1000"]
-    return frame(h, "Burst of 1 000 flips: ferrofire 7 000+ per second, stock bennu 2 to 18",
+    return frame(h, "1 000 flips at once: ferrofire 7 000+ per second, stock bennu 6.0.0 2-18",
                  "Breaker flips completed per second when 1 000 are issued at once (Docker)",
-                 f"ferrofire: median of 5 reps, 0 of {num(hi[1]['issued'])} missed per row. Stock bennu: 1 rep, and {lo[1]['lost']}, {lo[2]['lost']}, {lo[5]['lost']}, {lo[10]['lost']} of its 1 000 missed the 10 s deadline; rate counts those done.",
+                 f"ferrofire: median of 5 reps, 0 of {num(hi[1]['issued'])} missed per row. Stock 6.0.0 (before upstream fix 91fd137; rerun pending): 1 rep, and {lo[1]['lost']}, {lo[2]['lost']}, {lo[5]['lost']}, {lo[10]['lost']} of its 1 000 missed the 10 s deadline; rate counts those done.",
                  b, legend=("ferrofire", "stock"))
 
 

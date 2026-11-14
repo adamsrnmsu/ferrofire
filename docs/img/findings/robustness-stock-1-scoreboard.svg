@@ -13,7 +13,7 @@ text{font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:1
 <text class="t" x="24" y="32">Stock bennu fails all 5 fault checks; with the fixes all 5 pass</text>
 <text class="s" x="24" y="52">Five faults thrown at the field device and watcher on the live range: outcome per build</text>
 <rect x="291" y="77" width="18" height="6" rx="3" class="stock"/>
-<text x="316.0" y="84.0" class="b">stock bennu</text>
+<text x="316.0" y="84.0" class="b">stock bennu 6.0.0</text>
 <rect x="521" y="77" width="18" height="6" rx="3" class="fixed"/>
 <text x="546.0" y="84.0" class="b">bennu + fixes</text>
 <text x="24.0" y="84.0" class="s">fault</text>

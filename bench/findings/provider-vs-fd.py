@@ -60,7 +60,7 @@ def panels(name, title, sub, xlabel, value, text, xmax, note):
         for y, (d, _, col, hatch) in zip(ys, PAIRS):
             v = value(d, R)
             if v is None:
-                ax.text(xmax * 0.03, y, "not run yet", va="center", fontsize=8, color=MUTED, style="italic")
+                ax.text(xmax * 0.03, y, "cannot run", va="center", fontsize=8, color=MUTED, style="italic")
                 continue
             ax.barh(y, v, height=0.62, color=col, hatch=hatch, edgecolor=SURFACE, linewidth=0)
             ax.text(v + xmax * 0.03, y, text(d, R), va="center", fontsize=8.5, color=INK)
@@ -95,7 +95,7 @@ def main():
     print(f"snapshot {snap}  pairings present {len(have)}/{len(PAIRS)}: {', '.join(have)}")
     for d, label, *_ in PAIRS:
         if d not in have:
-            print(f"\n{label}: NOT RUN YET ({d}/ missing)")
+            print(f"\n{label}: NO DATA ({d}/ has no cells.csv: the ferrofire FD rejects stock's datagrams, control-latency.md section 9)")
             continue
         print(f"\n{label}   [{d}]")
         for cell in ("breaker:seq:100", "breaker:sim:10", "breaker:sim:50", "breaker:sim:100", "breaker:sim:1000", "gen:seq:5", "gen:sim:5"):
@@ -112,17 +112,17 @@ def main():
             gen[d, cell.split(":")[0], "n"] += c["issued"]
     print("flaps: " + "; ".join(f"{d} breaker {gen[d, 'breaker']}/{gen[d, 'breaker', 'n']} gen {gen[d, 'gen']}/{gen[d, 'gen', 'n']}" for d in have))
 
-    foot = lambda cell: (f"INTERIM, bench still running: raw snapshot {snap}, {len(have)} of {len(PAIRS)} pairings.\nReps at 1/2/5/10 RTUs: "
+    foot = lambda cell: (f"Raw data to {snap}. Stock = bennu 6.0.0 (before upstream fix 91fd137; rerun pending). Stock provider + ferrofire FD: the FD rejects stock's datagrams.\nReps at 1/2/5/10 RTUs: "
                          + "; ".join(f"{l} {reps(d, cell)}" for d, l, *_ in PAIRS if d in have).replace(" provider", "")
                          + ".\nDocker bench, one VM. FD = field device. Colour = provider (blue ferrofire, grey stock); hatched = the FD is the other kind.")
     ms = lambda d, R: f"{p50(d, R):.0f}" + (f"  ({share[R]:.0f} % of gain)" if d == M else "")
     panels("provider-vs-fd-1-latency",
            f"Swapping only the provider cuts a breaker flip from {p50(S, 1) / 1e3:.1f} s to {p50(M, 1) / 1e3:.1f} s on 1 RTU, to {p50(M, 10) / 1e3:.1f} s on 10",
-           "Median time from SCADA write to read-back, 100 sequential breaker flips (ms). In brackets: share of the full ferrofire gain.",
+           "Median time from SCADA write to read-back, 100 sequential breaker flips (ms). In brackets: share of the full ferrofire gain. Stock = bennu 6.0.0.",
            "write to read-back, median (ms)", p50, ms, max(p50(S, R) for R in RS), foot("breaker:seq:100"))
     cell = "breaker:sim:100"
     panels("provider-vs-fd-2-burst-loss",
-           f"Burst loss follows the field device: a stock FD misses {lossp(M, 1, cell):.0f} % of 100 flips at once, even behind ferrofire",
+           f"Burst loss follows the field device: a stock bennu 6.0.0 FD misses {lossp(M, 1, cell):.0f} % of 100 flips, even behind ferrofire",
            "Share of 100 simultaneous breaker flips never seen on read-back (%), all reps pooled.",
            "flips missed (%)", lambda d, R: lossp(d, R, cell), lambda d, R: f"{lossp(d, R, cell):.0f} %", 100, foot(cell))
 

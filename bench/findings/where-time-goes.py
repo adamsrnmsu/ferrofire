@@ -87,7 +87,7 @@ def save(fig, name, title, sub):
 def chart_stages(st):
     """One bar per stack on a shared time axis: pale = until the provider applied the write, full = until the SCADA reads it back."""
     fig, ax = plt.subplots(figsize=(7.4, 2.7))
-    for y, (name, col, s) in enumerate([("stock bennu", STK, st["stock"]), ("ferrofire", FF, st["ferrofire"])]):
+    for y, (name, col, s) in enumerate([("stock bennu\n6.0.0", STK, st["stock"]), ("ferrofire", FF, st["ferrofire"])]):
         ax.barh(y, s["applied"], height=0.5, color=col, alpha=0.4, lw=0)
         ax.barh(y, s["visible"] - s["applied"], left=s["applied"], height=0.5, color=col, ec=SURFACE, lw=1.5)
         ax.text(-12, y, name, ha="right", va="center", fontweight="bold")
@@ -113,7 +113,7 @@ def line(ax, ys, col, label, ls="-", dy=0, fmt="{:.0f}", ends=True):
 
 
 def frame(ax, ylabel, top):
-    ax.set(xlim=(-0.45, 5.7), ylim=(0, top), xlabel="stock bennu publish interval")
+    ax.set(xlim=(-0.45, 5.7), ylim=(0, top), xlabel="stock bennu 6.0.0 publish interval (before upstream fix 91fd137; rerun pending)")
     ax.set_xticks(range(5), XT)
     ax.set_ylabel(ylabel)
     ax.grid(axis="y")
@@ -124,8 +124,8 @@ def chart_sweep(p5, p1, ff):
     fig, ax = plt.subplots(figsize=(7.4, 3.6))
     ax.plot([-0.45, 4.05], [ff, ff], color=FF, lw=2)
     ax.text(-0.4, ff - 50, f"ferrofire {ff:.0f} ms (any RTU count)", va="center", fontsize=8.5)
-    line(ax, p1, STK, f"stock, 1 RTU\n{p1[-1]:.0f} ms", ls="--", ends=False)
-    line(ax, p5, STK, f"stock, 5 RTUs\n{p5[-1]:.0f} ms", dy=65, ends=False)
+    line(ax, p1, STK, f"stock 6.0.0, 1 RTU\n{p1[-1]:.0f} ms", ls="--", ends=False)
+    line(ax, p5, STK, f"stock 6.0.0, 5 RTUs\n{p5[-1]:.0f} ms", dy=65, ends=False)
     ax.text(0.12, p5[0] + 30, f"{p5[0]:.0f} (5 RTUs), {p1[0]:.0f} (1 RTU)", va="center", fontsize=8, color=INK2)
     ax.text(3, p5[3] + 55, f"{p5[3]:.0f}", ha="center", va="center", fontsize=8, color=INK2)
     frame(ax, "write to read-back, ms (p50)", 1150)
@@ -138,12 +138,12 @@ def chart_burst(l1, l2):
     fig, ax = plt.subplots(figsize=(7.4, 3.4))
     ax.axhline(0, color=FF, lw=2, clip_on=False, zorder=3)
     ax.text(4.12, 5, "ferrofire: 0 missed", va="center", fontsize=8.5)
-    line(ax, l1, STK, f"stock, 1 RTU\n{l1[-1]:.0f} % missed", ls="--", fmt="{:.0f} %")
-    line(ax, l2, STK, f"stock, 2 RTUs\n{l2[-1]:.0f} % missed", fmt="{:.0f} %")
+    line(ax, l1, STK, f"stock 6.0.0, 1 RTU\n{l1[-1]:.0f} % missed", ls="--", fmt="{:.0f} %")
+    line(ax, l2, STK, f"stock 6.0.0, 2 RTUs\n{l2[-1]:.0f} % missed", fmt="{:.0f} %")
     frame(ax, "flips not visible within 10 s, %", 100)
     fig.subplots_adjust(top=0.8, bottom=0.21, left=0.09, right=0.985)
-    save(fig, "burst", f"A burst still misses {l2[-1]:.0f} to {l1[-1]:.0f} % on stock bennu, however fast it publishes",
-         "100 simultaneous breaker flips on 1 or 2 RTUs, 500 flips per point, Docker.")
+    save(fig, "burst", f"A burst still misses {l2[-1]:.0f} to {l1[-1]:.0f} % on stock bennu 6.0.0, however fast it publishes",
+         "100 simultaneous breaker flips on 1 or 2 RTUs, 500 flips per point, Docker. Before upstream fix 91fd137; rerun pending.")
 
 
 def main():

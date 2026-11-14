@@ -146,7 +146,7 @@ assert "stopped receiving after a second client" in R["robust-stock"]["checks"][
 assert "did not resume accepting" in R["robust-stock"]["checks"]["dnp3-accept"][1]
 assert "same pid" in R["robust-fixed"]["checks"]["modbus-badframes"][1] and "resumed accepting" in R["robust-fixed"]["checks"]["dnp3-accept"][1]
 X1, X2, Y0, RH = 300, 530, 112, 46
-b = [f'<rect x="{X1 - 9}" y="77" width="18" height="6" rx="3" class="stock"/>', T(X1 + 16, 84, "stock bennu", "b"),
+b = [f'<rect x="{X1 - 9}" y="77" width="18" height="6" rx="3" class="stock"/>', T(X1 + 16, 84, "stock bennu 6.0.0", "b"),
      f'<rect x="{X2 - 9}" y="77" width="18" height="6" rx="3" class="fixed"/>', T(X2 + 16, 84, "bennu + fixes", "b"), T(24, 84, "fault", "s")]
 for i, (it, label, how, s_out, f_out) in enumerate(rows):
     y = Y0 + i * RH
@@ -180,7 +180,7 @@ for cls, x1, y1, y0, tip in (("stock", stock["conns"], stock["after"], stock["be
     b += [f'<g><title>{tip}</title><line x1="{px(0):.1f}" y1="{py(y0):.1f}" x2="{px(x1):.1f}" y2="{py(y1):.1f}" stroke="var(--{cls})" stroke-width="2" stroke-dasharray="2 5" stroke-linecap="round"/>',
           f'<circle class="{cls} ring" cx="{px(0):.1f}" cy="{py(y0):.1f}" r="5"/><circle class="{cls} ring" cx="{px(x1):.1f}" cy="{py(y1):.1f}" r="5"/></g>']
 sx, sy = px(stock["conns"]), py(stock["after"])
-b += [T(sx + 14, sy + 24, "stock bennu", "b"), T(sx + 14, sy + 39, f"{stock['before']} → {n(stock['after'])} sockets, stops answering", "s"),
+b += [T(sx + 14, sy + 24, "stock bennu 6.0.0", "b"), T(sx + 14, sy + 39, f"{stock['before']} → {n(stock['after'])} sockets, stops answering", "s"),
       T(sx + 14, sy + 54, f"at connection {n(stock['conns'])}; +{stock['mb']} MB of stderr", "s"),
       T(sx + 14, sy + 69, "quoted from PR #79 comment, no raw file", "m"),
       T(px(churn["done"]), py(5) - 42, "bennu + fix (PR #79)", "b", "end"),
@@ -204,7 +204,7 @@ b.append(T(X0 + bx(30000), Y0 + 160, "watcher-stderr.log growth, KB per minute",
 for i, h in enumerate(sorted(bpm["stock"])):
     y = Y0 + i * 62
     b.append(T(L, y + 24, h, "b"))
-    for j, (cls, name) in enumerate((("stock", "stock bennu"), ("fixed", "bennu + fix (PR #82)"))):
+    for j, (cls, name) in enumerate((("stock", "stock bennu 6.0.0"), ("fixed", "bennu + fix (PR #82)"))):
         v, yy = bpm[cls][h], y + j * (BH + 2)
         wv = max(bx(v), 2)
         b += [f'<g><title>{h}, {name}: {n(v)} B/min</title><path class="{cls}" d="M{X0},{yy} h{wv - min(4, wv):.1f} a4,4 0 0 1 4,4 v{BH - 8} a4,4 0 0 1 -4,4 h-{wv - min(4, wv):.1f} z"/></g>'
