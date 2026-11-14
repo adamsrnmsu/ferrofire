@@ -14,8 +14,8 @@ Three device sizes, **S** 15 tags, **M** 800 tags, **L** 8 112 tags (the size of
 (Modbus discrete inputs, DNP3 binary inputs), the rest analog (input registers scaled 0..1000 onto 0..65535, DNP3 analog inputs); 4 coils and 2 holding registers go out to the provider's REP. `cycle-time` is 50 ms in both configs.
 
 - **The stream**: RADIO-framed UDP to `239.0.0.1:40000` in 1 400-byte chunks (whole points, `_ff.seq/_ff.cyc/_ff.t` trailer, NUL: the framing both devices accept; the cross bench found stock accepts it and ferrofire needs the NUL). Analog values change every
-  cycle. The probe point (a discrete input) flips every 0.3-0.6 s (1-2 s at 1 Hz; 1.5-3 s for DNP3) on a jittered schedule, so a flip never lines up with a period inside the device. **Each datagram begins with a counter point `cntK:<cycle>`**
-  (K = the datagram's index in its cycle): the counters are input registers whose value is the integer sent, so a counter that skips is a chunk whose value was never visible.
+  cycle and **every binary flips every cycle** (true on odd cycles, false on even), so the text of a cycle alternates in length: L is 130 datagrams on even cycles and 128 on odd (M 13, S 1). The probe point (a discrete input) flips every 0.3-0.6 s (1-2 s at 1 Hz; 1.5-3 s for DNP3) on a jittered schedule, so a flip never lines up with a period inside the device. **Each datagram begins with a counter point `cntK:<cycle>`**
+  (K = the datagram's index in its cycle): the counters are input registers whose value is the integer sent, so a counter that skips is a chunk whose value was never visible. The drop test uses the counters that exist in every cycle (128 on L).
 - **One process, one clock**: the harness (`fdmicro`) sends the stream, answers the REP, runs the Modbus and DNP3 clients and timestamps everything with CLOCK_MONOTONIC; it shares the device's PID namespace, so device cpu, RSS and the UDP counters of the
   device's network namespace (`InDatagrams`, `RcvbufErrors`) are read from `/proc` of the device itself.
 - **Stream to register**: the time from the send of the datagram that carries a probe flip to the end of the first Modbus read that shows it. The poll is a tight FC2 loop on one connection (about 33 000 reads a second), so the delay is an upper bound
@@ -30,8 +30,7 @@ Three device sizes, **S** 15 tags, **M** 800 tags, **L** 8 112 tags (the size of
 Deviations from a like-for-like setup, stated once: (1) the harness's REP is ferrofire's own `transport::serve` (the zeromq crate) for both devices: both talk to it, but stock's libzmq REQ and ferrofire's zeromq REQ are what they are. (2) The datagrams use ferrofire datagram
 v1 framing (trailer, NUL), not stock's exact bytes; stock ignores the trailer and accepts the NUL. (3) The Modbus and DNP3 configs are separate files (one protocol per device), the same for both stacks. (4) The load generator shares the VM with the device (16 tight clients
 use several cores of the 18). (5) Contention: no other `ff-rust`, cargo or mutator container ran at any run's start (`other_containers_start none` in all 36 `env.txt`), but other sessions' `ff-buildroot` containers did run at times and the host's 1-minute load average at run start
-was 3.3 to 6.8 on 18 vCPU (`host_load_start`), so absolute numbers carry some host noise; the rep-to-rep spreads below show how much. (6) The harness source was committed after the runs (every `env.txt` says `dirty True`); the DNP3 runs use the master of this commit
-(an earlier version stopped at the first fragment of a multi-fragment response and its DNP3 runs were discarded and redone). The harness has since gained a `counter skips by datagram index` diagnostic line that the `driver.log` files of these runs do not have; section 4's finding about it comes from a separate stock L run with that line (not in the raw results).
+was 3.3 to 6.8 on 18 vCPU (`host_load_start`), so absolute numbers carry some host noise; the rep-to-rep spreads below show how much. (6) The harness source was committed after the runs (every `env.txt` says `dirty True`). Two sets of runs were discarded and redone: the DNP3 runs (an earlier master stopped at the first fragment of a multi-fragment response) and the M and L Modbus runs (the first drop-test analysis counted the counters of L's two datagrams that exist only on even cycles as skipped by stock, and read the sent count one cycle late; the first version of this report said stock lost 0.3% of L's datagrams and skipped two counters: both were harness artifacts).
 
 ## 1. Stream to register
 
@@ -47,14 +46,14 @@ How long after a datagram leaves the provider is its value visible in a Modbus r
 | S 15 tags, 10 Hz | stock bennu | 3 | 300 | 0 | 0.110 | 0.140 | 0.193 | 0.292 |
 | S 15 tags, 100 Hz | ferrofire | 3 | 300 | 0 | 0.060 | 0.088 | 0.129 | 0.148 |
 | S 15 tags, 100 Hz | stock bennu | 3 | 300 | 0 | 0.083 | 0.112 | 0.164 | 0.227 |
-| M 800 tags, 100 Hz | ferrofire | 3 | 300 | 0 | 0.061 | 0.095 | 0.144 | 0.234 |
-| M 800 tags, 100 Hz | stock bennu | 3 | 300 | 0 | 0.090 | 0.130 | 0.178 | 0.301 |
-| L 8112 tags, 10 Hz | ferrofire | 3 | 300 | 0 | 0.110 | 0.138 | 0.163 | 0.179 |
-| L 8112 tags, 10 Hz | stock bennu | 3 | 300 | 0 | 0.113 | 0.178 | 0.294 | 1.326 |
+| M 800 tags, 100 Hz | ferrofire | 3 | 300 | 0 | 0.060 | 0.084 | 0.112 | 0.148 |
+| M 800 tags, 100 Hz | stock bennu | 3 | 300 | 0 | 0.086 | 0.122 | 0.186 | 0.221 |
+| L 8112 tags, 10 Hz | ferrofire | 3 | 300 | 0 | 0.096 | 0.133 | 0.190 | 1.158 |
+| L 8112 tags, 10 Hz | stock bennu | 3 | 300 | 0 | 0.108 | 0.159 | 0.334 | 0.890 |
 
-Both devices make a value visible within about a tenth of a millisecond of the datagram leaving, at every size and rate: neither waits for its 50 ms cycle to expose input. Ferrofire is 0.02-0.03 ms faster at p50 on S and M (0.076 vs 0.110 ms at 10 Hz, 0.061 vs 0.090
-ms for M), about the width of one read, and equal at L (0.110 vs 0.113 ms; stock's p99 0.294 ms and a 1.3 ms worst case against ferrofire's 0.163 ms). The reps agree within a few microseconds (S 10 Hz p50 0.075-0.077 ms ferrofire, 0.107-0.114 ms stock). No flip was missed. Whatever
-makes a ferrofire provider stack faster than the stock one is not the field device's input path: this is the stage the control-latency bench's stage table put at 1-2 ms including the SCADA's 2 ms poll.
+Both devices make a value visible within about a tenth of a millisecond of the datagram leaving, at every size and rate: neither waits for its 50 ms cycle to expose input. Ferrofire is 0.02-0.03 ms faster at p50 on S and M (S at 10 Hz 0.076 vs 0.110 ms, M 0.060 vs 0.086 ms), about the width of one read, and 0.01 ms
+faster at L (0.096 vs 0.108 ms), where its p99 is lower (0.190 vs 0.334 ms) but its worst case higher (1.16 vs 0.89 ms). The reps agree within a few microseconds (S 10 Hz p50 0.075-0.077 ms ferrofire, 0.107-0.114 ms stock). No flip was missed, and none was a cycle late, although ferrofire's device loses datagrams at L (section 4).
+Whatever makes a ferrofire provider stack faster than the stock one is not the field device's input path: this is the stage the control-latency bench's stage table put at 1-2 ms including the SCADA's 2 ms poll.
 
 ## 2. Modbus read latency and throughput, 1, 4 and 16 clients
 
@@ -74,36 +73,36 @@ makes a ferrofire provider stack faster than the stock one is not the field devi
 | S | FC4 x 10 | 4 | stock bennu | 3 | 104 819 | 37.4 | 43.0 | 52.0 | 0 | 4 | 100.0 | 104 821 |
 | S | FC4 x 10 | 16 | ferrofire | 3 | 146 122 | 94.8 | 230.2 | 330.7 | 0 | 16 | 604.5 | 24 171 |
 | S | FC4 x 10 | 16 | stock bennu | 3 | 109 764 | 142.9 | 164.2 | 193.1 | 0 | 16 | 100.0 | 109 774 |
-| M | FC4 x 1 | 1 | ferrofire | 3 | 33 120 | 29.2 | 37.6 | 43.2 | 0 | 1 | 40.0 | 82 802 |
-| M | FC4 x 1 | 1 | stock bennu | 3 | 31 752 | 30.0 | 40.3 | 48.6 | 0 | 1 | 45.0 | 70 561 |
-| M | FC4 x 1 | 4 | ferrofire | 3 | 94 500 | 39.4 | 70.7 | 95.6 | 0 | 4 | 168.8 | 55 985 |
-| M | FC4 x 1 | 4 | stock bennu | 3 | 107 859 | 35.8 | 43.9 | 64.2 | 0 | 4 | 101.6 | 106 163 |
-| M | FC4 x 1 | 16 | ferrofire | 3 | 152 370 | 91.7 | 217.2 | 310.9 | 0 | 16 | 607.6 | 25 079 |
-| M | FC4 x 1 | 16 | stock bennu | 3 | 113 537 | 135.7 | 172.3 | 216.2 | 0 | 16 | 102.0 | 111 316 |
-| M | FC4 x 100 | 1 | ferrofire | 3 | 28 114 | 35.0 | 44.3 | 50.7 | 0 | 1 | 49.4 | 56 913 |
-| M | FC4 x 100 | 1 | stock bennu | 3 | 20 363 | 48.1 | 59.8 | 72.0 | 0 | 1 | 63.6 | 32 018 |
-| M | FC4 x 100 | 4 | ferrofire | 3 | 84 232 | 44.0 | 75.3 | 103.3 | 0 | 4 | 203.8 | 41 332 |
-| M | FC4 x 100 | 4 | stock bennu | 3 | 45 600 | 85.3 | 98.7 | 155.8 | 0 | 4 | 103.0 | 44 273 |
-| M | FC4 x 100 | 16 | ferrofire | 3 | 73 069 | 189.3 | 466.2 | 623.5 | 0 | 16 | 814.9 | 8 966 |
-| M | FC4 x 100 | 16 | stock bennu | 3 | 45 126 | 347.5 | 410.0 | 491.8 | 0 | 16 | 103.0 | 43 817 |
-| L | FC4 x 1 | 1 | ferrofire | 3 | 33 520 | 28.8 | 37.8 | 43.8 | 0 | 1 | 40.6 | 82 564 |
-| L | FC4 x 1 | 1 | stock bennu | 3 | 31 027 | 30.9 | 40.7 | 46.2 | 0 | 1 | 44.8 | 69 257 |
-| L | FC4 x 1 | 4 | ferrofire | 3 | 96 641 | 39.0 | 66.0 | 86.3 | 0 | 4 | 172.2 | 56 123 |
-| L | FC4 x 1 | 4 | stock bennu | 3 | 109 532 | 35.4 | 42.3 | 52.2 | 0 | 4 | 101.8 | 107 597 |
-| L | FC4 x 1 | 16 | ferrofire | 3 | 151 611 | 92.0 | 218.3 | 312.7 | 0 | 16 | 604.8 | 25 069 |
-| L | FC4 x 1 | 16 | stock bennu | 3 | 112 954 | 135.2 | 169.2 | 226.1 | 0 | 16 | 102.0 | 110 747 |
-| L | FC4 x 100 | 1 | ferrofire | 3 | 27 080 | 36.0 | 47.1 | 53.8 | 0 | 1 | 52.6 | 51 483 |
-| L | FC4 x 100 | 1 | stock bennu | 3 | 16 076 | 58.7 | 77.7 | 91.5 | 0 | 1 | 71.2 | 22 579 |
-| L | FC4 x 100 | 4 | ferrofire | 3 | 77 570 | 47.6 | 84.0 | 110.2 | 0 | 4 | 220.4 | 35 196 |
-| L | FC4 x 100 | 4 | stock bennu | 3 | 33 007 | 118.8 | 134.0 | 214.0 | 0 | 4 | 102.6 | 32 172 |
-| L | FC4 x 100 | 16 | ferrofire | 3 | 54 961 | 261.1 | 600.6 | 798.0 | 0 | 16 | 859.9 | 6 392 |
-| L | FC4 x 100 | 16 | stock bennu | 3 | 32 270 | 489.5 | 542.8 | 794.8 | 0 | 16 | 102.6 | 31 455 |
+| M | FC4 x 1 | 1 | ferrofire | 3 | 33 497 | 28.8 | 37.6 | 42.9 | 0 | 1 | 39.6 | 84 589 |
+| M | FC4 x 1 | 1 | stock bennu | 3 | 31 044 | 31.1 | 40.6 | 45.8 | 0 | 1 | 44.2 | 70 235 |
+| M | FC4 x 1 | 4 | ferrofire | 3 | 99 629 | 38.1 | 61.7 | 76.5 | 0 | 4 | 173.0 | 57 591 |
+| M | FC4 x 1 | 4 | stock bennu | 3 | 110 002 | 35.4 | 41.2 | 50.8 | 0 | 4 | 101.8 | 108 059 |
+| M | FC4 x 1 | 16 | ferrofire | 3 | 154 788 | 90.2 | 213.2 | 306.1 | 0 | 16 | 608.5 | 25 436 |
+| M | FC4 x 1 | 16 | stock bennu | 3 | 116 808 | 133.6 | 157.7 | 183.8 | 0 | 16 | 102.0 | 114 525 |
+| M | FC4 x 100 | 1 | ferrofire | 3 | 27 936 | 35.1 | 44.6 | 50.0 | 0 | 1 | 48.8 | 57 246 |
+| M | FC4 x 100 | 1 | stock bennu | 3 | 20 055 | 48.8 | 59.8 | 71.1 | 0 | 1 | 63.6 | 31 533 |
+| M | FC4 x 100 | 4 | ferrofire | 3 | 86 895 | 43.2 | 70.1 | 88.3 | 0 | 4 | 207.8 | 41 818 |
+| M | FC4 x 100 | 4 | stock bennu | 3 | 46 336 | 83.7 | 96.8 | 150.8 | 0 | 4 | 103.0 | 44 988 |
+| M | FC4 x 100 | 16 | ferrofire | 3 | 73 508 | 187.1 | 466.0 | 623.9 | 0 | 16 | 813.3 | 9 038 |
+| M | FC4 x 100 | 16 | stock bennu | 3 | 45 718 | 342.1 | 395.9 | 492.3 | 0 | 16 | 103.0 | 44 392 |
+| L | FC4 x 1 | 1 | ferrofire | 3 | 33 339 | 28.8 | 37.2 | 43.1 | 0 | 1 | 40.0 | 83 348 |
+| L | FC4 x 1 | 1 | stock bennu | 3 | 30 594 | 31.7 | 40.8 | 46.1 | 0 | 1 | 44.6 | 68 598 |
+| L | FC4 x 1 | 4 | ferrofire | 3 | 100 093 | 38.0 | 61.2 | 77.3 | 0 | 4 | 173.0 | 57 858 |
+| L | FC4 x 1 | 4 | stock bennu | 3 | 110 319 | 35.4 | 41.0 | 49.5 | 0 | 4 | 101.8 | 108 370 |
+| L | FC4 x 1 | 16 | ferrofire | 3 | 153 117 | 91.1 | 215.8 | 310.5 | 0 | 16 | 612.3 | 25 006 |
+| L | FC4 x 1 | 16 | stock bennu | 3 | 116 202 | 134.5 | 155.1 | 182.3 | 0 | 16 | 101.8 | 114 154 |
+| L | FC4 x 100 | 1 | ferrofire | 3 | 26 884 | 36.1 | 47.5 | 52.6 | 0 | 1 | 51.2 | 52 508 |
+| L | FC4 x 100 | 1 | stock bennu | 3 | 15 681 | 61.1 | 77.8 | 90.0 | 0 | 1 | 71.0 | 22 086 |
+| L | FC4 x 100 | 4 | ferrofire | 3 | 78 605 | 47.3 | 80.7 | 100.6 | 0 | 4 | 224.4 | 35 030 |
+| L | FC4 x 100 | 4 | stock bennu | 3 | 31 700 | 124.2 | 142.9 | 191.2 | 0 | 4 | 102.6 | 30 897 |
+| L | FC4 x 100 | 16 | ferrofire | 3 | 54 867 | 261.2 | 596.2 | 794.0 | 0 | 16 | 862.7 | 6 360 |
+| L | FC4 x 100 | 16 | stock bennu | 3 | 31 547 | 500.1 | 559.0 | 760.3 | 0 | 16 | 102.6 | 30 750 |
 
-Single client, one register: the devices are level (33 120 vs 31 752 requests a second on M, p50 29 vs 30 us, p99 43 vs 49 us). **At 4 clients stock is ahead** on small reads: 107 859 requests a second against ferrofire's 94 500 (p99 64 vs 96 us). At 16 clients ferrofire is
-ahead on throughput (152 370 vs 113 537 requests a second) and behind on tail latency (p99 311 vs 216 us), because stock serves every client from one thread (its cpu stays at 100% of a core at 4 and 16 clients) and ferrofire spreads them over several cores (170% and 600%).
-**Per unit of cpu stock wins every case from 4 clients up**: at 16 clients ferrofire spends 25 079 requests per device-cpu-second, stock 111 316 (4.4 times as much work done per cpu-second), at 4 clients 55 985 vs 106 163; only at 1 client is ferrofire cheaper per request (82 802 vs 70 561).
-Large reads (100 registers) go the other way: ferrofire 28 114 vs 20 363 requests a second at 1 client, 84 232 vs 45 600 at 4, 73 069 vs 45 126 at 16 (p99 624 vs 492 us at 16: more throughput, a longer tail), and the per-request cost is not much different between the stacks (per device-cpu-second 41 332 vs 44 273 at 4 clients).
-The profile size does not move the one-register numbers; on L the 100-register read widens ferrofire's lead (27 080 vs 16 076 requests a second at 1 client). No read failed and every client was served at 16 clients on both devices. The reps agree within about 5% (M, 16 clients, one register: ferrofire 150 779-152 870, stock 111 948-116 102), except ferrofire at 4 clients (87 494-96 072).
+Single client, one register: the devices are level (33 497 vs 31 044 requests a second on M, p50 28.8 vs 31.1 us, p99 43 vs 46 us). **At 4 clients stock is ahead** on small reads: 110 002 requests a second against ferrofire's 99 629 (p99 51 vs 77 us). At 16 clients ferrofire is
+ahead on throughput (154 788 vs 116 808 requests a second) and behind on tail latency (p99 306 vs 184 us), because stock serves every client from one thread (its cpu stays at about 100% of a core at 4 and 16 clients) and ferrofire spreads them over several cores (173% and 609%).
+**Per unit of cpu stock wins every case from 4 clients up**: at 16 clients ferrofire spends 25 436 requests per device-cpu-second, stock 114 525 (4.5 times as much work done per cpu-second), at 4 clients 57 591 vs 108 059; only at 1 client is ferrofire cheaper per request (84 589 vs 70 235).
+Large reads (100 registers) go the other way: ferrofire 27 936 vs 20 055 requests a second at 1 client, 86 895 vs 46 336 at 4, 73 508 vs 45 718 at 16 (p99 624 vs 492 us at 16: more throughput, a longer tail), and the per-request cost is close (per device-cpu-second 41 818 vs 44 988 at 4 clients).
+The profile size does not move the one-register numbers; on L the 100-register read widens ferrofire's lead (26 884 vs 15 681 requests a second at 1 client). No read failed and every client was served at 16 clients on both devices. The reps agree within about 3% (M, 16 clients, one register: ferrofire 152 416-155 218, stock 116 697-117 562).
 
 ## 3. Write-forward: Modbus write to the WRITE= at the provider
 
@@ -113,48 +112,45 @@ The profile size does not move the one-register numbers; on L the 100-register r
 |---|---|---|---|---|---|---|---|---|---|
 | S | ferrofire | 3 | 27.0 | 51.5 | 58.7 | 0 | 0 | 23.4 | 309.5 |
 | S | stock bennu | 3 | 27.8 | 51.1 | 56.9 | 0 | 66 | 28.6 | 369.7 |
-| M | ferrofire | 3 | 31.8 | 56.5 | 60.4 | 0 | 0 | 25.0 | 298.2 |
-| M | stock bennu | 3 | 24.8 | 49.4 | 53.2 | 0 | 65 | 27.9 | 238.3 |
-| L | ferrofire | 3 | 27.8 | 53.7 | 60.2 | 0 | 0 | 28.1 | 301.5 |
-| L | stock bennu | 3 | 24.4 | 58.3 | 60.2 | 0 | 66 | 25.2 | 302.8 |
+| M | ferrofire | 3 | 26.3 | 52.6 | 58.0 | 0 | 0 | 25.9 | 311.5 |
+| M | stock bennu | 3 | 32.8 | 53.6 | 57.5 | 0 | 65 | 33.1 | 343.2 |
+| L | ferrofire | 3 | 27.1 | 50.2 | 57.0 | 0 | 0 | 25.0 | 326.6 |
+| L | stock bennu | 3 | 26.1 | 56.6 | 60.2 | 0 | 66 | 28.8 | 369.2 |
 
-With writes spaced out the devices are the same: a write reaches the provider 24-32 ms at p50 and 53-60 ms at p99 after it was sent, the scan cycle (`cycle-time` 50 ms) plus nothing measurable; none was lost. The Modbus reply itself takes 0.2-0.4 ms. **Written in quick succession
-(every 60-150 ms) stock forwards about a third of them**: 64-66 of 100 writes never produced a `WRITE=` naming their value within 250 ms, in every rep and on every size; ferrofire forwarded all 100 each time. The writes that stock forwards at that rate are not late (p50 25-29 ms). This looks like
+With writes spaced out the devices are the same: a write reaches the provider 26-33 ms at p50 and 57-60 ms at p99 after it was sent, the scan cycle (`cycle-time` 50 ms) and nothing measurable on top; none was lost. The Modbus reply itself takes 0.3-0.4 ms. **Written in quick succession
+(every 60-150 ms) stock forwards about a third of them**: 65 or 66 of 100 writes never produced a `WRITE=` naming their value within 250 ms, in every rep and on every size; ferrofire forwarded all 100 each time. The writes that stock forwards at that rate are not late (p50 29-33 ms). This looks like
 stock coalescing a coil that changes again before the previous value has gone out (its update map holds one value per tag) and is consistent with the control bench's burst losses. An ad hoc check outside the harness (a Python REP, not in the raw results) saw the same at 250 ms spacing, and at 2.5 s spacing every write went through, 5-53 ms after it was sent.
 Which stock path drops them (the Modbus server's update map, or the output module's scan) was not traced.
 
 ## 4. Full-cycle streams: delivery, drops, cpu and memory
 
-L is 130 datagrams per cycle, all sent back to back (as a provider does), 10 times a second; M is 13 datagrams, 100 times a second.
+L is 128-130 datagrams per cycle, all sent back to back (as a provider does), 10 times a second; M is 13 datagrams, 100 times a second.
 
 ![Delivery, cpu and memory under the full-cycle streams](../img/charts/12d-fd-load.svg)
 
 | case | device | reps | datagrams sent | reached the device | lost % | RcvbufErrors | sender drops | cycles never visible % | registers wrong at the end % |
 |---|---|---|---|---|---|---|---|---|---|
-| M 800 tags, 100 Hz | ferrofire | 3 | 117 039 | 117 000 | 0.0 | 0 | 0 | 0.0 | 0.0 |
-| M 800 tags, 100 Hz | stock bennu | 3 | 117 039 | 117 000 | 0.0 | 0 | 0 | 0.0 | 0.0 |
-| L 8112 tags, 10 Hz | ferrofire | 3 | 116 488 | 88 040 | 24.4 | 28 060 | 0 | 24.1 | 17.6 |
-| L 8112 tags, 10 Hz | stock bennu | 3 | 116 484 | 116 100 | 0.3 | 0 | 0 | 0.8 | 0.0 |
+| M 800 tags, 100 Hz | ferrofire | 3 | 117 039 | 117 039 | 0.0 | 0 | 0 | 0.0 | 0.0 |
+| M 800 tags, 100 Hz | stock bennu | 3 | 117 039 | 117 039 | 0.0 | 0 | 0 | 0.0 | 0.0 |
+| L 8112 tags, 10 Hz | ferrofire | 3 | 116 486 | 88 996 | 23.6 | 27 555 | 0 | 22.4 | 20.7 |
+| L 8112 tags, 10 Hz | stock bennu | 3 | 116 488 | 116 488 | 0.0 | 0 | 0 | 0.0 | 0.0 |
 
-**Ferrofire's field device loses a quarter of an 8 112-tag stream and stock does not.** On L at 10 Hz the kernel delivered 88 040 of 116 488 datagrams to ferrofire (24.4% lost, 24.2-24.6% in each rep; `RcvbufErrors` 28 060 of the 28 448 missing), so a quarter of the cycles' counters
-were never visible (24.1%) and 17.6% of the 8 081 registers checked after the stream stopped were wrong (stale by one or more cycles). Stock received 116 100 of 116 484. M at 100 Hz lost nothing on either device, and neither lost anything at S. The loss is the receive queue overflowing during the burst: the
-130 datagrams of a cycle arrive faster than ferrofire's receive thread parses them and the socket's default buffer holds about 100. Ferrofire sets no `SO_RCVBUF` on its input socket and a larger buffer would likely remove it; that was not tried here (follow-up bead). The stream-only and loaded
-windows show the same loss (3 150-3 390 `RcvbufErrors` in each 10 s stream-only window; 1 460-1 740 in the DNP3 stream-only window).
+**Ferrofire's field device loses almost a quarter of an 8 112-tag stream and stock loses none.** On L at 10 Hz the kernel delivered 88 996 of 116 486 datagrams to ferrofire (23.6% lost, 23.0-24.4% in each rep; `RcvbufErrors` 27 555), so 22.4% of the counter values were never visible and 20.7% of the 8 079 registers checked after the stream
+stopped were wrong (stale by one or more cycles). Stock received 116 488 of 116 488, skipped no counter and had no register wrong. M at 100 Hz lost nothing on either device, nor did S. The loss is the receive queue overflowing during the burst: the
+128-130 datagrams of a cycle arrive faster than ferrofire's receive thread parses them and the socket's default buffer holds about 100. Ferrofire sets no `SO_RCVBUF` on its input socket and a larger buffer would likely remove it; that was not tried here (follow-up bead ww-c2i). The stream-only
+windows show the same loss (3 060-3 260 `RcvbufErrors` in each 10 s window; 1 460-1 740 in the DNP3 stream-only window).
 
-Stock has its own, much smaller gap, not visible in the kernel counters: on L, the counters of the **last two datagrams of every second cycle** (indices 128 and 129 of 130) never became visible (the counters step by 2) although the kernel delivered those datagrams; 2 of the 8 081 registers were wrong at the end in every rep. That is
-0.8% of the counters (the value of one point per datagram, not a chunk of tags); the other tags in those two datagrams were right at the end of all three reps but were not checked cycle by cycle. A direct read of the registers (counters 124-131 every 40 ms) confirmed it. A batch limit of 128 datagrams per scan would explain it; not traced.
-
-**Cpu and memory**: ferrofire is smaller everywhere: idle RSS 4.0 / 4.5 / 10.5 MB (S / M / L) against stock's 6.3 / 10.5 / 50.7 MB; under the stream 4.7 / 5.3 / 12.2 MB against 6.4 / 10.8 / 51.1 MB. Cpu with the stream and no client: 0.1 / 2.9 / 4.4% against 0.2 / 5.5 / 5.0%
-(M at 100 Hz: ferrofire half stock's cost; L: level, and ferrofire's number is for a device that lost a quarter of the datagrams). Over a whole run (including the 16-client reads) ferrofire's peak RSS reaches 30 MB on L, stock's stays at 51 MB. Idle cpu is a rounding error on both Modbus devices (0.0-0.6%); with the DNP3 server loaded stock idles at 3.0% cpu and 47 MB on L (its 1 Hz rewrite of 8 112 points) against ferrofire's 0.4% and 11 MB.
+**Cpu and memory**: ferrofire is smaller everywhere: idle RSS 4.0 / 4.5 / 10.5 MB (S / M / L) against stock's 6.3 / 10.5 / 50.7 MB; under the stream 4.7 / 5.3 / 12.2 MB against 6.4 / 10.8 / 51.1 MB. Cpu with the stream and no client: 0.1 / 3.7 / 4.5% against 0.2 / 6.4 / 5.6%
+(M at 100 Hz: ferrofire a little over half stock's; L: close, and ferrofire's number is for a device that lost a quarter of the datagrams, so it parses fewer than stock does). Over a whole run (including the 16-client reads) ferrofire's peak RSS reaches 30 MB on L, stock's stays at 51 MB. Idle cpu is a rounding error on both Modbus devices (0.0-0.5%); with the DNP3 server loaded stock idles at 3.0% cpu and 47 MB on L (its 1 Hz rewrite of 8 112 points) against ferrofire's 0.4% and 11 MB.
 
 | profile | device | reps | idle RSS MB | stream RSS MB | peak RSS MB | idle cpu % | stream cpu % | stream + 1 tight reader cpu % | 4 readers cpu % | 16 readers cpu % |
 |---|---|---|---|---|---|---|---|---|---|---|
 | S | ferrofire | 3 | 4.0 | 4.7 | 6.6 | 0.1 | 0.1 | 38.4 | 169.6 | 609.8 |
 | S | stock bennu | 3 | 6.3 | 6.4 | 6.7 | 0.1 | 0.2 | 42.2 | 99.8 | 100.0 |
-| M | ferrofire | 3 | 4.5 | 5.3 | 8.6 | 0.1 | 2.9 | 40.2 | 168.8 | 607.6 |
-| M | stock bennu | 3 | 10.5 | 10.8 | 11.1 | 0.2 | 5.5 | 44.6 | 101.6 | 102.0 |
-| L | ferrofire | 3 | 10.5 | 12.2 | 30.0 | 0.0 | 4.4 | 40.6 | 172.2 | 604.8 |
-| L | stock bennu | 3 | 50.7 | 51.1 | 51.4 | 0.6 | 5.0 | 44.8 | 101.8 | 102.0 |
+| M | ferrofire | 3 | 4.5 | 5.3 | 8.7 | 0.1 | 3.7 | 39.7 | 173.0 | 608.5 |
+| M | stock bennu | 3 | 10.5 | 10.8 | 11.1 | 0.2 | 6.4 | 44.3 | 101.8 | 102.0 |
+| L | ferrofire | 3 | 10.5 | 12.2 | 30.0 | 0.0 | 4.5 | 39.9 | 173.0 | 612.3 |
+| L | stock bennu | 3 | 50.7 | 51.1 | 51.4 | 0.5 | 5.6 | 44.5 | 101.8 | 101.8 |
 
 ## 5. DNP3 class-0 poll
 
@@ -171,16 +167,16 @@ Stock has its own, much smaller gap, not visible in the kernel counters: on L, t
 
 **Small device: level** (S, 167-byte response: p50 0.169 ms ferrofire, 0.144 ms stock, **stock ahead at p50**; 34 060 vs 26 717 polls a second back to back, ferrofire ahead there). **Large device: ferrofire is far ahead.** On M (6 716 bytes, several fragments) a stock poll
 takes 123 ms at p50 against ferrofire's 0.40 ms (8 polls a second vs 7 504), the same in every rep: a constant 123 ms looks like three 40 ms stalls, a delayed-ACK pattern between the master's small confirm and the outstation's next write, which is how a standard master sees the stock outstation; a master that
-acknowledges at once may see less (not tried). On L (67 646 bytes) stock's p50 was 3.1, 4.4 and 1 148 ms in the three reps with a p99 of about 1.1 s in each: its once-a-second refresh of every point (spec 4.2: "a 1 Hz thread rewrites every point") blocks polls for most of a second at 8 112 points, so back-to-back polls reached 7, 2 and 1 a second;
+acknowledges at once may see less (not tried). On L (67 646 bytes) stock's p50 was 3.1, 4.4 and 1 148 ms in the three reps with a p99 of about 1.1 s in each: the likely cause is its once-a-second rewrite of every point (spec 4.2: "a 1 Hz thread rewrites every point"; its idle cpu at L is 3.0%), which would block polls for most of a second at 8 112 points (not traced), so back-to-back polls reached 7, 2 and 1 a second;
 ferrofire polled the same response at 740 a second (p50 2.5 ms, p99 4.1 ms).
 Stream to DNP3-visible is **about half a second at p50 and about a second at p95 on both** (p50 S 483 vs 501 ms, M 526 vs 673, L 496 vs 878 ms; p95 on stock L is 2.8 s because its polls are blocked): both refresh the outstation's database once a second (ferrofire copies stock's 1 Hz refresh), so for
 values Modbus is where the field-device difference shows. Ferrofire also lost datagrams while serving L polls (1 450-1 530 `RcvbufErrors` in the back-to-back phase), stock none.
 
 ## Where stock wins, where ferrofire wins
 
-Stock wins: delivery of an 8 112-tag stream at 10 Hz (0.3% lost against 24.4%); the cost of a Modbus request once there is more than one client (about 4 times as many requests per cpu-second at 16 clients, and higher throughput at 4 clients on small reads, with a shorter p99 at 4 and 16 clients);
+Stock wins: delivery of an 8 112-tag stream at 10 Hz (none lost against 23.6%); the cost of a Modbus request once there is more than one client (about 4 times as many requests per cpu-second at 16 clients, and higher throughput at 4 clients on small reads, with a shorter p99 at 4 and 16 clients);
 a DNP3 class-0 poll on the smallest device (p50 0.144 vs 0.169 ms). Ferrofire wins: memory (a fifth of stock's RSS on L: 12 vs 51 MB under the stream); throughput at 16 clients and on large reads; forwarding every write of a quick sequence (stock lost 64-66 of 100); DNP3 class-0 polls on devices of 800 tags and up
-(300 times faster at M, 370 times more polls a second at L); about 0.02-0.03 ms on stream to register on small devices. Level: stream to register at L, a spaced write-forward (bounded by the 50 ms cycle in both), the DNP3 refresh period, idle cpu.
+(300 times faster at M, 370 times more polls a second at L; against a master that confirms each fragment, see section 5); 0.01-0.03 ms on stream to register. Level: stream to register at L, a spaced write-forward (bounded by the 50 ms cycle in both), the DNP3 refresh period, idle cpu.
 
 ## What the numbers do not say
 
@@ -188,4 +184,4 @@ a DNP3 class-0 poll on the smallest device (p50 0.144 vs 0.169 ms). Ferrofire wi
 - Latencies are for a device on an idle bridge with a client in the same VM; they measure the devices' software, not a network.
 - Each device carries one protocol server here; a device serving Modbus and DNP3 together was not measured.
 - Three reps per cell. S, M and L were run in order within a rep, so a host drift would hit the stacks alike but sizes unequally; the reps agree within a few percent except where stated (stock DNP3 on L, bimodal).
-- The cause of stock's quick-write coalescing, of its two missing counters per second cycle and of its constant 123 ms DNP3 poll on M were observed, not traced in the stock source.
+- The causes of stock's quick-write coalescing, of its constant 123 ms DNP3 poll on M and of its stalled L polls were observed, not traced in the stock source.

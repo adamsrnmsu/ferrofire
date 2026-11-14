@@ -77,8 +77,9 @@ struct Prov {
     hz: AtomicU64,
     flip_every: AtomicU64,
     cyc: AtomicU64,
-    /// Datagrams (= counters in use) of the latest cycle.
+    /// Most and fewest datagrams (= counters in use) of any cycle since `set_stream`: every binary flips every cycle, so a cycle's text is 2 kB longer on one parity (L: 130 or 128 datagrams).
     chunks: AtomicU64,
+    chunks_min: AtomicU64,
     sent: AtomicU64,
     dropped: AtomicU64,
     probe: AtomicBool,
@@ -144,7 +145,8 @@ fn provider(p: Arc<Prov>, lay: Arc<Layout>) {
             })
             .collect();
         seq += ds.len() as u64;
-        p.chunks.store(ds.len() as u64, SeqCst);
+        p.chunks.fetch_max(ds.len() as u64, SeqCst);
+        p.chunks_min.fetch_min(ds.len() as u64, SeqCst);
         grow_sndbuf(&sock, cycle_bytes(&ds));
         if flip {
             let mut f = p.flips.lock().unwrap();
@@ -224,13 +226,17 @@ impl Rec {
     }
     /// cpu (percent of one core), RSS and UDP counters of the device over [a, b].
     fn window(&mut self, phase: &str, variant: &str, a: Snap, b: Snap, sent: u64) {
+        self.window2(phase, variant, a, b, b, sent);
+    }
+    /// As `window`, with the UDP counters read at `u` (a later snapshot, after the stream stopped and the queue drained).
+    fn window2(&mut self, phase: &str, variant: &str, a: Snap, b: Snap, u: Snap, sent: u64) {
         let wall = b.t.unwrap().duration_since(a.t.unwrap()).as_secs_f64();
         self.add(phase, variant, "cpu_pct", (b.cpu_ticks - a.cpu_ticks) as f64 / TICKS / wall * 100.0);
         self.add(phase, variant, "rss_mb", b.rss_kb as f64 / 1024.0);
         self.add(phase, variant, "rss_hwm_mb", b.hwm_kb as f64 / 1024.0);
-        self.add(phase, variant, "udp_in", (b.in_dgrams - a.in_dgrams) as f64);
+        self.add(phase, variant, "udp_in", (u.in_dgrams - a.in_dgrams) as f64);
         self.add(phase, variant, "udp_sent", sent as f64);
-        self.add(phase, variant, "rcvbuf_errors", (b.rcvbuf_err - a.rcvbuf_err) as f64);
+        self.add(phase, variant, "rcvbuf_errors", (u.rcvbuf_err - a.rcvbuf_err) as f64);
     }
     fn dist(&mut self, phase: &str, variant: &str, name: &str, mut v: Vec<u64>, scale: f64) {
         v.sort_unstable();
@@ -254,6 +260,8 @@ fn set_stream(p: &Prov, on: bool, hz: f64, flip_every: u64) {
     p.hz.store(hz.to_bits(), SeqCst);
     p.flip_every.store(flip_every, SeqCst);
     p.flips.lock().unwrap().clear();
+    p.chunks.store(0, SeqCst);
+    p.chunks_min.store(u64::MAX, SeqCst);
     p.on.store(on, SeqCst);
 }
 
@@ -421,7 +429,8 @@ fn drops(r: &mut Rec, dev: &Dev, p: &Prov, lay: &Layout, host: &str, secs: u64) 
     let mut mb = Mb::connect(host, 502).expect("modbus");
     set_stream(p, true, lay.hz, 0);
     std::thread::sleep(Duration::from_millis(300));
-    let nk = p.chunks.load(SeqCst) as usize; // counters in use: one per datagram of a cycle
+    std::thread::sleep(Duration::from_millis(500)); // at least two cycles, so both parities have been seen
+    let nk = p.chunks_min.load(SeqCst) as usize; // counters sent in every cycle: one per datagram of the shorter cycle
     let (a, s0, c0, d0) = (dev.snap(), p.sent.load(SeqCst), p.cyc.load(SeqCst), p.dropped.load(SeqCst));
     let (mut last, mut steps, mut skipped, mut changes, mut gap, mut errs) = (vec![0u16; nk], 0u64, 0u64, 0u64, Duration::ZERO, 0u64);
     let mut by_idx = vec![0u64; nk];
@@ -452,7 +461,7 @@ fn drops(r: &mut Rec, dev: &Dev, p: &Prov, lay: &Layout, host: &str, secs: u64) 
     let (cyc, dropped) = (p.cyc.load(SeqCst) - c0, p.dropped.load(SeqCst) - d0);
     p.on.store(false, SeqCst);
     std::thread::sleep(Duration::from_secs(1));
-    let sent_total = p.sent.load(SeqCst);
+    let (b2, sent_total) = (dev.snap(), p.sent.load(SeqCst)); // quiet: the device's UDP counters and the sent count describe the same datagrams
     let c = p.cyc.load(SeqCst);
     // end state: every counter, binary and analog register against the last cycle
     let mut bad = 0u64;
@@ -498,8 +507,9 @@ fn drops(r: &mut Rec, dev: &Dev, p: &Prov, lay: &Layout, host: &str, secs: u64) 
     r.add("drops", &variant, "max_poll_gap_ms", gap.as_secs_f64() * 1e3);
     r.add("drops", &variant, "end_state_bad_regs", bad as f64);
     r.add("drops", &variant, "end_state_checked", (lay.tags.len() - 1 - (lay.kmax - nk)) as f64);
-    r.add("drops", &variant, "datagrams_per_cycle", nk as f64);
-    r.window("drops", &variant, a, b, sent_total - s0);
+    r.add("drops", &variant, "datagrams_per_cycle_min", nk as f64);
+    r.add("drops", &variant, "datagrams_per_cycle_max", p.chunks.load(SeqCst) as f64);
+    r.window2("drops", &variant, a, b, b2, sent_total - s0);
 }
 
 // ---- phases: dnp3 -------------------------------------------------------------------------------------------------------
@@ -662,7 +672,7 @@ fn main() {
     let comm = if stack == "ferrofire" { "ferrofire" } else { "bennu-field-d" };
     let dev = Dev::find(comm);
     assert!(!dev.pids.is_empty(), "no process named {comm} in the shared PID namespace");
-    let p = Arc::new(Prov { hz: AtomicU64::new(lay.hz.to_bits()), ..Default::default() });
+    let p = Arc::new(Prov { hz: AtomicU64::new(lay.hz.to_bits()), chunks_min: AtomicU64::new(u64::MAX), ..Default::default() });
     start_rep(p.clone());
     let (p2, l2) = (p.clone(), lay.clone());
     std::thread::spawn(move || provider(p2, l2));

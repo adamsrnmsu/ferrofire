@@ -278,13 +278,13 @@ Full method, Modbus read throughput at 1, 4 and 16 clients, write-forward, drops
 | S 15 tags, 10 Hz | stock bennu | 3 | 300 | 0 | 0.110 | 0.140 | 0.193 | 0.292 |
 | S 15 tags, 100 Hz | ferrofire | 3 | 300 | 0 | 0.060 | 0.088 | 0.129 | 0.148 |
 | S 15 tags, 100 Hz | stock bennu | 3 | 300 | 0 | 0.083 | 0.112 | 0.164 | 0.227 |
-| M 800 tags, 100 Hz | ferrofire | 3 | 300 | 0 | 0.061 | 0.095 | 0.144 | 0.234 |
-| M 800 tags, 100 Hz | stock bennu | 3 | 300 | 0 | 0.090 | 0.130 | 0.178 | 0.301 |
-| L 8112 tags, 10 Hz | ferrofire | 3 | 300 | 0 | 0.110 | 0.138 | 0.163 | 0.179 |
-| L 8112 tags, 10 Hz | stock bennu | 3 | 300 | 0 | 0.113 | 0.178 | 0.294 | 1.326 |
+| M 800 tags, 100 Hz | ferrofire | 3 | 300 | 0 | 0.060 | 0.084 | 0.112 | 0.148 |
+| M 800 tags, 100 Hz | stock bennu | 3 | 300 | 0 | 0.086 | 0.122 | 0.186 | 0.221 |
+| L 8112 tags, 10 Hz | ferrofire | 3 | 300 | 0 | 0.096 | 0.133 | 0.190 | 1.158 |
+| L 8112 tags, 10 Hz | stock bennu | 3 | 300 | 0 | 0.108 | 0.159 | 0.334 | 0.890 |
 
-Both field devices expose a new value in about a tenth of a millisecond, ferrofire 0.02-0.03 ms sooner on the small and medium devices. Stock wins on delivery of an 8 112-tag stream (ferrofire's device lost 24% of the datagrams at 10 Hz, stock 0.3%) and on cpu per Modbus request with several clients (about 4 times as many requests per cpu-second at 16 clients); ferrofire wins on memory
-(12 vs 51 MB on 8 112 tags), Modbus throughput at 16 clients and on large reads, forwarding every write of a quick sequence (stock forwarded about a third), and DNP3 class-0 polls on 800 tags and up (stock 123 ms at p50 on 800 tags, ferrofire 0.4 ms).
+Both field devices expose a new value in about a tenth of a millisecond, ferrofire 0.02-0.03 ms sooner on the small and medium devices. Stock wins on delivery of an 8 112-tag stream (ferrofire's device lost 24% of the datagrams at 10 Hz, stock none) and on cpu per Modbus request with several clients (about 4 times as many requests per cpu-second at 16 clients); ferrofire wins on memory
+(12 vs 51 MB on 8 112 tags), Modbus throughput at 16 clients and on large reads, forwarding every write of a quick sequence (stock forwarded about a third), and DNP3 class-0 polls on 800 tags and up (stock 123 ms at p50 on 800 tags, ferrofire 0.4 ms; against a master that confirms each fragment, stock's figure looks like a delayed-ACK stall).
 
 ## Other results on the bench and the live range
 

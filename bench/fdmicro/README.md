@@ -4,12 +4,12 @@ ferrofire `field-device` vs stock bennu `bennu-field-deviced` (bennu 6.0.0, the 
 provider process stands in for everything around the device, so only the device differs. Report: [docs/bench/field-device.md](../../docs/bench/field-device.md); raw: `docs/bench/results/fdmicro/`.
 
 ```
-make bench-fdmicro                                  # = python3 bench/fdmicro/run.py: builds the harness in ff-rust, runs the whole matrix (about 2 h), finished runs are skipped
+make bench-fdmicro                                  # = python3 bench/fdmicro/run.py: builds ferrofire and the harness in ff-rust, runs the whole matrix (about 2 h), finished runs are skipped
 REPS=1 PROFILES=S PROTOS=mb OUTDIR=target-linux/fdmicro/smoke SECS=2 FLIPS=10 python3 bench/fdmicro/run.py     # a smoke run into a scratch dir
 make charts                                         # docs/bench/field-device.md and docs/img/charts/12*.svg from the raw files (uv + matplotlib)
 ```
 
-Needs the ferrofire release binary (`make linux`, `target-linux/release/ferrofire`) and the images `ff-rust:22.04` and `ffc-stock:22.04` (`bench/Dockerfile.stock`) on the **default** docker daemon.
+Needs the images `ff-rust:22.04` and `ffc-stock:22.04` (`bench/Dockerfile.stock`) on the **default** docker daemon. `run.py` builds ferrofire (`target-linux/release/ferrofire`) and the harness itself unless `NOBUILD=1`.
 cargo runs with `CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0`; never start it next to another heavy container. Env knobs are listed at the top of `run.py`.
 
 ## Parts

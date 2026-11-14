@@ -30,8 +30,9 @@ def out(*a):
 
 
 def build():
-    """cargo on the default daemon, sized for the 7.7 GB VM: 2 jobs, no incremental."""
-    sh("docker", "run", "--rm", "--platform", PLAT, *MNT, "-w", "/src/bench/fdmicro", "-e", "CARGO_BUILD_JOBS=2", "-e", "CARGO_INCREMENTAL=0", "-e", "CARGO_TARGET_DIR=/src/target-linux/fdmicro-build", IMG, "cargo", "build", "--release")
+    """cargo on the default daemon, sized for the 7.7 GB VM: 2 jobs, no incremental. ferrofire's release binary (as run_control.py builds it), then the harness."""
+    sh("docker", "run", "--rm", "--platform", PLAT, *MNT, "-w", "/src", "-e", "CARGO_BUILD_JOBS=2", "-e", "CARGO_INCREMENTAL=0", IMG, "bash", "-c",
+       "CARGO_TARGET_DIR=/src/target-linux cargo build --release && cd bench/fdmicro && CARGO_TARGET_DIR=/src/target-linux/fdmicro-build cargo build --release")
 
 
 def cleanup():
