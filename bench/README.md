@@ -123,6 +123,20 @@ sequential mode, one concurrent Modbus client per RTU in simultaneous mode.
 - **Generator**: spin-down (status off after PG ramps 40 MW to 0 at 40 MW/s, `power.ramp` in the generated model) then spin-up (status on, PG ramps back), each a measured phase; breakers: open the first n of `flip_order`, then restore (unmeasured, checked).
 - The provider stamp joins the first unused `Applied:` line of the command's tag and value at or after `t_cmd`; a provider other than ferrofire only has to log lines of that shape.
 
+## Stock bennu at faster publish intervals (ww-1df.35)
+
+Stock publishes once a second and that is not configurable: pybennu 6.0.0 `PyPower.periodic_publish` (`solvers/python_power.py`) ends in `time.sleep(1)`, and no `config.ini` key reaches it. **Deviation from stock as shipped, bench only**:
+`bench/stock_provider.py` (the stock provider plus the `Applied:` stamps) replaces `PyPower.periodic_publish` by a verbatim copy of the 6.0.0 method with `time.sleep(1)` -> `time.sleep(PERIOD)`, `PERIOD` from the env var `STOCK_PUBLISH_S`, and timing counters that print one
+`Publish-stats: ... publishes= pack_ms_mean= send_ms_mean= cpu_s=` line every 10 s (the pack / send / CPU numbers of the report). With `STOCK_PUBLISH_S` unset the method is stock's own. Nothing in the image, the field devices, the grid or the driver changes.
+
+```
+for P in 0.5 0.2 0.1 0.05; do STOCK_PUBLISH_S=$P STACK=stock REPS=5 SLOW=breaker:seq:1000,breaker:sim:1000 SLOW_REPS=1 OUTDIR=docs/bench/results/control/stock-${P}s python3 bench/run_control.py; done   # ~100 min each, Docker, one heavy container at a time
+bash bench/stock_capacity.sh > docs/bench/results/control/stock-capacity.txt   # idle provider, 55 s per interval: pack/send ms, effective period, CPU
+for P in 0.5 0.2 0.1 0.05; do python3 bench/control_summary.py docs/bench/results/control/stock-${P}s > docs/bench/results/control/stock-${P}s/summary.md; done
+```
+
+Same matrix, grid, driver and fresh-stack-per-cell as the 1 s baseline (`results/control/stock/`), 5 reps (an interval takes under 2.5 h), R = 1, 2, 5, 10; Docker only (the range matched Docker for both stacks). The report is section 8 of `docs/bench/control-latency.md` (`bench/charts.py`: `chart_stock_intervals`; `control_report.py`: `provider_stats`).
+
 ## Control-latency on the live range (ww-1df.23.5)
 
 The same driver, grid, cells and raw layout on real VMs: `bench/range/run_range.py` (host, stdlib) + `bench/range/vm.sh` (inside the VMs). Topology: `topologies/control-bench-arm64`

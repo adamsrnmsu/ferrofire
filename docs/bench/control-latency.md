@@ -25,6 +25,7 @@ Differences that matter when reading the numbers:
 - Stock bennu has **no generator ramp**: its generator cells are status flips only, so it has no `setpoint` time, and a stock status flip does not bring PG back (spin-down writes PG to 0 and spin-up leaves it at 0,
   [pg-after-status-flip.txt](results/control/stock/pg-after-status-flip.txt)). Ferrofire ramps PG at 40 MW/s.
 - Stock runs a fresh stack per cell (a stock provider that falls behind keeps applying a backlog). The two n = 1000 breaker cells of stock ran **1 rep** (not 5) at every R. Every other cell has 5 reps (Docker) or 3 (range).
+- Stock publishes once a second as shipped; section 8 reruns it at 0.5, 0.2, 0.1 and 0.05 s (a one-line patch of its publish loop, Docker only). Sections 1 to 7 compare against stock as shipped; "What the numbers do not say" states the comparison against both.
 - Every cell of the Docker matrix ran on both stacks; nothing was skipped. The range ran the subset above only: no R = 10, no 5, 50 or 1000 flips, no 2 or 10 generators.
 - Contention: no run started with another cargo, ff-rust or mutator container present (`contended_at_start False` in all 40 Docker and 18 range `env.txt` files). The Docker host was not idle: its 1-minute load average at run start
   ranged from 3.1 to 17.1 (`host_load_start` in each `.env.txt`, `vm_load1_start_end` in each `.cells.csv`) on an 18-vCPU VM, and stock uses about one CPU, so Docker latencies include some host noise. The range host's load at run start was at most 4.5.
@@ -32,8 +33,8 @@ Differences that matter when reading the numbers:
   Since ww-1df.32 the field device holds an ACKed point for up to 2 s against stream values that differ from it, so the flaps are gone (0 in the re-run); the "before ww-1df.32" rows are the earlier run kept in `results/control/ferrofire-before-ww-1df.32/`.
   The driver counts a command as done only when the state is also seen on the stream, so a flap is not an error, but a SCADA polling at 2 ms sees it.
 
-Solve time of the power flow at 1 250 branches, ferrofire in a container on a contended host: about 9.7 ms per solve ([solve-time.txt](results/control/solve-time.txt)). Pybennu is not installed offline, so
-its solve time is not measured; the stock provider applies a command in about 26 ms p50 (section 2).
+Solve time of the power flow at 1 250 branches, ferrofire in a container on a contended host: about 9.7 ms per solve ([solve-time.txt](results/control/solve-time.txt)). Stock's re-solve of the same grid (PyPower) was
+measured from the provider's stamps in section 8: about 16 ms p50; the stock provider applies a command in about 26 ms p50 (section 2).
 
 ## 1. Sequential breaker flips: ferrofire vs stock bennu
 
@@ -240,9 +241,53 @@ Every phase of every run, ferrofire vs stock bennu, Docker (full matrix) and ran
 - **Flaps** (ferrofire only): the read-back showed the new state, then the old, then the new again. Before ww-1df.32: 3 831 in the simultaneous breaker phases, 1 in a sequential breaker phase and 720 in the generator phases (360 sequential, 360 simultaneous) in Docker; 194 and 108 on the range. After the ACK hold (field device ignores a differing stream value for up to 2 s after a provider ACK, ww-1df.32): none in any phase, Docker or range. Stock has none in any phase.
   Latency did not change beyond run-to-run noise: sequential breaker p50 98.7 ms before and 98.5 ms after in Docker (99 and 99 on the range), p95 109.6 and 114.4 (108.5 and 108.2); simultaneous p95 141.3 and 133.5 (150.6 and 145.2). The sequential p95 rise in Docker is in the stream stamp (driver-side, before the field device), not in visible minus stream. An A/B of the 1 000-flip simultaneous cell with the pre-fix and the fixed binary on the same host (alternating runs) showed no difference.
 
+## 8. Stock bennu at faster publish intervals
+
+Sections 1 to 7 measure stock as shipped: it publishes its whole model once a second, hard-coded (pybennu 6.0.0 `PyPower.periodic_publish` ends in `time.sleep(1)`; there is no config option), and its seconds-level latency tracks that interval. So the stock side was rerun at 0.5, 0.2, 0.1 and 0.05 s
+(ferrofire publishes every 50 ms) to see how much of the gap is the interval. **Deviation from stock as shipped**: `bench/stock_provider.py` swaps `PyPower.periodic_publish` for a verbatim copy whose only change is `time.sleep(1)` -> `time.sleep(STOCK_PUBLISH_S)` (plus timing counters and one `Publish-stats:` log line every 10 s);
+nothing else of the provider, and no field device, is changed. Same grid, harness and driver as the 1 s baseline (`STACK=stock STOCK_PUBLISH_S=<interval> python3 bench/run_control.py`): a fresh stack per cell, R = 1, 2, 5, 10, **5 reps** of every cell (an interval took about 100 minutes) except the two n = 1000 breaker cells (1 rep, as in the baseline).
+Raw: `results/control/stock-<interval>s/` (the 1 s baseline stays in `results/control/stock/`). Docker only: the range was not rerun, since Docker matched it for both stacks (section 6). The ferrofire results are untouched and are the reference.
+
+**Can the stock provider keep up?** At 1 250 branches one publish costs 21 to 29 ms (pack 17 to 24 ms, send 4 to 5 ms) and a write re-solve about 16 ms p50 (p95 20 ms at 1 s, 29 to 36 ms at the faster intervals). Stock's loop sleeps *after* it publishes, so its real period is the interval plus the work: it never skips a publish or builds a backlog,
+but at 0.05 s it publishes every 72 ms (14 per s, not 20). Idle CPU grows from 3% of a core at 1 s to 30% at 0.05 s; in the bench cells the median provider reaches 33% and the busiest cell 93%. It is one Python process, so publishing and solving share one interpreter lock. Measured idle, one provider, no RTUs ([stock-capacity.txt](results/control/stock-capacity.txt)); the solve columns are the provider's own stamps over every bench run of that interval:
+
+| interval s | pack ms | send ms | one publish ms | effective period ms | publishes per s | CPU % of a core (idle) | solve p50 ms | solve p95 ms |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 23.0 | 4.9 | 27.9 | 1035 | 1.0 | 2.9 | 16 | 20 |
+| 0.5 | 23.4 | 5.1 | 28.5 | 535 | 1.9 | 5.8 | 18 | 29 |
+| 0.2 | 23.7 | 5.1 | 28.7 | 236 | 4.2 | 13.2 | 16 | 35 |
+| 0.1 | 22.9 | 5.0 | 27.9 | 135 | 7.4 | 22.5 | 15 | 34 |
+| 0.05 | 17.0 | 4.4 | 21.4 | 79 | 12.7 | 29.8 | 16 | 35 |
+
+Latency, loss and order per interval, Docker, 5 reps (stock n = 1 000 cells: 1 rep). Sequential = 100 flips on 5 RTUs and on 1 RTU; "100 sim lost" is the share of 100 simultaneous breaker flips not visible within 10 s; reordered and chunk skew are as in section 7 (simultaneous breaker phases, all R); the generator column is spin-up status on, p50, all R pooled;
+"bench CPU" is the provider process over the cells that ran at least 20 s, median, % of one core (the 1 s runs have no stats lines; its idle CPU is in the table above). The last row is ferrofire as measured in sections 1 to 7 (its CPU was not measured).
+
+![Stock bennu at faster publish intervals](../img/charts/09j-stock-intervals.svg)
+
+| publish interval s | reps | effective period ms | seq p50 ms (5 RTUs) | seq p95 ms (5 RTUs) | seq p50 ms (1 RTU) | seq p95 ms (1 RTU) | 100 sim lost % (1 RTU) | 100 sim lost % (10 RTUs) | reordered | chunk skew | gen status-on p50 ms | idle CPU % | bench CPU % |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 (as shipped) | 5 | 1000 (nominal) | 1022 | 1035 | 1025 | 1033 | 81 | 0 | 1105 | 85 | 1020 | 3 |  |
+| 0.5 | 5 | 530 | 528 | 542 | 531 | 1052 | 80 | 0 | 1243 | 1 | 526 | 6 | 12 |
+| 0.2 | 5 | 231 | 220 | 232 | 468 | 708 | 80 | 0 | 1261 | 0 | 223 | 13 | 20 |
+| 0.1 | 5 | 124 | 116 | 125 | 512 | 638 | 80 | 0 | 1262 | 0 | 118 | 22 | 23 |
+| 0.05 | 5 | 72 | 127 | 204 | 564 | 601 | 80 | 0 | 1271 | 0 | 91 | 30 | 33 |
+| ferrofire, 0.05 | 5 | 50 | 99 | 112 | 98 | 118 | 0 | 0 | 0 | 110 | 110 | not measured | not measured |
+
+- **On many RTUs the sequential gap closes with the interval**: on 5 RTUs p50 is 1 022, 528, 220, 116 ms at 1, 0.5, 0.2, 0.1 s, and at 0.1 s stock is within 20 ms of ferrofire (99 ms). At 0.05 s it does not improve on 5 RTUs (p50 127 ms, p95 204 ms against ferrofire's 99 and 112): a publish and a re-solve now compete, so the tail grows. On 10 RTUs 0.05 s gives 86 ms p50, a little below ferrofire's 99 ms.
+- **One or two RTUs stay slow at any interval.** On 1 RTU the sequential p50 stays at 470 to 570 ms and on 2 RTUs at 225 to 250 ms once the interval is 0.2 s or less: the provider's `Applied:` stamps of one RTU are 0.5 s apart (stock's field device hands writes to the provider about two per second per RTU; its `cycle-time` in the generated config is 50 ms, so it is not that; not traced further),
+  so a sequential flip on one RTU waits about 0.5 s for its turn whatever the publish interval. Ferrofire: 98 ms on any R.
+- **Simultaneous commands are not helped.** The same two writes per second per RTU cap a burst: 100 simultaneous flips lose 80% on 1 RTU (400 of 500 over the reps) and 60% on 2, and 1 000 flips lose 80 to 98% on every R, at every interval (1 s as shipped: 81%, 63%, 7% on 1, 2, 5 RTUs and 0 on 10). Ferrofire lost none.
+  The provider-applied time of a burst does not move either (10 flips on 1 RTU: 2.5 s p50 at every interval).
+- **Reordering stays**: 1 105 reordered pairs at 1 s, 1 243 to 1 271 at the faster intervals; ferrofire none. The order is set by when the provider applies each write, before anything is published.
+- **Generators**: stock's status-on p50 is 1 020, 526, 223, 118 and 91 ms at 1, 0.5, 0.2, 0.1 and 0.05 s; ferrofire's is 110 ms and its PG reaches the setpoint at 1.1 s (the ramp stock does not have), so section 5's comparison holds with stock's status time now following its interval.
+- **No command lost or wrong in any sequential phase** at any interval (wrong final, wrong at the provider, wrong collateral, write and poll errors, flaps: 0 in all 528 phases of each new directory).
+
+The faster stock costs about ten times the idle CPU for a publish rate 14 times higher. One run (0.1 s, R = 10, rep 2) failed to start a cell (`gen:seq:5`: "baseline never reached" right after the stack started) and was run again whole; the failed attempt is not in the results.
+
+
 ## What the numbers do not say
 
 - The order columns count adjacent visible inversions, not commands, and only pairs where both commands were seen. "Reordered" is judged on the stream stamps (first datagram carrying the state), so it means the stack published the later command's state first; "chunk skew" is not an error in the state sequence, only in when two points of one publish were read. A threshold of half the publish period separates them cleanly here (ferrofire's largest stream gap is 3 ms against 25 ms).
-- Stock bennu is measured as the repo's phenix overlay ships it (publish once a second); its seconds-level latency tracks that interval (its provider applies a command in about 26 ms), not Modbus or the solver. Neither stack's publish rate was tuned.
+- Sections 1 to 7 measure stock bennu as the repo's phenix overlay ships it (publish once a second); its seconds-level latency tracks that interval (its provider applies a command in about 26 ms), not Modbus or the solver. Section 8 reruns it at 0.5, 0.2, 0.1 and 0.05 s with the one patch described there (Docker only, not on the range). Against that tuned stock: at 0.1 s or below it is within about 20 ms of ferrofire on sequential flips over 5 or 10 RTUs (at 0.05 s on 10 RTUs slightly below ferrofire's 99 ms), but still 5 to 6 times slower on 1 RTU and 2 to 3 times on 2 RTUs, it still loses 80% of 100 simultaneous flips on 1 RTU, and it still reorders; ferrofire's 50 ms publish was not tuned either. So the ferrofire-is-about-ten-times-faster claim holds against stock as shipped, and against tuned stock only for few RTUs and for bursts, not for sequential flips over many RTUs. The cause of stock's write rate (about two per RTU per second, section 8) was not traced, and the faster provider costs up to 10 times the idle CPU (ferrofire's CPU was not measured).
 - No generator number for stock includes the ramp (stock has none). The generator comparison is therefore: ferrofire spin-up status 110 ms and PG at setpoint 1.1 s, against stock status at 1.0 s with PG left at 0.
 - The Docker runs share one VM with the host's other workloads (load 3 to 17 at the start of a run); the range host's load at run start was at most 4.5. The range numbers agree with Docker's.

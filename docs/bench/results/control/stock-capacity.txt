@@ -1,0 +1,8 @@
+date 2026-11-14T06:10:00Z
+host_load 7.70 6.38 5.50
+docker_vm cpus=18 mem=8317202432
+interval 1 windows 4 pack_ms_mean 23.0 send_ms_mean 4.9 work_ms 27.9 effective_period_ms 1035 publishes_per_s 1.0 cpu_pct 2.9
+interval 0.5 windows 4 pack_ms_mean 23.4 send_ms_mean 5.1 work_ms 28.5 effective_period_ms 535 publishes_per_s 1.9 cpu_pct 5.8
+interval 0.2 windows 4 pack_ms_mean 23.7 send_ms_mean 5.1 work_ms 28.7 effective_period_ms 236 publishes_per_s 4.2 cpu_pct 13.2
+interval 0.1 windows 4 pack_ms_mean 22.9 send_ms_mean 5.0 work_ms 27.9 effective_period_ms 135 publishes_per_s 7.4 cpu_pct 22.5
+interval 0.05 windows 4 pack_ms_mean 17.0 send_ms_mean 4.4 work_ms 21.4 effective_period_ms 79 publishes_per_s 12.7 cpu_pct 29.8

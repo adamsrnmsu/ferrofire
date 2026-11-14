@@ -261,7 +261,7 @@ Full method, every figure, lost and wrong counts, and what stock cannot run (no 
 | stock bennu | 5 | 500 | 1022 | 1035 | 1041 | 1046 |
 | stock bennu | 10 | 500 | 1022 | 1044 | 1051 | 1060 |
 
-Ferrofire shows a flip in about 100 ms, stock bennu in about 1 020 ms; with 100 flips at once on 1 RTU stock loses 81% within 10 s and ferrofire loses none.
+Ferrofire shows a flip in about 100 ms, stock bennu in about 1 020 ms; with 100 flips at once on 1 RTU stock loses 81% within 10 s and ferrofire loses none. With stock's publish interval cut to 0.1 s or 0.05 s (Docker, [control-latency.md](bench/control-latency.md) section 8) its sequential flips over 5 or 10 RTUs take 86 to 127 ms, close to ferrofire's 99 ms, but on 1 RTU still about 500 ms, and it still loses 80% of 100 simultaneous flips on 1 RTU: stock's write rate, not its publish interval, limits those.
 
 ## Other results on the bench and the live range
 

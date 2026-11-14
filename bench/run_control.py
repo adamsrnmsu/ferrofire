@@ -11,6 +11,7 @@ Finished runs are skipped, so an interrupted matrix resumes.
 
 Env: STACK (ferrofire), OUTDIR, RS (1,2,5,10), REPS (5), CELLS (default: the full matrix), SLOW (cells that get SLOW_REPS reps only), SLOW_REPS,
 NOBUILD=1 (use the binaries already in target-linux), WAIT (seconds to wait for other cargo containers to finish before a run, 600).
+STOCK_PUBLISH_S (STACK=stock, default 1 = as shipped): stock publish interval, s (ww-1df.35; stock hard-codes 1 s, bench/stock_provider.py patches it); use OUTDIR=docs/bench/results/control/stock-<s>s.
 STACK=stock: pybennu + stock bennu field devices (image ffc-stock:22.04 from bench/Dockerfile.stock; bench/stock_provider.py), same driver and cells, raw in .../stock/.
 Joining the provider stamps to the commands: bench/control_join.py."""
 import gzip, hashlib, os, pathlib, subprocess, sys, time
@@ -58,12 +59,15 @@ def start_ferrofire(r):
     return f"{d}/scada.json", "udp://*;239.0.1.{n}:40000"
 
 
+PUB = os.environ.get("STOCK_PUBLISH_S", "1")   # stock publish interval, s (bench/stock_provider.py; ww-1df.35)
+
+
 def start_stock(r):
     """stock bennu: pybennu-power-solver (PyPower; bench/stock_provider.py = stock plus `Applied:` stamps) + R bennu-field-deviced, all one image (STOCK_IMG).
     One publish group for every RTU (stock publishes the whole model, once a second, to the one endpoint of config.ini)."""
     d = f"/src/target-linux/control-grid/R{r}"
     docker_run("ffc-prov", "provider", "python3", "/src/bench/stock_provider.py", "start", "-c", f"{d}/config.ini", img=STOCK_IMG,
-               extra=["-v", f"{GRID}/case.py:/etc/sceptre/case_control.py:ro"])
+               extra=["-v", f"{GRID}/case.py:/etc/sceptre/case_control.py:ro", "-e", f"STOCK_PUBLISH_S={PUB}", "-e", "STOCK_PUBLISH_STATS=1"])
     for n in range(1, r + 1):
         docker_run(f"ffc-rtu-{n}", f"rtu-{n}", "bash", "-c", f"bennu-field-deviced --command start --file {d}/bennu/rtu-{n}.xml && exec tail --pid=$(pgrep -o bennu-field-d) -f /dev/null", img=STOCK_IMG)  # it daemonizes
     return f"{d}/scada.json", "udp://*;239.0.0.1:40000"
@@ -151,10 +155,11 @@ def run(rep, r):
     binary = hashlib.sha256((ROOT / "target-linux/release/ferrofire").read_bytes()).hexdigest()[:16]
     if STACK == "stock":
         binary = f"stock image {out('docker', 'image', 'inspect', STOCK_IMG, '--format', '{{.Id}}')[:23]} (driver ffcontrol, ferrofire {binary})"
+    pub_line = f"stock_publish_s {PUB}\n" if STACK == "stock" else ""
     (OUT / f"{base.name}.env.txt").write_text(
         f"stack {STACK} R {r} rep {rep}\nstart {t0} end {time.strftime('%FT%TZ', time.gmtime())}\ndriver_exit {drv_rc}\n"
         f"commit {out('git', '-C', str(ROOT), 'rev-parse', 'HEAD')} dirty {bool(out('git', '-C', str(ROOT), 'status', '--porcelain', '--', 'src', 'bench/control'))}\n"
-        f"ferrofire_sha256 {binary}\nhost_load_start {load0}\nhost_load_end {load()}\n"
+        f"ferrofire_sha256 {binary}\n{pub_line}host_load_start {load0}\nhost_load_end {load()}\n"
         f"docker_vm {out('docker', 'info', '--format', 'cpus={{.NCPU}} mem={{.MemTotal}}')}\n"
         f"contended_at_start {bool(others0)}{(' (waited ' + str(WAIT) + ' s, still running: ' + '; '.join(busy) + ')') if busy else ''}\n"
         f"other_containers_start {'; '.join(others0) or 'none'}\nother_containers_end {'; '.join(others()) or 'none'}\nstale_containers_ignored {'; '.join(others(True)) or 'none'}\ncells {cells_for(rep)}\n")

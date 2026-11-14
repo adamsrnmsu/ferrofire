@@ -1,0 +1,44 @@
+== breaker:seq:1 exit 0
+breaker:seq:1 open: 1/1 done, lost 0, wrong 0/0, flaps 0, 0.42 s
+== breaker:sim:1 exit 0
+breaker:sim:1 open: 1/1 done, lost 0, wrong 0/0, flaps 0, 0.24 s
+== breaker:seq:5 exit 0
+breaker:seq:5 open: 5/5 done, lost 0, wrong 0/0, flaps 0, 2.47 s
+== breaker:sim:5 exit 0
+breaker:sim:5 open: 5/5 done, lost 0, wrong 0/0, flaps 0, 0.25 s
+== breaker:seq:10 exit 0
+breaker:seq:10 open: 10/10 done, lost 0, wrong 0/0, flaps 0, 5.00 s
+== breaker:sim:10 exit 0
+breaker:sim:10 open: 10/10 done, lost 0, wrong 0/0, flaps 0, 0.94 s
+== breaker:seq:50 exit 0
+breaker:seq:50 open: 50/50 done, lost 0, wrong 0/0, flaps 0, 26.14 s
+== breaker:sim:50 exit 0
+breaker:sim:50 open: 50/50 done, lost 0, wrong 0/0, flaps 0, 4.92 s
+== breaker:seq:100 exit 0
+breaker:seq:100 open: 100/100 done, lost 0, wrong 0/0, flaps 0, 52.51 s
+== breaker:sim:100 exit 0
+breaker:sim:100 open: 100/100 done, lost 0, wrong 0/0, flaps 0, 9.68 s
+== gen:seq:1 exit 0
+gen:seq:1 down: 1/1 done, lost 0, wrong 0/0, flaps 0, 0.25 s
+gen:seq:1 up: 1/1 done, lost 0, wrong 0/0, flaps 0, 0.47 s
+== gen:sim:1 exit 0
+gen:sim:1 down: 1/1 done, lost 0, wrong 0/0, flaps 0, 0.24 s
+gen:sim:1 up: 1/1 done, lost 0, wrong 0/0, flaps 0, 0.47 s
+== gen:seq:2 exit 0
+gen:seq:2 down: 2/2 done, lost 0, wrong 0/0, flaps 0, 0.77 s
+gen:seq:2 up: 2/2 done, lost 0, wrong 0/0, flaps 0, 1.01 s
+== gen:sim:2 exit 0
+gen:sim:2 down: 2/2 done, lost 0, wrong 0/0, flaps 0, 0.25 s
+gen:sim:2 up: 2/2 done, lost 0, wrong 0/0, flaps 0, 0.48 s
+== gen:seq:5 exit 0
+gen:seq:5 down: 5/5 done, lost 0, wrong 0/0, flaps 0, 2.37 s
+gen:seq:5 up: 5/5 done, lost 0, wrong 0/0, flaps 0, 2.59 s
+== gen:sim:5 exit 0
+gen:sim:5 down: 5/5 done, lost 0, wrong 0/0, flaps 0, 0.22 s
+gen:sim:5 up: 5/5 done, lost 0, wrong 0/0, flaps 0, 0.46 s
+== gen:seq:10 exit 0
+gen:seq:10 down: 10/10 done, lost 0, wrong 0/0, flaps 0, 5.10 s
+gen:seq:10 up: 10/10 done, lost 0, wrong 0/0, flaps 0, 5.21 s
+== gen:sim:10 exit 0
+gen:sim:10 down: 10/10 done, lost 0, wrong 0/0, flaps 0, 0.90 s
+gen:sim:10 up: 10/10 done, lost 0, wrong 0/0, flaps 0, 0.99 s

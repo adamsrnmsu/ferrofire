@@ -566,8 +566,92 @@ def chart_control():
     TABLES["09i-solve"] = sv["per_solve_ms"].split(" (")[0]
 
 
+def idle_cpu():
+    """{interval s: provider CPU %, idle, no commands} from the stock-capacity.txt probe (bench/stock_capacity.sh)."""
+    out = {}
+    f = cr.CTL / "stock-capacity.txt"
+    for l in f.read_text().splitlines() if f.exists() else []:
+        m = re.match(r"interval ([\d.]+) .* cpu_pct ([\d.]+)", l)
+        if m:
+            out[float(m[1])] = float(m[2])
+    return out
+
+
+def solve(stack):
+    """[p50, p95] ms of the stock write handler (provider-side `Applied:` stamps: entry to the ACK, i.e. the re-solve) over every stamp of the stack."""
+    v = sorted((c["solved"] - c["applied"]) for c in cmds("docker", stack) if c["applied"] is not None and c["solved"] is not None)
+    return [f"{cr.pct(v, .5):.0f}", f"{cr.pct(v, .95):.0f}"]
+
+
+def chart_stock_intervals():
+    """9j: the stock provider at faster publish intervals (ww-1df.35), Docker, ferrofire at 50 ms as the reference."""
+    ivs = [(1.0, "stock")] + list(cr.STOCK_FAST)
+    idle, rows, S = idle_cpu(), [], []
+    ff = lat("docker", "ferrofire", "visible", "breaker", "seq", 100, 5)
+    ffg = lat("docker", "ferrofire", "visible", "gen", "seq", dir="up")
+    for iv, name in ivs:
+        seq, seq1 = (lat("docker", name, "visible", "breaker", "seq", 100, R) for R in (5, 1))
+        sim = {R: [q for q in phs("docker", name) if q["R"] == R and q["cell"] == "breaker:sim:100"] for R in (1, 10)}
+        lost = {R: 100 * sum(q["lost"] for q in sim[R]) / sum(q["issued"] for q in sim[R]) for R in sim}
+        oc = [sum(v[i] for (R, k), v in cr.order_counts("docker", name).items() if k == "breaker:sim") for i in (0, 1)]
+        gen = lat("docker", name, "visible", "gen", "seq", dir="up")
+        cpu, per = cr.provider_stats(name) if name != "stock" else ([], [])
+        reps = len({q["rep"] for q in phs("docker", name)})
+        d = dict(iv=iv, seq50=cr.pct(seq, .5), seq95=cr.pct(seq, .95), r1=cr.pct(seq1, .5), lost1=lost[1], lost10=lost[10], gen=cr.pct(gen, .5), cpu=cr.pct(cpu, .5) if cpu else None, idle=idle.get(iv),
+                 per=cr.pct(per, .5) if per else None)
+        S.append(d)
+        rows.append((f"{iv:g}" + (" (as shipped)" if name == "stock" else ""), reps, f"{d['per']:.0f}" if d["per"] else ("1000 (nominal)" if name == "stock" else ""), p(seq, .5), p(seq, .95), p(seq1, .5), p(seq1, .95), f"{lost[1]:.0f}", f"{lost[10]:.0f}",
+                     oc[0], oc[1], p(gen, .5), f"{d['idle']:.0f}" if d["idle"] is not None else "", f"{d['cpu']:.0f}" if d["cpu"] else ""))
+    f50, g50 = cr.pct(ff, .5), cr.pct(ffg, .5)
+    pc = cr.provider_stats(ivs[-1][1])
+    TABLES["09j-period"], TABLES["09j-peak"] = f"{cr.pct(pc[1], .5):.0f}", f"{pc[0][-1]:.0f}"
+    cap = [dict(re.findall(r"(\w+) ([\d.]+)", l)) for l in (cr.CTL / "stock-capacity.txt").read_text().splitlines() if l.startswith("interval ")]
+    TABLES["09k-stock-capacity"] = "\n".join(["| interval s | pack ms | send ms | one publish ms | effective period ms | publishes per s | CPU % of a core (idle) | solve p50 ms | solve p95 ms |", "|" + "---|" * 9] +
+        ["| " + " | ".join([c["interval"], c["pack_ms_mean"], c["send_ms_mean"], c["work_ms"], c["effective_period_ms"], c["publishes_per_s"], c["cpu_pct"], *solve(n)]) + " |" for c, (_, n) in zip(cap, ivs)])
+    ff1 = lat("docker", "ferrofire", "visible", "breaker", "seq", 100, 1)
+    ffo = [sum(v[i] for (R, k), v in cr.order_counts("docker", "ferrofire").items() if k == "breaker:sim") for i in (0, 1)]
+    rows.append(("ferrofire, 0.05", 5, "50", p(ff, .5), p(ff, .95), p(ff1, .5), p(ff1, .95), "0", "0", ffo[0], ffo[1], p(ffg, .5), "not measured", "not measured"))
+    xs, labels = range(len(S)), [f"{d['iv']:g} s" for d in S]
+    fig, axs = plt.subplots(2, 2, figsize=(7.4, 5.6))
+    for a in axs.flat:
+        a.grid(axis="x", visible=False)
+        a.set_xticks(xs, labels)
+        a.tick_params(length=0)
+    ref = lambda a, v, txt: (a.axhline(v, color=FF, lw=1.2, ls="--"), a.text(-0.1, v, txt, color=FF, fontsize=7.5, ha="left", va="bottom"))
+    a = axs[0][0]
+    a.plot(xs, [d["seq50"] for d in S], color=STK, marker="o", lw=1.6, label="p50")
+    a.plot(xs, [d["seq95"] for d in S], color=STK, marker="o", mfc=SURFACE, lw=1.2, ls=":", label="p95")
+    a.plot(xs, [d["r1"] for d in S], color=STK, marker="s", lw=1.0, ls="--", label="p50, 1 RTU")
+    ref(a, f50, "ferrofire 50 ms: p50 %.0f ms" % f50)
+    a.set_title("sequential breaker flip visible, 5 RTUs, ms", fontsize=8.5, color=INK2, loc="left")
+    a.legend(loc="upper right")
+    a = axs[0][1]
+    a.plot(xs, [d["lost1"] for d in S], color=STK, marker="o", lw=1.6, label="1 RTU")
+    a.plot(xs, [d["lost10"] for d in S], color=STK, marker="o", mfc=SURFACE, lw=1.2, ls=":", label="10 RTUs")
+    ref(a, 0, "ferrofire: 0")
+    a.set_title("100 simultaneous flips lost, %", fontsize=8.5, color=INK2, loc="left")
+    a.legend(loc="center right")
+    a = axs[1][0]
+    a.plot(xs, [d["gen"] for d in S], color=STK, marker="o", lw=1.6)
+    ref(a, g50, "ferrofire: %.0f ms" % g50)
+    a.set_title("generator spin-up, status on at the SCADA, p50, ms", fontsize=8.5, color=INK2, loc="left")
+    a = axs[1][1]
+    a.plot(xs, [d["idle"] for d in S], color=STK, marker="o", mfc=SURFACE, lw=1.2, ls=":", label="idle (no commands)")
+    a.plot([i for i, d in enumerate(S) if d["cpu"]], [d["cpu"] for d in S if d["cpu"]], color=STK, marker="o", lw=1.6, label="during the bench cells")
+    a.set_title("stock provider CPU, % of one core", fontsize=8.5, color=INK2, loc="left")
+    a.legend(loc="upper left")
+    for a in axs.flat:
+        a.set_ylim(bottom=0)
+        a.set_xlabel("stock publish interval (as shipped: 1 s)", color=INK2, fontsize=8)
+    fig.subplots_adjust(hspace=0.55)
+    finish(fig, "09j-stock-intervals", rows, ["publish interval s", "reps", "effective period ms", "seq p50 ms (5 RTUs)", "seq p95 ms (5 RTUs)", "seq p50 ms (1 RTU)", "seq p95 ms (1 RTU)", "100 sim lost % (1 RTU)", "100 sim lost % (10 RTUs)",
+                                              "reordered", "chunk skew", "gen status-on p50 ms", "idle CPU %", "bench CPU %"],
+           "Stock bennu at faster publish intervals vs ferrofire at 50 ms, Docker", None, axs[0][0],
+           note="Stock grey, ferrofire blue dashed. Intervals are the sleep of stock's publish loop (bench/stock_provider.py); sequential = 100 flips on 5 RTUs (and 1 RTU); generator spin-up = all R pooled; ferrofire reference = its 5-rep runs.")
+
+
 def main():
-    for f in (chart_age, chart_loss, chart_reorder, chart_stale, chart_fanout, chart_nng, chart_live, chart_ovs, chart_bennu, chart_control):
+    for f in (chart_age, chart_loss, chart_reorder, chart_stale, chart_fanout, chart_nng, chart_live, chart_ovs, chart_bennu, chart_control, chart_stock_intervals):
         f()
     for tin, tout in (("results.md.in", ROOT / "docs/results.md"), ("control_latency.md.in", ROOT / "docs/bench/control-latency.md")):
         text = (HERE / tin).read_text()

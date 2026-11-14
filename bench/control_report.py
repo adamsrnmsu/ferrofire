@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Loader for the control-latency raw results (docs/bench/results/control/{ferrofire,stock,range/*}): one dict per command with its
 latencies in ms from t_cmd, and one per phase (cells.csv). Used by bench/charts.py for docs/bench/control-latency.md. Stdlib only (ww-1df.23.6)."""
-import csv, glob, gzip, os, pathlib, sys
+import csv, glob, gzip, os, pathlib, re, sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -31,7 +31,7 @@ def commands(env, stack):
             t, ms = int(r["t_cmd"]), lambda k: (int(r[k]) - t) / 1e6 if r.get(k) not in (None, "", "0") else None
             _, mode, n = r["cell"].split(":")
             out.append(dict(cell=r["cell"], mode=mode, kind=r["kind"], dir=r["dir"], n=int(n), R=int(r["R"]), rep=int(r["rep"]) if "rep" in r else int(base.split("_rep")[1]),
-                            done=r["done"] == "1", ack=ms("t_ack"), applied=ms("t_apply_ns"), stream=ms("t_stream"), visible=ms("t_visible"), setpoint=ms("t_setpoint")))
+                            done=r["done"] == "1", ack=ms("t_ack"), applied=ms("t_apply_ns"), solved=ms("t_solved_ns"), stream=ms("t_stream"), visible=ms("t_visible"), setpoint=ms("t_setpoint")))
     return out
 
 
@@ -46,6 +46,37 @@ def phases(env, stack):
 
 # Publish period of the stack's provider: ferrofire runs the grid at dt 0.05 s (bench/gen_grid.py), stock bennu publishes once a second.
 PUBLISH_S = {"ferrofire": 0.05, "ferrofire-before": 0.05, "stock": 1.0}
+# Stock at faster publish intervals (ww-1df.35): results/control/stock-<interval>s/, Docker only, stack name `stock-<interval>s`.
+STOCK_FAST = sorted((float(d.name[6:-1]), d.name) for d in CTL.glob("stock-*s") if d.is_dir() and d.name[6:-1].replace(".", "").isdigit())[::-1]
+for _iv, _n in STOCK_FAST:
+    DIRS["docker", _n] = CTL / _n
+    PUBLISH_S[_n] = _iv
+
+STATS = re.compile(r"Publish-stats: t_ns=(\d+) period_s=\S+ publishes=(\d+) .*? cpu_s=([\d.]+)")
+
+
+def provider_stats(stack, env="docker"):
+    """From the `Publish-stats:` lines of bench/stock_provider.py (one per 10 s per provider) in the stack's prov.log.gz, one fresh provider per `== ` section (a cell):
+    ([provider process CPU, % of one core, per section of >= 2 lines], [effective publish period in ms, one per 10 s window]). Both from consecutive-line deltas,
+    so provider start-up (importing pypower, about 4 CPU s) is left out."""
+    cpu, per = [], []
+
+    def close(sec):
+        if len(sec) >= 2:
+            cpu.append(100 * (sec[-1][2] - sec[0][2]) / ((sec[-1][0] - sec[0][0]) / 1e9))
+        per.extend((y[0] - x[0]) / 1e6 / y[1] for x, y in zip(sec, sec[1:]))
+
+    for f in sorted(glob.glob(f"{DIRS[env, stack]}/R*_rep*.prov.log.gz")):
+        sec = []
+        for l in gzip.open(f, "rt", errors="replace"):
+            m = STATS.search(l)
+            if m:
+                sec.append((int(m[1]), int(m[2]), float(m[3])))
+            elif l.startswith("== "):
+                close(sec)
+                sec = []
+        close(sec)
+    return sorted(cpu), sorted(per)
 
 
 def order_split(rows, period_s):

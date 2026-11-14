@@ -1,0 +1,7 @@
+publish interval s,reps,effective period ms,seq p50 ms (5 RTUs),seq p95 ms (5 RTUs),seq p50 ms (1 RTU),seq p95 ms (1 RTU),100 sim lost % (1 RTU),100 sim lost % (10 RTUs),reordered,chunk skew,gen status-on p50 ms,idle CPU %,bench CPU %
+1 (as shipped),5,1000 (nominal),1022,1035,1025,1033,81,0,1105,85,1020,3,
+0.5,5,530,528,542,531,1052,80,0,1243,1,526,6,12
+0.2,5,231,220,232,468,708,80,0,1261,0,223,13,20
+0.1,5,124,116,125,512,638,80,0,1262,0,118,22,23
+0.05,5,72,127,204,564,601,80,0,1271,0,91,30,33
+"ferrofire, 0.05",5,50,99,112,98,118,0,0,0,110,110,not measured,not measured
