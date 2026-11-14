@@ -289,7 +289,7 @@ Both field devices expose a new value in about a tenth of a millisecond, ferrofi
 ## 11. Provider alone: ferrofire vs Sandia's C++ bennu-simulink-provider (stub model)
 
 Plumbing only, no solver: the unmodified C++ provider on a C stand-in for the Simulink model against ferrofire with an equally trivial model, through the same field devices and driver (100 and 1 250 points, publish 0.1 and 0.05 s, 10 RTUs, Docker, 3 reps).
-Method, deviations and all tables: [cpp-provider.md](bench/cpp-provider.md); raw: [results/cppprov/](bench/results/cppprov/). At a 0.05 s interval ferrofire shows a write in 49 ms against 118-151 ms through the C++ provider (two unsynchronised timers) and publishes at exactly the interval (the C++ provider sleeps after the work: 53-58 ms); 1 000 simultaneous writes are all delivered by ferrofire and lose about half through the C++ provider (its 256-message update FIFO fills between two 50 ms steps).
+Method, deviations and all tables: [cpp-provider.md](bench/cpp-provider.md); raw: [results/cppprov/](bench/results/cppprov/). At a 0.05 s interval ferrofire shows a write in 49 ms in every rep against 118-151 ms pooled through the C++ provider (two unsynchronised timers whose phase is fixed per run, so the 3 reps span 100 to 200 ms and the factor of 2.4-3x is indicative only) and publishes at exactly the interval (the C++ provider sleeps after the work: 53-58 ms); 1 000 simultaneous writes are all delivered by ferrofire and lose about half through the C++ provider (its 256-message update FIFO fills between two 50 ms steps).
 
 ## Other results on the bench and the live range
 
