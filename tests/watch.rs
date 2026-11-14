@@ -81,6 +81,31 @@ fn alive(pid: i32) -> bool {
         .unwrap()
         .success()
 }
+/// Gone or a zombie: an orphaned grandchild is reparented to a pid 1 (cargo, in the container) that never reaps it.
+fn gone(pid: i32) -> bool {
+    let o = Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .unwrap();
+    let s = String::from_utf8_lossy(&o.stdout);
+    s.trim().is_empty() || s.trim_start().starts_with('Z')
+}
+/// v1 firmware without `exec`: the shell stays the watcher's child and a grandchild writes its pid to `$MARK.gpid`.
+fn v1_no_exec(tail: &str) -> String {
+    script(&format!(
+        "echo \"v1 $*\" >> \"$MARK\"\nsleep 1000 &\necho $! > \"$MARK.gpid\"\n{tail}\n"
+    ))
+}
+fn gpid(w: &W) -> i32 {
+    w.wait("grandchild pid", 3, |w| {
+        fs::read_to_string(w.path("mark.gpid")).is_ok_and(|s| s.ends_with('\n'))
+    });
+    fs::read_to_string(w.path("mark.gpid"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap()
+}
 
 /// Start a watcher on `fw` (written with `mode`) and the rtu config copied to `cfg`.
 fn spawn(tag: &str, fw: Option<(&[u8], u32)>) -> W {
@@ -239,4 +264,39 @@ fn reports_signal_exit() {
     w.wait("signal exit", 3, |w| {
         w.err().contains("watch: exited status=signal 9")
     });
+}
+
+#[test]
+fn restart_stops_firmware_grandchildren() {
+    let w = spawn("grand", Some((v1_no_exec("wait").as_bytes(), 0o755)));
+    let g = gpid(&w);
+    assert!(!gone(g), "grandchild never ran");
+    put(&w.path("fw"), v(2), 0o755);
+    w.wait("v2", 3, |w| w.marker().contains("v2 "));
+    w.wait("v1 grandchild gone", 7, |_| gone(g));
+}
+
+#[test]
+fn sigterm_stops_firmware_grandchildren() {
+    let mut w = spawn("grandterm", Some((v1_no_exec("wait").as_bytes(), 0o755)));
+    let g = gpid(&w);
+    Command::new("kill")
+        .arg(w.child.id().to_string())
+        .status()
+        .unwrap();
+    let end = Instant::now() + Duration::from_secs(7);
+    while w.child.try_wait().unwrap().is_none() {
+        assert!(Instant::now() < end, "watcher still running");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    w.wait("grandchild gone", 2, |_| gone(g));
+}
+
+#[test]
+fn crash_stops_firmware_grandchildren() {
+    // the shell exits but leaves its background child holding the device's ports
+    let w = spawn("grandcrash", Some((v1_no_exec("exit 1").as_bytes(), 0o755)));
+    let g = gpid(&w);
+    w.wait("exited", 3, |w| w.err().contains("watch: exited"));
+    w.wait("grandchild gone", 2, |_| gone(g));
 }

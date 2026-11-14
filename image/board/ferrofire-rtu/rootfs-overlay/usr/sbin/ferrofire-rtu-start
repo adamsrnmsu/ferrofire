@@ -6,8 +6,10 @@ cfg=${1:-/etc/sceptre/config.xml}
 home=/home/sceptre
 pidfile=/run/ferrofire-watch.pid
 
-[ -e "$home/ferrofire.firmware" ] || cp /usr/bin/ferrofire "$home/ferrofire.firmware"
-[ -e "$home/config.xml" ] || cp "$cfg" "$home/config.xml"
+# cp to .tmp then mv: a power cut mid-copy must not leave a truncated seed that the next boot keeps.
+seed() { [ -e "$2" ] || { cp "$1" "$2.tmp" && mv "$2.tmp" "$2"; }; }
+seed /usr/bin/ferrofire "$home/ferrofire.firmware"
+seed "$cfg" "$home/config.xml"
 chown sceptre:sceptre "$home/ferrofire.firmware" "$home/config.xml"
 
 if [ -r "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then

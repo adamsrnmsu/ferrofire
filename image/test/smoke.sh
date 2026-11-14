@@ -50,6 +50,17 @@ boot() {
 stop() { r sync; kill $qemu; wait $qemu 2>/dev/null || true; }
 trap 'kill $qemu 2>/dev/null || true; rm -rf "$tmp"' EXIT
 
+# rtu_seed_atomic needs no VM: run the start script here (a throwaway container) with a cp that dies after 10 bytes.
+# The seed path must stay absent, so the next boot seeds again instead of keeping a truncated firmware.
+mkdir -p /home/sceptre /etc/sceptre "$tmp/stub"
+head -c 4096 /dev/urandom >/usr/bin/ferrofire
+# shellcheck disable=SC2016 # $1/$2 are the stub's own arguments
+printf '#!/bin/sh\nhead -c 10 "$1" >"$2"; exit 1\n' >"$tmp/stub/cp" && chmod +x "$tmp/stub/cp"
+{ ! PATH="$tmp/stub:$PATH" sh /src/image/board/ferrofire-rtu/rootfs-overlay/usr/sbin/ferrofire-rtu-start 2>/dev/null &&
+  [ ! -e /home/sceptre/ferrofire.firmware ]; } || fail rtu_seed_atomic
+rm -rf /home/sceptre /usr/bin/ferrofire
+echo "ok rtu_seed_atomic"
+
 cp /src/tests/conformance/rtu-1.xml "$tmp/factory.xml"
 sed 's/<name>rtu-1<\/name>/<!-- injected -->&/' "$tmp/factory.xml" >"$tmp/injected.xml"
 echo '/usr/sbin/ferrofire-rtu-start /etc/sceptre/config.xml' >"$tmp/start.sh"
@@ -115,6 +126,17 @@ echo "ok root_telnet_denied"
 { ! sshpass -p '' ssh "${opts[@]}" -p 2222 root@127.0.0.1 true 2>/dev/null &&
   r 'grep -qx "PermitRootLogin no" /etc/ssh/sshd_config'; } || fail root_ssh_denied
 echo "ok root_ssh_denied"
+
+# BusyBox is setuid root and root's password is empty: su must refuse a blank password off /etc/securetty
+# (FEATURE_SU_BLANK_PW_NEEDS_SECURE_TTY), over ssh without a tty and on a telnet pty. `id` first proves the shell ran.
+r 'id; su -c id root </dev/null 2>&1' >"$tmp/su-ssh" || true
+# shellcheck disable=SC2016 # $1 expands in the inner bash
+timeout 25 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2323; sleep 2; printf "sceptre\r\n" >&3; sleep 2; printf "sceptre\r\n" >&3
+  sleep 3; printf "id; su -c id root\r\n" >&3; sleep 3; printf "exit\r\n" >&3; timeout 2 cat <&3' >"$tmp/su-telnet" 2>/dev/null || true
+for f in su-ssh su-telnet; do
+  { grep -aq 'uid=1001(sceptre)' "$tmp/$f" && ! grep -aq 'uid=0' "$tmp/$f"; } || { cat -v "$tmp/$f"; fail "su_root_denied ($f)"; }
+done
+echo "ok su_root_denied"
 
 # phenix assigns addresses by link order: the non-lo links must be exactly the two NICs, with no dummy0/sit0/etc.
 [ "$(r "ip -o link | awk -F': ' '\$2 != \"lo\" {sub(/@.*/, \"\", \$2); printf \"%s \", \$2}'")" = "eth0 eth1 " ] ||

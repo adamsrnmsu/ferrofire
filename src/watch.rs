@@ -6,7 +6,7 @@ use clap::Args;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::process::ExitStatusExt;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -53,17 +53,16 @@ fn status_text(s: ExitStatus) -> String {
     )
 }
 
-/// SIGTERM, up to 5 s grace, then SIGKILL.
+/// SIGTERM the firmware's process group, up to 5 s grace for the leader, then SIGKILL whatever is left of the
+/// group. The group, not the pid: a firmware script without `exec` leaves the device as a grandchild holding its ports.
 fn stop_child(c: &mut Child) {
-    sys::kill(c.id() as i32, libc::SIGTERM);
+    let group = -(c.id() as i32);
+    sys::kill(group, libc::SIGTERM);
     let end = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < end {
-        if matches!(c.try_wait(), Ok(Some(_))) {
-            return;
-        }
+    while Instant::now() < end && matches!(c.try_wait(), Ok(None)) {
         std::thread::sleep(Duration::from_millis(20));
     }
-    let _ = c.kill();
+    sys::kill(group, libc::SIGKILL);
     let _ = c.wait();
 }
 
@@ -86,6 +85,7 @@ fn start(cli: &Cli, want: &str) -> Result<Option<Child>, String> {
         .args(["field-device", "--file"])
         .arg(&cli.file)
         .current_dir(&cli.run_dir) // the device writes event logs to relative paths; the device root is read-only
+        .process_group(0) // its own group, so stop_child reaches the whole firmware
         .spawn()
         .map(Some)
         .map_err(|e| e.to_string())
@@ -138,7 +138,10 @@ impl Watch {
             return;
         };
         eprintln!("watch: exited status={}", status_text(s));
-        self.child = None;
+        // the leader is gone: anything it left behind in its group would hold the device's ports
+        if let Some(c) = self.child.take() {
+            sys::kill(-(c.id() as i32), libc::SIGKILL);
+        }
         self.fail();
     }
 
