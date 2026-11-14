@@ -20,6 +20,8 @@ Reruns over the same raw data are byte-identical. No docker, no build, no benchm
 | `stream-fidelity.py` | 5 | `docs/bench/results/{raw,raw-datagram-v1,raw-datagram-v1-d4a,live}` |
 | `robustness-stock.py` | 6 | `docs/bench/results/burger` |
 | `cpu-profiling.py` | 7 | `cpu-profiling-raw/` (copied from `/var/tmp/ff-prof`) |
+| `field-device.py` | 8 | `docs/bench/results/fdmicro` (through `bench/fdmicro_report.py`) |
+| `cpp-provider.py` | 9 | `docs/bench/results/cppprov` |
 
 Colours: ferrofire blue `#2a78d6`, stock bennu grey `#898781`, as in `bench/charts.py`.
 

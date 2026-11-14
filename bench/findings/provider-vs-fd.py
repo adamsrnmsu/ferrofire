@@ -112,7 +112,7 @@ def main():
             gen[d, cell.split(":")[0], "n"] += c["issued"]
     print("flaps: " + "; ".join(f"{d} breaker {gen[d, 'breaker']}/{gen[d, 'breaker', 'n']} gen {gen[d, 'gen']}/{gen[d, 'gen', 'n']}" for d in have))
 
-    foot = lambda cell: (f"Raw data to {snap}. Stock = bennu 6.0.0 (before upstream fix 91fd137; rerun pending). Stock provider + ferrofire FD: the FD rejects stock's datagrams.\nReps at 1/2/5/10 RTUs: "
+    foot = lambda cell: (f"Raw data to {snap}. Stock = bennu 6.0.0 (before upstream fix 91fd137; rerun pending). Stock provider + ferrofire FD: stock's datagrams lack the NUL the FD requires (ww-y87).\nReps at 1/2/5/10 RTUs: "
                          + "; ".join(f"{l} {reps(d, cell)}" for d, l, *_ in PAIRS if d in have).replace(" provider", "")
                          + ".\nDocker bench, one VM. FD = field device. Colour = provider (blue ferrofire, grey stock); hatched = the FD is the other kind.")
     ms = lambda d, R: f"{p50(d, R):.0f}" + (f"  ({share[R]:.0f} % of gain)" if d == M else "")
