@@ -137,6 +137,8 @@ RADIO/DISH API. Defaults: `tcp://0.0.0.0:5555`, `udp://*;239.0.0.1:40000`; the i
 NNG was evaluated as a second transport and dropped on 2026-11-09: see the
 [historical comparison](docs/bench/transport-comparison.md); loss, reordering, fan-out, restart and fault numbers for datagram v1: [docs/bench/datagram-v1-bench.md](docs/bench/datagram-v1-bench.md). Loss is not healed within one period (a cycle of D datagrams is complete with probability (1-p)^D; per-tag staleness p99 is about 2-3 periods at 1 % loss, 3-9 at 5 %), and without IGMP snooping on the switch every port gets the whole stream; see [the refresh and loss model](docs/datagram-v1.md#refresh-and-loss-model). Where multicast is not available use the pull-bridge below.
 
+Where the CPU goes and which optimizations were measured: [docs/profiling.md](docs/profiling.md).
+
 ### Per-RTU endpoints
 
 `publish_slices:` in the model YAML (or `--publish-tags ENDPOINT=a,b,c` / `ENDPOINT=@config.xml`, repeatable) publishes named tag

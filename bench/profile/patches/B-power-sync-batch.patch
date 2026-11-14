@@ -1,0 +1,42 @@
+diff --git a/src/model.rs b/src/model.rs
+index 4b24f62..29ae885 100644
+--- a/src/model.rs
++++ b/src/model.rs
+@@ -312,6 +312,7 @@ pub struct Model {
+     eval_order: Vec<(usize, Node)>, // output slots with their expression, dependency order
+     published: Vec<(String, Kind, usize)>,
+     power: Option<PowerRt>,
++    power_written: bool,
+ }
+ 
+ /// Standoff when a body moving down is held at a closed barrier (keeps it in the zone it came from).
+@@ -771,6 +772,7 @@ impl Model {
+             eval_order,
+             published,
+             power,
++            power_written: false,
+         })
+     }
+ 
+@@ -811,7 +813,8 @@ impl Model {
+         };
+         p.pw.set(i, x);
+         p.dirty = true;
+-        p.sync(&mut self.v);
++        self.v[p.slots[i]] = p.pw.get(i); // the rest is re-synced once per batch (apply_writes)
++        self.power_written = true;
+         true
+     }
+ 
+@@ -823,6 +826,11 @@ impl Model {
+                 rejected.push(tag.clone());
+             }
+         }
++        if std::mem::take(&mut self.power_written) {
++            if let Some(p) = self.power.as_ref() {
++                p.sync(&mut self.v);
++            }
++        }
+         self.eval();
+         rejected
+     }

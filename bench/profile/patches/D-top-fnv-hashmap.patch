@@ -1,0 +1,81 @@
+diff --git a/src/top.rs b/src/top.rs
+index 777bc72..90c2dfb 100644
+--- a/src/top.rs
++++ b/src/top.rs
+@@ -11,7 +11,7 @@ use crate::hint::lock;
+ use crate::log::{pick, run_dirs};
+ use crate::model::Value;
+ use crate::probe::{follow, json_str, watched};
+-use std::collections::{BTreeMap, VecDeque};
++use std::collections::{BTreeMap, HashMap, VecDeque};
+ use std::io::{BufRead, BufReader, Write};
+ use std::os::unix::net::UnixStream;
+ use std::sync::mpsc::{channel, Receiver as Inbox, Sender};
+@@ -129,14 +129,31 @@ pub fn once_text(rows: &[Row], json: bool) -> String {
+ 
+ // ---- the serving side: newest value per tag, streamed as frames -------------------------------------------
+ 
++/// FNV-1a: the tag names come from the model, not from a peer, so SipHash's flood resistance buys nothing here.
++#[derive(Default)]
++struct Fnv(u64);
++impl std::hash::Hasher for Fnv {
++    fn finish(&self) -> u64 {
++        self.0
++    }
++    fn write(&mut self, b: &[u8]) {
++        let mut h = if self.0 == 0 { 0xcbf29ce484222325 } else { self.0 };
++        for x in b {
++            h = (h ^ u64::from(*x)).wrapping_mul(0x100000001b3);
++        }
++        self.0 = h;
++    }
++}
++type Fast = std::hash::BuildHasherDefault<Fnv>;
++
+ struct Store {
+     seq: u64,
+-    map: BTreeMap<String, (f64, u64, Instant)>,
++    map: HashMap<String, (f64, u64, Instant), Fast>,
+ }
+ 
+ static TAGS: std::sync::Mutex<Store> = std::sync::Mutex::new(Store {
+     seq: 0,
+-    map: BTreeMap::new(),
++    map: HashMap::with_hasher(std::hash::BuildHasherDefault::new()),
+ });
+ 
+ fn number(v: Value) -> f64 {
+@@ -166,16 +183,21 @@ pub fn publish(snap: &[(String, Value)], now: Instant) {
+ pub fn tags(now: Instant) -> Vec<(String, f64, f64)> {
+     let st = lock(&TAGS);
+     let age = |at: Instant| now.saturating_duration_since(at).as_secs_f64();
+-    st.map
++    let mut out: Vec<_> = st
++        .map
+         .iter()
+         .map(|(n, (v, _, at))| (n.clone(), *v, age(*at)))
+-        .collect()
++        .collect();
++    out.sort_by(|a, b| a.0.cmp(&b.0));
++    out
+ }
+ 
+ /// The tags updated after `since`, as wire lines ending in `F` (nothing when none), and the newest seq.
+ fn frame(st: &Store, since: u64, now: Instant) -> (String, u64) {
+     let mut out = String::new();
+-    for (name, (v, _, at)) in st.map.iter().filter(|(_, e)| e.1 > since) {
++    let mut rows: Vec<_> = st.map.iter().filter(|(_, e)| e.1 > since).collect();
++    rows.sort_by(|a, b| a.0.cmp(b.0));
++    for (name, (v, _, at)) in rows {
+         let age = now.saturating_duration_since(*at).as_millis();
+         out += &format!("T\t{name}\t{v}\t{age}\n");
+     }
+@@ -466,7 +488,7 @@ mod tests {
+         let now = Instant::now();
+         let mut st = Store {
+             seq: 0,
+-            map: BTreeMap::new(),
++            map: HashMap::default(),
+         };
+         assert_eq!(frame(&st, 0, now), (String::new(), 0)); // nothing published: no frame
+         st.map.insert("a".into(), (1.5, 1, now));

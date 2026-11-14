@@ -1,0 +1,34 @@
+diff --git a/src/power/pf.rs b/src/power/pf.rs
+index bbee7e9..f8994a9 100644
+--- a/src/power/pf.rs
++++ b/src/power/pf.rs
+@@ -240,17 +240,23 @@ fn lu_pivot(a: &[f64], n: usize, k: usize) -> (usize, f64) {
+         .fold((k, -1.0), |m, x| if x.1 > m.1 { x } else { m })
+ }
+ 
+-/// Eliminate column `k` below the pivot row.
++/// Eliminate column `k` below the pivot row. Columns right of the pivot row's last nonzero cannot change (x - f*0 = x),
++/// so the row update stops there: bit-identical to the full loop, and fast while the matrix is sparse.
+ fn lu_eliminate(a: &mut [f64], b: &mut [f64], n: usize, k: usize) {
+-    for i in k + 1..n {
+-        let f = a[i * n + k] / a[k * n + k];
++    let (top, rest) = a.split_at_mut((k + 1) * n);
++    let pivot_row = &top[k * n..];
++    let hi = (k..n).rev().find(|&j| pivot_row[j] != 0.0).map_or(k, |j| j + 1);
++    let prow = &pivot_row[k..hi];
++    let pkk = pivot_row[k];
++    for (r, row) in rest.chunks_exact_mut(n).enumerate() {
++        let f = row[k] / pkk;
+         if f == 0.0 {
+             continue;
+         }
+-        for j in k..n {
+-            a[i * n + j] -= f * a[k * n + j];
++        for (x, p) in row[k..hi].iter_mut().zip(prow) {
++            *x -= f * p;
+         }
+-        b[i] -= f * b[k];
++        b[k + 1 + r] -= f * b[k];
+     }
+ }
+ 

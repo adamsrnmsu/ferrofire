@@ -1,0 +1,82 @@
+diff --git a/src/bennu.rs b/src/bennu.rs
+index 697be9d..f525b80 100644
+--- a/src/bennu.rs
++++ b/src/bennu.rs
+@@ -98,9 +98,19 @@ pub fn fmt_value(v: Value) -> String {
+ 
+ /// One publish tick as a `tag:value,...` message.
+ pub fn snapshot_msg(snap: &[(String, Value)]) -> String {
+-    snap.iter()
+-        .map(|(t, v)| format!("{t}:{},", fmt_value(*v)))
+-        .collect()
++    msg_of(snap.iter().map(|(t, v)| (t.as_str(), *v)), snap.len())
++}
++
++fn msg_of<'a>(it: impl Iterator<Item = (&'a str, Value)>, n: usize) -> String {
++    use std::fmt::Write;
++    let mut s = String::with_capacity(n * 24);
++    for (t, v) in it {
++        let _ = match v {
++            Value::Binary(b) => write!(s, "{t}:{b},"),
++            Value::Analog(x) => write!(s, "{t}:{x},"),
++        };
++    }
++    s
+ }
+ 
+ /// The pseudo-tags appended to every datagram (ferrofire datagram v1): the per-endpoint datagram counter, the
+@@ -544,6 +554,8 @@ pub type Plan = Vec<(String, Option<Vec<String>>)>;
+ pub struct Target {
+     pub out: Box<dyn Publisher>,
+     pub tags: Option<HashSet<String>>,
++    /// Snapshot positions of `tags`, resolved on the first publish (the snapshot order is fixed for the life of a model).
++    pub idx: std::sync::OnceLock<Vec<usize>>,
+ }
+ 
+ /// Send each target its part of `snap`, in snapshot order.
+@@ -552,12 +564,11 @@ pub fn publish_all(targets: &[Target], snap: &[(String, Value)]) {
+         match &t.tags {
+             None => t.out.publish(&snapshot_msg(snap)),
+             Some(set) => {
+-                let part: Vec<_> = snap
+-                    .iter()
+-                    .filter(|(n, _)| set.contains(n))
+-                    .cloned()
+-                    .collect();
+-                t.out.publish(&snapshot_msg(&part));
++                let idx = t.idx.get_or_init(|| {
++                    (0..snap.len()).filter(|&i| set.contains(&snap[i].0)).collect()
++                });
++                let m = msg_of(idx.iter().map(|&i| (snap[i].0.as_str(), snap[i].1)), idx.len());
++                t.out.publish(&m);
+             }
+         }
+     }
+@@ -675,6 +686,7 @@ fn targets_of(plan: Plan) -> Result<Vec<Target>, String> {
+             Ok(Target {
+                 out: transport::publisher(&ep)?,
+                 tags: tags.map(|t| t.into_iter().collect()),
++                idx: Default::default(),
+             })
+         })
+         .collect()
+@@ -691,6 +703,7 @@ fn elastic_target(a: &RunArgs) -> Result<Option<Target>, String> {
+     Ok(es.map(|es| Target {
+         out: Box::new(es),
+         tags: None,
++        idx: Default::default(),
+     }))
+ }
+ 
+diff --git a/tests/bennu.rs b/tests/bennu.rs
+index 9366517..ee473e3 100644
+--- a/tests/bennu.rs
++++ b/tests/bennu.rs
+@@ -318,6 +318,7 @@ fn sink(tags: Option<&[&str]>) -> (Target, Arc<Mutex<Vec<String>>>) {
+         Target {
+             out: Box::new(Sink(log.clone())),
+             tags,
++            idx: Default::default(),
+         },
+         log,
+     )

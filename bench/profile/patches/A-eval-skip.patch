@@ -1,0 +1,153 @@
+diff --git a/src/model.rs b/src/model.rs
+index 4b24f62..b966b0a 100644
+--- a/src/model.rs
++++ b/src/model.rs
+@@ -312,6 +312,8 @@ pub struct Model {
+     eval_order: Vec<(usize, Node)>, // output slots with their expression, dependency order
+     published: Vec<(String, Kind, usize)>,
+     power: Option<PowerRt>,
++    fresh: bool, // every derived slot matches v (set by eval, cleared by any other write to v)
++    pub no_skip: bool, // test/bench toggle: always evaluate
+ }
+ 
+ /// Standoff when a body moving down is held at a closed barrier (keeps it in the zone it came from).
+@@ -771,6 +773,8 @@ impl Model {
+             eval_order,
+             published,
+             power,
++            fresh: false,
++            no_skip: false,
+         })
+     }
+ 
+@@ -783,6 +787,13 @@ impl Model {
+         for (slot, f) in &self.eval_order {
+             self.v[*slot] = f.eval(&self.v);
+         }
++        self.fresh = true;
++    }
++
++    fn eval_if_stale(&mut self) {
++        if !self.fresh || self.no_skip {
++            self.eval();
++        }
+     }
+ 
+     fn wire(&self, k: Kind, x: f64) -> Value {
+@@ -801,6 +812,7 @@ impl Model {
+         };
+         if let Some(i) = self.inputs.get(tag) {
+             self.v[i.slot] = if i.is_bool { bit(x != 0.0) } else { x };
++            self.fresh = false;
+             return true;
+         }
+         let Some(p) = self.power.as_mut() else {
+@@ -812,6 +824,7 @@ impl Model {
+         p.pw.set(i, x);
+         p.dirty = true;
+         p.sync(&mut self.v);
++        self.fresh = false;
+         true
+     }
+ 
+@@ -823,7 +836,7 @@ impl Model {
+                 rejected.push(tag.clone());
+             }
+         }
+-        self.eval();
++        self.eval_if_stale();
+         rejected
+     }
+ 
+@@ -882,7 +895,8 @@ impl Model {
+             if (p.pw.get(*ti) - x).abs() > 1e-9 {
+                 p.pw.set(*ti, x);
+                 p.dirty = true;
+-                p.sync(&mut self.v); // later drive entries may read this one (`load-1_bus-3`.mw)
++                p.sync(&mut self.v);
++                self.fresh = false; // later drive entries may read this one (`load-1_bus-3`.mw)
+             }
+         }
+         if p.dirty || self.time - p.last_solve >= p.max_interval - 1e-9 {
+@@ -890,11 +904,12 @@ impl Model {
+             p.dirty = false;
+             p.last_solve = self.time;
+             p.sync(&mut self.v);
++            self.fresh = false;
+         }
+     }
+ 
+     pub fn step(&mut self, dt: f64) {
+-        self.eval();
++        self.eval_if_stale();
+         if let Some(p) = self.power.as_mut() {
+             p.dirty |= p.pw.advance(dt);
+         }
+@@ -949,23 +964,28 @@ impl Model {
+             return;
+         }
+         let y0: Vec<f64> = self.odes.iter().map(|o| self.v[o.slot]).collect();
+-        let k = |m: &mut Model, y: &[f64]| -> Vec<f64> {
++        let k = |m: &mut Model, y: &[f64], first: bool| -> Vec<f64> {
+             for (o, yi) in m.odes.iter().zip(y) {
+                 m.v[o.slot] = *yi;
+             }
+-            m.eval();
++            if !(first && m.fresh && !m.no_skip) {
++                // (skipped when y == current v at the ODE slots and every derived slot is current)
++                m.fresh = false;
++                m.eval();
++            }
+             m.odes.iter().map(|o| o.f.eval(&m.v)).collect()
+         };
+         let at = |y: &[f64], d: &[f64], s: f64| -> Vec<f64> {
+             y.iter().zip(d).map(|(a, b)| a + s * b).collect()
+         };
+-        let k1 = k(self, &y0);
+-        let k2 = k(self, &at(&y0, &k1, h / 2.0));
+-        let k3 = k(self, &at(&y0, &k2, h / 2.0));
+-        let k4 = k(self, &at(&y0, &k3, h));
++        let k1 = k(self, &y0, true);
++        let k2 = k(self, &at(&y0, &k1, h / 2.0), false);
++        let k3 = k(self, &at(&y0, &k2, h / 2.0), false);
++        let k4 = k(self, &at(&y0, &k3, h), false);
+         for (i, o) in self.odes.iter().enumerate() {
+             self.v[o.slot] = y0[i] + h / 6.0 * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]);
+         }
++        self.fresh = false;
+     }
+ }
+ 
+@@ -1023,6 +1043,32 @@ fn order_outputs(exprs: Vec<(usize, Node)>, syms: &Syms) -> Result<Vec<(usize, N
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn skipping_redundant_evals_is_bit_identical() {
++        let osc = "version: 1\ndt: 0.05\nsubsteps: 3\ninputs:\n  u: {type: analog}\nstates:\n  x: {ode: \"v\", init: 1}\n  v: {ode: \"-x - 0.1*v + d\", init: 0}\n  w: {toward: {target: \"u * 2\", rate: 1}, init: 0}\noutputs:\n  x: {type: analog}\n  v: {type: analog}\n  w: {type: analog}\n  d: {type: analog, expr: \"u + w * 0.5\"}\n  u: {type: analog}\n";
++        let models = [osc.to_string(), std::fs::read_to_string("models/waterway.yaml").unwrap(), std::fs::read_to_string("models/pump-station.yaml").unwrap()];
++        for y in models {
++            let (mut a, mut b) = (Model::load(&y).unwrap(), Model::load(&y).unwrap());
++            b.no_skip = true;
++            let tags: Vec<String> = a.tags().map(|(t, _)| t.to_string()).collect();
++            let ins: Vec<String> = a.inputs.keys().cloned().collect();
++            let mut seed = 12345u64;
++            for i in 0..2000 {
++                seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
++                let ws: Vec<(String, Value)> = if i % 7 == 0 && !ins.is_empty() {
++                    vec![(ins[(seed >> 33) as usize % ins.len()].clone(), Value::Analog(((seed >> 20) % 3) as f64))]
++                } else { vec![] };
++                assert_eq!(a.apply_writes(&ws), b.apply_writes(&ws));
++                a.step(a.dt);
++                b.step(b.dt);
++                for t in &tags {
++                    let (x, y) = (a.get(t).unwrap(), b.get(t).unwrap());
++                    assert_eq!(format!("{x:?}"), format!("{y:?}"), "{t} at {i}");
++                }
++            }
++        }
++    }
++
+     #[test]
+     fn rejects_bad_models() {
+         let e = |y: &str| Model::load(y).err().expect("should fail");

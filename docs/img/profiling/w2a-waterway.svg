@@ -1,0 +1,1158 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="1600" height="1078" onload="init(evt)" viewBox="0 0 1600 1078" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs>
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	text { font-family:Verdana; font-size:12px; fill:rgb(0,0,0); }
+	#search, #ignorecase { opacity:0.1; cursor:pointer; }
+	#search:hover, #search.show, #ignorecase:hover, #ignorecase.show { opacity:1; }
+	#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+	#title { text-anchor:middle; font-size:17px}
+	#unzoom { cursor:pointer; }
+	#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+	.hide { display:none; }
+	.parent { opacity:0.5; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	"use strict";
+	var details, searchbtn, unzoombtn, matchedtxt, svg, searching, currentSearchTerm, ignorecase, ignorecaseBtn;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		ignorecaseBtn = document.getElementById("ignorecase");
+		unzoombtn = document.getElementById("unzoom");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+		currentSearchTerm = null;
+
+		// use GET parameters to restore a flamegraphs state.
+		var params = get_params();
+		if (params.x && params.y)
+			zoom(find_group(document.querySelector('[x="' + params.x + '"][y="' + params.y + '"]')));
+                if (params.s) search(params.s);
+	}
+
+	// event listeners
+	window.addEventListener("click", function(e) {
+		var target = find_group(e.target);
+		if (target) {
+			if (target.nodeName == "a") {
+				if (e.ctrlKey === false) return;
+				e.preventDefault();
+			}
+			if (target.classList.contains("parent")) unzoom(true);
+			zoom(target);
+			if (!document.querySelector('.parent')) {
+				// we have basically done a clearzoom so clear the url
+				var params = get_params();
+				if (params.x) delete params.x;
+				if (params.y) delete params.y;
+				history.replaceState(null, null, parse_params(params));
+				unzoombtn.classList.add("hide");
+				return;
+			}
+
+			// set parameters for zoom state
+			var el = target.querySelector("rect");
+			if (el && el.attributes && el.attributes.y && el.attributes._orig_x) {
+				var params = get_params()
+				params.x = el.attributes._orig_x.value;
+				params.y = el.attributes.y.value;
+				history.replaceState(null, null, parse_params(params));
+			}
+		}
+		else if (e.target.id == "unzoom") clearzoom();
+		else if (e.target.id == "search") search_prompt();
+		else if (e.target.id == "ignorecase") toggle_ignorecase();
+	}, false)
+
+	// mouse-over for info
+	// show
+	window.addEventListener("mouseover", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = "Function: " + g_to_text(target);
+	}, false)
+
+	// clear
+	window.addEventListener("mouseout", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = ' ';
+	}, false)
+
+	// ctrl-F for search
+	// ctrl-I to toggle case-sensitive search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+		else if (e.ctrlKey && e.keyCode === 73) {
+			e.preventDefault();
+			toggle_ignorecase();
+		}
+	}, false)
+
+	// functions
+	function get_params() {
+		var params = {};
+		var paramsarr = window.location.search.substr(1).split('&');
+		for (var i = 0; i < paramsarr.length; ++i) {
+			var tmp = paramsarr[i].split("=");
+			if (!tmp[0] || !tmp[1]) continue;
+			params[tmp[0]]  = decodeURIComponent(tmp[1]);
+		}
+		return params;
+	}
+	function parse_params(params) {
+		var uri = "?";
+		for (var key in params) {
+			uri += key + '=' + encodeURIComponent(params[key]) + '&';
+		}
+		if (uri.slice(-1) == "&")
+			uri = uri.substring(0, uri.length - 1);
+		if (uri == '?')
+			uri = window.location.href.split('?')[0];
+		return uri;
+	}
+	function find_child(node, selector) {
+		var children = node.querySelectorAll(selector);
+		if (children.length) return children[0];
+	}
+	function find_group(node) {
+		var parent = node.parentElement;
+		if (!parent) return;
+		if (parent.id == "frames") return node;
+		return find_group(parent);
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_" + attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_" + attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes.width.value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes.x.value = parseFloat(r.attributes.x.value) + 3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2 * 12 * 0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		var sl = t.getSubStringLength(0, txt.length);
+		// check if only whitespace or if we can fit the entire string into width w
+		if (/^ *$/.test(txt) || sl < w)
+			return;
+
+		// this isn't perfect, but gives a good starting point
+		// and avoids calling getSubStringLength too often
+		var start = Math.floor((w/sl) * txt.length);
+		for (var x = start; x > 0; x = x-2) {
+			if (t.getSubStringLength(0, x + 2) <= w) {
+				t.textContent = txt.substring(0, x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = (parseFloat(e.attributes.x.value) - x - 10) * ratio + 10;
+				if (e.tagName == "text")
+					e.attributes.x.value = find_child(e.parentNode, "rect[x]").attributes.x.value + 3;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseFloat(e.attributes.width.value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_child(c[i], x - 10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = 10;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseInt(svg.width.baseVal.value) - (10 * 2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr.width.value);
+		var xmin = parseFloat(attr.x.value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr.y.value);
+		var ratio = (svg.width.baseVal.value - 2 * 10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		unzoombtn.classList.remove("hide");
+
+		var el = document.getElementById("frames").children;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a.x.value);
+			var ew = parseFloat(a.width.value);
+			var upstack;
+			// Is it an ancestor
+			if (0 == 0) {
+				upstack = parseFloat(a.y.value) > ymin;
+			} else {
+				upstack = parseFloat(a.y.value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.classList.add("parent");
+					zoom_parent(e);
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.classList.add("hide");
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.classList.add("hide");
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					update_text(e);
+				}
+			}
+		}
+		search();
+	}
+	function unzoom(dont_update_text) {
+		unzoombtn.classList.add("hide");
+		var el = document.getElementById("frames").children;
+		for(var i = 0; i < el.length; i++) {
+			el[i].classList.remove("parent");
+			el[i].classList.remove("hide");
+			zoom_reset(el[i]);
+			if(!dont_update_text) update_text(el[i]);
+		}
+		search();
+	}
+	function clearzoom() {
+		unzoom();
+
+		// remove zoom state
+		var params = get_params();
+		if (params.x) delete params.x;
+		if (params.y) delete params.y;
+		history.replaceState(null, null, parse_params(params));
+	}
+
+	// search
+	function toggle_ignorecase() {
+		ignorecase = !ignorecase;
+		if (ignorecase) {
+			ignorecaseBtn.classList.add("show");
+		} else {
+			ignorecaseBtn.classList.remove("show");
+		}
+		reset_search();
+		search();
+	}
+	function reset_search() {
+		var el = document.querySelectorAll("#frames rect");
+		for (var i = 0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+		var params = get_params();
+		delete params.s;
+		history.replaceState(null, null, parse_params(params));
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)"
+			    + (ignorecase ? ", ignoring case" : "")
+			    + "\nPress Ctrl-i to toggle case sensitivity", "");
+			if (term != null) search(term);
+		} else {
+			reset_search();
+			searching = 0;
+			currentSearchTerm = null;
+			searchbtn.classList.remove("show");
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.classList.add("hide");
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		if (term) currentSearchTerm = term;
+		if (currentSearchTerm === null) return;
+
+		var re = new RegExp(currentSearchTerm, ignorecase ? 'i' : '');
+		var el = document.getElementById("frames").children;
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes.width.value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes.x.value);
+				orig_save(rect, "fill");
+				rect.attributes.fill.value = "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+		var params = get_params();
+		params.s = currentSearchTerm;
+		history.replaceState(null, null, parse_params(params));
+
+		searchbtn.classList.add("show");
+		searchbtn.firstChild.nodeValue = "Reset Search";
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.classList.remove("hide");
+		var pct = 100 * count / maxwidth;
+		if (pct != 100) pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="1600.0" height="1078.0" fill="url(#background)"  />
+<text id="title" x="800.00" y="24" >w2a-waterway prov</text>
+<text id="details" x="10.00" y="1061" > </text>
+<text id="unzoom" x="10.00" y="24" class="hide">Reset Zoom</text>
+<text id="search" x="1490.00" y="24" >Search</text>
+<text id="ignorecase" x="1574.00" y="24" >ic</text>
+<text id="matched" x="1490.00" y="1061" > </text>
+<g id="frames">
+<g >
+<title>do_softirq (16,032,064 samples, 17.39%)</title><rect x="593.9" y="453" width="274.8" height="15.0" fill="rgb(223,87,20)" rx="2" ry="2" />
+<text  x="596.91" y="463.5" >do_softirq</text>
+</g>
+<g >
+<title>&lt;ferrofire::expr::Node&gt;::eval (2,004,008 samples, 2.17%)</title><rect x="250.4" y="805" width="34.4" height="15.0" fill="rgb(254,226,54)" rx="2" ry="2" />
+<text  x="253.43" y="815.5" >&lt;f..</text>
+</g>
+<g >
+<title>&lt;ferrofire::expr::Node&gt;::eval (2,004,008 samples, 2.17%)</title><rect x="147.4" y="821" width="34.3" height="15.0" fill="rgb(254,226,54)" rx="2" ry="2" />
+<text  x="150.39" y="831.5" >&lt;f..</text>
+</g>
+<g >
+<title>ip_route_output_flow (2,004,008 samples, 2.17%)</title><rect x="490.9" y="581" width="34.3" height="15.0" fill="rgb(216,52,12)" rx="2" ry="2" />
+<text  x="493.87" y="591.5" >ip..</text>
+</g>
+<g >
+<title>epoll_pwait (6,012,024 samples, 6.52%)</title><rect x="1280.9" y="805" width="103.0" height="15.0" fill="rgb(215,46,11)" rx="2" ry="2" />
+<text  x="1283.87" y="815.5" >epoll_pwait</text>
+</g>
+<g >
+<title>el0t_64_sync_handler (6,012,024 samples, 6.52%)</title><rect x="1487.0" y="773" width="103.0" height="15.0" fill="rgb(211,32,7)" rx="2" ry="2" />
+<text  x="1489.96" y="783.5" >el0t_64_sync..</text>
+</g>
+<g >
+<title>ip_rcv (4,008,016 samples, 4.35%)</title><rect x="662.6" y="117" width="68.7" height="15.0" fill="rgb(209,22,5)" rx="2" ry="2" />
+<text  x="665.61" y="127.5" >ip_rcv</text>
+</g>
+<g >
+<title>rw_verify_area (2,004,008 samples, 2.17%)</title><rect x="1555.7" y="661" width="34.3" height="15.0" fill="rgb(218,64,15)" rx="2" ry="2" />
+<text  x="1558.65" y="671.5" >rw..</text>
+</g>
+<g >
+<title>ferrofire (92,184,368 samples, 100.00%)</title><rect x="10.0" y="1013" width="1580.0" height="15.0" fill="rgb(236,143,34)" rx="2" ry="2" />
+<text  x="13.00" y="1023.5" >ferrofire</text>
+</g>
+<g >
+<title>__libc_start_main@@GLIBC_2.34 (72,144,288 samples, 78.26%)</title><rect x="10.0" y="981" width="1236.5" height="15.0" fill="rgb(229,113,27)" rx="2" ry="2" />
+<text  x="13.00" y="991.5" >__libc_start_main@@GLIBC_2.34</text>
+</g>
+<g >
+<title>&lt;tokio::runtime::time::handle::Handle&gt;::process_at_time (4,008,016 samples, 4.35%)</title><rect x="1383.9" y="853" width="68.7" height="15.0" fill="rgb(208,17,4)" rx="2" ry="2" />
+<text  x="1386.91" y="863.5" >&lt;tokio:..</text>
+</g>
+<g >
+<title>nft_do_chain_ipv4 (4,008,016 samples, 4.35%)</title><rect x="593.9" y="69" width="68.7" height="15.0" fill="rgb(213,40,9)" rx="2" ry="2" />
+<text  x="596.91" y="79.5" >nft_do_..</text>
+</g>
+<g >
+<title>&lt;tokio::runtime::time::wheel::Wheel&gt;::poll (2,004,008 samples, 2.17%)</title><rect x="1383.9" y="837" width="34.4" height="15.0" fill="rgb(239,156,37)" rx="2" ry="2" />
+<text  x="1386.91" y="847.5" >&lt;t..</text>
+</g>
+<g >
+<title>el0t_64_sync (2,004,008 samples, 2.17%)</title><rect x="353.5" y="757" width="34.3" height="15.0" fill="rgb(217,56,13)" rx="2" ry="2" />
+<text  x="356.48" y="767.5" >el..</text>
+</g>
+<g >
+<title>&lt;ferrofire::expr::Node&gt;::eval (2,004,008 samples, 2.17%)</title><rect x="181.7" y="805" width="34.4" height="15.0" fill="rgb(254,226,54)" rx="2" ry="2" />
+<text  x="184.74" y="815.5" >&lt;f..</text>
+</g>
+<g >
+<title>__netif_receive_skb_one_core (4,008,016 samples, 4.35%)</title><rect x="662.6" y="133" width="68.7" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="665.61" y="143.5" >__netif..</text>
+</g>
+<g >
+<title>__siphash_unaligned (4,008,016 samples, 4.35%)</title><rect x="800.0" y="181" width="68.7" height="15.0" fill="rgb(221,74,17)" rx="2" ry="2" />
+<text  x="803.00" y="191.5" >__sipha..</text>
+</g>
+<g >
+<title>nf_conntrack_in (4,008,016 samples, 4.35%)</title><rect x="800.0" y="197" width="68.7" height="15.0" fill="rgb(206,8,2)" rx="2" ry="2" />
+<text  x="803.00" y="207.5" >nf_conn..</text>
+</g>
+<g >
+<title>common_nsleep_timens (2,004,008 samples, 2.17%)</title><rect x="1177.8" y="709" width="34.4" height="15.0" fill="rgb(226,98,23)" rx="2" ry="2" />
+<text  x="1180.83" y="719.5" >co..</text>
+</g>
+<g >
+<title>&lt;alloc::vec::into_iter::IntoIter&lt; (2,004,008 samples, 2.17%)</title><rect x="44.3" y="805" width="34.4" height="15.0" fill="rgb(213,40,9)" rx="2" ry="2" />
+<text  x="47.35" y="815.5" >&lt;a..</text>
+</g>
+<g >
+<title>nft_counter_eval (2,004,008 samples, 2.17%)</title><rect x="593.9" y="53" width="34.4" height="15.0" fill="rgb(217,55,13)" rx="2" ry="2" />
+<text  x="596.91" y="63.5" >nf..</text>
+</g>
+<g >
+<title>ip_rcv_finish_core (4,008,016 samples, 4.35%)</title><rect x="662.6" y="53" width="68.7" height="15.0" fill="rgb(246,189,45)" rx="2" ry="2" />
+<text  x="665.61" y="63.5" >ip_rcv_..</text>
+</g>
+<g >
+<title>vfs_write (4,008,016 samples, 4.35%)</title><rect x="1521.3" y="677" width="68.7" height="15.0" fill="rgb(250,209,50)" rx="2" ry="2" />
+<text  x="1524.30" y="687.5" >vfs_write</text>
+</g>
+<g >
+<title>__netif_receive_skb (16,032,064 samples, 17.39%)</title><rect x="593.9" y="309" width="274.8" height="15.0" fill="rgb(218,60,14)" rx="2" ry="2" />
+<text  x="596.91" y="319.5" >__netif_receive_skb</text>
+</g>
+<g >
+<title>alloc_skb_with_frags (2,004,008 samples, 2.17%)</title><rect x="387.8" y="533" width="34.4" height="15.0" fill="rgb(228,107,25)" rx="2" ry="2" />
+<text  x="390.83" y="543.5" >al..</text>
+</g>
+<g >
+<title>udp_sendmsg (2,004,008 samples, 2.17%)</title><rect x="1040.4" y="613" width="34.4" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="1043.43" y="623.5" >ud..</text>
+</g>
+<g >
+<title>cfree@GLIBC_2.17 (2,004,008 samples, 2.17%)</title><rect x="284.8" y="821" width="34.3" height="15.0" fill="rgb(224,88,21)" rx="2" ry="2" />
+<text  x="287.78" y="831.5" >cf..</text>
+</g>
+<g >
+<title>&lt;tokio::runtime::time::Driver&gt;::park_internal (6,012,024 samples, 6.52%)</title><rect x="1280.9" y="853" width="103.0" height="15.0" fill="rgb(245,185,44)" rx="2" ry="2" />
+<text  x="1283.87" y="863.5" >&lt;tokio::runt..</text>
+</g>
+<g >
+<title>ipv4_conntrack_in (4,008,016 samples, 4.35%)</title><rect x="800.0" y="213" width="68.7" height="15.0" fill="rgb(226,98,23)" rx="2" ry="2" />
+<text  x="803.00" y="223.5" >ipv4_co..</text>
+</g>
+<g >
+<title>__sys_sendto (40,080,160 samples, 43.48%)</title><rect x="387.8" y="645" width="687.0" height="15.0" fill="rgb(236,146,34)" rx="2" ry="2" />
+<text  x="390.83" y="655.5" >__sys_sendto</text>
+</g>
+<g >
+<title>el0t_64_sync_handler (2,004,008 samples, 2.17%)</title><rect x="353.5" y="741" width="34.3" height="15.0" fill="rgb(211,32,7)" rx="2" ry="2" />
+<text  x="356.48" y="751.5" >el..</text>
+</g>
+<g >
+<title>__libc_sendto (40,080,160 samples, 43.48%)</title><rect x="387.8" y="757" width="687.0" height="15.0" fill="rgb(205,2,0)" rx="2" ry="2" />
+<text  x="390.83" y="767.5" >__libc_sendto</text>
+</g>
+<g >
+<title>el0t_64_sync (40,080,160 samples, 43.48%)</title><rect x="387.8" y="741" width="687.0" height="15.0" fill="rgb(217,56,13)" rx="2" ry="2" />
+<text  x="390.83" y="751.5" >el0t_64_sync</text>
+</g>
+<g >
+<title>br_nf_pre_routing (16,032,064 samples, 17.39%)</title><rect x="593.9" y="245" width="274.8" height="15.0" fill="rgb(208,14,3)" rx="2" ry="2" />
+<text  x="596.91" y="255.5" >br_nf_pre_routing</text>
+</g>
+<g >
+<title>&lt;tokio::runtime::context::scoped::Scoped&lt;tokio::runtime::scheduler::Context&gt;&gt;::set::&lt;&lt;tokio::runtime::scheduler::current_thread::CoreGuard&gt;::enter&lt;&lt;tokio::runtime::scheduler::current_thread::CoreGuard&gt;::block_on&lt;ferrofire::transport::zmq::serve::{closure#1}::{closure#0}&gt;::{closure#0}, core::option::Option&lt; (20,040,080 samples, 21.74%)</title><rect x="1246.5" y="901" width="343.5" height="15.0" fill="rgb(216,52,12)" rx="2" ry="2" />
+<text  x="1249.52" y="911.5" >&lt;tokio::runtime::context::scoped::Scoped&lt;tokio..</text>
+</g>
+<g >
+<title>qdisc_pkt_len_segs_init (2,004,008 samples, 2.17%)</title><rect x="1006.1" y="485" width="34.3" height="15.0" fill="rgb(227,102,24)" rx="2" ry="2" />
+<text  x="1009.09" y="495.5" >qd..</text>
+</g>
+<g >
+<title>schedule (2,004,008 samples, 2.17%)</title><rect x="1177.8" y="661" width="34.4" height="15.0" fill="rgb(254,229,54)" rx="2" ry="2" />
+<text  x="1180.83" y="671.5" >sc..</text>
+</g>
+<g >
+<title>&lt;alloc::string::String as core::iter::traits::collect::FromIterator&lt;alloc::string::String&gt;&gt;::from_iter::&lt;core::iter::adapters::map::Map&lt;core::slice::iter::Iter&lt; (2,004,008 samples, 2.17%)</title><rect x="319.1" y="805" width="34.4" height="15.0" fill="rgb(243,177,42)" rx="2" ry="2" />
+<text  x="322.13" y="815.5" >&lt;a..</text>
+</g>
+<g >
+<title>__sock_sendmsg (40,080,160 samples, 43.48%)</title><rect x="387.8" y="629" width="687.0" height="15.0" fill="rgb(217,57,13)" rx="2" ry="2" />
+<text  x="390.83" y="639.5" >__sock_sendmsg</text>
+</g>
+<g >
+<title>__br_forward (4,008,016 samples, 4.35%)</title><rect x="593.9" y="149" width="68.7" height="15.0" fill="rgb(212,36,8)" rx="2" ry="2" />
+<text  x="596.91" y="159.5" >__br_fo..</text>
+</g>
+<g >
+<title>__call_rcu_common.constprop.0 (8,016,032 samples, 8.70%)</title><rect x="868.7" y="437" width="137.4" height="15.0" fill="rgb(208,17,4)" rx="2" ry="2" />
+<text  x="871.70" y="447.5" >__call_rcu_common..</text>
+</g>
+<g >
+<title>&lt;std::thread::lifecycle::spawn_unchecked&lt;ferrofire::transport::zmq::serve::{closure#1},  (20,040,080 samples, 21.74%)</title><rect x="1246.5" y="949" width="343.5" height="15.0" fill="rgb(212,36,8)" rx="2" ry="2" />
+<text  x="1249.52" y="959.5" >&lt;std::thread::lifecycle::spawn_unchecked&lt;ferro..</text>
+</g>
+<g >
+<title>do_el0_svc (40,080,160 samples, 43.48%)</title><rect x="387.8" y="693" width="687.0" height="15.0" fill="rgb(218,60,14)" rx="2" ry="2" />
+<text  x="390.83" y="703.5" >do_el0_svc</text>
+</g>
+<g >
+<title>ferrofire::bennu::tick_and_publish (2,004,008 samples, 2.17%)</title><rect x="1212.2" y="853" width="34.3" height="15.0" fill="rgb(253,220,52)" rx="2" ry="2" />
+<text  x="1215.17" y="863.5" >fe..</text>
+</g>
+<g >
+<title>thread_start (20,040,080 samples, 21.74%)</title><rect x="1246.5" y="997" width="343.5" height="15.0" fill="rgb(212,34,8)" rx="2" ry="2" />
+<text  x="1249.52" y="1007.5" >thread_start</text>
+</g>
+<g >
+<title>fib_select_path (2,004,008 samples, 2.17%)</title><rect x="490.9" y="549" width="34.3" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="493.87" y="559.5" >fi..</text>
+</g>
+<g >
+<title>br_nf_forward_ip.part.0 (4,008,016 samples, 4.35%)</title><rect x="593.9" y="101" width="68.7" height="15.0" fill="rgb(251,212,50)" rx="2" ry="2" />
+<text  x="596.91" y="111.5" >br_nf_f..</text>
+</g>
+<g >
+<title>inet_sendmsg (38,076,152 samples, 41.30%)</title><rect x="387.8" y="613" width="652.6" height="15.0" fill="rgb(244,183,43)" rx="2" ry="2" />
+<text  x="390.83" y="623.5" >inet_sendmsg</text>
+</g>
+<g >
+<title>el0_svc (6,012,024 samples, 6.52%)</title><rect x="1487.0" y="757" width="103.0" height="15.0" fill="rgb(244,183,43)" rx="2" ry="2" />
+<text  x="1489.96" y="767.5" >el0_svc</text>
+</g>
+<g >
+<title>ip_rcv_finish (4,008,016 samples, 4.35%)</title><rect x="662.6" y="69" width="68.7" height="15.0" fill="rgb(205,1,0)" rx="2" ry="2" />
+<text  x="665.61" y="79.5" >ip_rcv_..</text>
+</g>
+<g >
+<title>alloc::fmt::format::format_inner (2,004,008 samples, 2.17%)</title><rect x="319.1" y="789" width="34.4" height="15.0" fill="rgb(237,150,35)" rx="2" ry="2" />
+<text  x="322.13" y="799.5" >al..</text>
+</g>
+<g >
+<title>do_epoll_pwait.part.0 (6,012,024 samples, 6.52%)</title><rect x="1280.9" y="693" width="103.0" height="15.0" fill="rgb(248,197,47)" rx="2" ry="2" />
+<text  x="1283.87" y="703.5" >do_epoll_pwa..</text>
+</g>
+<g >
+<title>ferrofire::bennu::publish_all (44,088,176 samples, 47.83%)</title><rect x="319.1" y="821" width="755.7" height="15.0" fill="rgb(236,144,34)" rx="2" ry="2" />
+<text  x="322.13" y="831.5" >ferrofire::bennu::publish_all</text>
+</g>
+<g >
+<title>__dev_queue_xmit (24,048,096 samples, 26.09%)</title><rect x="593.9" y="485" width="412.2" height="15.0" fill="rgb(244,182,43)" rx="2" ry="2" />
+<text  x="596.91" y="495.5" >__dev_queue_xmit</text>
+</g>
+<g >
+<title>ip_output (28,056,112 samples, 30.43%)</title><rect x="559.6" y="549" width="480.8" height="15.0" fill="rgb(247,194,46)" rx="2" ry="2" />
+<text  x="562.57" y="559.5" >ip_output</text>
+</g>
+<g >
+<title>&lt;tokio::runtime::time::wheel::Wheel&gt;::next_expiration (2,004,008 samples, 2.17%)</title><rect x="1383.9" y="821" width="34.4" height="15.0" fill="rgb(226,96,23)" rx="2" ry="2" />
+<text  x="1386.91" y="831.5" >&lt;t..</text>
+</g>
+<g >
+<title>handle_softirqs (16,032,064 samples, 17.39%)</title><rect x="593.9" y="373" width="274.8" height="15.0" fill="rgb(238,156,37)" rx="2" ry="2" />
+<text  x="596.91" y="383.5" >handle_softirqs</text>
+</g>
+<g >
+<title>__arm64_sys_getsockopt (2,004,008 samples, 2.17%)</title><rect x="353.5" y="693" width="34.3" height="15.0" fill="rgb(241,168,40)" rx="2" ry="2" />
+<text  x="356.48" y="703.5" >__..</text>
+</g>
+<g >
+<title>__arm64_sys_write (4,008,016 samples, 4.35%)</title><rect x="1521.3" y="709" width="68.7" height="15.0" fill="rgb(254,226,54)" rx="2" ry="2" />
+<text  x="1524.30" y="719.5" >__arm64..</text>
+</g>
+<g >
+<title>do_el0_svc (2,004,008 samples, 2.17%)</title><rect x="1177.8" y="757" width="34.4" height="15.0" fill="rgb(218,60,14)" rx="2" ry="2" />
+<text  x="1180.83" y="767.5" >do..</text>
+</g>
+<g >
+<title>finish_task_switch.isra.0 (2,004,008 samples, 2.17%)</title><rect x="1177.8" y="629" width="34.4" height="15.0" fill="rgb(246,189,45)" rx="2" ry="2" />
+<text  x="1180.83" y="639.5" >fi..</text>
+</g>
+<g >
+<title>ip_finish_output2 (28,056,112 samples, 30.43%)</title><rect x="559.6" y="501" width="480.8" height="15.0" fill="rgb(219,67,16)" rx="2" ry="2" />
+<text  x="562.57" y="511.5" >ip_finish_output2</text>
+</g>
+<g >
+<title>invoke_syscall.constprop.0 (4,008,016 samples, 4.35%)</title><rect x="1521.3" y="725" width="68.7" height="15.0" fill="rgb(244,183,43)" rx="2" ry="2" />
+<text  x="1524.30" y="735.5" >invoke_..</text>
+</g>
+<g >
+<title>&lt;&amp;std::fs::File as core::io::write::Write&gt;::write (6,012,024 samples, 6.52%)</title><rect x="1487.0" y="821" width="103.0" height="15.0" fill="rgb(240,163,39)" rx="2" ry="2" />
+<text  x="1489.96" y="831.5" >&lt;&amp;std::fs::F..</text>
+</g>
+<g >
+<title>std::rt::lang_start::&lt;()&gt;::{closure#0} (72,144,288 samples, 78.26%)</title><rect x="10.0" y="917" width="1236.5" height="15.0" fill="rgb(232,125,29)" rx="2" ry="2" />
+<text  x="13.00" y="927.5" >std::rt::lang_start::&lt;()&gt;::{closure#0}</text>
+</g>
+<g >
+<title>__fget_files (2,004,008 samples, 2.17%)</title><rect x="1349.6" y="645" width="34.3" height="15.0" fill="rgb(216,51,12)" rx="2" ry="2" />
+<text  x="1352.57" y="655.5" >__..</text>
+</g>
+<g >
+<title>&lt;mio::poll::Poll&gt;::poll (6,012,024 samples, 6.52%)</title><rect x="1280.9" y="821" width="103.0" height="15.0" fill="rgb(226,101,24)" rx="2" ry="2" />
+<text  x="1283.87" y="831.5" >&lt;mio::poll::..</text>
+</g>
+<g >
+<title>el0_svc (2,004,008 samples, 2.17%)</title><rect x="353.5" y="725" width="34.3" height="15.0" fill="rgb(244,183,43)" rx="2" ry="2" />
+<text  x="356.48" y="735.5" >el..</text>
+</g>
+<g >
+<title>ip_finish_output (28,056,112 samples, 30.43%)</title><rect x="559.6" y="533" width="480.8" height="15.0" fill="rgb(242,173,41)" rx="2" ry="2" />
+<text  x="562.57" y="543.5" >ip_finish_output</text>
+</g>
+<g >
+<title>deliver_clone (4,008,016 samples, 4.35%)</title><rect x="593.9" y="165" width="68.7" height="15.0" fill="rgb(207,9,2)" rx="2" ry="2" />
+<text  x="596.91" y="175.5" >deliver..</text>
+</g>
+<g >
+<title>do_el0_svc (4,008,016 samples, 4.35%)</title><rect x="1521.3" y="741" width="68.7" height="15.0" fill="rgb(218,60,14)" rx="2" ry="2" />
+<text  x="1524.30" y="751.5" >do_el0_..</text>
+</g>
+<g >
+<title>malloc (2,004,008 samples, 2.17%)</title><rect x="216.1" y="789" width="34.3" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="219.09" y="799.5" >ma..</text>
+</g>
+<g >
+<title>&lt;tokio::time::sleep::Sleep as core::future::future::Future&gt;::poll (6,012,024 samples, 6.52%)</title><rect x="1487.0" y="869" width="103.0" height="15.0" fill="rgb(227,105,25)" rx="2" ry="2" />
+<text  x="1489.96" y="879.5" >&lt;tokio::time..</text>
+</g>
+<g >
+<title>&lt;tokio::runtime::runtime::Runtime&gt;::block_on::&lt;ferrofire::transport::zmq::serve::{closure#1}::{closure#0}&gt; (20,040,080 samples, 21.74%)</title><rect x="1246.5" y="917" width="343.5" height="15.0" fill="rgb(211,32,7)" rx="2" ry="2" />
+<text  x="1249.52" y="927.5" >&lt;tokio::runtime::runtime::Runtime&gt;::block_on::..</text>
+</g>
+<g >
+<title>start_thread (20,040,080 samples, 21.74%)</title><rect x="1246.5" y="981" width="343.5" height="15.0" fill="rgb(212,34,8)" rx="2" ry="2" />
+<text  x="1249.52" y="991.5" >start_thread</text>
+</g>
+<g >
+<title>&lt;std::sys::net::connection::socket::UdpSocket&gt;::send_to (40,080,160 samples, 43.48%)</title><rect x="387.8" y="773" width="687.0" height="15.0" fill="rgb(207,11,2)" rx="2" ry="2" />
+<text  x="390.83" y="783.5" >&lt;std::sys::net::connection::socket::UdpSocket&gt;::send_to</text>
+</g>
+<g >
+<title>ferrofire::transport::zmq::serve::{closure#1}::{closure#0} (8,016,032 samples, 8.70%)</title><rect x="1452.6" y="885" width="137.4" height="15.0" fill="rgb(212,32,7)" rx="2" ry="2" />
+<text  x="1455.61" y="895.5" >ferrofire::transp..</text>
+</g>
+<g >
+<title>_start (72,144,288 samples, 78.26%)</title><rect x="10.0" y="997" width="1236.5" height="15.0" fill="rgb(245,185,44)" rx="2" ry="2" />
+<text  x="13.00" y="1007.5" >_start</text>
+</g>
+<g >
+<title>malloc (2,004,008 samples, 2.17%)</title><rect x="1109.1" y="821" width="34.4" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="1112.13" y="831.5" >ma..</text>
+</g>
+<g >
+<title>__rseq_handle_slowpath (2,004,008 samples, 2.17%)</title><rect x="1143.5" y="757" width="34.3" height="15.0" fill="rgb(244,180,43)" rx="2" ry="2" />
+<text  x="1146.48" y="767.5" >__..</text>
+</g>
+<g >
+<title>ip_route_output_key_hash (2,004,008 samples, 2.17%)</title><rect x="490.9" y="565" width="34.3" height="15.0" fill="rgb(206,7,1)" rx="2" ry="2" />
+<text  x="493.87" y="575.5" >ip..</text>
+</g>
+<g >
+<title>ferrofire::main (72,144,288 samples, 78.26%)</title><rect x="10.0" y="885" width="1236.5" height="15.0" fill="rgb(217,56,13)" rx="2" ry="2" />
+<text  x="13.00" y="895.5" >ferrofire::main</text>
+</g>
+<g >
+<title>br_pass_frame_up (4,008,016 samples, 4.35%)</title><rect x="662.6" y="181" width="68.7" height="15.0" fill="rgb(209,19,4)" rx="2" ry="2" />
+<text  x="665.61" y="191.5" >br_pass..</text>
+</g>
+<g >
+<title>nf_hook_slow (4,008,016 samples, 4.35%)</title><rect x="593.9" y="85" width="68.7" height="15.0" fill="rgb(243,175,42)" rx="2" ry="2" />
+<text  x="596.91" y="95.5" >nf_hook..</text>
+</g>
+<g >
+<title>std::sys::backtrace::__rust_begin_short_backtrace::&lt;fn (72,144,288 samples, 78.26%)</title><rect x="10.0" y="901" width="1236.5" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="13.00" y="911.5" >std::sys::backtrace::__rust_begin_short_backtrace::&lt;fn</text>
+</g>
+<g >
+<title>invoke_syscall.constprop.0 (6,012,024 samples, 6.52%)</title><rect x="1280.9" y="725" width="103.0" height="15.0" fill="rgb(244,183,43)" rx="2" ry="2" />
+<text  x="1283.87" y="735.5" >invoke_sysca..</text>
+</g>
+<g >
+<title>ip_check_mc_rcu (4,008,016 samples, 4.35%)</title><rect x="662.6" y="37" width="68.7" height="15.0" fill="rgb(250,210,50)" rx="2" ry="2" />
+<text  x="665.61" y="47.5" >ip_chec..</text>
+</g>
+<g >
+<title>&lt;alloc::vec::Vec&lt; (6,012,024 samples, 6.52%)</title><rect x="44.3" y="821" width="103.1" height="15.0" fill="rgb(209,20,4)" rx="2" ry="2" />
+<text  x="47.35" y="831.5" >&lt;alloc::vec:..</text>
+</g>
+<g >
+<title>ferrofire::bennu::engine (70,140,280 samples, 76.09%)</title><rect x="10.0" y="853" width="1202.2" height="15.0" fill="rgb(205,1,0)" rx="2" ry="2" />
+<text  x="13.00" y="863.5" >ferrofire::bennu::engine</text>
+</g>
+<g >
+<title>invoke_syscall.constprop.0 (2,004,008 samples, 2.17%)</title><rect x="1177.8" y="741" width="34.4" height="15.0" fill="rgb(244,183,43)" rx="2" ry="2" />
+<text  x="1180.83" y="751.5" >in..</text>
+</g>
+<g >
+<title>hrtimer_nanosleep (2,004,008 samples, 2.17%)</title><rect x="1177.8" y="693" width="34.4" height="15.0" fill="rgb(237,147,35)" rx="2" ry="2" />
+<text  x="1180.83" y="703.5" >hr..</text>
+</g>
+<g >
+<title>__ip_append_data (2,004,008 samples, 2.17%)</title><rect x="387.8" y="565" width="34.4" height="15.0" fill="rgb(225,95,22)" rx="2" ry="2" />
+<text  x="390.83" y="575.5" >__..</text>
+</g>
+<g >
+<title>do_el0_svc (2,004,008 samples, 2.17%)</title><rect x="353.5" y="709" width="34.3" height="15.0" fill="rgb(218,60,14)" rx="2" ry="2" />
+<text  x="356.48" y="719.5" >do..</text>
+</g>
+<g >
+<title>el0t_64_sync_handler (6,012,024 samples, 6.52%)</title><rect x="1280.9" y="773" width="103.0" height="15.0" fill="rgb(211,32,7)" rx="2" ry="2" />
+<text  x="1283.87" y="783.5" >el0t_64_sync..</text>
+</g>
+<g >
+<title>__memcpy_generic (2,004,008 samples, 2.17%)</title><rect x="78.7" y="805" width="34.3" height="15.0" fill="rgb(231,124,29)" rx="2" ry="2" />
+<text  x="81.70" y="815.5" >__..</text>
+</g>
+<g >
+<title>ksys_write (4,008,016 samples, 4.35%)</title><rect x="1521.3" y="693" width="68.7" height="15.0" fill="rgb(205,4,1)" rx="2" ry="2" />
+<text  x="1524.30" y="703.5" >ksys_wr..</text>
+</g>
+<g >
+<title>el0t_64_sync (4,008,016 samples, 4.35%)</title><rect x="1143.5" y="805" width="68.7" height="15.0" fill="rgb(217,56,13)" rx="2" ry="2" />
+<text  x="1146.48" y="815.5" >el0t_64..</text>
+</g>
+<g >
+<title>&lt;alloc::vec::Vec&lt; (2,004,008 samples, 2.17%)</title><rect x="216.1" y="805" width="34.3" height="15.0" fill="rgb(209,20,4)" rx="2" ry="2" />
+<text  x="219.09" y="815.5" >&lt;a..</text>
+</g>
+<g >
+<title>br_nf_hook_thresh (10,020,040 samples, 10.87%)</title><rect x="593.9" y="213" width="171.8" height="15.0" fill="rgb(211,30,7)" rx="2" ry="2" />
+<text  x="596.91" y="223.5" >br_nf_hook_thresh</text>
+</g>
+<g >
+<title>std::sys::backtrace::__rust_begin_short_backtrace::&lt;ferrofire::transport::zmq::serve::{closure#1},  (20,040,080 samples, 21.74%)</title><rect x="1246.5" y="933" width="343.5" height="15.0" fill="rgb(210,23,5)" rx="2" ry="2" />
+<text  x="1249.52" y="943.5" >std::sys::backtrace::__rust_begin_short_backtr..</text>
+</g>
+<g >
+<title>bpf_lsm_file_permission (2,004,008 samples, 2.17%)</title><rect x="1555.7" y="645" width="34.3" height="15.0" fill="rgb(238,154,36)" rx="2" ry="2" />
+<text  x="1558.65" y="655.5" >bp..</text>
+</g>
+<g >
+<title>nf_hook_slow (4,008,016 samples, 4.35%)</title><rect x="800.0" y="229" width="68.7" height="15.0" fill="rgb(243,175,42)" rx="2" ry="2" />
+<text  x="803.00" y="239.5" >nf_hook..</text>
+</g>
+<g >
+<title>ipv4_conntrack_in (2,004,008 samples, 2.17%)</title><rect x="765.7" y="229" width="34.3" height="15.0" fill="rgb(226,98,23)" rx="2" ry="2" />
+<text  x="768.65" y="239.5" >ip..</text>
+</g>
+<g >
+<title>invoke_syscall.constprop.0 (40,080,160 samples, 43.48%)</title><rect x="387.8" y="677" width="687.0" height="15.0" fill="rgb(244,183,43)" rx="2" ry="2" />
+<text  x="390.83" y="687.5" >invoke_syscall.constprop.0</text>
+</g>
+<g >
+<title>ip_route_output_key_hash (2,004,008 samples, 2.17%)</title><rect x="525.2" y="581" width="34.4" height="15.0" fill="rgb(206,7,1)" rx="2" ry="2" />
+<text  x="528.22" y="591.5" >ip..</text>
+</g>
+<g >
+<title>do_epoll_wait (6,012,024 samples, 6.52%)</title><rect x="1280.9" y="677" width="103.0" height="15.0" fill="rgb(211,31,7)" rx="2" ry="2" />
+<text  x="1283.87" y="687.5" >do_epoll_wait</text>
+</g>
+<g >
+<title>ip_sabotage_in (4,008,016 samples, 4.35%)</title><rect x="662.6" y="85" width="68.7" height="15.0" fill="rgb(232,124,29)" rx="2" ry="2" />
+<text  x="665.61" y="95.5" >ip_sabo..</text>
+</g>
+<g >
+<title>____do_softirq (16,032,064 samples, 17.39%)</title><rect x="593.9" y="405" width="274.8" height="15.0" fill="rgb(219,65,15)" rx="2" ry="2" />
+<text  x="596.91" y="415.5" >____do_softirq</text>
+</g>
+<g >
+<title>&lt;mio::sys::unix::waker::Waker&gt;::wake (6,012,024 samples, 6.52%)</title><rect x="1487.0" y="837" width="103.0" height="15.0" fill="rgb(208,17,4)" rx="2" ry="2" />
+<text  x="1489.96" y="847.5" >&lt;mio::sys::u..</text>
+</g>
+<g >
+<title>eventfd_write (2,004,008 samples, 2.17%)</title><rect x="1521.3" y="661" width="34.4" height="15.0" fill="rgb(232,127,30)" rx="2" ry="2" />
+<text  x="1524.30" y="671.5" >ev..</text>
+</g>
+<g >
+<title>call_on_irq_stack (16,032,064 samples, 17.39%)</title><rect x="593.9" y="421" width="274.8" height="15.0" fill="rgb(239,156,37)" rx="2" ry="2" />
+<text  x="596.91" y="431.5" >call_on_irq_stack</text>
+</g>
+<g >
+<title>el0_svc (6,012,024 samples, 6.52%)</title><rect x="1280.9" y="757" width="103.0" height="15.0" fill="rgb(244,183,43)" rx="2" ry="2" />
+<text  x="1283.87" y="767.5" >el0_svc</text>
+</g>
+<g >
+<title>&lt;tokio::runtime::time::handle::Handle&gt;::reregister (6,012,024 samples, 6.52%)</title><rect x="1487.0" y="853" width="103.0" height="15.0" fill="rgb(248,199,47)" rx="2" ry="2" />
+<text  x="1489.96" y="863.5" >&lt;tokio::runt..</text>
+</g>
+<g >
+<title>ferrofire::bennu::send_all::&lt;&lt;ferrofire::transport::zmq::Radio as ferrofire::transport::Publisher&gt;::publish::{closure#1}, &lt;ferrofire::transport::zmq::Radio as ferrofire::transport::Publisher&gt;::publish::{closure#2}&gt; (40,080,160 samples, 43.48%)</title><rect x="387.8" y="789" width="687.0" height="15.0" fill="rgb(252,218,52)" rx="2" ry="2" />
+<text  x="390.83" y="799.5" >ferrofire::bennu::send_all::&lt;&lt;ferrofire::transport::zmq::Radio as ferrofire::transport::Publish..</text>
+</g>
+<g >
+<title>__arm64_sys_epoll_pwait (6,012,024 samples, 6.52%)</title><rect x="1280.9" y="709" width="103.0" height="15.0" fill="rgb(240,165,39)" rx="2" ry="2" />
+<text  x="1283.87" y="719.5" >__arm64_sys_..</text>
+</g>
+<g >
+<title>ip_send_skb (28,056,112 samples, 30.43%)</title><rect x="559.6" y="565" width="480.8" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="562.57" y="575.5" >ip_send_skb</text>
+</g>
+<g >
+<title>nft_do_chain (2,004,008 samples, 2.17%)</title><rect x="628.3" y="53" width="34.3" height="15.0" fill="rgb(227,103,24)" rx="2" ry="2" />
+<text  x="631.26" y="63.5" >nf..</text>
+</g>
+<g >
+<title>&lt;std::sys::thread::unix::Thread&gt;::new::thread_start (20,040,080 samples, 21.74%)</title><rect x="1246.5" y="965" width="343.5" height="15.0" fill="rgb(212,34,8)" rx="2" ry="2" />
+<text  x="1249.52" y="975.5" >&lt;std::sys::thread::unix::Thread&gt;::new::thread_..</text>
+</g>
+<g >
+<title>__libc_start_call_main (72,144,288 samples, 78.26%)</title><rect x="10.0" y="965" width="1236.5" height="15.0" fill="rgb(210,26,6)" rx="2" ry="2" />
+<text  x="13.00" y="975.5" >__libc_start_call_main</text>
+</g>
+<g >
+<title>ferrofire::bennu::tick_and_publish (66,132,264 samples, 71.74%)</title><rect x="10.0" y="837" width="1133.5" height="15.0" fill="rgb(253,220,52)" rx="2" ry="2" />
+<text  x="13.00" y="847.5" >ferrofire::bennu::tick_and_publish</text>
+</g>
+<g >
+<title>all (92,184,368 samples, 100%)</title><rect x="10.0" y="1029" width="1580.0" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="13.00" y="1039.5" ></text>
+</g>
+<g >
+<title>el0_svc (40,080,160 samples, 43.48%)</title><rect x="387.8" y="709" width="687.0" height="15.0" fill="rgb(244,183,43)" rx="2" ry="2" />
+<text  x="390.83" y="719.5" >el0_svc</text>
+</g>
+<g >
+<title>main (72,144,288 samples, 78.26%)</title><rect x="10.0" y="949" width="1236.5" height="15.0" fill="rgb(243,179,42)" rx="2" ry="2" />
+<text  x="13.00" y="959.5" >main</text>
+</g>
+<g >
+<title>br_handle_frame (16,032,064 samples, 17.39%)</title><rect x="593.9" y="261" width="274.8" height="15.0" fill="rgb(233,128,30)" rx="2" ry="2" />
+<text  x="596.91" y="271.5" >br_handle_frame</text>
+</g>
+<g >
+<title>std::rt::lang_start_internal (72,144,288 samples, 78.26%)</title><rect x="10.0" y="933" width="1236.5" height="15.0" fill="rgb(246,191,45)" rx="2" ry="2" />
+<text  x="13.00" y="943.5" >std::rt::lang_start_internal</text>
+</g>
+<g >
+<title>br_nf_forward (4,008,016 samples, 4.35%)</title><rect x="593.9" y="117" width="68.7" height="15.0" fill="rgb(207,9,2)" rx="2" ry="2" />
+<text  x="596.91" y="127.5" >br_nf_f..</text>
+</g>
+<g >
+<title>__netif_receive_skb_one_core (16,032,064 samples, 17.39%)</title><rect x="593.9" y="293" width="274.8" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="596.91" y="303.5" >__netif_receive_skb_one_core</text>
+</g>
+<g >
+<title>nf_hook_slow (4,008,016 samples, 4.35%)</title><rect x="593.9" y="133" width="68.7" height="15.0" fill="rgb(243,175,42)" rx="2" ry="2" />
+<text  x="596.91" y="143.5" >nf_hook..</text>
+</g>
+<g >
+<title>do_el0_svc (6,012,024 samples, 6.52%)</title><rect x="1280.9" y="741" width="103.0" height="15.0" fill="rgb(218,60,14)" rx="2" ry="2" />
+<text  x="1283.87" y="751.5" >do_el0_svc</text>
+</g>
+<g >
+<title>fdget (2,004,008 samples, 2.17%)</title><rect x="1349.6" y="661" width="34.3" height="15.0" fill="rgb(241,167,40)" rx="2" ry="2" />
+<text  x="1352.57" y="671.5" >fd..</text>
+</g>
+<g >
+<title>do_nanosleep (2,004,008 samples, 2.17%)</title><rect x="1177.8" y="677" width="34.4" height="15.0" fill="rgb(253,220,52)" rx="2" ry="2" />
+<text  x="1180.83" y="687.5" >do..</text>
+</g>
+<g >
+<title>core::fmt::write (2,004,008 samples, 2.17%)</title><rect x="319.1" y="773" width="34.4" height="15.0" fill="rgb(221,77,18)" rx="2" ry="2" />
+<text  x="322.13" y="783.5" >co..</text>
+</g>
+<g >
+<title>udp_send_skb (28,056,112 samples, 30.43%)</title><rect x="559.6" y="581" width="480.8" height="15.0" fill="rgb(241,169,40)" rx="2" ry="2" />
+<text  x="562.57" y="591.5" >udp_send_skb</text>
+</g>
+<g >
+<title>ip_make_skb (6,012,024 samples, 6.52%)</title><rect x="387.8" y="581" width="103.1" height="15.0" fill="rgb(242,173,41)" rx="2" ry="2" />
+<text  x="390.83" y="591.5" >ip_make_skb</text>
+</g>
+<g >
+<title>br_handle_frame_finish (10,020,040 samples, 10.87%)</title><rect x="593.9" y="197" width="171.8" height="15.0" fill="rgb(228,108,25)" rx="2" ry="2" />
+<text  x="596.91" y="207.5" >br_handle_frame_finish</text>
+</g>
+<g >
+<title>ferrofire::bennu::grow_sndbuf (2,004,008 samples, 2.17%)</title><rect x="353.5" y="789" width="34.3" height="15.0" fill="rgb(226,98,23)" rx="2" ry="2" />
+<text  x="356.48" y="799.5" >fe..</text>
+</g>
+<g >
+<title>__getsockopt (2,004,008 samples, 2.17%)</title><rect x="353.5" y="773" width="34.3" height="15.0" fill="rgb(238,153,36)" rx="2" ry="2" />
+<text  x="356.48" y="783.5" >__..</text>
+</g>
+<g >
+<title>el0_svc (4,008,016 samples, 4.35%)</title><rect x="1143.5" y="773" width="68.7" height="15.0" fill="rgb(244,183,43)" rx="2" ry="2" />
+<text  x="1146.48" y="783.5" >el0_svc</text>
+</g>
+<g >
+<title>ferrofire::bennu::main (72,144,288 samples, 78.26%)</title><rect x="10.0" y="869" width="1236.5" height="15.0" fill="rgb(205,1,0)" rx="2" ry="2" />
+<text  x="13.00" y="879.5" >ferrofire::bennu::main</text>
+</g>
+<g >
+<title>&lt;ferrofire::model::Model&gt;::step (4,008,016 samples, 4.35%)</title><rect x="216.1" y="821" width="68.7" height="15.0" fill="rgb(254,225,53)" rx="2" ry="2" />
+<text  x="219.09" y="831.5" >&lt;ferrof..</text>
+</g>
+<g >
+<title>__ip_make_skb (4,008,016 samples, 4.35%)</title><rect x="422.2" y="565" width="68.7" height="15.0" fill="rgb(215,48,11)" rx="2" ry="2" />
+<text  x="425.17" y="575.5" >__ip_ma..</text>
+</g>
+<g >
+<title>udp_sendmsg (38,076,152 samples, 41.30%)</title><rect x="387.8" y="597" width="652.6" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="390.83" y="607.5" >udp_sendmsg</text>
+</g>
+<g >
+<title>__memcpy_generic (2,004,008 samples, 2.17%)</title><rect x="319.1" y="757" width="34.4" height="15.0" fill="rgb(231,124,29)" rx="2" ry="2" />
+<text  x="322.13" y="767.5" >__..</text>
+</g>
+<g >
+<title>br_flood (4,008,016 samples, 4.35%)</title><rect x="593.9" y="181" width="68.7" height="15.0" fill="rgb(243,178,42)" rx="2" ry="2" />
+<text  x="596.91" y="191.5" >br_flood</text>
+</g>
+<g >
+<title>__arm64_sys_sendto (40,080,160 samples, 43.48%)</title><rect x="387.8" y="661" width="687.0" height="15.0" fill="rgb(221,74,17)" rx="2" ry="2" />
+<text  x="390.83" y="671.5" >__arm64_sys_sendto</text>
+</g>
+<g >
+<title>__ip_finish_output (28,056,112 samples, 30.43%)</title><rect x="559.6" y="517" width="480.8" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="562.57" y="527.5" >__ip_finish_output</text>
+</g>
+<g >
+<title>&lt;tokio::runtime::scheduler::current_thread::Context&gt;::park (10,020,040 samples, 10.87%)</title><rect x="1280.9" y="885" width="171.7" height="15.0" fill="rgb(252,217,52)" rx="2" ry="2" />
+<text  x="1283.87" y="895.5" >&lt;tokio::runtime::sched..</text>
+</g>
+<g >
+<title>&lt;ferrofire::transport::zmq::Radio as ferrofire::transport::Publisher&gt;::publish (42,084,168 samples, 45.65%)</title><rect x="353.5" y="805" width="721.3" height="15.0" fill="rgb(249,203,48)" rx="2" ry="2" />
+<text  x="356.48" y="815.5" >&lt;ferrofire::transport::zmq::Radio as ferrofire::transport::Publisher&gt;::publish</text>
+</g>
+<g >
+<title>__local_bh_enable_ip (16,032,064 samples, 17.39%)</title><rect x="593.9" y="469" width="274.8" height="15.0" fill="rgb(237,147,35)" rx="2" ry="2" />
+<text  x="596.91" y="479.5" >__local_bh_enable_ip</text>
+</g>
+<g >
+<title>__GI___libc_write (6,012,024 samples, 6.52%)</title><rect x="1487.0" y="805" width="103.0" height="15.0" fill="rgb(217,57,13)" rx="2" ry="2" />
+<text  x="1489.96" y="815.5" >__GI___libc_..</text>
+</g>
+<g >
+<title>&lt;tokio::runtime::io::driver::Driver&gt;::turn (6,012,024 samples, 6.52%)</title><rect x="1280.9" y="837" width="103.0" height="15.0" fill="rgb(224,88,21)" rx="2" ry="2" />
+<text  x="1283.87" y="847.5" >&lt;tokio::runt..</text>
+</g>
+<g >
+<title>__alloc_skb (2,004,008 samples, 2.17%)</title><rect x="387.8" y="517" width="34.4" height="15.0" fill="rgb(226,100,23)" rx="2" ry="2" />
+<text  x="390.83" y="527.5" >__..</text>
+</g>
+<g >
+<title>el0t_64_sync_handler (40,080,160 samples, 43.48%)</title><rect x="387.8" y="725" width="687.0" height="15.0" fill="rgb(211,32,7)" rx="2" ry="2" />
+<text  x="390.83" y="735.5" >el0t_64_sync_handler</text>
+</g>
+<g >
+<title>br_nf_pre_routing_finish (10,020,040 samples, 10.87%)</title><rect x="593.9" y="229" width="171.8" height="15.0" fill="rgb(253,224,53)" rx="2" ry="2" />
+<text  x="596.91" y="239.5" >br_nf_pre_routing_finish</text>
+</g>
+<g >
+<title>clock_nanosleep@@GLIBC_2.17 (4,008,016 samples, 4.35%)</title><rect x="1143.5" y="821" width="68.7" height="15.0" fill="rgb(218,60,14)" rx="2" ry="2" />
+<text  x="1146.48" y="831.5" >clock_n..</text>
+</g>
+<g >
+<title>__do_softirq (16,032,064 samples, 17.39%)</title><rect x="593.9" y="389" width="274.8" height="15.0" fill="rgb(246,191,45)" rx="2" ry="2" />
+<text  x="596.91" y="399.5" >__do_softirq</text>
+</g>
+<g >
+<title>net_rx_action (16,032,064 samples, 17.39%)</title><rect x="593.9" y="357" width="274.8" height="15.0" fill="rgb(240,164,39)" rx="2" ry="2" />
+<text  x="596.91" y="367.5" >net_rx_action</text>
+</g>
+<g >
+<title>__schedule (2,004,008 samples, 2.17%)</title><rect x="1177.8" y="645" width="34.4" height="15.0" fill="rgb(227,103,24)" rx="2" ry="2" />
+<text  x="1180.83" y="655.5" >__..</text>
+</g>
+<g >
+<title>el0t_64_sync_handler (4,008,016 samples, 4.35%)</title><rect x="1143.5" y="789" width="68.7" height="15.0" fill="rgb(211,32,7)" rx="2" ry="2" />
+<text  x="1146.48" y="799.5" >el0t_64..</text>
+</g>
+<g >
+<title>process_backlog (16,032,064 samples, 17.39%)</title><rect x="593.9" y="325" width="274.8" height="15.0" fill="rgb(224,90,21)" rx="2" ry="2" />
+<text  x="596.91" y="335.5" >process_backlog</text>
+</g>
+<g >
+<title>&lt;tokio::runtime::scheduler::current_thread::Context&gt;::park_internal (10,020,040 samples, 10.87%)</title><rect x="1280.9" y="869" width="171.7" height="15.0" fill="rgb(226,99,23)" rx="2" ry="2" />
+<text  x="1283.87" y="879.5" >&lt;tokio::runtime::sched..</text>
+</g>
+<g >
+<title>nf_hook_slow (4,008,016 samples, 4.35%)</title><rect x="662.6" y="101" width="68.7" height="15.0" fill="rgb(243,175,42)" rx="2" ry="2" />
+<text  x="665.61" y="111.5" >nf_hook..</text>
+</g>
+<g >
+<title>__ip_select_ident (4,008,016 samples, 4.35%)</title><rect x="422.2" y="549" width="68.7" height="15.0" fill="rgb(236,142,34)" rx="2" ry="2" />
+<text  x="425.17" y="559.5" >__ip_se..</text>
+</g>
+<g >
+<title>sock_alloc_send_pskb (2,004,008 samples, 2.17%)</title><rect x="387.8" y="549" width="34.4" height="15.0" fill="rgb(210,26,6)" rx="2" ry="2" />
+<text  x="390.83" y="559.5" >so..</text>
+</g>
+<g >
+<title>call_rcu (8,016,032 samples, 8.70%)</title><rect x="868.7" y="453" width="137.4" height="15.0" fill="rgb(206,7,1)" rx="2" ry="2" />
+<text  x="871.70" y="463.5" >call_rcu</text>
+</g>
+<g >
+<title>el0t_64_sync (6,012,024 samples, 6.52%)</title><rect x="1280.9" y="789" width="103.0" height="15.0" fill="rgb(217,56,13)" rx="2" ry="2" />
+<text  x="1283.87" y="799.5" >el0t_64_sync</text>
+</g>
+<g >
+<title>std::thread::functions::sleep (4,008,016 samples, 4.35%)</title><rect x="1143.5" y="837" width="68.7" height="15.0" fill="rgb(212,35,8)" rx="2" ry="2" />
+<text  x="1146.48" y="847.5" >std::th..</text>
+</g>
+<g >
+<title>malloc (2,004,008 samples, 2.17%)</title><rect x="113.0" y="805" width="34.4" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="116.04" y="815.5" >ma..</text>
+</g>
+<g >
+<title>__arm64_sys_clock_nanosleep (2,004,008 samples, 2.17%)</title><rect x="1177.8" y="725" width="34.4" height="15.0" fill="rgb(206,9,2)" rx="2" ry="2" />
+<text  x="1180.83" y="735.5" >__..</text>
+</g>
+<g >
+<title>__netif_receive_skb (4,008,016 samples, 4.35%)</title><rect x="662.6" y="149" width="68.7" height="15.0" fill="rgb(218,60,14)" rx="2" ry="2" />
+<text  x="665.61" y="159.5" >__netif..</text>
+</g>
+<g >
+<title>ferrofire::top::publish (2,004,008 samples, 2.17%)</title><rect x="1074.8" y="821" width="34.3" height="15.0" fill="rgb(244,182,43)" rx="2" ry="2" />
+<text  x="1077.78" y="831.5" >fe..</text>
+</g>
+<g >
+<title>__netif_receive_skb_core.constprop.0 (16,032,064 samples, 17.39%)</title><rect x="593.9" y="277" width="274.8" height="15.0" fill="rgb(244,182,43)" rx="2" ry="2" />
+<text  x="596.91" y="287.5" >__netif_receive_skb_core.constprop.0</text>
+</g>
+<g >
+<title>&lt;ferrofire::model::Model&gt;::apply_writes (2,004,008 samples, 2.17%)</title><rect x="181.7" y="821" width="34.4" height="15.0" fill="rgb(227,103,24)" rx="2" ry="2" />
+<text  x="184.74" y="831.5" >&lt;f..</text>
+</g>
+<g >
+<title>_int_free (2,004,008 samples, 2.17%)</title><rect x="284.8" y="805" width="34.3" height="15.0" fill="rgb(247,196,46)" rx="2" ry="2" />
+<text  x="287.78" y="815.5" >_i..</text>
+</g>
+<g >
+<title>tokio::util::wake::wake_arc_raw::&lt;tokio::runtime::scheduler::current_thread::Handle&gt; (2,004,008 samples, 2.17%)</title><rect x="1418.3" y="837" width="34.3" height="15.0" fill="rgb(246,191,45)" rx="2" ry="2" />
+<text  x="1421.26" y="847.5" >to..</text>
+</g>
+<g >
+<title>netif_receive_skb (4,008,016 samples, 4.35%)</title><rect x="662.6" y="165" width="68.7" height="15.0" fill="rgb(245,186,44)" rx="2" ry="2" />
+<text  x="665.61" y="175.5" >netif_r..</text>
+</g>
+<g >
+<title>dst_release (8,016,032 samples, 8.70%)</title><rect x="868.7" y="469" width="137.4" height="15.0" fill="rgb(250,210,50)" rx="2" ry="2" />
+<text  x="871.70" y="479.5" >dst_release</text>
+</g>
+<g >
+<title>ip_mc_check_igmp (2,004,008 samples, 2.17%)</title><rect x="731.3" y="181" width="34.4" height="15.0" fill="rgb(211,28,6)" rx="2" ry="2" />
+<text  x="734.30" y="191.5" >ip..</text>
+</g>
+<g >
+<title>__napi_poll (16,032,064 samples, 17.39%)</title><rect x="593.9" y="341" width="274.8" height="15.0" fill="rgb(247,195,46)" rx="2" ry="2" />
+<text  x="596.91" y="351.5" >__napi_poll</text>
+</g>
+<g >
+<title>el0t_64_sync (6,012,024 samples, 6.52%)</title><rect x="1487.0" y="789" width="103.0" height="15.0" fill="rgb(217,56,13)" rx="2" ry="2" />
+<text  x="1489.96" y="799.5" >el0t_64_sync</text>
+</g>
+<g >
+<title>do_softirq_own_stack (16,032,064 samples, 17.39%)</title><rect x="593.9" y="437" width="274.8" height="15.0" fill="rgb(250,209,50)" rx="2" ry="2" />
+<text  x="596.91" y="447.5" >do_softirq_own_stack</text>
+</g>
+</g>
+</svg>
