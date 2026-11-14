@@ -57,6 +57,8 @@ enum Cmd {
     },
     /// Stand-in for bennu-field-device: reads a sceptre config.xml, serves protocols over the provider's data
     FieldDevice(ferrofire::fd::Cli),
+    /// Supervise a pushable firmware executable as the field device; restart it when the firmware or config changes
+    Watch(ferrofire::watch::Cli),
     /// Print a shell completion script
     Completions { shell: clap_complete::Shell },
 }
@@ -103,8 +105,17 @@ fn inspect(cmd: Cmd) -> Option<Cmd> {
     None
 }
 
+/// The subcommands that act as the field device, exiting with its status.
+fn device(cmd: Cmd) -> Option<Cmd> {
+    match cmd {
+        Cmd::FieldDevice(a) => std::process::exit(ferrofire::fd::main(a)),
+        Cmd::Watch(a) => std::process::exit(ferrofire::watch::main(a)),
+        other => Some(other),
+    }
+}
+
 fn dispatch(cmd: Cmd) {
-    let Some(cmd) = offline(cmd).and_then(inspect) else {
+    let Some(cmd) = offline(cmd).and_then(inspect).and_then(device) else {
         return;
     };
     match cmd {
@@ -113,7 +124,6 @@ fn dispatch(cmd: Cmd) {
         Cmd::Pypower(a) => ferrofire::pypower::run_cli(a),
         Cmd::Simulink { args } => ferrofire::simulink::main(&args),
         Cmd::Log { args } => ferrofire::log::main(&args),
-        Cmd::FieldDevice(a) => std::process::exit(ferrofire::fd::main(a)),
         #[cfg(feature = "elastic")]
         Cmd::Groundtruth(a) => ferrofire::groundtruth::run_cli(a),
         _ => {}
