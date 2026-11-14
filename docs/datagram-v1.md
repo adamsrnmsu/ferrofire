@@ -114,7 +114,7 @@ Receiver (`ferrofire::datagram::Receiver`; the rules for the bench client and th
 |---|---|
 | shorter than its `group_len`, empty, or not UTF-8 | garbage, dropped |
 | another group | not ours, dropped |
-| body without the final NUL, or whose last point lacks its comma | truncated, dropped whole (a cut number would parse as a wrong value) |
+| body whose last point lacks its comma (the final NUL is optional: pybennu, the stock provider, sends none) | truncated, dropped whole (a cut number would parse as a wrong value) |
 | tag not subscribed | the point is skipped |
 | point with no `:`, empty name or a value that is not a finite number / `true` / `false` | the point is skipped, the others of the datagram count |
 | `_ff.seq` already seen (the last 256 are remembered) or 256 or more behind the newest | duplicate, dropped. A lower seq that is new is a chunk that overtook its neighbour: accepted |

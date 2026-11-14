@@ -15,7 +15,7 @@ pub enum Reject {
     Garbage,
     /// Another endpoint's group.
     WrongGroup,
-    /// The body does not end in a comma and a NUL: cut short on the way.
+    /// The body does not end in a comma (before an optional NUL): cut short on the way.
     Truncated,
     /// A duplicate or an older datagram than one already seen.
     Stale,
@@ -135,13 +135,14 @@ impl Receiver {
         }
     }
 
-    /// The body text of a datagram for our group: NUL-terminated, UTF-8, every point complete.
+    /// The body text of a datagram for our group: UTF-8, every point complete. The NUL is optional: pybennu sends none (ww-y87), and
+    /// a cut is told by the last point lacking its comma.
     fn body_of<'a>(&self, d: &'a [u8]) -> Result<&'a str, Reject> {
         let (group, body) = unframe(d).ok_or(Reject::Garbage)?;
         if group != self.group {
             return Err(Reject::WrongGroup);
         }
-        let body = body.strip_suffix(&[0]).ok_or(Reject::Truncated)?;
+        let body = body.strip_suffix(&[0]).unwrap_or(body);
         let body = std::str::from_utf8(body).map_err(|_| Reject::Garbage)?;
         match body.is_empty() || body.ends_with(',') {
             true => Ok(body),

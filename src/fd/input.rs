@@ -298,10 +298,6 @@ mod tests {
         });
         let sock = bind("udp://127.0.0.1:0").unwrap();
         let to = sock.local_addr().unwrap();
-        eprintln!(
-            "RCVBUF {:?}",
-            socket2::SockRef::from(&sock).recv_buffer_size()
-        );
         let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
         for n in &names {
             let pad = "x:0,".repeat(330); // about 1.4 KB: the stream's chunk size
