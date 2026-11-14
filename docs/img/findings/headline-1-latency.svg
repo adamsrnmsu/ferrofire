@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 392" width="720" height="392" role="img" aria-label="A breaker flip shows up in 0.1 s on ferrofire, 1 s on stock bennu">
+<style>text{font-family:'DejaVu Sans',Verdana,sans-serif}
+.bg{fill:#fcfcfb}.t{fill:#0b0b0b;font-weight:bold;font-size:15px}.s{fill:#52514e;font-size:12px}
+.v{fill:#0b0b0b;font-size:12px}.m{fill:#898781;font-size:11px}
+.g{stroke:#e1e0d9;stroke-width:1}.a{stroke:#c3c2b7;stroke-width:1}.ff{fill:#2a78d6}.st{fill:#898781}
+.rg{fill:#fcfcfb;stroke:#0b0b0b;stroke-width:1.5}.ln{stroke:#c3c2b7;stroke-width:2}.ring{stroke:#fcfcfb;stroke-width:2}</style>
+<rect width="720" height="392" class="bg"/>
+<text x="16.0" y="26.0" class="t" text-anchor="start">A breaker flip shows up in 0.1 s on ferrofire, 1 s on stock bennu</text>
+<text x="16.0" y="46.0" class="s" text-anchor="start">Median time from SCADA write to the new state read back at the RTU; flips sent one at a time</text>
+<rect x="16" y="58" width="12" height="12" rx="2" class="ff"/>
+<text x="34.0" y="68.0" class="s" text-anchor="start">ferrofire</text>
+<rect x="120.8" y="58" width="12" height="12" rx="2" class="st"/>
+<text x="138.8" y="68.0" class="s" text-anchor="start">stock bennu</text>
+<path d="M246.0 59.0l5 5l-5 5l-5 -5z" class="rg"><title>live range</title></path>
+<text x="258.0" y="68.0" class="s" text-anchor="start">same test on the live range</text>
+<line x1="56" x2="704" y1="320.0" y2="320.0" class="a"/>
+<text x="48.0" y="324.0" class="m" text-anchor="end">0</text>
+<line x1="56" x2="704" y1="282.7" y2="282.7" class="g"/>
+<text x="48.0" y="286.7" class="m" text-anchor="end">200</text>
+<line x1="56" x2="704" y1="245.3" y2="245.3" class="g"/>
+<text x="48.0" y="249.3" class="m" text-anchor="end">400</text>
+<line x1="56" x2="704" y1="208.0" y2="208.0" class="g"/>
+<text x="48.0" y="212.0" class="m" text-anchor="end">600</text>
+<line x1="56" x2="704" y1="170.7" y2="170.7" class="g"/>
+<text x="48.0" y="174.7" class="m" text-anchor="end">800</text>
+<line x1="56" x2="704" y1="133.3" y2="133.3" class="g"/>
+<text x="48.0" y="137.3" class="m" text-anchor="end">1 000</text>
+<line x1="56" x2="704" y1="96.0" y2="96.0" class="g"/>
+<text x="48.0" y="100.0" class="m" text-anchor="end">1 200</text>
+<text x="16.0" y="84.0" class="m" text-anchor="start">ms</text>
+<text x="137.0" y="340.0" class="s" text-anchor="middle">1 RTU</text>
+<path d="M80.0 320v-14.3q0 -4 4 -4h48q4 0 4 4v14.3z" class="ff"><title>ferrofire, 1 RTU, Docker: p50 98 ms, p95 118 ms</title></path>
+<text x="108.0" y="293.7" class="v" text-anchor="middle">98</text>
+<path d="M108.0 296.5l5 5l-5 5l-5 -5z" class="rg"><title>ferrofire, 1 RTU, range: p50 99 ms, p95 105 ms</title></path>
+<path d="M138.0 320v-187.3q0 -4 4 -4h48q4 0 4 4v187.3z" class="st"><title>stock bennu, 1 RTU, Docker: p50 1025 ms, p95 1033 ms</title></path>
+<text x="166.0" y="120.7" class="v" text-anchor="middle">1 025</text>
+<path d="M166.0 125.2l5 5l-5 5l-5 -5z" class="rg"><title>stock bennu, 1 RTU, range: p50 1017 ms, p95 1062 ms</title></path>
+<text x="299.0" y="340.0" class="s" text-anchor="middle">2 RTUs</text>
+<path d="M242.0 320v-14.3q0 -4 4 -4h48q4 0 4 4v14.3z" class="ff"><title>ferrofire, 2 RTU, Docker: p50 98 ms, p95 117 ms</title></path>
+<text x="270.0" y="293.7" class="v" text-anchor="middle">98</text>
+<path d="M270.0 296.5l5 5l-5 5l-5 -5z" class="rg"><title>ferrofire, 2 RTU, range: p50 99 ms, p95 111 ms</title></path>
+<path d="M300.0 320v-187.0q0 -4 4 -4h48q4 0 4 4v187.0z" class="st"><title>stock bennu, 2 RTU, Docker: p50 1023 ms, p95 1032 ms</title></path>
+<text x="328.0" y="121.0" class="v" text-anchor="middle">1 023</text>
+<path d="M328.0 124.8l5 5l-5 5l-5 -5z" class="rg"><title>stock bennu, 2 RTU, range: p50 1019 ms, p95 1047 ms</title></path>
+<text x="461.0" y="340.0" class="s" text-anchor="middle">5 RTUs</text>
+<path d="M404.0 320v-14.5q0 -4 4 -4h48q4 0 4 4v14.5z" class="ff"><title>ferrofire, 5 RTU, Docker: p50 99 ms, p95 112 ms</title></path>
+<text x="432.0" y="293.5" class="v" text-anchor="middle">99</text>
+<path d="M432.0 296.5l5 5l-5 5l-5 -5z" class="rg"><title>ferrofire, 5 RTU, range: p50 99 ms, p95 110 ms</title></path>
+<path d="M462.0 320v-186.8q0 -4 4 -4h48q4 0 4 4v186.8z" class="st"><title>stock bennu, 5 RTU, Docker: p50 1022 ms, p95 1035 ms</title></path>
+<text x="490.0" y="121.2" class="v" text-anchor="middle">1 022</text>
+<path d="M490.0 124.6l5 5l-5 5l-5 -5z" class="rg"><title>stock bennu, 5 RTU, range: p50 1020 ms, p95 1046 ms</title></path>
+<text x="623.0" y="340.0" class="s" text-anchor="middle">10 RTUs</text>
+<path d="M566.0 320v-14.5q0 -4 4 -4h48q4 0 4 4v14.5z" class="ff"><title>ferrofire, 10 RTU, Docker: p50 99 ms, p95 110 ms</title></path>
+<text x="594.0" y="293.5" class="v" text-anchor="middle">99</text>
+<path d="M624.0 320v-186.8q0 -4 4 -4h48q4 0 4 4v186.8z" class="st"><title>stock bennu, 10 RTU, Docker: p50 1022 ms, p95 1044 ms</title></path>
+<text x="652.0" y="121.2" class="v" text-anchor="middle">1 022</text>
+<text x="16.0" y="365.0" class="m" text-anchor="start">Docker: 500 flips per bar (5 reps). Live range: 300 per point (3 reps, 1/2/5 RTUs). Stock bennu as shipped</text>
+<text x="16.0" y="380.0" class="m" text-anchor="start">publishes once a second.</text>
+</svg>

@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 392" width="720" height="392" role="img" aria-label="100 flips at once: ferrofire lands all, stock bennu misses up to 81 %">
+<style>text{font-family:'DejaVu Sans',Verdana,sans-serif}
+.bg{fill:#fcfcfb}.t{fill:#0b0b0b;font-weight:bold;font-size:15px}.s{fill:#52514e;font-size:12px}
+.v{fill:#0b0b0b;font-size:12px}.m{fill:#898781;font-size:11px}
+.g{stroke:#e1e0d9;stroke-width:1}.a{stroke:#c3c2b7;stroke-width:1}.ff{fill:#2a78d6}.st{fill:#898781}
+.rg{fill:#fcfcfb;stroke:#0b0b0b;stroke-width:1.5}.ln{stroke:#c3c2b7;stroke-width:2}.ring{stroke:#fcfcfb;stroke-width:2}</style>
+<rect width="720" height="392" class="bg"/>
+<text x="16.0" y="26.0" class="t" text-anchor="start">100 flips at once: ferrofire lands all, stock bennu misses up to 81 %</text>
+<text x="16.0" y="46.0" class="s" text-anchor="start">Share of 100 simultaneous breaker flips not visible at the RTU within 10 s</text>
+<rect x="16" y="58" width="12" height="12" rx="2" class="ff"/>
+<text x="34.0" y="68.0" class="s" text-anchor="start">ferrofire</text>
+<rect x="120.8" y="58" width="12" height="12" rx="2" class="st"/>
+<text x="138.8" y="68.0" class="s" text-anchor="start">stock bennu</text>
+<path d="M246.0 59.0l5 5l-5 5l-5 -5z" class="rg"><title>live range</title></path>
+<text x="258.0" y="68.0" class="s" text-anchor="start">same test on the live range</text>
+<line x1="56" x2="704" y1="320.0" y2="320.0" class="a"/>
+<text x="48.0" y="324.0" class="m" text-anchor="end">0</text>
+<line x1="56" x2="704" y1="275.2" y2="275.2" class="g"/>
+<text x="48.0" y="279.2" class="m" text-anchor="end">20</text>
+<line x1="56" x2="704" y1="230.4" y2="230.4" class="g"/>
+<text x="48.0" y="234.4" class="m" text-anchor="end">40</text>
+<line x1="56" x2="704" y1="185.6" y2="185.6" class="g"/>
+<text x="48.0" y="189.6" class="m" text-anchor="end">60</text>
+<line x1="56" x2="704" y1="140.8" y2="140.8" class="g"/>
+<text x="48.0" y="144.8" class="m" text-anchor="end">80</text>
+<line x1="56" x2="704" y1="96.0" y2="96.0" class="g"/>
+<text x="48.0" y="100.0" class="m" text-anchor="end">100</text>
+<text x="16.0" y="84.0" class="m" text-anchor="start">% missed</text>
+<text x="137.0" y="340.0" class="s" text-anchor="middle">1 RTU</text>
+<text x="108.0" y="312.0" class="v" text-anchor="middle">0 %</text>
+<path d="M108.0 315.0l5 5l-5 5l-5 -5z" class="rg"><title>ferrofire, 1 RTU, range: lost 0 of 300</title></path>
+<path d="M138.0 320v-177.9q0 -4 4 -4h48q4 0 4 4v177.9z" class="st"><title>stock bennu, 1 RTU, Docker: lost 406 of 500</title></path>
+<text x="166.0" y="130.1" class="v" text-anchor="middle">81 %</text>
+<path d="M166.0 135.1l5 5l-5 5l-5 -5z" class="rg"><title>stock bennu, 1 RTU, range: lost 241 of 300</title></path>
+<text x="299.0" y="340.0" class="s" text-anchor="middle">2 RTUs</text>
+<text x="270.0" y="312.0" class="v" text-anchor="middle">0 %</text>
+<path d="M270.0 315.0l5 5l-5 5l-5 -5z" class="rg"><title>ferrofire, 2 RTU, range: lost 0 of 300</title></path>
+<path d="M300.0 320v-137.6q0 -4 4 -4h48q4 0 4 4v137.6z" class="st"><title>stock bennu, 2 RTU, Docker: lost 316 of 500</title></path>
+<text x="328.0" y="170.4" class="v" text-anchor="middle">63 %</text>
+<path d="M328.0 176.1l5 5l-5 5l-5 -5z" class="rg"><title>stock bennu, 2 RTU, range: lost 186 of 300</title></path>
+<text x="461.0" y="340.0" class="s" text-anchor="middle">5 RTUs</text>
+<text x="432.0" y="312.0" class="v" text-anchor="middle">0 %</text>
+<path d="M432.0 315.0l5 5l-5 5l-5 -5z" class="rg"><title>ferrofire, 5 RTU, range: lost 0 of 300</title></path>
+<path d="M462.0 320v-12.1q0 -4 4 -4h48q4 0 4 4v12.1z" class="st"><title>stock bennu, 5 RTU, Docker: lost 36 of 500</title></path>
+<text x="490.0" y="295.9" class="v" text-anchor="middle">7 %</text>
+<path d="M490.0 311.2l5 5l-5 5l-5 -5z" class="rg"><title>stock bennu, 5 RTU, range: lost 5 of 300</title></path>
+<text x="623.0" y="340.0" class="s" text-anchor="middle">10 RTUs</text>
+<text x="594.0" y="312.0" class="v" text-anchor="middle">0 %</text>
+<text x="652.0" y="312.0" class="v" text-anchor="middle">0 %</text>
+<text x="16.0" y="365.0" class="m" text-anchor="start">Docker: 500 flips per bar (5 x 100). Live range: 300 per point. Stock bennu as shipped (1 s publish); it</text>
+<text x="16.0" y="380.0" class="m" text-anchor="start">loses fewer as RTUs are added.</text>
+</svg>

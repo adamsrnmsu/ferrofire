@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 296" width="760" height="296" role="img" aria-label="Stock watcher writes 58 KB/min to stderr on an idle RTU; with the fix, 0">
+<title>Stock watcher writes 58 KB/min to stderr on an idle RTU; with the fix, 0</title><desc>Bar chart of watcher stderr log growth per minute on two RTUs, stock bennu against the fixed build.</desc>
+<style>
+:root{--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;--grid:#e1e0d9;--stock:#898781;--fixed:#6250d6}
+@media (prefers-color-scheme:dark){:root{--surface:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#898781;--grid:#383835;--stock:#898781;--fixed:#9085e9}}
+text{font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;fill:var(--ink)}
+.t{font-size:15px;font-weight:700}.s{fill:var(--ink2)}.m{fill:var(--muted);font-size:11px}.b{font-weight:600}
+.grid{stroke:var(--grid);stroke-width:1}.stock{fill:var(--stock)}.fixed{fill:var(--fixed)}
+.ring{stroke:var(--surface);stroke-width:2}.bad{fill:#d03b3b}.good{fill:#0ca30c}
+.ic{stroke:#fff;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
+</style>
+<rect width="760" height="296" fill="var(--surface)"/>
+<text class="t" x="24" y="32">Stock watcher writes 58 KB/min to stderr on an idle RTU; with the fix, 0</text>
+<text class="s" x="24" y="52">Growth of watcher-stderr.log during the watcher-quiet check, two RTUs</text>
+<line class="grid" x1="150.0" x2="150.0" y1="84" y2="220"/>
+<text x="150.0" y="236.0" class="s" text-anchor="middle">0</text>
+<line class="grid" x1="276.7" x2="276.7" y1="84" y2="220"/>
+<text x="276.7" y="236.0" class="s" text-anchor="middle">20</text>
+<line class="grid" x1="403.3" x2="403.3" y1="84" y2="220"/>
+<text x="403.3" y="236.0" class="s" text-anchor="middle">40</text>
+<line class="grid" x1="530.0" x2="530.0" y1="84" y2="220"/>
+<text x="530.0" y="236.0" class="s" text-anchor="middle">60</text>
+<text x="340.0" y="256.0" class="s" text-anchor="middle">watcher-stderr.log growth, KB per minute</text>
+<text x="24.0" y="120.0" class="b">rtu-1</text>
+<g><title>rtu-1, stock bennu: 57 780 B/min</title><path class="stock" d="M150,96 h361.9 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-361.9 z"/></g>
+<text x="523.9" y="108.0">stock bennu: 57.8 KB/min</text>
+<g><title>rtu-1, bennu + fix (PR #82): 0 B/min</title><rect class="fixed" x="150" y="114" width="2" height="16"/></g>
+<text x="171.0" y="126.0" class="s">bennu + fix (PR #82): 0 B/min</text>
+<text x="24.0" y="182.0" class="b">rtu-2</text>
+<g><title>rtu-2, stock bennu: 57 723 B/min</title><path class="stock" d="M150,158 h361.6 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-361.6 z"/></g>
+<text x="523.6" y="170.0">stock bennu: 57.7 KB/min</text>
+<g><title>rtu-2, bennu + fix (PR #82): 0 B/min</title><rect class="fixed" x="150" y="176" width="2" height="16"/></g>
+<text x="171.0" y="188.0" class="s">bennu + fix (PR #82): 0 B/min</text>
+<line x1="163.0" x2="163.0" y1="84" y2="220" stroke="#d03b3b" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="168.0" y="80.0" class="s">check limit 2 048 B/min</text>
+<text x="24.0" y="282.0" class="m">Stock line is 'pid = N', 10 bytes, about 96 times a second. One board run per build, live waterway-arm64 range, 2026-11-10.</text>
+</svg>

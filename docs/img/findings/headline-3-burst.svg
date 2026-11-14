@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 336" width="720" height="336" role="img" aria-label="Burst of 1 000 flips: ferrofire 7 000+ per second, stock bennu 2 to 18">
+<style>text{font-family:'DejaVu Sans',Verdana,sans-serif}
+.bg{fill:#fcfcfb}.t{fill:#0b0b0b;font-weight:bold;font-size:15px}.s{fill:#52514e;font-size:12px}
+.v{fill:#0b0b0b;font-size:12px}.m{fill:#898781;font-size:11px}
+.g{stroke:#e1e0d9;stroke-width:1}.a{stroke:#c3c2b7;stroke-width:1}.ff{fill:#2a78d6}.st{fill:#898781}
+.rg{fill:#fcfcfb;stroke:#0b0b0b;stroke-width:1.5}.ln{stroke:#c3c2b7;stroke-width:2}.ring{stroke:#fcfcfb;stroke-width:2}</style>
+<rect width="720" height="336" class="bg"/>
+<text x="16.0" y="26.0" class="t" text-anchor="start">Burst of 1 000 flips: ferrofire 7 000+ per second, stock bennu 2 to 18</text>
+<text x="16.0" y="46.0" class="s" text-anchor="start">Breaker flips completed per second when 1 000 are issued at once (Docker)</text>
+<rect x="16" y="58" width="12" height="12" rx="2" class="ff"/>
+<text x="34.0" y="68.0" class="s" text-anchor="start">ferrofire</text>
+<rect x="120.8" y="58" width="12" height="12" rx="2" class="st"/>
+<text x="138.8" y="68.0" class="s" text-anchor="start">stock bennu</text>
+<line x1="80.0" x2="80.0" y1="90" y2="250" class="g"/>
+<text x="80.0" y="268.0" class="m" text-anchor="middle">1</text>
+<line x1="222.5" x2="222.5" y1="90" y2="250" class="g"/>
+<text x="222.5" y="268.0" class="m" text-anchor="middle">10</text>
+<line x1="365.0" x2="365.0" y1="90" y2="250" class="g"/>
+<text x="365.0" y="268.0" class="m" text-anchor="middle">100</text>
+<line x1="507.5" x2="507.5" y1="90" y2="250" class="g"/>
+<text x="507.5" y="268.0" class="m" text-anchor="middle">1 000</text>
+<line x1="650.0" x2="650.0" y1="90" y2="250" class="g"/>
+<text x="650.0" y="268.0" class="m" text-anchor="middle">10 000</text>
+<text x="365.0" y="286.0" class="s" text-anchor="middle">flips completed per second (log scale)</text>
+<text x="68.0" y="116.0" class="s" text-anchor="end">1 RTU</text>
+<line x1="113.6" x2="629.0" y1="112" y2="112" class="ln"/>
+<circle cx="113.6" cy="112" r="6" class="st ring"><title>stock bennu, 1 RTU: 1.72 flips/s, lost 981 of 1000</title></circle>
+<circle cx="629.0" cy="112" r="6" class="ff ring"><title>ferrofire, 1 RTU: 7128.09 flips/s, lost 0 of 5000</title></circle>
+<text x="113.6" y="100.0" class="v" text-anchor="middle">1.7</text>
+<text x="641.0" y="116.0" class="v" text-anchor="start">7 128</text>
+<text x="68.0" y="156.0" class="s" text-anchor="end">2 RTUs</text>
+<line x1="162.0" x2="636.7" y1="152" y2="152" class="ln"/>
+<circle cx="162.0" cy="152" r="6" class="st ring"><title>stock bennu, 2 RTU: 3.76 flips/s, lost 962 of 1000</title></circle>
+<circle cx="636.7" cy="152" r="6" class="ff ring"><title>ferrofire, 2 RTU: 8070.51 flips/s, lost 0 of 5000</title></circle>
+<text x="162.0" y="140.0" class="v" text-anchor="middle">3.8</text>
+<text x="648.7" y="156.0" class="v" text-anchor="start">8 071</text>
+<text x="68.0" y="196.0" class="s" text-anchor="end">5 RTUs</text>
+<line x1="216.5" x2="638.4" y1="192" y2="192" class="ln"/>
+<circle cx="216.5" cy="192" r="6" class="st ring"><title>stock bennu, 5 RTU: 9.08 flips/s, lost 908 of 1000</title></circle>
+<circle cx="638.4" cy="192" r="6" class="ff ring"><title>ferrofire, 5 RTU: 8291.03 flips/s, lost 0 of 5000</title></circle>
+<text x="216.5" y="180.0" class="v" text-anchor="middle">9.1</text>
+<text x="650.4" y="196.0" class="v" text-anchor="start">8 291</text>
+<text x="68.0" y="236.0" class="s" text-anchor="end">10 RTUs</text>
+<line x1="259.6" x2="638.6" y1="232" y2="232" class="ln"/>
+<circle cx="259.6" cy="232" r="6" class="st ring"><title>stock bennu, 10 RTU: 18.22 flips/s, lost 800 of 1000</title></circle>
+<circle cx="638.6" cy="232" r="6" class="ff ring"><title>ferrofire, 10 RTU: 8318.31 flips/s, lost 0 of 5000</title></circle>
+<text x="259.6" y="220.0" class="v" text-anchor="middle">18.2</text>
+<text x="650.6" y="236.0" class="v" text-anchor="start">8 318</text>
+<text x="16.0" y="309.0" class="m" text-anchor="start">ferrofire: median of 5 reps, 0 of 5 000 missed per row. Stock bennu: 1 rep, and 981, 962, 908, 800 of its 1</text>
+<text x="16.0" y="324.0" class="m" text-anchor="start">000 missed the 10 s deadline; rate counts those done.</text>
+</svg>

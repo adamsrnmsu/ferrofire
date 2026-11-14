@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 376" width="760" height="376" role="img" aria-label="Stock bennu fails all 5 fault checks; with the fixes all 5 pass">
+<title>Stock bennu fails all 5 fault checks; with the fixes all 5 pass</title><desc>Pass/fail matrix of five everything-burger robustness checks, stock bennu against bennu with PRs 79, 81 and 82.</desc>
+<style>
+:root{--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;--grid:#e1e0d9;--stock:#898781;--fixed:#6250d6}
+@media (prefers-color-scheme:dark){:root{--surface:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#898781;--grid:#383835;--stock:#898781;--fixed:#9085e9}}
+text{font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;fill:var(--ink)}
+.t{font-size:15px;font-weight:700}.s{fill:var(--ink2)}.m{fill:var(--muted);font-size:11px}.b{font-weight:600}
+.grid{stroke:var(--grid);stroke-width:1}.stock{fill:var(--stock)}.fixed{fill:var(--fixed)}
+.ring{stroke:var(--surface);stroke-width:2}.bad{fill:#d03b3b}.good{fill:#0ca30c}
+.ic{stroke:#fff;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
+</style>
+<rect width="760" height="376" fill="var(--surface)"/>
+<text class="t" x="24" y="32">Stock bennu fails all 5 fault checks; with the fixes all 5 pass</text>
+<text class="s" x="24" y="52">Five faults thrown at the field device and watcher on the live range: outcome per build</text>
+<rect x="291" y="77" width="18" height="6" rx="3" class="stock"/>
+<text x="316.0" y="84.0" class="b">stock bennu</text>
+<rect x="521" y="77" width="18" height="6" rx="3" class="fixed"/>
+<text x="546.0" y="84.0" class="b">bennu + fixes</text>
+<text x="24.0" y="84.0" class="s">fault</text>
+<line class="grid" x1="24" x2="736" y1="92" y2="92"/>
+<text x="24.0" y="110.0" class="b">Truncated Modbus frame</text>
+<text x="24.0" y="125.0" class="m">MBAP length 0 · PR #81</text>
+<g><title>fails: device dies (pid 434 → none)</title><circle cx="300" cy="112" r="9" class="bad"/><path class="ic" transform="translate(300,112)" d="M-3,-3 L3,3 M3,-3 L-3,3"/></g><text x="316.0" y="110.0" class="b">fails</text><text x="316.0" y="125.0" class="m">device dies (pid 434 → none)</text>
+<g><title>passes: frame dropped, same pid</title><circle cx="530" cy="112" r="9" class="good"/><path class="ic" transform="translate(530,112)" d="M-4,0 L-1.2,3 L4,-3"/></g><text x="546.0" y="110.0" class="b">passes</text><text x="546.0" y="125.0" class="m">frame dropped, same pid</text>
+<line class="grid" x1="24" x2="736" y1="138" y2="138"/>
+<text x="24.0" y="156.0" class="b">Second IEC-104 master connects</text>
+<text x="24.0" y="171.0" class="m">PR #81</text>
+<g><title>fails: first master stops receiving</title><circle cx="300" cy="158" r="9" class="bad"/><path class="ic" transform="translate(300,158)" d="M-3,-3 L3,3 M3,-3 L-3,3"/></g><text x="316.0" y="156.0" class="b">fails</text><text x="316.0" y="171.0" class="m">first master stops receiving</text>
+<g><title>passes: both masters keep receiving</title><circle cx="530" cy="158" r="9" class="good"/><path class="ic" transform="translate(530,158)" d="M-4,0 L-1.2,3 L4,-3"/></g><text x="546.0" y="156.0" class="b">passes</text><text x="546.0" y="171.0" class="m">both masters keep receiving</text>
+<line class="grid" x1="24" x2="736" y1="184" y2="184"/>
+<text x="24.0" y="202.0" class="b">DNP3 accept() error</text>
+<text x="24.0" y="217.0" class="m">fd limit hit, then restored · PR #81</text>
+<g><title>fails: never accepts again</title><circle cx="300" cy="204" r="9" class="bad"/><path class="ic" transform="translate(300,204)" d="M-3,-3 L3,3 M3,-3 L-3,3"/></g><text x="316.0" y="202.0" class="b">fails</text><text x="316.0" y="217.0" class="m">never accepts again</text>
+<g><title>passes: accepts again, answers</title><circle cx="530" cy="204" r="9" class="good"/><path class="ic" transform="translate(530,204)" d="M-4,0 L-1.2,3 L4,-3"/></g><text x="546.0" y="202.0" class="b">passes</text><text x="546.0" y="217.0" class="m">accepts again, answers</text>
+<line class="grid" x1="24" x2="736" y1="230" y2="230"/>
+<text x="24.0" y="248.0" class="b">1 500 Modbus connect/close</text>
+<text x="24.0" y="263.0" class="m">one socket each · PR #79</text>
+<g><title>fails: stops answering at 1 006 *</title><circle cx="300" cy="250" r="9" class="bad"/><path class="ic" transform="translate(300,250)" d="M-3,-3 L3,3 M3,-3 L-3,3"/></g><text x="316.0" y="248.0" class="b">fails</text><text x="316.0" y="263.0" class="m">stops answering at 1 006 *</text>
+<g><title>passes: 1 500 done, still answers</title><circle cx="530" cy="250" r="9" class="good"/><path class="ic" transform="translate(530,250)" d="M-4,0 L-1.2,3 L4,-3"/></g><text x="546.0" y="248.0" class="b">passes</text><text x="546.0" y="263.0" class="m">1 500 done, still answers</text>
+<line class="grid" x1="24" x2="736" y1="276" y2="276"/>
+<text x="24.0" y="294.0" class="b">Watcher polling an idle RTU</text>
+<text x="24.0" y="309.0" class="m">stderr log growth · PR #82</text>
+<g><title>fails: 58 KB/min of log</title><circle cx="300" cy="296" r="9" class="bad"/><path class="ic" transform="translate(300,296)" d="M-3,-3 L3,3 M3,-3 L-3,3"/></g><text x="316.0" y="294.0" class="b">fails</text><text x="316.0" y="309.0" class="m">58 KB/min of log</text>
+<g><title>passes: 0 B/min</title><circle cx="530" cy="296" r="9" class="good"/><path class="ic" transform="translate(530,296)" d="M-4,0 L-1.2,3 L4,-3"/></g><text x="546.0" y="294.0" class="b">passes</text><text x="546.0" y="309.0" class="m">0 B/min</text>
+<line class="grid" x1="24" x2="736" y1="322" y2="322"/>
+<text x="24.0" y="342.0" class="m">* quoted from a PR #79 comment; no raw file kept. The other nine cells are parsed from the board reports.</text>
+<text x="24.0" y="358.0" class="m">Each fix was tested on its own build (3 builds, one per PR), not one combined build. One board run per build, live waterway-arm64 range, 2026-11-10.</text>
+</svg>

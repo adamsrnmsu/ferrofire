@@ -1,0 +1,107 @@
+#### big A
+big  cpu=25.9
+big  cpu=23.6
+big  cpu=27.3
+big  cpu=23.8
+big  cpu=25.4
+big  cpu=22.4
+#### query E
+  base read cpu=24.4 rate=17318/s p50=53.5us p99=107.4us
+  base query cpu=42.9 rate=11691/s p50=78.6us p99=147.7us
+  E read cpu=24.2 rate=17298/s p50=54.3us p99=93.0us
+  E query cpu=24.2 rate=15352/s p50=58.1us p99=89.8us
+  base read cpu=27.4 rate=16708/s p50=53.9us p99=224.5us
+  base query cpu=43.1 rate=11662/s p50=79.8us p99=167.2us
+  E read cpu=24.7 rate=17329/s p50=54.8us p99=106.5us
+  E query cpu=24.7 rate=15463/s p50=58.1us p99=100.8us
+  base read cpu=24.4 rate=17464/s p50=54.0us p99=104.9us
+  base query cpu=43.5 rate=11700/s p50=79.0us p99=153.2us
+  E read cpu=24.7 rate=17463/s p50=53.8us p99=94.5us
+  E query cpu=24.8 rate=15386/s p50=58.6us p99=92.3us
+#### gridfast-idle C
+gridfast-idle  cpu=48.8
+gridfast-idle  cpu=40.2
+gridfast-idle  cpu=48.6
+gridfast-idle  cpu=38.9
+gridfast-idle  cpu=48.6
+gridfast-idle  cpu=39.3
+#### gridfast-idle D
+gridfast-idle  cpu=48.8
+gridfast-idle  cpu=43.2
+gridfast-idle  cpu=50.4
+gridfast-idle  cpu=44.4
+gridfast-idle  cpu=50.2
+gridfast-idle  cpu=45.2
+#### m800 C
+m800  cpu=8.1
+m800  cpu=7.3
+m800  cpu=8.5
+m800  cpu=7.5
+m800  cpu=7.9
+m800  cpu=7.3
+#### grid-storm B
+grid-storm  cpu=16.9
+  cells 40 ok 40 span_s p50 0.120 p90 0.135  wall_s p50 0.283
+grid-storm  cpu=11.7
+  cells 40 ok 40 span_s p50 0.120 p90 0.127  wall_s p50 0.284
+grid-storm  cpu=17.3
+  cells 40 ok 40 span_s p50 0.117 p90 0.133  wall_s p50 0.281
+grid-storm  cpu=11.7
+  cells 40 ok 40 span_s p50 0.121 p90 0.134  wall_s p50 0.284
+grid-storm  cpu=17.6
+  cells 40 ok 40 span_s p50 0.117 p90 0.135  wall_s p50 0.281
+grid-storm  cpu=11.7
+  cells 41 ok 41 span_s p50 0.120 p90 0.123  wall_s p50 0.284
+#### grid-storm F
+grid-storm  cpu=19.2
+  cells 39 ok 39 span_s p50 0.118 p90 0.136  wall_s p50 0.281
+grid-storm  cpu=19.6
+  cells 40 ok 40 span_s p50 0.118 p90 0.135  wall_s p50 0.281
+grid-storm  cpu=18.8
+  cells 40 ok 40 span_s p50 0.117 p90 0.136  wall_s p50 0.280
+grid-storm  cpu=18.7
+  cells 40 ok 40 span_s p50 0.120 p90 0.137  wall_s p50 0.283
+grid-storm  cpu=19.5
+  cells 39 ok 39 span_s p50 0.126 p90 0.136  wall_s p50 0.290
+grid-storm  cpu=18.4
+  cells 39 ok 39 span_s p50 0.119 p90 0.135  wall_s p50 0.282
+#### gridfast-storm B
+gridfast-storm  cpu=63.0
+  cells 41 ok 41 span_s p50 0.089 p90 0.095  wall_s p50 0.248
+gridfast-storm  cpu=55.8
+  cells 44 ok 44 span_s p50 0.072 p90 0.077  wall_s p50 0.229
+gridfast-storm  cpu=59.4
+  cells 42 ok 42 span_s p50 0.081 p90 0.089  wall_s p50 0.239
+gridfast-storm  cpu=56.0
+  cells 43 ok 43 span_s p50 0.072 p90 0.079  wall_s p50 0.229
+gridfast-storm  cpu=57.4
+  cells 36 ok 36 span_s p50 0.081 p90 0.087  wall_s p50 0.239
+gridfast-storm  cpu=56.7
+  cells 41 ok 41 span_s p50 0.072 p90 0.078  wall_s p50 0.230
+#### gridfast-storm F
+gridfast-storm  cpu=59.1
+  cells 41 ok 41 span_s p50 0.082 p90 0.090  wall_s p50 0.238
+gridfast-storm  cpu=59.4
+  cells 39 ok 39 span_s p50 0.082 p90 0.087  wall_s p50 0.239
+gridfast-storm  cpu=59.7
+  cells 41 ok 41 span_s p50 0.083 p90 0.089  wall_s p50 0.240
+gridfast-storm  cpu=59.5
+  cells 41 ok 41 span_s p50 0.080 p90 0.088  wall_s p50 0.239
+gridfast-storm  cpu=60.4
+  cells 41 ok 41 span_s p50 0.082 p90 0.091  wall_s p50 0.239
+gridfast-storm  cpu=62.7
+  cells 40 ok 40 span_s p50 0.089 p90 0.094  wall_s p50 0.248
+#### gridfast-storm C
+gridfast-storm  cpu=58.5
+  cells 27 ok 27 span_s p50 0.086 p90 0.095  wall_s p50 0.243
+gridfast-storm  cpu=43.8
+  cells 41 ok 41 span_s p50 0.081 p90 0.087  wall_s p50 0.238
+gridfast-storm  cpu=63.6
+  cells 39 ok 39 span_s p50 0.089 p90 0.097  wall_s p50 0.248
+gridfast-storm  cpu=47.2
+  cells 37 ok 37 span_s p50 0.089 p90 0.097  wall_s p50 0.248
+gridfast-storm  cpu=64.4
+  cells 37 ok 37 span_s p50 0.091 p90 0.101  wall_s p50 0.250
+gridfast-storm  cpu=48.7
+  cells 37 ok 37 span_s p50 0.087 p90 0.094  wall_s p50 0.247
+CAMPAIGNDONE
