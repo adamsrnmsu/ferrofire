@@ -19,6 +19,7 @@ sys.path.insert(0, str(HERE))
 import dg_report as dg  # noqa: E402  (stdlib only)
 import report  # noqa: E402  (matplotlib only inside its own chart functions)
 import control_report as cr  # noqa: E402  (stdlib only)
+import fdmicro_report as fm  # noqa: E402  (stdlib only)
 
 ROOT, RES = dg.ROOT, dg.RES
 OUT = ROOT / "docs/img/charts"
@@ -725,10 +726,154 @@ def chart_cross():
         w.writerows(rows)
 
 
+def chart_fdmicro():
+    """12a-12e: the field-device microbench (ww-1df.41): ferrofire field-device vs stock bennu-field-deviced, one scripted provider, Docker. Median over reps unless a table says pooled."""
+    if not fm.DATA:
+        return
+    SK = ("ferrofire", "stock")
+    col = {"ferrofire": FF, "stock": STK}
+    n = lambda s, pr, proto="mb": len(fm.reps(s, pr, proto))
+    f1 = lambda x: "" if x is None else f"{x:.1f}"
+    f3 = lambda x: "" if x is None else f"{x:.3f}"
+    f0 = lambda x: "" if x is None else f"{x:,.0f}".replace(",", " ")
+    leg = [sw(SNAME[s], col[s]) for s in SK]
+
+    def bars(ax, cats, vals, ticks=None, fmt="{:.2f}", log=False):
+        """vals[stack] = list per cat (None = no number); ticks[stack] = a second marker (p99)."""
+        w = 0.8 / len(SK)
+        for i, s in enumerate(SK):
+            xs = [x + (i - (len(SK) - 1) / 2) * w for x in range(len(cats))]
+            ok = [(x, v) for x, v in zip(xs, vals[s]) if v is not None]
+            ax.bar([x for x, _ in ok], [v for _, v in ok], width=w * 0.9, color=col[s], ec=SURFACE, lw=1)
+            if ticks:
+                ax.plot([x for x, t in zip(xs, ticks[s]) if t is not None], [t for t in ticks[s] if t is not None], ls="", marker="_", color=INK, ms=7)
+            for x, v in ok:
+                ax.text(x, v, fmt.format(v), ha="center", va="bottom", fontsize=6.5, color=INK2, rotation=90)
+        ax.set_xticks(range(len(cats)), cats)
+        ax.tick_params(length=0)
+        top = max(v for vs in [*vals.values(), *(ticks or {}).values()] for v in vs if v is not None)
+        ax.set_ylim(*( (min(v for vs in vals.values() for v in vs if v) / 3, top * 8) if log else (0, top * 1.35)))
+        if log:
+            ax.set_yscale("log")
+
+    def title(ax, t):
+        ax.set_title(t, fontsize=8.5, color=INK2, loc="left")
+
+    # 12a stream to register -------------------------------------------------------------------------------------------------------
+    cases = [("S", "1", "S 15 tags, 1 Hz"), ("S", "10", "S 15 tags, 10 Hz"), ("S", "100", "S 15 tags, 100 Hz"), ("M", "100", "M 800 tags, 100 Hz"), ("L", "10", "L 8112 tags, 10 Hz")]
+    cases = [c for c in cases if any(fm.pooled(s, c[0], "mb", "s2r", f"{c[1]}hz")[0] for s in SK)]
+    q = {(s, c[0], c[1]): fm.pooled(s, c[0], "mb", "s2r", f"{c[1]}hz") for s in SK for c in cases}
+    rows = [(c[2], SNAME[s], n(s, c[0]), len(q[s, c[0], c[1]][0]) + q[s, c[0], c[1]][1], q[s, c[0], c[1]][1], *[f3(fm.pct(q[s, c[0], c[1]][0], x)) for x in (.5, .95, .99)], f3(max(q[s, c[0], c[1]][0] or [None]))) for c in cases for s in SK]
+    fig, (ax,) = fig_ax()
+    bars(ax, [c[2].replace(", ", "\n") for c in cases], {s: [fm.pct(q[s, c[0], c[1]][0], .5) for c in cases] for s in SK}, {s: [fm.pct(q[s, c[0], c[1]][0], .99) for c in cases] for s in SK}, "{:.3f}")
+    finish(fig, "12a-fd-stream-to-register", rows, ["case", "device", "reps", "flips", "missed", "p50 ms", "p95 ms", "p99 ms", "max ms"],
+           "Stream to Modbus register: ferrofire field device vs stock, scripted provider", "milliseconds from the datagram send to the first read showing it; bar p50, tick p99; tight poll on one connection", ax, leg,
+           note="Delay = read completed minus datagram sent: an upper bound, one read round trip (about 30 us) wide. Pooled over the reps, about 100 flips per rep and case.", left=0.09)
+
+    # 12b modbus reads -------------------------------------------------------------------------------------------------------------
+    rows = []
+    for pr in fm.PROFILES:
+        big = min(100, {"S": 10, "M": 719, "L": 6050}[pr])   # n_ir of the layouts; the request size of the large read
+        for nreg in (1, big):
+            for c in (1, 4, 16):
+                for s in SK:
+                    g = lambda m: fm.med(s, pr, "mb", "read", f"c{c}_n{nreg}", m)
+                    if g("req_per_s") is not None:
+                        rows.append((pr, f"FC4 x {nreg}", c, SNAME[s], n(s, pr), f0(g("req_per_s")), f1(g("us_p50")), f1(g("us_p95")), f1(g("us_p99")), f0(g("errors")), f0(g("clients_served")), f1(g("cpu_pct")), f0(g("req_per_s") / g("cpu_pct") * 100)))
+    fig, axs = fig_ax(7.4, 3.5, 3, sharey=False)
+    cl = (1, 4, 16)
+    g = lambda s, c, k: fm.med(s, "M", "mb", "read", f"c{c}_n1", k)
+    bars(axs[0], ["1", "4", "16"], {s: [g(s, c, "req_per_s") for c in cl] for s in SK}, fmt="{:.0f}")
+    title(axs[0], "requests per second")
+    bars(axs[1], ["1", "4", "16"], {s: [g(s, c, "us_p99") for c in cl] for s in SK}, fmt="{:.0f}")
+    title(axs[1], "p99 latency, us")
+    bars(axs[2], ["1", "4", "16"], {s: [None if not g(s, c, "cpu_pct") else g(s, c, "req_per_s") / g(s, c, "cpu_pct") * 100 for c in cl] for s in SK}, fmt="{:.0f}")
+    title(axs[2], "requests per device-cpu-second")
+    for a in axs:
+        a.set_xlabel("clients", fontsize=8, color=INK2)
+    finish(fig, "12b-fd-modbus-reads", rows, ["profile", "request", "clients", "device", "reps", "req/s", "p50 us", "p95 us", "p99 us", "errors", "clients served", "device cpu %", "req per device-cpu-s"],
+           "Modbus read latency and throughput, 1, 4 and 16 clients", "", axs[0], leg, note="Profile M (800 tags, stream at 100 Hz), FC4 of 1 register; every profile and the 100-register read are in the table. Each client is a tight request loop on its own connection; the load generator shares the VM with the device.", left=0.1)
+
+    # 12c write forward ------------------------------------------------------------------------------------------------------------
+    rows, pr3 = [], list(fm.PROFILES)
+    for pr in pr3:
+        for s in SK:
+            g = lambda v, m: fm.med(s, pr, "mb", "write", v, m)
+            if g("spaced", "forward_ms_p50") is not None:
+                rows.append((pr, SNAME[s], n(s, pr), f1(g("spaced", "forward_ms_p50")), f1(g("spaced", "forward_ms_p95")), f1(g("spaced", "forward_ms_p99")), f0(g("spaced", "lost")), f0(g("rapid", "lost")), f1(g("rapid", "forward_ms_p50")), f1(g("spaced", "ack_us_p50"))))
+    fig, axs = fig_ax(7.4, 3.5, 2, sharey=False)
+    bars(axs[0], pr3, {s: [fm.med(s, pr, "mb", "write", "spaced", "forward_ms_p50") for pr in pr3] for s in SK}, {s: [fm.med(s, pr, "mb", "write", "spaced", "forward_ms_p99") for pr in pr3] for s in SK}, "{:.1f}")
+    title(axs[0], "write to WRITE= at provider, ms")
+    bars(axs[1], pr3, {s: [None if fm.med(s, pr, "mb", "write", "rapid", "lost") is None else 100 - fm.med(s, pr, "mb", "write", "rapid", "lost") for pr in pr3] for s in SK}, fmt="{:.0f}")
+    title(axs[1], "rapid writes forwarded, %")
+    finish(fig, "12c-fd-write-forward", rows, ["profile", "device", "reps", "spaced p50 ms", "p95 ms", "p99 ms", "spaced lost of 60", "rapid lost of 100", "rapid p50 ms", "write ack p50 us"],
+           "Write-forward: Modbus FC5 to the WRITE= request at the provider", "", axs[0], leg, note="Same 50 ms cycle-time in both configs; p50 bar, p99 tick; rapid = one write every 60-150 ms. A write counts as lost if no WRITE= naming its value arrived within 1 s (spaced) or 250 ms (rapid).")
+
+    # 12d datagram delivery, cpu, rss ---------------------------------------------------------------------------------------------------
+    load = [("M", "100", "M 800 tags, 100 Hz"), ("L", "10", "L 8112 tags, 10 Hz")]
+    rows = []
+    for pr, hz, lab in load:
+        for s in SK:
+            g = lambda m: fm.total(s, pr, "mb", "drops", f"{hz}hz", m)
+            if g("udp_sent"):
+                rows.append((lab, SNAME[s], n(s, pr), f0(g("udp_sent")), f0(g("udp_in")), f1(100 * (1 - g("udp_in") / g("udp_sent"))), f0(g("rcvbuf_errors")), f0(g("sender_dropped")), f1(100 * g("counter_steps_skipped") / max(1, g("counter_changes") + g("counter_steps_skipped"))), f1(100 * g("end_state_bad_regs") / max(1, g("end_state_checked")))))
+    fig, axs = plt.subplots(1, 3, figsize=(7.4, 3.5))
+    for a in axs:
+        a.grid(axis="x", visible=False)
+    cats = [l[2].replace(", ", "\n") for l in load]
+    dv = lambda s: [None if not fm.total(s, pr, "mb", "drops", f"{hz}hz", "udp_sent") else 100 * fm.total(s, pr, "mb", "drops", f"{hz}hz", "udp_in") / fm.total(s, pr, "mb", "drops", f"{hz}hz", "udp_sent") for pr, hz, _ in load]
+    bars(axs[0], cats, {s: dv(s) for s in SK}, fmt="{:.1f}")
+    axs[0].set_ylim(0, 125)
+    title(axs[0], "datagrams reaching device, %")
+    cp = [(pr, "stream", f"{fm.MAIN_HZ[pr]}hz") for pr in pr3]
+    bars(axs[1], pr3, {s: [fm.med(s, pr, "mb", "stream", f"{fm.MAIN_HZ[pr]}hz", "cpu_pct") for pr in pr3] for s in SK}, fmt="{:.1f}")
+    title(axs[1], "device cpu, stream only, %")
+    bars(axs[2], pr3, {s: [fm.med(s, pr, "mb", "stream", f"{fm.MAIN_HZ[pr]}hz", "rss_mb") for pr in pr3] for s in SK}, fmt="{:.1f}")
+    title(axs[2], "device RSS, MB")
+    finish(fig, "12d-fd-load", rows, ["case", "device", "reps", "datagrams sent", "reached the device", "lost %", "RcvbufErrors", "sender drops", "cycles never visible %", "registers wrong at the end %"],
+           "Full-cycle streams: delivery, cpu and memory of the field device", "", axs[0], leg, note="Left: kernel UDP InDatagrams of the device's network namespace over 30 s of stream. A lost datagram is a whole chunk of the cycle.", left=0.06)
+    rows = []
+    for pr in pr3:
+        for s in SK:
+            g = lambda ph, v, m: fm.med(s, pr, "mb", ph, v, m)
+            hz = f"{fm.MAIN_HZ[pr]}hz"
+            if g("idle", "-", "cpu_pct") is not None:
+                rows.append((pr, SNAME[s], n(s, pr), f1(g("idle", "-", "rss_mb")), f1(g("stream", hz, "rss_mb")), f1(g("drops", hz, "rss_hwm_mb")), f1(g("idle", "-", "cpu_pct")), f1(g("stream", hz, "cpu_pct")),
+                             f1(g("s2r", hz, "cpu_pct")), f1(g("read", "c4_n1", "cpu_pct")), f1(g("read", "c16_n1", "cpu_pct"))))
+    TABLES["12d-cpu-rss"] = "\n".join(["| " + " | ".join(h) + " |" for h in [["profile", "device", "reps", "idle RSS MB", "stream RSS MB", "peak RSS MB", "idle cpu %", "stream cpu %", "stream + 1 tight reader cpu %", "4 readers cpu %", "16 readers cpu %"]]] + ["|" + "---|" * 11] + ["| " + " | ".join(map(str, r)) + " |" for r in rows])
+    with open(OUT / "12d-cpu-rss.csv", "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["profile", "device", "reps", "idle_rss_mb", "stream_rss_mb", "peak_rss_mb", "idle_cpu_pct", "stream_cpu_pct", "stream_1reader_cpu_pct", "4readers_cpu_pct", "16readers_cpu_pct"])
+        w.writerows(rows)
+
+    # 12e dnp3 -------------------------------------------------------------------------------------------------------------------------
+    rows = []
+    for pr in pr3:
+        for s in SK:
+            g = lambda ph, m: fm.med(s, pr, "dnp3", ph, f"{fm.MAIN_HZ[pr]}hz", m)
+            d, miss = fm.pooled(s, pr, "dnp3", "s2r", f"dnp3-{fm.MAIN_HZ[pr]}hz")
+            if g("dnp3read", "ms_p50") is not None:
+                rows.append((pr, SNAME[s], n(s, pr, "dnp3"), f0(g("dnp3read", "response_bytes")), f3(g("dnp3read", "ms_p50")), f3(g("dnp3read", "ms_p95")), f3(g("dnp3read", "ms_p99")), f0(g("dnp3tight", "polls_per_s")),
+                             f1(g("dnp3tight", "cpu_pct")), f0(fm.med(s, pr, "dnp3", "idle", "-", "rss_mb")), f0(g("stream", "rss_mb")), f1(fm.med(s, pr, "dnp3", "idle", "-", "cpu_pct")), f1(g("stream", "cpu_pct")),
+                             f0(fm.pct(d, .5)), f0(fm.pct(d, .95)), f0(max(d or [None])), miss))
+    fig, axs = fig_ax(7.4, 3.5, 3, sharey=False)
+    bars(axs[0], pr3, {s: [fm.med(s, pr, "dnp3", "dnp3read", f"{fm.MAIN_HZ[pr]}hz", "ms_p50") for pr in pr3] for s in SK}, {s: [fm.med(s, pr, "dnp3", "dnp3read", f"{fm.MAIN_HZ[pr]}hz", "ms_p99") for pr in pr3] for s in SK}, "{:.2f}", log=True)
+    title(axs[0], "poll time, ms (log)")
+    bars(axs[1], pr3, {s: [fm.med(s, pr, "dnp3", "dnp3tight", f"{fm.MAIN_HZ[pr]}hz", "polls_per_s") for pr in pr3] for s in SK}, fmt="{:.0f}", log=True)
+    title(axs[1], "polls per second (log)")
+    dd = {s: [fm.pct(fm.pooled(s, pr, "dnp3", "s2r", f"dnp3-{fm.MAIN_HZ[pr]}hz")[0], .5) for pr in pr3] for s in SK}
+    bars(axs[2], pr3, dd, fmt="{:.0f}")
+    title(axs[2], "stream to visible, ms")
+    for a in axs[1:]:
+        a.set_ylabel("")
+    finish(fig, "12e-fd-dnp3", rows, ["profile", "device", "reps", "response bytes", "poll p50 ms", "p95 ms", "p99 ms", "back-to-back polls/s", "cpu % while polling", "idle RSS MB", "stream RSS MB", "idle cpu %", "stream cpu %", "stream-to-visible p50 ms", "p95 ms", "max ms", "flips never seen"],
+           "DNP3 class-0 integrity poll: latency, throughput and stream-to-visible", "", axs[0], leg, note="One master, READ g60v1 (class 0), every fragment that asks for it confirmed. Poll time: p50 bar, p99 tick, 300 polls 20 ms apart; polls per second: back to back; stream to visible: p50, tight poll, probe flipped 1.5-3 s apart, pooled.", left=0.06)
+
+
 def main():
-    for f in (chart_age, chart_loss, chart_reorder, chart_stale, chart_fanout, chart_nng, chart_live, chart_ovs, chart_bennu, chart_control, chart_stock_intervals, chart_cross):
+    for f in (chart_age, chart_loss, chart_reorder, chart_stale, chart_fanout, chart_nng, chart_live, chart_ovs, chart_bennu, chart_control, chart_stock_intervals, chart_cross, chart_fdmicro):
         f()
-    for tin, tout in (("results.md.in", ROOT / "docs/results.md"), ("control_latency.md.in", ROOT / "docs/bench/control-latency.md")):
+    for tin, tout in (("results.md.in", ROOT / "docs/results.md"), ("control_latency.md.in", ROOT / "docs/bench/control-latency.md"), ("field_device.md.in", ROOT / "docs/bench/field-device.md")):
         text = (HERE / tin).read_text()
         for k, v in TABLES.items():
             text = text.replace("{{table:" + k + "}}", v)

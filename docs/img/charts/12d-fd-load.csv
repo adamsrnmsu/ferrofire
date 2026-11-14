@@ -1,0 +1,5 @@
+case,device,reps,datagrams sent,reached the device,lost %,RcvbufErrors,sender drops,cycles never visible %,registers wrong at the end %
+"M 800 tags, 100 Hz",ferrofire,3,117 039,117 000,0.0,0,0,0.0,0.0
+"M 800 tags, 100 Hz",stock bennu,3,117 039,117 000,0.0,0,0,0.0,0.0
+"L 8112 tags, 10 Hz",ferrofire,3,116 488,88 040,24.4,28 060,0,24.1,17.6
+"L 8112 tags, 10 Hz",stock bennu,3,116 484,116 100,0.3,0,0,0.8,0.0

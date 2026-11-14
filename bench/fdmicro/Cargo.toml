@@ -1,0 +1,15 @@
+[package]
+name = "fdmicro"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Field-device microbench harness (ww-1df.41): standalone, not part of ferrofire's build or gates.
+[workspace]
+
+[dependencies]
+ferrofire = { path = "../.." }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3

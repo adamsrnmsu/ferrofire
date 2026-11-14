@@ -1,0 +1,7 @@
+profile,device,reps,spaced p50 ms,p95 ms,p99 ms,spaced lost of 60,rapid lost of 100,rapid p50 ms,write ack p50 us
+S,ferrofire,3,27.0,51.5,58.7,0,0,23.4,309.5
+S,stock bennu,3,27.8,51.1,56.9,0,66,28.6,369.7
+M,ferrofire,3,31.8,56.5,60.4,0,0,25.0,298.2
+M,stock bennu,3,24.8,49.4,53.2,0,65,27.9,238.3
+L,ferrofire,3,27.8,53.7,60.2,0,0,28.1,301.5
+L,stock bennu,3,24.4,58.3,60.2,0,66,25.2,302.8

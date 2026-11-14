@@ -1,0 +1,7 @@
+profile,device,reps,idle_rss_mb,stream_rss_mb,peak_rss_mb,idle_cpu_pct,stream_cpu_pct,stream_1reader_cpu_pct,4readers_cpu_pct,16readers_cpu_pct
+S,ferrofire,3,4.0,4.7,6.6,0.1,0.1,38.4,169.6,609.8
+S,stock bennu,3,6.3,6.4,6.7,0.1,0.2,42.2,99.8,100.0
+M,ferrofire,3,4.5,5.3,8.6,0.1,2.9,40.2,168.8,607.6
+M,stock bennu,3,10.5,10.8,11.1,0.2,5.5,44.6,101.6,102.0
+L,ferrofire,3,10.5,12.2,30.0,0.0,4.4,40.6,172.2,604.8
+L,stock bennu,3,50.7,51.1,51.4,0.6,5.0,44.8,101.8,102.0

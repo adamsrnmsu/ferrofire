@@ -172,3 +172,7 @@ Ferrofire: one stack per (rep, R) runs every cell; stock: a fresh stack per cell
 guest load and whether anything else was running. Gotchas found: phenix cannot boot a `do_not_boot` VM later (`vm restart` / `vm redeploy` do not find it in minimega), so `up` replays
 the experiment's own mm-script stanza for rtu-3..5; `cc send` never overwrites a file the guest already has (each ship uses a new file name); stock `bennu-field-deviced` needs a relative
 `--file` path and leaves a pid file that `vm.sh stop` removes.
+
+## Field-device microbench (ww-1df.41)
+
+ferrofire `field-device` vs stock `bennu-field-deviced` with one scripted provider and the same config, no real provider: stream-to-register delay, Modbus read latency and throughput at 1/4/16 clients, write-forward, drops, cpu/RSS, DNP3 class-0 polls. Harness, phases and how to run it: [fdmicro/README.md](fdmicro/README.md) (`make bench-fdmicro`); report: [docs/bench/field-device.md](../docs/bench/field-device.md).

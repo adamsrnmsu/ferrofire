@@ -263,6 +263,29 @@ Full method, every figure, lost and wrong counts, and what stock cannot run (no 
 
 Ferrofire shows a flip in about 100 ms, stock bennu in about 1 020 ms; with 100 flips at once on 1 RTU stock loses 81% within 10 s and ferrofire loses none. With stock's publish interval cut to 0.1 s or 0.05 s (Docker, [control-latency.md](bench/control-latency.md) section 8) its sequential flips over 5 or 10 RTUs take 86 to 127 ms, close to ferrofire's 99 ms, but on 1 RTU still about 500 ms, and it still loses 80% of 100 simultaneous flips on 1 RTU: stock's write rate, not its publish interval, limits those.
 
+## 10. Field device alone: ferrofire vs stock bennu-field-deviced
+
+The same config loaded by `ferrofire field-device` and by stock `bennu-field-deviced`, fed by one scripted provider (no provider effects), Docker, 3 reps, 15 / 800 / 8 112 tags. Unit: milliseconds from the datagram leaving the provider to the first Modbus read that shows it, p50 (bar) and p99 (tick).
+Full method, Modbus read throughput at 1, 4 and 16 clients, write-forward, drops, cpu and RSS, DNP3: [field-device.md](bench/field-device.md); raw: [results/fdmicro/](bench/results/fdmicro/).
+
+![Stream to register, ferrofire vs stock field device](img/charts/12a-fd-stream-to-register.svg)
+
+| case | device | reps | flips | missed | p50 ms | p95 ms | p99 ms | max ms |
+|---|---|---|---|---|---|---|---|---|
+| S 15 tags, 1 Hz | ferrofire | 3 | 90 | 0 | 0.083 | 0.108 | 0.194 | 0.194 |
+| S 15 tags, 1 Hz | stock bennu | 3 | 90 | 0 | 0.116 | 0.147 | 0.235 | 0.235 |
+| S 15 tags, 10 Hz | ferrofire | 3 | 300 | 0 | 0.076 | 0.104 | 0.123 | 0.151 |
+| S 15 tags, 10 Hz | stock bennu | 3 | 300 | 0 | 0.110 | 0.140 | 0.193 | 0.292 |
+| S 15 tags, 100 Hz | ferrofire | 3 | 300 | 0 | 0.060 | 0.088 | 0.129 | 0.148 |
+| S 15 tags, 100 Hz | stock bennu | 3 | 300 | 0 | 0.083 | 0.112 | 0.164 | 0.227 |
+| M 800 tags, 100 Hz | ferrofire | 3 | 300 | 0 | 0.061 | 0.095 | 0.144 | 0.234 |
+| M 800 tags, 100 Hz | stock bennu | 3 | 300 | 0 | 0.090 | 0.130 | 0.178 | 0.301 |
+| L 8112 tags, 10 Hz | ferrofire | 3 | 300 | 0 | 0.110 | 0.138 | 0.163 | 0.179 |
+| L 8112 tags, 10 Hz | stock bennu | 3 | 300 | 0 | 0.113 | 0.178 | 0.294 | 1.326 |
+
+Both field devices expose a new value in about a tenth of a millisecond, ferrofire 0.02-0.03 ms sooner on the small and medium devices. Stock wins on delivery of an 8 112-tag stream (ferrofire's device lost 24% of the datagrams at 10 Hz, stock 0.3%) and on cpu per Modbus request with several clients (about 4 times as many requests per cpu-second at 16 clients); ferrofire wins on memory
+(12 vs 51 MB on 8 112 tags), Modbus throughput at 16 clients and on large reads, forwarding every write of a quick sequence (stock forwarded about a third), and DNP3 class-0 polls on 800 tags and up (stock 123 ms at p50 on 800 tags, ferrofire 0.4 ms).
+
 ## Other results on the bench and the live range
 
 These have no chart: each is a single measured event rather than a comparison across settings.

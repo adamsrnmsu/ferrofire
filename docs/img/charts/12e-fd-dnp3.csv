@@ -1,0 +1,7 @@
+profile,device,reps,response bytes,poll p50 ms,p95 ms,p99 ms,back-to-back polls/s,cpu % while polling,idle RSS MB,stream RSS MB,idle cpu %,stream cpu %,stream-to-visible p50 ms,p95 ms,max ms,flips never seen
+S,ferrofire,3,167,0.169,0.243,0.275,34 060,40.4,4,5,0.2,0.2,483,974,983,0
+S,stock bennu,3,167,0.144,0.288,0.361,26 717,73.8,8,8,0.2,0.2,501,995,999,0
+M,ferrofire,3,6 716,0.399,0.634,0.697,7 504,60.2,5,6,0.4,2.8,526,937,974,0
+M,stock bennu,3,6 716,122.859,123.804,124.185,8,6.1,12,12,0.4,5.6,673,1 101,1 201,0
+L,ferrofire,3,67 646,2.527,3.657,4.118,740,56.0,11,14,0.4,5.0,496,982,997,0
+L,stock bennu,3,67 646,4.366,85.804,1149.653,2,8.7,47,47,3.0,7.8,878,2 760,2 960,0
