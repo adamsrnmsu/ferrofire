@@ -1,9 +1,11 @@
 # ferrofire: findings on one page
 
 ferrofire against stock bennu as shipped: Docker bench on one VM plus a live phenix range, 2026-11-14.
-"Stock" is bennu 6.0.0, before the upstream batched-write fix 91fd137 (release v2026.11.03), which removed a fixed 500 ms sleep per write in the field device.
-That sleep explains the burst losses, the reordering and the 0.5 s floor below; none is claimed for current bennu, and a rerun is pending (ww-1df.47). The 1 s publish latency is unaffected.
-Every number is recomputed from raw data by [`bench/findings/`](../bench/findings/README.md).
+
+- "Stock" is bennu 6.0.0, before the upstream batched-write fix 91fd137 (release v2026.11.03), which removed a fixed 500 ms sleep per write in the field device.
+- That sleep explains the burst losses, the reordering and the 0.5 s floor below; none is claimed for current bennu, and a rerun is pending (ww-1df.47).
+- The 1 s publish latency is unaffected.
+- Every number is recomputed from raw data by [`bench/findings/`](../bench/findings/README.md).
 
 ## In 30 seconds
 
@@ -17,7 +19,7 @@ Every number is recomputed from raw data by [`bench/findings/`](../bench/finding
 
 ## 1. How fast does a command take effect?
 
-98-99 ms on ferrofire against 1 022-1 025 ms on stock bennu, flat from 1 to 10 RTUs.
+98-99 ms on ferrofire against 1 022-1 025 ms on stock bennu as shipped (1 s publish), flat from 1 to 10 RTUs.
 
 ![Sequential flip latency by RTU count](img/findings/headline-1-latency.svg)
 
@@ -49,7 +51,7 @@ Stock applies a flip in 26 ms, then waits about 995 ms for its once-a-second pub
 
 ## 3. Provider or field device: which one matters?
 
-Swapping only the provider gives 49 % of the latency gain on 1 RTU, 79 % on 2, all of it on 5-10.
+Against stock as shipped (1 s publish), swapping only the provider gives 49 % of the latency gain on 1 RTU, 79 % on 2, all of it on 5-10.
 
 ![Sequential latency per provider and field-device pairing](img/findings/provider-vs-fd-1-latency.svg)
 
@@ -129,7 +131,7 @@ Same scripted provider, same config: stock wins stream delivery and CPU per requ
 
 - Stock wins: ferrofire drops 23.6 % of an 8 112-tag 10 Hz stream, stock none; 800 tags at 100 Hz is clean on both.
 - Stock wins: 4.5x the Modbus requests per CPU-second at 16 clients, where ferrofire serves 33 % more on 6.1 cores.
-- ferrofire wins: a DNP3 poll of 800 tags takes 0.4 ms against 123 ms; it forwards all 100 quick writes, stock bennu 6.0.0 34-35.
+- ferrofire wins: a DNP3 poll of 800 tags takes 0.4 ms against 123 ms (stock is ahead at 15 tags); it forwards all 100 quick writes, stock bennu 6.0.0 34-35.
 
 *Docker, 3 reps. The 130-datagram burst is a worst case. Quick-write loss: bennu 6.0.0 only. The 123 ms is untraced.*
 

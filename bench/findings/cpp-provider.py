@@ -96,12 +96,12 @@ def main():
     panels("cpp-provider-1-latency",
            f"At a 0.05 s publish ferrofire shows a flip in {p50(FFF, 100, '0.05'):.0f} ms, the C++ provider chain in {p50(CF, 1250, '0.05'):.0f}-{p50(CF, 100, '0.05'):.0f} ms ({lo:.1f}-{hi:.1f}x, indicative only)",
            "Median time from SCADA write to read-back, sequential breaker flips (ms). Bar: 3 reps pooled; dots: each rep's median (the C++ chain is bimodal).",
-           "write to read-back, median (ms)", [((n, p), f"{n} points, publish {p} s") for n, p in cells], lat_draw, 285)
+           "write to read-back, median (ms)", [((n, p), f"{n:,}".replace(",", " ") + f" points, publish {p} s") for n, p in cells], lat_draw, 285)
 
     def loss_draw(ax, y, d, key, col, hatch):
         v = lossp(d, key)
         ax.barh(y, v, height=0.62, color=col, hatch=hatch, edgecolor=SURFACE, linewidth=0)
-        ax.text(v + 2, y, f"{v:.0f} %  ({cnt[d, 1250, key, 'sim1000'][0] - cnt[d, 1250, key, 'sim1000'][1]} of {cnt[d, 1250, key, 'sim1000'][0]})", va="center", fontsize=8.5)
+        ax.text(v + 2, y, f"{v:.0f} %  ({cnt[d, 1250, key, 'sim1000'][0] - cnt[d, 1250, key, 'sim1000'][1]:,} of {cnt[d, 1250, key, 'sim1000'][0]:,})".replace(",", " "), va="center", fontsize=8.5)
     panels("cpp-provider-2-burst-loss",
            f"1 000 flips at once: ferrofire loses none; the C++ chain loses {lossp(CF, '0.05'):.0f}-{lossp(CF, '0.1'):.0f} % behind a ferrofire FD",
            "Share of 1 000 simultaneous flips not seen on read-back within 10 s (%), 1 250 points, reps pooled. Stock FD = bennu 6.0.0. 100 at once: none lost.",
