@@ -41,22 +41,38 @@ boot() {
     -drive if=pflash,format=raw,file="$tmp/vars.fd" \
     -drive if=none,id=hd0,format=raw,file="$raw" -device virtio-blk-pci,drive=hd0 \
     -netdev user,id=n0,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=tcp:127.0.0.1:2323-:23 -device virtio-net-pci,netdev=n0,romfile= \
+    -netdev user,id=n1 -device e1000,netdev=n1,romfile= \
     -serial file:"$serial" &
   qemu=$!
   for _ in $(seq 120); do r true 2>/dev/null && return; kill -0 $qemu 2>/dev/null || fail "ssh_login: qemu exited"; sleep 3; done
   fail ssh_login
 }
 stop() { r sync; kill $qemu; wait $qemu 2>/dev/null || true; }
-trap 'kill $qemu 2>/dev/null; rm -rf "$tmp"' EXIT
+trap 'kill $qemu 2>/dev/null || true; rm -rf "$tmp"' EXIT
 
 cp /src/tests/conformance/rtu-1.xml "$tmp/factory.xml"
 sed 's/<name>rtu-1<\/name>/<!-- injected -->&/' "$tmp/factory.xml" >"$tmp/injected.xml"
 echo '/usr/sbin/ferrofire-rtu-start /etc/sceptre/config.xml' >"$tmp/start.sh"
-inject /etc/sceptre/config.xml:"$tmp/factory.xml" /etc/phenix/startup/sceptre-start.sh:"$tmp/start.sh"
+# miniccc_path stub: what `phenix image inject-miniexe` puts at /usr/local/bin/miniccc (removed after the check).
+printf '#!/bin/sh\necho "$@" >/run/miniccc.args\nexec sleep 100000\n' >"$tmp/miniccc"
+chmod +x "$tmp/miniccc"
+# The image has no /usr/local; phenix's injector creates it, so do the same.
+debugfs -w -R "mkdir /usr/local" "$raw?offset=$off" >/dev/null 2>&1 || true
+debugfs -w -R "mkdir /usr/local/bin" "$raw?offset=$off" >/dev/null 2>&1 || true
+# phenix owns all addressing (its interfaces script runs from /etc/phenix/startup): the image runs no DHCP client,
+# so give the guest the user-net address the way phenix would.
+printf 'ip link set eth0 up\nip addr add 10.0.2.15/24 dev eth0\nip route add default via 10.0.2.2\n' >"$tmp/net.sh"
+inject /etc/sceptre/config.xml:"$tmp/factory.xml" /etc/phenix/startup/00-net.sh:"$tmp/net.sh" /etc/phenix/startup/sceptre-start.sh:"$tmp/start.sh" /usr/local/bin/miniccc:"$tmp/miniccc"
 boot
 # ssh_login: wait for a real login (QEMU's hostfwd accepts TCP before the guest listens).
 r true || fail ssh_login
 echo "ok ssh_login"
+
+# Nothing at boot (S40network's udhcpc deconfig) may undo the address phenix set.
+sleep 10
+[ "$(r "ip -o -4 addr show dev eth0 | awk '{print \$4}'")" = 10.0.2.15/24 ] && ! r 'ps | grep -q "[u]dhcpc"' ||
+  { r 'ip -o -4 addr; ps'; fail static_ip_kept; }
+echo "ok static_ip_kept"
 
 r "awk '\$2==\"/\" {o=\$4} END {exit o !~ /^ro(,|\$)/}' /proc/mounts" || fail root_ro
 echo "ok root_ro"
@@ -100,6 +116,19 @@ echo "ok root_telnet_denied"
   r 'grep -qx "PermitRootLogin no" /etc/ssh/sshd_config'; } || fail root_ssh_denied
 echo "ok root_ssh_denied"
 
+# phenix assigns addresses by link order: the non-lo links must be exactly the two NICs, with no dummy0/sit0/etc.
+[ "$(r "ip -o link | awk -F': ' '\$2 != \"lo\" {sub(/@.*/, \"\", \$2); printf \"%s \", \$2}'")" = "eth0 eth1 " ] ||
+  { r 'ip -o link'; fail only_nic_links; }
+echo "ok only_nic_links"
+
+# phenix's default NIC model is e1000: some interface must be bound to that driver.
+r 'for d in /sys/class/net/*/device/driver; do [ "$(basename "$(readlink "$d")")" = e1000 ] && exit 0; done; exit 1' || fail e1000_driver
+echo "ok e1000_driver"
+
+# S30miniccc runs the injected /usr/local/bin/miniccc with the cc serial port.
+r 'for _ in $(seq 20); do grep -q -- "-serial /dev/virtio-ports/cc" /run/miniccc.args 2>/dev/null && exit 0; sleep 0.5; done; exit 1' || fail miniccc_path
+echo "ok miniccc_path"
+
 r 'ferrofire --version' >/dev/null || fail ferrofire_runs
 echo "ok ferrofire_runs"
 
@@ -142,3 +171,8 @@ sleep 3
 r 'grep -q sceptre-start2.sh /var/log/phenix-startup.log' || fail "rtu_start_idempotent: start2 never ran"
 [ "$(r "ps | grep -c '[f]errofire watch'")" = 1 ] || fail rtu_start_idempotent
 echo "ok rtu_start_idempotent"
+
+# Remove the miniccc stub again (the disk is a throwaway copy, but leave it as found).
+stop
+debugfs -w -R "rm /usr/local/bin/miniccc" "$raw?offset=$off" >/dev/null 2>&1 || true
+debugfs -R "stat /usr/local/bin/miniccc" "$raw?offset=$off" 2>&1 | grep -q 'not found' || fail "miniccc_path: stub not removed"

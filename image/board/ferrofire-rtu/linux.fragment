@@ -5,3 +5,9 @@ CONFIG_PARTITION_ADVANCED=y
 CONFIG_EFI_PARTITION=y
 # QEMU virt under ACPI exposes no PL031: the wall clock comes from UEFI runtime services.
 CONFIG_RTC_DRV_EFI=y
+# phenix's default NIC model is e1000 (virtio-net stays on from the base config).
+CONFIG_E1000=y
+# dummy0 would be the first non-lo link and phenix's interface script would give it the VM's address.
+# CONFIG_DUMMY is not set
+# sit0 would appear after the NICs (between eth0 and eth1 on some boots); the RTU needs no IPv6-in-IPv4 tunnels.
+# CONFIG_IPV6_SIT is not set
