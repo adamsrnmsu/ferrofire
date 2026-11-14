@@ -52,6 +52,13 @@ for _iv, _n in STOCK_FAST:
     DIRS["docker", _n] = CTL / _n
     PUBLISH_S[_n] = _iv
 
+# The 2x2 provider x field-device cross matrix (ww-1df.40): results/control/cross-<provider>-<fd>[-<interval>s]/, Docker only, stack name = the directory name.
+CROSS = sorted(d.name for d in CTL.glob("cross-*") if d.is_dir())
+for _n in CROSS:
+    _p = _n.split("-")
+    DIRS["docker", _n] = CTL / _n
+    PUBLISH_S[_n] = 0.05 if _p[1] == "ferrofire" else (float(_p[3][:-1]) if len(_p) > 3 else 1.0)
+
 STATS = re.compile(r"Publish-stats: t_ns=(\d+) period_s=\S+ publishes=(\d+) .*? cpu_s=([\d.]+)")
 
 

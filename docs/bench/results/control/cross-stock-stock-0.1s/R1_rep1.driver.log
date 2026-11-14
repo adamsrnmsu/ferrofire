@@ -1,0 +1,16 @@
+== breaker:seq:100 exit 0
+breaker:seq:100 open: 100/100 done, lost 0, wrong 0/0, flaps 0, 55.29 s
+== breaker:sim:10 exit 0
+breaker:sim:10 open: 10/10 done, lost 0, wrong 0/0, flaps 0, 4.69 s
+== breaker:sim:50 exit 0
+breaker:sim:50 open: 20/50 done, lost 30, wrong 0/0, flaps 0, 10.62 s
+== breaker:sim:100 exit 0
+breaker:sim:100 open: 20/100 done, lost 80, wrong 0/0, flaps 0, 10.64 s
+== breaker:sim:1000 exit 0
+breaker:sim:1000 open: 20/1000 done, lost 980, wrong 0/0, flaps 0, 10.75 s
+== gen:seq:5 exit 0
+gen:seq:5 down: 5/5 done, lost 0, wrong 0/0, flaps 0, 2.35 s
+gen:seq:5 up: 5/5 done, lost 0, wrong 0/0, flaps 0, 2.28 s
+== gen:sim:5 exit 0
+gen:sim:5 down: 5/5 done, lost 0, wrong 0/0, flaps 0, 2.19 s
+gen:sim:5 up: 5/5 done, lost 0, wrong 0/0, flaps 0, 2.18 s

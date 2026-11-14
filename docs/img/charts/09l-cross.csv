@@ -1,0 +1,17 @@
+provider + field device,reps,RTUs,seq p50 ms,seq p95 ms,applied p50 ms,stream p50 ms
+ferrofire + ferrofire FD,3,1,98,118,51,97
+ferrofire + ferrofire FD,3,2,98,116,45,97
+ferrofire + ferrofire FD,3,5,98,115,45,97
+ferrofire + ferrofire FD,3,10,99,111,44,98
+ferrofire + stock FD,3,1,576,598,522,575
+ferrofire + stock FD,3,2,289,486,232,287
+ferrofire + stock FD,3,5,100,185,79,98
+ferrofire + stock FD,3,10,99,108,44,98
+stock 0.1 s + stock FD,3,1,525,641,472,524
+stock 0.1 s + stock FD,3,2,250,481,188,249
+stock 0.1 s + stock FD,3,5,116,126,26,114
+stock 0.1 s + stock FD,3,10,116,136,24,114
+stock 1 s + stock FD,3,1,1029,1040,29,1028
+stock 1 s + stock FD,3,2,1027,1039,26,1026
+stock 1 s + stock FD,3,5,1024,1040,24,1023
+stock 1 s + stock FD,3,10,1021,1048,26,1020

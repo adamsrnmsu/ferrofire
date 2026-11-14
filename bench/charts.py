@@ -650,8 +650,83 @@ def chart_stock_intervals():
            note="Stock grey, ferrofire blue dashed. Intervals are the sleep of stock's publish loop (bench/stock_provider.py); sequential = 100 flips on 5 RTUs (and 1 RTU); generator spin-up = all R pooled; ferrofire reference = its 5-rep runs.")
 
 
+CROSS_NAMES = {"cross-ferrofire-ferrofire": "ferrofire + ferrofire FD", "cross-ferrofire-stock": "ferrofire + stock FD",
+               "cross-stock-stock-0.1s": "stock 0.1 s + stock FD", "cross-stock-stock": "stock 1 s + stock FD"}
+
+
+def chart_cross():
+    """9l/9m: the 2x2 provider x field-device cross matrix (ww-1df.40), Docker. Colour = provider (ferrofire blue, stock grey; lighter grey = stock tuned to 0.1 s), hatch = stock field device."""
+    names = [n for n in CROSS_NAMES if n in cr.CROSS and phs("docker", n)]
+    col = {"cross-ferrofire-ferrofire": (FF, ""), "cross-ferrofire-stock": (FF, "////"), "cross-stock-stock-0.1s": ("#b9b8b0", "////"), "cross-stock-stock": (STK, "////")}
+    Rs, reps = (1, 2, 5, 10), {n: len({q["rep"] for q in phs("docker", n)}) for n in names}
+    f0 = lambda x: "" if x is None else f"{x:.0f}"
+    seq = {(n, R): {f: lat("docker", n, f, "breaker", "seq", 100, R) for f in ("applied", "stream", "visible")} for n in names for R in Rs}
+    sim = lambda n, c, R: [q for q in phs("docker", n) if q["R"] == R and q["cell"] == c]
+    lost = lambda n, c, R: 100 * sum(q["lost"] for q in sim(n, c, R)) / max(1, sum(q["issued"] for q in sim(n, c, R)))
+    rows = [(CROSS_NAMES[n], reps[n], R, f0(cr.pct(seq[n, R]["visible"], .5)), f0(cr.pct(seq[n, R]["visible"], .95)), f0(cr.pct(seq[n, R]["applied"], .5)), f0(cr.pct(seq[n, R]["stream"], .5)))
+            for n in names for R in Rs]
+    fig, axs = plt.subplots(2, 2, figsize=(7.4, 6.0))
+    for a in axs.flat:
+        a.grid(axis="x", visible=False)
+        a.tick_params(length=0)
+    xs = lambda i, k: [x + (i - (len(names) - 1) / 2) * 0.8 / len(names) for x in range(k)]
+    bw = 0.8 / len(names) * 0.9
+    a = axs[0][0]
+    for i, n in enumerate(names):
+        v = [cr.pct(seq[n, R]["visible"], .5) for R in Rs]
+        a.bar(xs(i, 4), v, width=bw, color=col[n][0], hatch=col[n][1] or None, ec=SURFACE, lw=1)
+        a.plot(xs(i, 4), [cr.pct(seq[n, R]["visible"], .95) for R in Rs], ls="", marker="_", color=INK, ms=6)
+    a.set_yscale("log")
+    a.set_ylim(10, 2000)
+    a.set_xticks(range(4), [f"{R} RTU" + ("s" if R > 1 else "") for R in Rs])
+    a.set_title("100 sequential flips visible: p50 bar, p95 tick, ms (log)", fontsize=8.5, color=INK2, loc="left")
+    a = axs[0][1]
+    for i, n in enumerate(names):
+        for j, f in enumerate(("applied", "stream", "visible")):
+            v = cr.pct(seq[n, 5][f], .5)
+            a.bar(j + (i - (len(names) - 1) / 2) * 0.8 / len(names), v, width=bw, color=col[n][0], hatch=col[n][1] or None, ec=SURFACE, lw=1)
+    a.set_yscale("log")
+    a.set_ylim(10, 2000)
+    a.set_xticks(range(3), ["provider\napplied", "first datagram\nwith the state", "visible at\nthe SCADA"])
+    a.set_title("stage times, 5 RTUs, p50, ms (log)", fontsize=8.5, color=INK2, loc="left")
+    a = axs[1][0]
+    for i, n in enumerate(names):
+        a.bar(xs(i, 4), [lost(n, "breaker:sim:100", R) for R in Rs], width=bw, color=col[n][0], hatch=col[n][1] or None, ec=SURFACE, lw=1)
+    a.set_xticks(range(4), [f"{R} RTU" + ("s" if R > 1 else "") for R in Rs])
+    a.set_title("100 simultaneous flips lost (not visible in 10 s), %", fontsize=8.5, color=INK2, loc="left")
+    a.set_ylim(0, 100)
+    oc = {n: [sum(v[i] for (R, k), v in cr.order_counts("docker", n).items() if k == "breaker:sim") for i in (0, 1)] for n in names}
+    fl = {n: int(sum(q["flaps"] for q in phs("docker", n))) for n in names}
+    a = axs[1][1]
+    for i, n in enumerate(names):
+        a.bar(xs(i, 2), [oc[n][0], fl[n]], width=bw, color=col[n][0], hatch=col[n][1] or None, ec=SURFACE, lw=1)
+        for x, v in zip(xs(i, 2), [oc[n][0], fl[n]]):
+            a.text(x, v, f"{v}", ha="center", va="bottom", fontsize=7, color=INK2, rotation=90)
+    a.set_xticks(range(2), ["reordered pairs\n(simultaneous flips)", "flaps\n(all phases)"])
+    a.set_ylim(0, max(max(v[0] for v in oc.values()), max(fl.values()), 1) * 1.25)
+    a.set_title("reordered visible pairs and flaps, all R and reps", fontsize=8.5, color=INK2, loc="left")
+    fig.subplots_adjust(hspace=0.5, top=0.8, bottom=0.12, left=0.08, right=0.985, wspace=0.18)
+    fig.text(0.012, 0.985, "Provider vs field device: the 2x2 cross matrix, Docker", ha="left", va="top", fontsize=10, fontweight="bold", color=INK)
+    fig.legend(handles=[sw(CROSS_NAMES[n], *col[n]) for n in names], loc="upper left", bbox_to_anchor=(0.005, 0.95), ncol=2, handlelength=1.1, columnspacing=1.6)
+    save(fig, "09l-cross")
+    head = ["provider + field device", "reps", "RTUs", "seq p50 ms", "seq p95 ms", "applied p50 ms", "stream p50 ms"]
+    with open(OUT / "09l-cross.csv", "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(head)
+        w.writerows(rows)
+    TABLES["09l-cross-seq"] = "\n".join(["| " + " | ".join(head) + " |", "|" + "---|" * len(head)] + ["| " + " | ".join(map(str, r)) + " |" for r in rows])
+    gen = {n: lat("docker", n, "visible", "gen", "seq", dir="up") for n in names}
+    rows = [(CROSS_NAMES[n], reps[n], *[f"{lost(n, 'breaker:sim:100', R):.0f}" for R in Rs], *[f"{lost(n, 'breaker:sim:1000', R):.0f}" for R in (1, 10)], oc[n][0], oc[n][1], fl[n], f0(cr.pct(gen[n], .5))) for n in names]
+    head = ["provider + field device", "reps", "100 sim lost % 1 RTU", "2 RTUs", "5 RTUs", "10 RTUs", "1000 sim lost % 1 RTU", "10 RTUs", "reordered", "chunk skew", "flaps", "gen status-on p50 ms"]
+    TABLES["09m-cross-burst"] = "\n".join(["| " + " | ".join(head) + " |", "|" + "---|" * len(head)] + ["| " + " | ".join(map(str, r)) + " |" for r in rows])
+    with open(OUT / "09m-cross-burst.csv", "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(head)
+        w.writerows(rows)
+
+
 def main():
-    for f in (chart_age, chart_loss, chart_reorder, chart_stale, chart_fanout, chart_nng, chart_live, chart_ovs, chart_bennu, chart_control, chart_stock_intervals):
+    for f in (chart_age, chart_loss, chart_reorder, chart_stale, chart_fanout, chart_nng, chart_live, chart_ovs, chart_bennu, chart_control, chart_stock_intervals, chart_cross):
         f()
     for tin, tout in (("results.md.in", ROOT / "docs/results.md"), ("control_latency.md.in", ROOT / "docs/bench/control-latency.md")):
         text = (HERE / tin).read_text()

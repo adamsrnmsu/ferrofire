@@ -285,6 +285,58 @@ Latency, loss and order per interval, Docker, 5 reps (stock n = 1 000 cells: 1 r
 The faster stock costs about ten times the idle CPU for a publish rate 14 times higher. One run (0.1 s, R = 10, rep 2) failed to start a cell (`gen:seq:5`: "baseline never reached" right after the stack started) and was run again whole; the failed attempt is not in the results.
 
 
+## 9. Provider vs field device (2x2)
+
+Sections 1 to 8 always paired a provider with its own field device (ferrofire with `ferrofire field-device`, pybennu with stock `bennu-field-deviced`), so they cannot say which of the two causes a number. The two are wire-compatible, so this section pairs them crosswise: provider {ferrofire, pybennu-power-solver} x field device {ferrofire, stock `bennu-field-deviced`}, same grid, same `ffcontrol` driver, same session on the same Docker host (`PROVIDER=... FD=... python3 bench/run_control.py`, [README](../../bench/README.md)). Stock's publish interval is the shipped 1 s and the best tuned interval of section 8, 0.1 s (within 20 ms of ferrofire on 5 and 10 RTUs; 0.05 s no longer improves on 5 RTUs).
+
+**One cell cannot be measured: the stock provider with the ferrofire field device.** The ferrofire field device drops every datagram of the stock provider, so its points never leave their initial values (the driver's baseline check, "every breaker closed", times out: [driver.log](results/control/cross-stock-ferrofire/R1_rep1.driver.log)). Reason: stock's RADIO datagrams have no terminating NUL (a listener on the bench network sees a body that ends in `,`: [stock-datagram-sample.txt](results/control/cross-stock-ferrofire/stock-datagram-sample.txt)), and `Receiver::body_of` (`src/datagram.rs`) requires one, as ferrofire's own publisher sends (`strip_suffix(&[0])`, else `Reject::Truncated`). The driver's `--legacy` flag appends the NUL for exactly this reason; the field device has no such mode. The other direction works: the stock field device parses ferrofire's datagram v1 stream (the NUL is harmless to it) and speaks the REQ/REP of ferrofire's provider. So the matrix has three cells plus the 1 s / 0.1 s variants of the stock one; the effect of the field device is measured with the ferrofire provider, the effect of the provider with the stock field device, and the stock-provider-with-ferrofire-field-device interaction is unknown.
+
+**Setup and deviations.** A mixed pairing starts the field device from a copy of its generated config whose stream endpoint is the provider's (ferrofire publishes one group per RTU, stock the whole model on one group; the stock field device takes the tags it needs from whichever stream). The driver flags follow the provider (stock: one tag per READ, status-only generators, no restore) and every pairing with a stock side runs a fresh stack per cell, as in section 8; ferrofire + ferrofire shares one stack per run and restores, as in sections 1 to 7. Cells: breaker sequential 100, simultaneous 10, 50, 100, 1 000, generator sequential and simultaneous 5; R = 1, 2, 5, 10; **3 reps** of each pairing, run rep by rep over the pairings, except the stock-provider 1 000-flip cells (1 rep, as before). Not the full matrix of sections 1 to 8, so the numbers are not pooled with it; they agree with it (ferrofire + ferrofire sequential p50 98 ms, stock 1 s 1 021 to 1 029 ms).
+Raw: `results/control/cross-<provider>-<fd>[-<interval>s]/`. 15 of the 48 runs started while another session's `cargo test` container was running on the shared VM (`contended_at_start True` in their `env.txt`); the same cell differs by a few percent between contended and quiet reps (sequential p50 at 5 RTUs: stock 1 s 1 027, 1 018, 1 026 ms over the three reps), so none was rerun.
+
+![Provider vs field device](../img/charts/09l-cross.svg)
+
+Sequential breaker flips (100 per run; unit ms since the SCADA write was sent; "applied" = the provider's own stamp, "stream" = first datagram carrying the new state, "seq" = visible at the SCADA):
+
+| provider + field device | reps | RTUs | seq p50 ms | seq p95 ms | applied p50 ms | stream p50 ms |
+|---|---|---|---|---|---|---|
+| ferrofire + ferrofire FD | 3 | 1 | 98 | 118 | 51 | 97 |
+| ferrofire + ferrofire FD | 3 | 2 | 98 | 116 | 45 | 97 |
+| ferrofire + ferrofire FD | 3 | 5 | 98 | 115 | 45 | 97 |
+| ferrofire + ferrofire FD | 3 | 10 | 99 | 111 | 44 | 98 |
+| ferrofire + stock FD | 3 | 1 | 576 | 598 | 522 | 575 |
+| ferrofire + stock FD | 3 | 2 | 289 | 486 | 232 | 287 |
+| ferrofire + stock FD | 3 | 5 | 100 | 185 | 79 | 98 |
+| ferrofire + stock FD | 3 | 10 | 99 | 108 | 44 | 98 |
+| stock 0.1 s + stock FD | 3 | 1 | 525 | 641 | 472 | 524 |
+| stock 0.1 s + stock FD | 3 | 2 | 250 | 481 | 188 | 249 |
+| stock 0.1 s + stock FD | 3 | 5 | 116 | 126 | 26 | 114 |
+| stock 0.1 s + stock FD | 3 | 10 | 116 | 136 | 24 | 114 |
+| stock 1 s + stock FD | 3 | 1 | 1029 | 1040 | 29 | 1028 |
+| stock 1 s + stock FD | 3 | 2 | 1027 | 1039 | 26 | 1026 |
+| stock 1 s + stock FD | 3 | 5 | 1024 | 1040 | 24 | 1023 |
+| stock 1 s + stock FD | 3 | 10 | 1021 | 1048 | 26 | 1020 |
+
+Bursts, order and flaps (100 and 1 000 simultaneous flips, "lost" = not visible within 10 s; reordered, chunk skew and flaps as in section 7, summed over all R and reps; generator = spin-up status on, p50, all R):
+
+| provider + field device | reps | 100 sim lost % 1 RTU | 2 RTUs | 5 RTUs | 10 RTUs | 1000 sim lost % 1 RTU | 10 RTUs | reordered | chunk skew | flaps | gen status-on p50 ms |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| ferrofire + ferrofire FD | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 126 | 0 | 110 |
+| ferrofire + stock FD | 3 | 80 | 60 | 0 | 0 | 98 | 80 | 1212 | 0 | 118 | 111 |
+| stock 0.1 s + stock FD | 3 | 80 | 60 | 0 | 0 | 98 | 80 | 832 | 0 | 0 | 118 |
+| stock 1 s + stock FD | 3 | 81 | 63 | 9 | 0 | 98 | 82 | 710 | 53 | 0 | 1025 |
+
+**Attribution.**
+
+- **Sequential latency on 5 and 10 RTUs is the provider's publish interval, not the field device.** With the ferrofire provider the stock field device is as fast as ferrofire's (10 RTUs: 99 ms for both; 5 RTUs: p50 100 vs 98 ms, p95 185 vs 115 ms), so it adds nothing to the median there. Swapping the provider with the stock field device kept: 1 021 ms at a 1 s publish, 116 ms at 0.1 s, 99 ms with ferrofire. The whole gap of section 1 on 10 RTUs (about 920 ms) is the 1 s publish; the stream stage is the same figure as the visible stage in every row, the field device adds 1 to 2 ms after the stream at every R (section 2).
+- **On 1 and 2 RTUs the stock field device is the floor.** With the ferrofire provider, which applies a command in 45 ms, the stock field device makes the sequential p50 576 ms on 1 RTU and 289 ms on 2 (ferrofire's own: 98 ms): the provider's `applied` stamp is 522 ms after the write, so the field device hands a write to the provider about every 0.5 s per RTU and the flip waits for its turn (the 0.5 s cadence of section 8, now located in the field device and not in the pybennu provider). A slower provider does not add to this: at 0.1 s the stock pairing is 525 ms on 1 RTU. At the shipped 1 s publish the floor is hidden (1 029 ms on 1 RTU): commands come 1 s apart and never queue behind it. Latency is therefore about max(publish wait, field-device cadence), not their sum.
+- **Burst losses are entirely the stock field device.** 100 simultaneous flips lose 80% on 1 RTU and 60% on 2 with the stock field device whatever provider drives it (ferrofire 80 / 60, stock 0.1 s 80 / 60, stock 1 s 81 / 63), and 1 000 flips lose 98% (80 to 82% on 10 RTUs); the ferrofire field device loses none, with the ferrofire provider. The one place the provider shows is the margin of the 10 s window: at 5 RTUs the 1 s publish loses 9% of 100 flips (20 flips per RTU at 0.5 s each end exactly at the deadline, and a publish interval later is past it) where the faster providers lose 0. The same two writes per second per RTU of section 8, now traced to `bennu-field-deviced` (the reason it hands over two per second was not investigated; its `cycle-time` is 50 ms in these configs).
+- **Reordering is the stock field device**: 0 pairs with the ferrofire field device; 1 212 (ferrofire provider), 832 (stock 0.1 s) and 710 (stock 1 s) with the stock one, and the ferrofire provider's own `applied` stamps show why: with the stock field device 1 318 of 2 606 adjacent simultaneous flips of one RTU (51%, the two orders equally likely) were applied in the opposite order to the one issued, with the ferrofire field device 0 of 13 704. The counts are not comparable between rows: the judge is half a publish period of the stream stamp (25 ms, 50 ms, 500 ms) and lost commands drop out of the pairs.
+- **Flaps are a pairing effect.** All 118 are in the generator spin-down phases of ferrofire provider + stock field device (59 in each of the two cells) and none anywhere else: the stock field device sets the point when the provider ACKs the write (SPEC 3.2), ferrofire's provider keeps the status on while PG ramps 40 MW to 0, so the next datagrams still say "on" and the status flips back before it finally goes off. The ferrofire field device holds an ACKed point against stale stream values (ww-1df.32); the stock provider has no ramp, so stock + stock does not flap.
+- **Generators**: status-on p50 is 110 ms (ferrofire + ferrofire), 111 (ferrofire + stock field device), 118 (stock 0.1 s) and 1 025 ms (stock 1 s): the provider's publish interval again, the field device not at all.
+
+In short: of the 1 s of latency that separates stock from ferrofire on many RTUs, all is the provider's publish interval (a stock provider at 0.1 s keeps 17 ms of it); of the burst losses, the reordering and the one-RTU latency floor, all is the stock field device; a ferrofire provider in front of a stock field device already has ferrofire's latency on 5 and 10 RTUs and the stock field device's behaviour under load. Isolating the field device with a scripted provider is ww-1df.41 and a C++ bennu provider ww-1df.42.
+
 ## What the numbers do not say
 
 - The order columns count adjacent visible inversions, not commands, and only pairs where both commands were seen. "Reordered" is judged on the stream stamps (first datagram carrying the state), so it means the stack published the later command's state first; "chunk skew" is not an error in the state sequence, only in when two points of one publish were read. A threshold of half the publish period separates them cleanly here (ferrofire's largest stream gap is 3 ms against 25 ms).

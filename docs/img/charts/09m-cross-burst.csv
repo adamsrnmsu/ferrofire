@@ -1,0 +1,5 @@
+provider + field device,reps,100 sim lost % 1 RTU,2 RTUs,5 RTUs,10 RTUs,1000 sim lost % 1 RTU,10 RTUs,reordered,chunk skew,flaps,gen status-on p50 ms
+ferrofire + ferrofire FD,3,0,0,0,0,0,0,0,126,0,110
+ferrofire + stock FD,3,80,60,0,0,98,80,1212,0,118,111
+stock 0.1 s + stock FD,3,80,60,0,0,98,80,832,0,0,118
+stock 1 s + stock FD,3,81,63,9,0,98,82,710,53,0,1025

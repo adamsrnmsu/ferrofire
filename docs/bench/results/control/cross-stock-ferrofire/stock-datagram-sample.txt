@@ -1,0 +1,4 @@
+# Two datagrams of the stock provider (pybennu 6.0.0, stock_provider.py) on 239.0.0.1:40000, seen by a UDP listener on the bench network. Last byte of each is ',': there is no terminating NUL.
+# ferrofire's field-device Receiver::body_of (src/datagram.rs) requires one (strip_suffix(&[0]) else Reject::Truncated), so it drops every datagram.
+len 1480 head b'\x0f54386972605942bbus-alert.active:false,bus-1.voltage:1.00458' tail b'929010223,bus-5.base_kv:345.0,' ends_with_NUL False
+len 1477 head b'\x0f54386972605942bbus-5.active:true,bus-5.slack:false,bus-6.vo' tail b'hunt_mvar:0.08567542400306963,' ends_with_NUL False

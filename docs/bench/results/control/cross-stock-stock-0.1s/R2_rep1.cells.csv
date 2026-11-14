@@ -1,0 +1,10 @@
+stack,R,rep,cell,mode,kind,dir,n,issued,ok,lost,wrong_final,wrong_provider,wrong_collateral,order_violations,flaps,write_errors,span_s,wall_s,per_s,poll_errors,vm_load1_start_end
+cross-stock-stock,2,1,breaker:seq:100,seq,breaker,open,100,100,100,0,0,0,0,0,0,0,27.602,28.709,3.62,0,1.04/0.69
+cross-stock-stock,2,1,breaker:sim:10,sim,breaker,open,10,10,10,0,0,0,0,4,0,0,2.205,3.317,4.53,0,0.69/0.64
+cross-stock-stock,2,1,breaker:sim:50,sim,breaker,open,50,50,40,10,0,0,0,20,0,0,10.740,11.106,3.72,0,0.64/0.62
+cross-stock-stock,2,1,breaker:sim:100,sim,breaker,open,100,100,40,60,0,0,0,17,0,0,10.573,11.123,3.78,0,0.62/0.68
+cross-stock-stock,2,1,breaker:sim:1000,sim,breaker,open,1000,1000,40,960,0,0,0,24,0,0,10.722,11.137,3.73,0,0.71/0.68
+cross-stock-stock,2,1,gen:seq:5,seq,gen,down,5,5,5,0,0,0,0,0,0,0,1.183,2.288,4.22,0,0.68/0.71
+cross-stock-stock,2,1,gen:seq:5,seq,gen,up,5,5,5,0,0,0,0,0,0,0,1.261,2.383,3.96,0,0.71/0.71
+cross-stock-stock,2,1,gen:sim:5,sim,gen,down,5,5,5,0,0,0,0,0,0,0,1.098,2.203,4.56,0,0.71/0.73
+cross-stock-stock,2,1,gen:sim:5,sim,gen,up,5,5,5,0,0,0,0,0,0,0,1.132,2.243,4.42,0,0.73/0.73

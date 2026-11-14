@@ -137,6 +137,23 @@ for P in 0.5 0.2 0.1 0.05; do python3 bench/control_summary.py docs/bench/result
 
 Same matrix, grid, driver and fresh-stack-per-cell as the 1 s baseline (`results/control/stock/`), 5 reps (an interval takes under 2.5 h), R = 1, 2, 5, 10; Docker only (the range matched Docker for both stacks). The report is section 8 of `docs/bench/control-latency.md` (`bench/charts.py`: `chart_stock_intervals`; `control_report.py`: `provider_stats`).
 
+## Provider vs field device: the 2x2 cross matrix (ww-1df.40)
+
+`PROVIDER=ferrofire|stock FD=ferrofire|stock python3 bench/run_control.py` pairs any provider with any field device (either variable set = cross mode; the stack is `cross-<provider>-<fd>`, results in
+`docs/bench/results/control/cross-<provider>-<fd>[-<s>s]/`, the suffix for `PROVIDER=stock` with a tuned `STOCK_PUBLISH_S`). Same grid, `ffcontrol` driver and raw layout as every other stack. A mixed pairing starts the
+field device from a copy of its generated config whose stream endpoint is the provider's (`target-linux/control-grid/R<R>/cross-<fd>-<provider>/`; the two generated configs differ only in that endpoint); the driver's flags follow the
+provider (stock: `--read-per 1 --legacy --status-only`) and the stack is fresh per cell whenever either side is stock. Run rep by rep over the pairings so host drift hits all alike:
+
+```
+CELLS=breaker:seq:100,breaker:sim:10,breaker:sim:50,breaker:sim:100,breaker:sim:1000,gen:seq:5,gen:sim:5 RS=1,2,5,10 NOBUILD=1
+for k in 1 2 3; do   # SLOW=breaker:sim:1000 SLOW_REPS=1 for the stock-provider pairings
+  PROVIDER=ferrofire FD=ferrofire REPS=$k python3 bench/run_control.py; PROVIDER=ferrofire FD=stock REPS=$k python3 bench/run_control.py
+  PROVIDER=stock FD=stock REPS=$k python3 bench/run_control.py; PROVIDER=stock FD=stock STOCK_PUBLISH_S=0.1 REPS=$k python3 bench/run_control.py
+done
+```
+
+`PROVIDER=stock FD=ferrofire` does not run: ferrofire's field-device receiver drops every datagram of the stock provider (no NUL terminator, `Receiver::body_of`), see section 9 of the report.
+
 ## Control-latency on the live range (ww-1df.23.5)
 
 The same driver, grid, cells and raw layout on real VMs: `bench/range/run_range.py` (host, stdlib) + `bench/range/vm.sh` (inside the VMs). Topology: `topologies/control-bench-arm64`

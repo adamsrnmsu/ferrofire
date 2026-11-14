@@ -1,0 +1,2 @@
+== breaker:seq:5 exit 2
+baseline never reached: every breaker closed, every generator on at its setpoint
