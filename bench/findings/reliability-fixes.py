@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Findings, theme "reliability-fixes": is a command ever lost, wrong, out of order or flickering, and what did the ACK hold (ww-1df.32) change?
 
-Reads docs/bench/results/control/{ferrofire-before-ww-1df.32,ferrofire,stock} and range/ of the same (cells.csv, cmds.csv), recomputes every
+Reads docs/bench/results/control/{ferrofire-before-ww-1df.32,ferrofire,stock-v2026.11.03,stock} and range/ of the same except v2026.11.03 (cells.csv, cmds.csv), recomputes every
 number, prints them, and writes docs/img/findings/reliability-fixes-{1-flaps,2-order,3-latency}.svg. Stdlib only, no clock, no randomness:
 reruns are byte-identical. Run: python3 bench/findings/reliability-fixes.py
 """
@@ -10,8 +10,8 @@ import csv, glob, math, pathlib, statistics as st
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 CTL = ROOT / "docs/bench/results/control"
 OUT = ROOT / "docs/img/findings"
-STACKS = {"before": "ferrofire-before-ww-1df.32", "ferrofire": "ferrofire", "stock": "stock"}
-PUBLISH_S = {"before": 0.05, "ferrofire": 0.05, "stock": 1.0}  # ferrofire grid dt 0.05 s, stock bennu publishes once a second
+STACKS = {"before": "ferrofire-before-ww-1df.32", "ferrofire": "ferrofire", "new": "stock-v2026.11.03", "stock": "stock"}   # new = bennu v2026.11.03 (has upstream 91fd137), stock = 6.0.0 (before it); ww-1df.47
+PUBLISH_S = {"before": 0.05, "ferrofire": 0.05, "new": 1.0, "stock": 1.0}  # ferrofire grid dt 0.05 s, stock bennu publishes once a second
 FAMS = ["gen:seq", "gen:sim", "breaker:sim", "breaker:seq"]
 FAM_NAME = {"gen:seq": "generator, one at a time", "gen:sim": "generator, all at once", "breaker:sim": "breaker, all at once", "breaker:seq": "breaker, one at a time"}
 COUNTS = "issued ok lost wrong_final wrong_provider wrong_collateral order_violations flaps write_errors".split()
@@ -75,9 +75,9 @@ CSS = """
 text{font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;fill:#52514e}
 .bg{fill:#fcfcfb}.t{font-size:15px;font-weight:700;fill:#0b0b0b}.ink{fill:#0b0b0b}.mu{fill:#898781;font-size:11px}
 .grid{stroke:#e1e0d9;stroke-width:1}.axis{stroke:#c3c2b7;stroke-width:1}
-.ff{fill:#2a78d6}.ffb{fill:#9ec5f4}.stk{fill:#898781}.b{font-weight:700}
+.ff{fill:#2a78d6}.ffb{fill:#9ec5f4}.stk{fill:#898781}.old{fill:#c9c8c0}.b{font-weight:700}
 @media (prefers-color-scheme:dark){text{fill:#c3c2b7}.bg{fill:#1a1a19}.t,.ink{fill:#f0efec}.mu{fill:#898781}
-.grid{stroke:#333330}.axis{stroke:#52514e}.ff{fill:#3987e5}.ffb{fill:#1f4d85}.stk{fill:#898781}}
+.grid{stroke:#333330}.axis{stroke:#52514e}.ff{fill:#3987e5}.ffb{fill:#1f4d85}.stk{fill:#898781}.old{fill:#52514e}}
 """
 
 
@@ -119,33 +119,36 @@ def chart_flaps(D):
     body.append(f'<line class="axis" x1="{x0}" x2="{x0}" y1="72" y2="{y - 8}"/>')
     save("reliability-fixes-1-flaps.svg", 760, y + 44, f"The ACK hold removed every flap: {n(b['tot']['flaps'])} before, {a['tot']['flaps']} after",
          f"ferrofire, Docker bench, {n(b['tot']['issued'])} commands per build. A flap: read-back shows new, old, new again.", body,
-         [f"Live range: {rb['tot']['flaps']} flaps before, {ra['tot']['flaps']} after, over {n(rb['tot']['issued'])} commands. Stock bennu: {D['docker', 'stock']['tot']['flaps']} flaps.",
+         [f"Live range: {rb['tot']['flaps']} flaps before, {ra['tot']['flaps']} after, over {n(rb['tot']['issued'])} commands. Bennu 6.0.0: {D['docker', 'stock']['tot']['flaps']} flaps, v2026.11.03: {D['docker', 'new']['tot']['flaps']} (all in sequential cells on 10 RTUs).",
           "Fix (ww-1df.32): the field device ignores a differing stream value for up to 2 s after a provider ACK."])
 
 
 def chart_order(D):
     lo, hi, x0, x1 = -3, 5, 150, 735  # log10 ms
     X = lambda ms: x0 + (x1 - x0) * (math.log10(min(max(ms, 10 ** lo), 10 ** hi)) - lo) / (hi - lo)
+    ROWS = ((115, "ferrofire", "ff", "ferrofire"), (205, "new", "stk", "bennu v2026.11.03"), (295, "stock", "old", "bennu 6.0.0"))
+    gy = 70, 335
     body = []
     for e in range(lo, hi + 1):
         lab = {-3: "1 µs", -2: "10 µs", -1: "0.1 ms", 0: "1 ms", 1: "10 ms", 2: "100 ms", 3: "1 s", 4: "10 s", 5: "100 s"}[e]
-        body += [f'<line class="grid" x1="{X(10 ** e):.1f}" x2="{X(10 ** e):.1f}" y1="70" y2="250"/>', text(X(10 ** e), 266, lab, "mu", "middle")]
-    body.append(text((x0 + x1) / 2, 284, "gap between the two commands' stream stamps, per inverted pair (log scale)", "", "middle"))
-    for y, s, cls, name in ((115, "ferrofire", "ff", "ferrofire"), (205, "stock", "stk", "stock 6.0.0")):
+        body += [f'<line class="grid" x1="{X(10 ** e):.1f}" x2="{X(10 ** e):.1f}" y1="{gy[0]}" y2="{gy[1]}"/>', text(X(10 ** e), gy[1] + 16, lab, "mu", "middle")]
+    body.append(text((x0 + x1) / 2, gy[1] + 34, "gap between the two commands' stream stamps, per inverted pair (log scale)", "", "middle"))
+    for y, s, cls, name in ROWS:
         inv = D["docker", s]["inv"]
         body.append(text(14, y + 4, name, "ink b"))
         for i, (_, gap, _) in enumerate(sorted(inv, key=lambda t: t[1])):
-            body.append(f'<circle cx="{X(gap):.1f}" cy="{y + (i * 37 % 41) - 20:.0f}" r="2.5" class="{cls}" fill-opacity="{0.4 if s == "ferrofire" else 0.75}"/>')
+            body.append(f'<circle cx="{X(gap):.1f}" cy="{y + (i * 37 % 41) - 20:.0f}" r="2.5" class="{cls}" fill-opacity="{0.4 if s in ("ferrofire", "new") else 0.75}"/>')
         for kind, word in (("skew", "in one publish (chunk skew)"), ("reorder", "real reorders, 1 s+ apart")):
             g = [t[1] for t in inv if t[0] == kind]
             lab = f"{n(len(g))} {word}" if g else "0 real reorders"
             body.append(text(X(3000) if kind == "reorder" else X(max(g)), y - 28, lab, "ink", "middle" if kind == "reorder" else "end"))
-    fs, ss = D["docker", "ferrofire"], D["docker", "stock"]
-    fg, sg = [t[1] for t in fs["inv"]], [t[1] for t in ss["inv"] if t[0] == "reorder"]
-    save("reliability-fixes-2-order.svg", 760, 340, f"ferrofire never reorders commands; stock bennu 6.0.0 did {n(len(sg))} times",
-         "Pairs of one RTU visible in the opposite order, simultaneous breaker flips, Docker. Stock = bennu 6.0.0, before upstream fix 91fd137.", body,
-         [f"ferrofire: all {len(fg)} pairs left in one publish, stamps at most {max(fg):.1f} ms apart. Stock: gap {min(sg) / 1e3:.2f} to {max(sg) / 1e3:.1f} s, median {st.median(sg) / 1e3:.1f} s.",
-          f"Pairs are counted among completed commands: ferrofire {n(fs['fam']['breaker:sim']['ok'])}, stock {n(ss['fam']['breaker:sim']['ok'])} (it lost {n(ss['fam']['breaker:sim']['lost'])})."])
+    fs, ns, ss = D["docker", "ferrofire"], D["docker", "new"], D["docker", "stock"]
+    fg, ng, sg = [t[1] for t in fs["inv"]], [t[1] for t in ns["inv"]], [t[1] for t in ss["inv"] if t[0] == "reorder"]
+    assert all(t[0] == "skew" for t in fs["inv"] + ns["inv"]) and len(sg), "the title claims: only 6.0.0 reorders"
+    save("reliability-fixes-2-order.svg", 760, 400, f"bennu 6.0.0 reordered commands {n(len(sg))} times; v2026.11.03 and ferrofire never do",
+         "Pairs of one RTU visible in the opposite order, simultaneous breaker flips, Docker. 6.0.0 = before upstream fix 91fd137.", body,
+         [f"ferrofire: all {len(fg)} pairs left in one publish, stamps at most {max(fg):.1f} ms apart. v2026.11.03: all {n(len(ng))} in one publish, at most {max(ng):.1f} ms apart. 6.0.0: gap {min(sg) / 1e3:.2f} to {max(sg) / 1e3:.1f} s, median {st.median(sg) / 1e3:.1f} s.",
+          f"Pairs are counted among completed commands: ferrofire {n(fs['fam']['breaker:sim']['ok'])}, v2026.11.03 {n(ns['fam']['breaker:sim']['ok'])}, 6.0.0 {n(ss['fam']['breaker:sim']['ok'])} (it lost {n(ss['fam']['breaker:sim']['lost'])})."])
 
 
 def chart_latency(D):
@@ -174,7 +177,7 @@ def main():
     assert [k for k, *_ in inverted([mk(0, 10, 100), mk(1, 5, 98_000_000)], 0.05)] == ["skew"]
     assert [k for k, *_ in inverted([mk(0, 10, 1_000_000_000), mk(1, 5, 5)], 1.0)] == ["reorder"]
     assert inverted([mk(0, 5, 100), mk(1, 10, 1), mk(2, 0, 1)], 0.05) == []
-    D = {(e, s): load(e, s) for e in ("docker", "range") for s in STACKS}
+    D = {(e, s): load(e, s) for e in ("docker", "range") for s in STACKS if (e, s) != ("range", "new")}   # the range was not rerun with v2026.11.03
     for (e, s), d in D.items():
         inv, t = d["inv"], d["tot"]
         re, sk = [x for x in inv if x[0] == "reorder"], [x for x in inv if x[0] == "skew"]

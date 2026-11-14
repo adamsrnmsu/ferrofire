@@ -8,7 +8,7 @@ sys.path.insert(0, str(HERE))
 import control_join as J  # noqa: E402
 
 CTL = HERE.parent / "docs/bench/results/control"
-DIRS = {("docker", "ferrofire"): CTL / "ferrofire", ("docker", "stock"): CTL / "stock",
+DIRS = {("docker", "ferrofire"): CTL / "ferrofire", ("docker", "stock"): CTL / "stock", ("docker", "stock-v2026.11.03"): CTL / "stock-v2026.11.03",
         ("range", "ferrofire"): CTL / "range/ferrofire", ("range", "stock"): CTL / "range/stock",
         ("docker", "ferrofire-before"): CTL / "ferrofire-before-ww-1df.32", ("range", "ferrofire-before"): CTL / "range/ferrofire-before-ww-1df.32"}
 STAGES = (("ack", "t_ack"), ("stream", "t_stream"), ("visible", "t_visible"), ("setpoint", "t_setpoint"))
@@ -45,19 +45,37 @@ def phases(env, stack):
 
 
 # Publish period of the stack's provider: ferrofire runs the grid at dt 0.05 s (bench/gen_grid.py), stock bennu publishes once a second.
-PUBLISH_S = {"ferrofire": 0.05, "ferrofire-before": 0.05, "stock": 1.0}
-# Stock at faster publish intervals (ww-1df.35): results/control/stock-<interval>s/, Docker only, stack name `stock-<interval>s`.
-STOCK_FAST = sorted((float(d.name[6:-1]), d.name) for d in CTL.glob("stock-*s") if d.is_dir() and d.name[6:-1].replace(".", "").isdigit())[::-1]
-for _iv, _n in STOCK_FAST:
+PUBLISH_S = {"ferrofire": 0.05, "ferrofire-before": 0.05, "stock": 1.0, "stock-v2026.11.03": 1.0}
+# Which stock bennu a stack is (ww-1df.47). Directories without a version are bennu 6.0.0 (the phenix overlay image, before upstream 91fd137); `-v2026.11.03` is the
+# release that has it. NEW is the current one, the main comparison; OLD is kept as the historical one.
+NEW, OLD = "stock-v2026.11.03", "stock"
+LABEL = {"ferrofire": "ferrofire", NEW: "bennu v2026.11.03", OLD: "bennu 6.0.0 (pre-91fd137)"}
+def parse_dir(name):
+    """(kind, provider, fd, version, interval s) of a results directory name: `stock[-v<ver>][-<s>s]` (a stock provider + its own field device) or
+    `cross-<provider>-<fd>[-v<ver>][-<s>s]`; version "" = bennu 6.0.0, interval None = not tuned (1 s for stock, 0.05 s for ferrofire). None if the name is neither."""
+    m = re.fullmatch(r"(?:stock()|cross-(ferrofire|stock)-(ferrofire|stock))(-v[\d.]+)?(?:-([\d.]+)s)?", name)
+    if not m:
+        return None
+    ver, iv = (m[4] or "-")[1:], float(m[5]) if m[5] else None
+    return ("stock", "stock", "stock", ver, iv) if m[2] is None else ("cross", m[2], m[3], ver, iv)
+
+
+# Stock at faster publish intervals (ww-1df.35): results/control/stock[-v<version>]-<interval>s/, Docker only, stack name = the directory name.
+_FAST = [(parse_dir(d.name), d.name) for d in CTL.glob("stock-*s") if d.is_dir()]
+STOCK_FAST = sorted((k[4], n) for k, n in _FAST if k and k[4] and not k[3])[::-1]    # bennu 6.0.0
+NEW_FAST = sorted((k[4], n) for k, n in _FAST if k and k[4] and k[3] == "v2026.11.03")[::-1]
+for _iv, _n in STOCK_FAST + NEW_FAST:
     DIRS["docker", _n] = CTL / _n
     PUBLISH_S[_n] = _iv
+    LABEL[_n] = f"{LABEL[NEW if _n.startswith(NEW) else OLD]}, {_iv:g} s"
 
-# The 2x2 provider x field-device cross matrix (ww-1df.40): results/control/cross-<provider>-<fd>[-<interval>s]/, Docker only, stack name = the directory name.
+# The 2x2 provider x field-device cross matrix (ww-1df.40): results/control/cross-<provider>-<fd>[-v<version>][-<interval>s]/, Docker only, stack name = the directory name.
 CROSS = sorted(d.name for d in CTL.glob("cross-*") if d.is_dir())
 for _n in CROSS:
-    _p = _n.split("-")
+    _k = parse_dir(_n)
+    assert _k and _k[0] == "cross", _n
     DIRS["docker", _n] = CTL / _n
-    PUBLISH_S[_n] = 0.05 if _p[1] == "ferrofire" else (float(_p[3][:-1]) if len(_p) > 3 else 1.0)
+    PUBLISH_S[_n] = 0.05 if _k[1] == "ferrofire" else _k[4] or 1.0
 
 STATS = re.compile(r"Publish-stats: t_ns=(\d+) period_s=\S+ publishes=(\d+) .*? cpu_s=([\d.]+)")
 
@@ -118,6 +136,11 @@ def order_counts(env, stack):
 
 
 if __name__ == "__main__":  # self-check: python3 bench/control_report.py
+    assert parse_dir("stock") == ("stock", "stock", "stock", "", None) and parse_dir("stock-0.1s") == ("stock", "stock", "stock", "", 0.1)
+    assert parse_dir("stock-v2026.11.03-0.1s") == ("stock", "stock", "stock", "v2026.11.03", 0.1) and parse_dir("stock-v2026.11.03")[3:] == ("v2026.11.03", None)
+    assert parse_dir("cross-ferrofire-stock-v2026.11.03") == ("cross", "ferrofire", "stock", "v2026.11.03", None)
+    assert parse_dir("cross-stock-stock-0.1s") == ("cross", "stock", "stock", "", 0.1) and parse_dir("cross-stock-stock-v2026.11.03-0.1s")[3:] == ("v2026.11.03", 0.1)
+    assert parse_dir("ferrofire") is None and parse_dir("stock-capacity.txt") is None and parse_dir("cross-x-stock") is None
     mk = lambda seq, vis, st: {"seq": str(seq), "t_visible": str(vis), "t_stream": str(st)}
     # a inverted within 3 ms of stream (skew), b inverted by 1 s of stream (reorder), c no stream stamp (reorder), d not inverted
     assert order_split([mk(0, 10, 100), mk(1, 5, 98_000_000)], 0.05) == (0, 1)

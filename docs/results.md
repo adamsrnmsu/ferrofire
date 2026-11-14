@@ -217,7 +217,7 @@ the fixed build did all 1 500 and stayed at 5.
 
 | build | label | connections done | sockets before | sockets at the end | state at the end |
 |---|---|---|---|---|---|
-| stock | stock bennu | 1006 | 6.0 | 1011.0 | stopped answering |
+| stock | stock bennu 6.0.0 | 1006 | 6.0 | 1011.0 | stopped answering |
 | fixed | bennu with the fix | 1500 | 5.0 | 5.0 | still answering |
 
 **8b. Watcher stderr log growth**: `watcher-stderr.log` growth over the burger `watcher-quiet` check, KB per minute, stock against fixed (the stock line is `pid = N`, repeated 22 958 and 23 761 times on the two RTUs):
@@ -246,10 +246,10 @@ Not covered: GOOSE, Windows nodes, the real rig.
 
 ## 9. Control latency: breaker flips and generator spin-up and spin-down
 
-ferrofire vs stock bennu (pybennu + stock field devices), same grid (1 250 branches, 10 generators) and SCADA driver, 1 to 10 RTUs, sequential and simultaneous commands, Docker (5 reps, full matrix) and the live range (3 reps, 1, 2, 5 RTUs). Unit: milliseconds from the SCADA write to the read-back showing the new state, p50 (100 sequential flips on 1, 2, 5, 10 RTUs, Docker).
+ferrofire vs stock bennu (pybennu + stock field devices; bennu v2026.11.03, the current release, and bennu 6.0.0, the older one every earlier run used), same grid (1 250 branches, 10 generators) and SCADA driver, 1 to 10 RTUs, sequential and simultaneous commands, Docker (5 reps, full matrix; 3 for v2026.11.03) and the live range (3 reps, 1, 2, 5 RTUs; ferrofire and 6.0.0 only). Unit: milliseconds from the SCADA write to the read-back showing the new state, p50 (100 sequential flips on 1, 2, 5, 10 RTUs, Docker).
 Full method, every figure, lost and wrong counts, and what stock cannot run (no generator ramp): [control-latency.md](bench/control-latency.md); raw: [results/control/](bench/results/control/).
 
-![Sequential breaker flips, ferrofire vs stock bennu](img/charts/09a-breaker-seq.svg)
+![Sequential breaker flips, ferrofire vs bennu v2026.11.03 and 6.0.0](img/charts/09a-breaker-seq.svg)
 
 | stack | RTUs | flips done | p50 ms | p95 ms | p99 ms | max ms |
 |---|---|---|---|---|---|---|
@@ -257,40 +257,49 @@ Full method, every figure, lost and wrong counts, and what stock cannot run (no 
 | ferrofire | 2 | 500 | 98 | 117 | 125 | 126 |
 | ferrofire | 5 | 500 | 99 | 112 | 119 | 126 |
 | ferrofire | 10 | 500 | 99 | 110 | 114 | 115 |
-| stock bennu | 1 | 500 | 1025 | 1033 | 1035 | 1036 |
-| stock bennu | 2 | 500 | 1023 | 1032 | 1035 | 1037 |
-| stock bennu | 5 | 500 | 1022 | 1035 | 1041 | 1046 |
-| stock bennu | 10 | 500 | 1022 | 1044 | 1051 | 1060 |
+| bennu v2026.11.03 | 1 | 300 | 1028 | 1039 | 1041 | 1042 |
+| bennu v2026.11.03 | 2 | 300 | 1029 | 1038 | 1041 | 1042 |
+| bennu v2026.11.03 | 5 | 300 | 1027 | 1040 | 1043 | 1047 |
+| bennu v2026.11.03 | 10 | 300 | 1025 | 1047 | 1054 | 1063 |
+| bennu 6.0.0 (pre-91fd137) | 1 | 500 | 1025 | 1033 | 1035 | 1036 |
+| bennu 6.0.0 (pre-91fd137) | 2 | 500 | 1023 | 1032 | 1035 | 1037 |
+| bennu 6.0.0 (pre-91fd137) | 5 | 500 | 1022 | 1035 | 1041 | 1046 |
+| bennu 6.0.0 (pre-91fd137) | 10 | 500 | 1022 | 1044 | 1051 | 1060 |
 
-Ferrofire shows a flip in about 100 ms, stock bennu in about 1 020 ms; with 100 flips at once on 1 RTU stock bennu 6.0.0 loses 81% within 10 s and ferrofire loses none. With stock's publish interval cut to 0.1 s or 0.05 s (Docker, [control-latency.md](bench/control-latency.md) section 8) its sequential flips over 5 or 10 RTUs take 86 to 127 ms, close to ferrofire's 99 ms, but on 1 RTU still about 500 ms, and it still loses 80% of 100 simultaneous flips on 1 RTU: the write rate of the bennu 6.0.0 field device, not its publish interval, limits those: about two writes per RTU per second, a fixed 500 ms sleep per request that upstream removed with the batched-write fix 91fd137 (release v2026.11.03). The burst, one-RTU and reordering results are therefore for 6.0.0 only; a rerun against current bennu is pending (ww-1df.47). The 1 s publish latency is not affected by that fix.
+Ferrofire shows a flip in about 100 ms, stock bennu (v2026.11.03 and 6.0.0 alike) in about 1 025 ms, because stock publishes its model once a second. Upstream fix 91fd137 (in v2026.11.03) removed the 500 ms sleep of bennu 6.0.0's field device, and with it the burst losses, the reordering and the 0.5 s floor on 1 to 2 RTUs of the 6.0.0 results: 100 flips at once on 1 RTU lost 81% on 6.0.0 and lose none on v2026.11.03 (ferrofire none either); with stock's publish interval cut to 0.1 s, v2026.11.03 shows a flip in 114 to 120 ms on every RTU count against ferrofire's 98 to 99 ms (6.0.0: about 500 ms on 1 RTU). So against current bennu ferrofire's advantage is the publish interval (and, under bursts, no flaps: v2026.11.03 flapped on 27% of 100-flip bursts on 5 RTUs behind a ferrofire provider); the burst advantage measured against 6.0.0 is history. 1 000 flips at once complete at about 7 100 to 8 300 per s on ferrofire, 1 100 to 1 300 on v2026.11.03 (1 s publish) and 2 to 18 on 6.0.0. Details, version note and what 91fd137 changed in every number: [control-latency.md](bench/control-latency.md).
 
 ## 10. Field device alone: ferrofire vs stock bennu-field-deviced
 
-The same config loaded by `ferrofire field-device` and by stock `bennu-field-deviced`, fed by one scripted provider (no provider effects), Docker, 3 reps, 15 / 800 / 8 112 tags. Unit: milliseconds from the datagram leaving the provider to the first Modbus read that shows it, p50 (bar) and p99 (tick).
+The same config loaded by `ferrofire field-device` and by stock `bennu-field-deviced` (v2026.11.03 and 6.0.0), fed by one scripted provider (no provider effects), Docker, 3 reps, 15 / 800 / 8 112 tags. Unit: milliseconds from the datagram leaving the provider to the first Modbus read that shows it, p50 (bar) and p99 (tick).
 Full method, Modbus read throughput at 1, 4 and 16 clients, write-forward, drops, cpu and RSS, DNP3: [field-device.md](bench/field-device.md); raw: [results/fdmicro/](bench/results/fdmicro/).
 
-![Stream to register, ferrofire vs stock field device](img/charts/12a-fd-stream-to-register.svg)
+![Stream to register, ferrofire vs bennu v2026.11.03 and 6.0.0 field device](img/charts/12a-fd-stream-to-register.svg)
 
 | case | device | reps | flips | missed | p50 ms | p95 ms | p99 ms | max ms |
 |---|---|---|---|---|---|---|---|---|
 | S 15 tags, 1 Hz | ferrofire | 3 | 90 | 0 | 0.083 | 0.108 | 0.194 | 0.194 |
-| S 15 tags, 1 Hz | stock bennu | 3 | 90 | 0 | 0.116 | 0.147 | 0.235 | 0.235 |
+| S 15 tags, 1 Hz | bennu v2026.11.03 | 3 | 90 | 0 | 0.121 | 0.150 | 0.207 | 0.207 |
+| S 15 tags, 1 Hz | bennu 6.0.0 (pre-91fd137) | 3 | 90 | 0 | 0.116 | 0.147 | 0.235 | 0.235 |
 | S 15 tags, 10 Hz | ferrofire | 3 | 300 | 0 | 0.076 | 0.104 | 0.123 | 0.151 |
-| S 15 tags, 10 Hz | stock bennu | 3 | 300 | 0 | 0.110 | 0.140 | 0.193 | 0.292 |
+| S 15 tags, 10 Hz | bennu v2026.11.03 | 3 | 300 | 0 | 0.108 | 0.141 | 0.172 | 0.266 |
+| S 15 tags, 10 Hz | bennu 6.0.0 (pre-91fd137) | 3 | 300 | 0 | 0.110 | 0.140 | 0.193 | 0.292 |
 | S 15 tags, 100 Hz | ferrofire | 3 | 300 | 0 | 0.060 | 0.088 | 0.129 | 0.148 |
-| S 15 tags, 100 Hz | stock bennu | 3 | 300 | 0 | 0.083 | 0.112 | 0.164 | 0.227 |
+| S 15 tags, 100 Hz | bennu v2026.11.03 | 3 | 300 | 0 | 0.081 | 0.106 | 0.122 | 0.175 |
+| S 15 tags, 100 Hz | bennu 6.0.0 (pre-91fd137) | 3 | 300 | 0 | 0.083 | 0.112 | 0.164 | 0.227 |
 | M 800 tags, 100 Hz | ferrofire | 3 | 300 | 0 | 0.060 | 0.084 | 0.112 | 0.148 |
-| M 800 tags, 100 Hz | stock bennu | 3 | 300 | 0 | 0.086 | 0.122 | 0.186 | 0.221 |
+| M 800 tags, 100 Hz | bennu v2026.11.03 | 3 | 300 | 0 | 0.086 | 0.119 | 0.173 | 0.188 |
+| M 800 tags, 100 Hz | bennu 6.0.0 (pre-91fd137) | 3 | 300 | 0 | 0.086 | 0.122 | 0.186 | 0.221 |
 | L 8112 tags, 10 Hz | ferrofire | 3 | 300 | 0 | 0.096 | 0.133 | 0.190 | 1.158 |
-| L 8112 tags, 10 Hz | stock bennu | 3 | 300 | 0 | 0.108 | 0.159 | 0.334 | 0.890 |
+| L 8112 tags, 10 Hz | bennu v2026.11.03 | 3 | 300 | 0 | 0.114 | 0.167 | 0.254 | 0.328 |
+| L 8112 tags, 10 Hz | bennu 6.0.0 (pre-91fd137) | 3 | 300 | 0 | 0.108 | 0.159 | 0.334 | 0.890 |
 
 Both field devices expose a new value in about a tenth of a millisecond, ferrofire 0.02-0.03 ms sooner on the small and medium devices. Stock wins on delivery of an 8 112-tag stream (ferrofire's device lost 24% of the datagrams at 10 Hz, stock none) and on cpu per Modbus request with several clients (about 4 times as many requests per cpu-second at 16 clients); ferrofire wins on memory
-(12 vs 51 MB on 8 112 tags), Modbus throughput at 16 clients and on large reads, forwarding every write of a quick sequence (stock bennu 6.0.0, before the upstream batched-write fix 91fd137, forwarded about a third; rerun against current bennu pending, ww-1df.47), and DNP3 class-0 polls on 800 tags and up (stock 123 ms at p50 on 800 tags, ferrofire 0.4 ms; against a master that confirms each fragment, stock's figure looks like a delayed-ACK stall).
+(12 vs 51 MB on 8 112 tags), Modbus throughput at 16 clients and on large reads, and DNP3 class-0 polls on 800 tags and up (stock 123 ms at p50 on 800 tags, ferrofire 0.4 ms; against a master that confirms each fragment, stock's figure looks like a delayed-ACK stall). Stock here is bennu v2026.11.03 (current) with bennu 6.0.0 alongside: they agree on everything but quick writes, where 6.0.0 forwarded only about a third of writes 60-150 ms apart and v2026.11.03 (upstream fix 91fd137) forwards all of them, as ferrofire does, so that is no longer a ferrofire advantage.
 
 ## 11. Provider alone: ferrofire vs Sandia's C++ bennu-simulink-provider (stub model)
 
 Plumbing only, no solver: the unmodified C++ provider on a C stand-in for the Simulink model against ferrofire with an equally trivial model, through the same field devices and driver (100 and 1 250 points, publish 0.1 and 0.05 s, 10 RTUs, Docker, 3 reps).
-Method, deviations and all tables: [cpp-provider.md](bench/cpp-provider.md); raw: [results/cppprov/](bench/results/cppprov/). At a 0.05 s interval ferrofire shows a write in 49 ms in every rep against 118-151 ms pooled through the C++ provider (two unsynchronised timers whose phase is fixed per run, so the 3 reps span 100 to 200 ms and the factor of 2.4-3x is indicative only) and publishes at exactly the interval (the C++ provider sleeps after the work: 53-58 ms); 1 000 simultaneous writes are all delivered by ferrofire and lose about half through the C++ provider (its 256-message update FIFO fills between two 50 ms steps).
+Method, deviations and all tables: [cpp-provider.md](bench/cpp-provider.md); raw: [results/cppprov-v2026.11.03/](bench/results/cppprov-v2026.11.03/) (bennu v2026.11.03, the current release, rerun in ww-1df.47) and [results/cppprov/](bench/results/cppprov/) (bennu 6.0.0, the first run). At a 0.05 s interval ferrofire shows a write in 49 ms in every rep against 148-150 ms pooled through the C++ provider (two unsynchronised timers whose phase is fixed per run, so the 3 reps span 100 to 200 ms and the factor of 3.0x is indicative only) and publishes at exactly the interval (the C++ provider sleeps after the work: 53-56 ms). 1 000 simultaneous writes are all delivered by ferrofire and, with bennu v2026.11.03, by the C++ chain too; the first run (bennu 6.0.0) lost 49-53% through the C++ provider (its 256-message update FIFO filled between two 50 ms steps, which the release enlarged: `e59691f`) and 80% through the 6.0.0 field device. New with v2026.11.03: its field device flaps behind the C++ provider (6 411 of 8 040 commands: the read-back shows the new state, the old one, the new one again), which no ferrofire pairing nor bennu 6.0.0 did.
 
 ## Other results on the bench and the live range
 

@@ -3,7 +3,11 @@ ferrofire,ack,500,0,0,0,1
 ferrofire,applied,500,45,93,100,104
 ferrofire,stream,500,97,112,118,125
 ferrofire,visible,500,99,112,119,126
-stock bennu,ack,500,0,0,0,0
-stock bennu,applied,500,26,48,52,58
-stock bennu,stream,500,1021,1034,1039,1044
-stock bennu,visible,500,1022,1035,1041,1046
+bennu v2026.11.03,ack,300,0,0,0,0
+bennu v2026.11.03,applied,300,29,47,50,51
+bennu v2026.11.03,stream,300,1026,1039,1042,1045
+bennu v2026.11.03,visible,300,1027,1040,1043,1047
+bennu 6.0.0 (pre-91fd137),ack,500,0,0,0,0
+bennu 6.0.0 (pre-91fd137),applied,500,26,48,52,58
+bennu 6.0.0 (pre-91fd137),stream,500,1021,1034,1039,1044
+bennu 6.0.0 (pre-91fd137),visible,500,1022,1035,1041,1046

@@ -1789,7 +1789,7 @@ z
 " style="fill: #898781"/>
    </g>
    <g id="text_14">
-    <!-- stock bennu -->
+    <!-- stock bennu 6.0.0 -->
     <g style="fill: #0b0b0b" transform="translate(26.464 30.020672) scale(0.085 -0.085)">
      <use xlink:href="#DejaVuSans-56"/>
      <use xlink:href="#DejaVuSans-57" transform="translate(52.09375 0)"/>
@@ -1802,19 +1802,25 @@ z
      <use xlink:href="#DejaVuSans-51" transform="translate(422.171875 0)"/>
      <use xlink:href="#DejaVuSans-51" transform="translate(485.546875 0)"/>
      <use xlink:href="#DejaVuSans-58" transform="translate(548.921875 0)"/>
+     <use xlink:href="#DejaVuSans-3" transform="translate(612.296875 0)"/>
+     <use xlink:href="#DejaVuSans-19" transform="translate(644.078125 0)"/>
+     <use xlink:href="#DejaVuSans-11" transform="translate(707.703125 0)"/>
+     <use xlink:href="#DejaVuSans-13" transform="translate(739.484375 0)"/>
+     <use xlink:href="#DejaVuSans-11" transform="translate(803.109375 0)"/>
+     <use xlink:href="#DejaVuSans-13" transform="translate(834.890625 0)"/>
     </g>
    </g>
    <g id="patch_10">
-    <path d="M 92.109234 30.020672 
-L 101.459234 30.020672 
-L 101.459234 24.070672 
-L 92.109234 24.070672 
+    <path d="M 116.437828 30.020672 
+L 125.787828 30.020672 
+L 125.787828 24.070672 
+L 116.437828 24.070672 
 z
 " style="fill: #2a78d6"/>
    </g>
    <g id="text_15">
     <!-- bennu with the fix -->
-    <g style="fill: #0b0b0b" transform="translate(108.259234 30.020672) scale(0.085 -0.085)">
+    <g style="fill: #0b0b0b" transform="translate(132.587828 30.020672) scale(0.085 -0.085)">
      <defs>
       <path id="DejaVuSans-13af" d="M 3431 3500 
 L 3431 0 

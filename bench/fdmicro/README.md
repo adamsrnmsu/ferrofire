@@ -1,6 +1,6 @@
 # Field-device microbench (ww-1df.41)
 
-ferrofire `field-device` vs stock bennu `bennu-field-deviced` (bennu 6.0.0, the phenix-waterway-range overlay image `ffc-stock:22.04`) with **no real provider**: one scripted
+ferrofire `field-device` vs stock bennu `bennu-field-deviced` (v2026.11.03, image `ffc-stock-2026.11.03:22.04`, the current one; bennu 6.0.0 = the phenix-waterway-range overlay image `ffc-stock:22.04`, before upstream 91fd137, is kept as the historical series) with **no real provider**: one scripted
 provider process stands in for everything around the device, so only the device differs. Report: [docs/bench/field-device.md](../../docs/bench/field-device.md); raw: `docs/bench/results/fdmicro/`.
 
 ```
@@ -9,7 +9,7 @@ REPS=1 PROFILES=S PROTOS=mb OUTDIR=target-linux/fdmicro/smoke SECS=2 FLIPS=10 py
 make charts                                         # docs/bench/field-device.md and docs/img/charts/12*.svg from the raw files (uv + matplotlib)
 ```
 
-Needs the images `ff-rust:22.04` and `ffc-stock:22.04` (`bench/Dockerfile.stock`) on the **default** docker daemon. `run.py` builds ferrofire (`target-linux/release/ferrofire`) and the harness itself unless `NOBUILD=1`.
+Needs the images `ff-rust:22.04` and a stock image (`ffc-stock:22.04`, `bench/Dockerfile.stock`, or `ffc-stock-2026.11.03:22.04`, `bench/stock_image.sh`; `STOCK_IMAGE` / `STOCK_VERSION` pick it, files of a non-6.0.0 stock are named `stock-v<version>_...`) on the **default** docker daemon. `run.py` builds ferrofire (`target-linux/release/ferrofire`) and the harness itself unless `NOBUILD=1`.
 cargo runs with `CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0`; never start it next to another heavy container. Env knobs are listed at the top of `run.py`.
 
 ## Parts

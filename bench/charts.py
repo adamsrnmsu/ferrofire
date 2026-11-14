@@ -286,7 +286,7 @@ def chart_live():
     ax.grid(axis="y", visible=False)
     ax.tick_params(length=0)
     ax.set_xlabel("datagrams in 3 600 s at 10 Hz")
-    finish(fig, "06a-live-datagrams", rows, head, "Live hour: datagrams sent by the provider vs received by each stock bennu RTU", "", ax,
+    finish(fig, "06a-live-datagrams", rows, head, "Live hour: datagrams sent by the provider vs received by each stock bennu 6.0.0 RTU", "", ax,
            note="waterway-arm64 range, one OVS bridge, 10 Hz, 1 datagram per cycle; counted from tcpdump captures at each NIC (bench/live/seqgap.py).", left=0.2)
     fig, (ax,) = fig_ax(h=3.3)
     cats = ["provider", "rtu-1", "rtu-2"]
@@ -349,17 +349,17 @@ def burger():
 def chart_bennu():
     b = burger()
     get = lambda item, build, metric: next(float(r["value"]) for r in b if (r["item"], r["build"], r["metric"]) == (item, build, metric))
-    hs = [swatch("stock bennu", C["stock"]), swatch("bennu with the fix", C["fixed"])]
+    hs = [swatch("stock bennu 6.0.0", C["stock"]), swatch("bennu with the fix", C["fixed"])]
     # 8a fd leak: open sockets at the start and at the end of the churn
     fig, (ax,) = fig_ax()
     ends = {k: get("modbus-churn", k, "conns_at_stop" if k == "stock" else "conns_done") for k in ("stock", "fixed")}
     sers = {k: [get("modbus-churn", k, "sockets_before"), get("modbus-churn", k, "sockets_after")] for k in ends}
-    rows = [(k, v, int(ends[k]), sers[k][0], sers[k][1], "stopped answering" if k == "stock" else "still answering") for k, v in (("stock", "stock bennu"), ("fixed", "bennu with the fix"))]
+    rows = [(k, v, int(ends[k]), sers[k][0], sers[k][1], "stopped answering" if k == "stock" else "still answering") for k, v in (("stock", "stock bennu 6.0.0"), ("fixed", "bennu with the fix"))]
     gbars(ax, ["before the churn", "end of the churn\n(stock: connection 1 006;\nfixed: connection 1 500)"], [("stock", C["stock"], [sers["stock"][0], sers["stock"][1]]), ("fixed", C["fixed"], [sers["fixed"][0], sers["fixed"][1]])], fmt="{:.0f}", w=0.17)
     ax.axhline(1024, color=AXIS, lw=1)
     ax.text(-0.25, 1040, "soft limit of open files: 1 024", fontsize=8, color=MUTED, va="bottom", ha="left")
     ax.set_ylim(0, 1250)
-    finish(fig, "08a-fd-leak", rows, ["build", "label", "connections done", "sockets before", "sockets at the end", "state at the end"], "Modbus server fd leak: stock bennu vs bennu with the fix (#79)",
+    finish(fig, "08a-fd-leak", rows, ["build", "label", "connections done", "sockets before", "sockets at the end", "state at the end"], "Modbus server fd leak: stock bennu 6.0.0 vs bennu with the fix (#79)",
            "open sockets of the field device", ax, hs, note="Phenix range, rtu-1, one connection opened and closed per read. Stock numbers are from the PR comment (burger.csv).")
     # 8b watcher log growth
     fig, (ax,) = fig_ax(h=3.4)
@@ -377,7 +377,7 @@ def chart_bennu():
     ax.set_xlim(0, 10)
     ax.set_ylim(0, len(items) + 1)
     ax.axis("off")
-    ax.text(5.9, len(items) + 0.5, "stock bennu", ha="center", va="center", fontsize=9, fontweight="bold", color=INK2)
+    ax.text(5.9, len(items) + 0.5, "stock bennu 6.0.0", ha="center", va="center", fontsize=9, fontweight="bold", color=INK2)
     ax.text(8.6, len(items) + 0.5, "with the fix", ha="center", va="center", fontsize=9, fontweight="bold", color=INK2)
     rows = []
     for i, (item, desc) in enumerate(items):
@@ -391,7 +391,7 @@ def chart_bennu():
             ax.add_patch(plt.Rectangle((x - 0.9, y - 0.17), 1.8, 0.34, fc=C["pass_"] if ok else C["fail"], ec="none"))
             ax.text(x, y, ("✓ pass" if ok else "✗ FAIL"), ha="center", va="center", fontsize=8.5, color="#ffffff", fontweight="bold")
         rows.append((item, desc, res[0], res[1]))
-    fig.text(0.012, 0.985, "Robustness checks: stock bennu vs bennu with the fixes (#79, #81, #82)", ha="left", va="top", fontsize=10, fontweight="bold", color=INK)
+    fig.text(0.012, 0.985, "Robustness checks: stock bennu 6.0.0 vs bennu with the fixes (#79, #81, #82)", ha="left", va="top", fontsize=10, fontweight="bold", color=INK)
     fig.subplots_adjust(top=0.9, bottom=0.03, left=0.01, right=0.99)
     save(fig, "08c-robust-matrix")
     with open(OUT / "08c-robust-matrix.csv", "w", newline="") as f:
@@ -404,8 +404,12 @@ def chart_bennu():
 # --- 9. control latency: breaker flips and generator spin up/down, ferrofire vs stock bennu, Docker vs range ---------------------
 FF, STK = C["fixed"], C["stock"]   # ferrofire blue, stock grey (as in section 8); range = same colour, hatched
 HATCH = {"docker": "", "range": "////"}
-SERIES = [(s, e) for e in ("docker", "range") for s in ("ferrofire", "stock")]
-SNAME = {"ferrofire": "ferrofire", "stock": "stock bennu"}
+NEW, OLD = cr.NEW, cr.OLD   # current bennu (v2026.11.03, has 91fd137) is the main comparison; 6.0.0 (pre-91fd137) the historical one (ww-1df.47)
+STK_OLD = "#c9c8c0"
+STACKS = tuple(s for s in ("ferrofire", NEW, OLD) if glob.glob(f"{cr.DIRS['docker', s]}/R*_rep*.cells.csv"))
+SCOL = {"ferrofire": FF, NEW: STK, OLD: STK_OLD}
+SNAME = cr.LABEL
+SERIES = [(s, e) for e in ("docker", "range") for s in STACKS if (e, s) in cr.DIRS and glob.glob(f"{cr.DIRS[e, s]}/R*_rep*.cells.csv")]   # the range was not rerun with current bennu
 _CMD, _PH = {}, {}
 
 
@@ -432,7 +436,7 @@ def sw(label, color, hatch=""):
 
 
 def handles(envs):
-    return [sw(f"{SNAME[s]}, {e}" if len(envs) > 1 else SNAME[s], FF if s == "ferrofire" else STK, HATCH[e]) for s, e in SERIES if e in envs]
+    return [sw(f"{SNAME[s]}, {e}" if len(envs) > 1 else SNAME[s], SCOL[s], HATCH[e]) for s, e in SERIES if e in envs]
 
 
 def cbars(ax, cats, series, fmt="{:.0f}", log=False):
@@ -462,70 +466,70 @@ def chart_control():
     f0 = lambda x: f"{x:.0f}"
     # 9a sequential breaker flips, visible at the SCADA, by R
     Rs, rows, bars = [1, 2, 5, 10], [], []
-    for s in ("ferrofire", "stock"):
+    for s in STACKS:
         v = {R: lat("docker", s, "visible", "breaker", "seq", 100, R) for R in Rs}
-        bars.append((FF if s == "ferrofire" else STK, "", [cr.pct(v[R], .5) for R in Rs]))
+        bars.append((SCOL[s], "", [cr.pct(v[R], .5) for R in Rs]))
         rows += [(SNAME[s], R, len(v[R]), p(v[R], .5), p(v[R], .95), p(v[R], .99), f0(v[R][-1])) for R in Rs]
     fig, (ax,) = fig_ax()
     cbars(ax, [f"{R} RTU" + ("s" if R > 1 else "") for R in Rs], bars)
     finish(fig, "09a-breaker-seq", rows, ["stack", "RTUs", "flips done", "p50 ms", "p95 ms", "p99 ms", "max ms"],
-           "Sequential breaker flips: ferrofire vs stock bennu, Docker", "SCADA write sent to read-back showing the new state, p50, ms", ax, handles(["docker"]),
-           note="Each flip waits for the previous one to be visible. 5 reps per (stack, R); the rows are the 500 flips of each (stack, R).")
+           "Sequential breaker flips: ferrofire vs bennu v2026.11.03 (and 6.0.0), Docker", "SCADA write sent to read-back showing the new state, p50, ms", ax, handles(["docker"]),
+           note="Each flip waits for the previous one to be visible. 5 reps of ferrofire and of bennu 6.0.0 (pre-91fd137), 3 of bennu v2026.11.03; the rows are the flips of each (stack, R).")
     # 9b where the time goes: ack, applied, stream, visible; sequential 100 flips, 5 RTUs
     stages, rows, bars = ["ack", "applied", "stream", "visible"], [], []
-    for s in ("ferrofire", "stock"):
+    for s in STACKS:
         v = {k: lat("docker", s, k, "breaker", "seq", 100, 5) for k in stages}
-        bars.append((FF if s == "ferrofire" else STK, "", [cr.pct(v[k], .5) for k in stages]))
+        bars.append((SCOL[s], "", [cr.pct(v[k], .5) for k in stages]))
         rows += [(SNAME[s], k, len(v[k]), p(v[k], .5), p(v[k], .95), p(v[k], .99), f0(v[k][-1])) for k in stages]
     fig, (ax,) = fig_ax()
     cbars(ax, ["write answered\n(SCADA)", "provider applied\nthe write", "first datagram at\nthe RTU", "read-back at\nthe SCADA"], bars)
     finish(fig, "09b-stages", rows, ["stack", "stage", "commands", "p50 ms", "p95 ms", "p99 ms", "max ms"],
-           "Where a sequential breaker flip spends its time: ferrofire vs stock bennu, Docker", "time since the write was sent, p50, ms", ax, handles(["docker"]),
-           note="5 reps, 500 flips per stack. Provider-applied is the provider's own stamp (ferrofire: --stamp-writes; stock: bench/stock_provider.py), on the SCADA driver's host clock.")
+           "Where a sequential flip spends its time: ferrofire vs bennu v2026.11.03 and 6.0.0", "time since the write was sent, p50, ms", ax, handles(["docker"]),
+           note="100 flips per rep and RTU count (5 RTUs shown). Provider-applied is the provider's own stamp (ferrofire: --stamp-writes; stock: bench/stock_provider.py), on the SCADA driver's host clock.")
     # 9c simultaneous breaker flips: how many were done in time, by n, R = 1 and 10
     ns, rows = [1, 5, 10, 50, 100, 1000], []
     fig, axs = fig_ax(ncols=2)
     for ax, R in zip(axs, (1, 10)):
         bars = []
-        for s in ("ferrofire", "stock"):
+        for s in STACKS:
             ph = [q for q in phs("docker", s) if q["R"] == R and q["cell"].startswith("breaker:sim:")]
             by = {n: [q for q in ph if q["n"] == n] for n in ns}
-            bars.append((FF if s == "ferrofire" else STK, "", [100 * sum(q["ok"] for q in by[n]) / sum(q["issued"] for q in by[n]) for n in ns]))
+            bars.append((SCOL[s], "", [100 * sum(q["ok"] for q in by[n]) / sum(q["issued"] for q in by[n]) for n in ns]))
             rows += [(SNAME[s], R, n, int(sum(q["issued"] for q in by[n])), int(sum(q["ok"] for q in by[n])), int(sum(q["lost"] for q in by[n])), len(by[n])) for n in ns]
         cbars(ax, [str(n) for n in ns], bars, fmt="{:.0f}")
         ax.set_title(f"{R} RTU" + ("s" if R > 1 else ""), fontsize=8.5, color=INK2, loc="left")
         ax.set_xlabel("flips issued at once", color=INK2)
     finish(fig, "09c-breaker-sim-done", rows, ["stack", "RTUs", "flips issued at once", "commands issued", "done within 10 s", "lost", "phases"],
-           "Simultaneous breaker flips done in time: ferrofire vs stock bennu, Docker", "share of the flips visible at the SCADA within 10 s, %", axs[0], handles(["docker"]),
-           note="All flips of a phase sent at once, one Modbus client per RTU. 5 reps; the n = 1000 phases of stock bennu ran once (1 rep).")
+           "Simultaneous flips done in time: ferrofire vs bennu v2026.11.03 and 6.0.0, Docker", "share of the flips visible at the SCADA within 10 s, %", axs[0], handles(["docker"]),
+           note="All flips of a phase sent at once, one Modbus client per RTU. Reps as in 9a; the n = 1000 phases of both stock versions ran once (1 rep).")
     # 9d simultaneous throughput
     rows, fig = [], None
     fig, axs = fig_ax(ncols=2)
     for ax, R in zip(axs, (1, 10)):
         bars = []
-        for s in ("ferrofire", "stock"):
+        for s in STACKS:
             ph = [q for q in phs("docker", s) if q["R"] == R and q["cell"].startswith("breaker:sim:")]
             by = {n: [q["per_s"] for q in ph if q["n"] == n] for n in ns}
-            bars.append((FF if s == "ferrofire" else STK, "", [st.median(by[n]) for n in ns]))
+            bars.append((SCOL[s], "", [st.median(by[n]) for n in ns]))
             rows += [(SNAME[s], R, n, len(by[n]), f"{st.median(by[n]):.1f}") for n in ns]
         cbars(ax, [str(n) for n in ns], bars, fmt="{:,.0f}", log=True)
         ax.set_title(f"{R} RTU" + ("s" if R > 1 else ""), fontsize=8.5, color=INK2, loc="left")
         ax.set_xlabel("flips issued at once", color=INK2)
     finish(fig, "09d-breaker-sim-throughput", rows, ["stack", "RTUs", "flips issued at once", "phases", "median flips per s"],
-           "Simultaneous breaker flips per second: ferrofire vs stock bennu, 1 and 10 RTUs, Docker", "flips done per second of the phase, median over reps (log scale)", axs[0], handles(["docker"]),
-           note="Done within 10 s over the time from the first write to the last read-back; lost flips are not counted, so a stock phase that lost most of its flips shows what it did serve.")
+           "Simultaneous flips per second: ferrofire vs bennu v2026.11.03 and 6.0.0, Docker", "flips done per second of the phase, median over reps (log scale)", axs[0], handles(["docker"]),
+           note="Done within 10 s over the time from the first write to the last read-back; lost flips are not counted, so a phase that lost most of its flips shows what it did serve.")
     # 9e generators: spin-up and spin-down, sequential, all n and R pooled
     cats = ["spin-up: status on\nat the SCADA", "spin-up: PG within 1%\nof the setpoint", "spin-down: status off\nat the SCADA"]
     rows, bars = [], []
-    for s in ("ferrofire", "stock"):
+    for s in STACKS:
         g = [("status on", lat("docker", s, "visible", "gen", "seq", dir="up")), ("PG at setpoint", lat("docker", s, "setpoint", "gen", "seq", dir="up")), ("status off", lat("docker", s, "visible", "gen", "seq", dir="down"))]
-        bars.append((FF if s == "ferrofire" else STK, "", [cr.pct(v, .5) for _, v in g]))
+        bars.append((SCOL[s], "", [cr.pct(v, .5) for _, v in g]))
         rows += [(SNAME[s], k, len(v), p(v, .5), p(v, .95), p(v, .99), f0(v[-1]) if v else "") for k, v in g]
     fig, (ax,) = fig_ax()
     cbars(ax, cats, bars)
     finish(fig, "09e-gen", rows, ["stack", "event", "generators done", "p50 ms", "p95 ms", "p99 ms", "max ms"],
-           "Generator spin-up and spin-down: ferrofire (ramp) vs stock bennu (no ramp), Docker", "SCADA write sent to the event, p50, ms", ax, handles(["docker"]),
-           note="Generators 1, 2, 5, 10 on 1, 2, 5, 10 RTUs pooled, 5 reps. Ferrofire spin-down: PG ramps 40 MW to 0 first, status goes off at the end. Stock has no ramp and no PG readback to wait on (n/a).")
+           "Generator spin-up and spin-down: ferrofire (ramp) vs bennu (no ramp), Docker", "SCADA write sent to the event, p50, ms", ax, handles(["docker"]),
+           note="Generators 1, 2, 5, 10 on 1, 2, 5, 10 RTUs pooled, reps as in 9a. Ferrofire spin-down: PG ramps 40 MW to 0 first, status goes off at the end. Stock has no ramp and no PG readback to wait on (n/a).")
     # 9f Docker vs range
     Rr, rows = [1, 2, 5], []
     fig, axs = fig_ax(ncols=2)
@@ -533,18 +537,20 @@ def chart_control():
         bars = []
         for s, e in SERIES:
             v = {R: lat(e, s, "visible", "breaker", mode, 100, R) for R in Rr}
-            bars.append((FF if s == "ferrofire" else STK, HATCH[e], [cr.pct(v[R], .5) for R in Rr]))
+            bars.append((SCOL[s], HATCH[e], [cr.pct(v[R], .5) for R in Rr]))
             rows += [(SNAME[s], e, mode, R, len(v[R]), p(v[R], .5), p(v[R], .95), p(v[R], .99), f0(v[R][-1])) for R in Rr]
         cbars(ax, [f"{R} RTU" + ("s" if R > 1 else "") for R in Rr], bars, log=True)
         ax.set_title({"seq": "sequential", "sim": "simultaneous (completed flips only)"}[mode], fontsize=8.5, color=INK2, loc="left")
     finish(fig, "09f-docker-vs-range", rows, ["stack", "where", "mode", "RTUs", "flips done", "p50 ms", "p95 ms", "p99 ms", "max ms"],
-           "100 breaker flips: Docker vs live range, ferrofire vs stock bennu", "SCADA write sent to read-back showing the new state, p50, ms (log scale)", axs[0], handles(["docker", "range"]),
-           note="Docker: 5 reps, 18 vCPU VM. Range: 3 reps, arm64 KVM VMs (provider and SCADA driver on one VM). Stock simultaneous flips that were lost are not in the p50.")
+           "100 flips: Docker vs live range; ferrofire vs bennu v2026.11.03 and 6.0.0", "SCADA write sent to read-back showing the new state, p50, ms (log scale)", axs[0], handles(["docker", "range"]),
+           note="Docker: 18 vCPU VM, reps as in 9a. Range: 3 reps, arm64 KVM VMs (provider and SCADA driver on one VM), ferrofire and bennu 6.0.0 only: the range was not rerun with v2026.11.03. Simultaneous flips that were lost are not in the p50.")
     # 9g lost and wrong, all phases
     rows = []
-    OC = {(e, s): cr.order_counts(e, s) for e in ("docker", "range") for s in ("ferrofire-before", "ferrofire", "stock")}
+    OC = {(e, s): cr.order_counts(e, s) for e in ("docker", "range") for s in ("ferrofire-before", *STACKS) if (e, s) in cr.DIRS}
     for e in ("docker", "range"):
-        for s in ("ferrofire-before", "ferrofire", "stock"):
+        for s in ("ferrofire-before", *STACKS):
+            if (e, s) not in cr.DIRS:
+                continue
             for kind, mode in (("breaker", "seq"), ("breaker", "sim"), ("gen", "seq"), ("gen", "sim")):
                 ph = [q for q in phs(e, s) if q["cell"].startswith(f"{kind}:{mode}:")]
                 t = lambda k: int(sum(q[k] for q in ph))
@@ -585,80 +591,97 @@ def solve(stack):
 
 
 def chart_stock_intervals():
-    """9j: the stock provider at faster publish intervals (ww-1df.35), Docker, ferrofire at 50 ms as the reference."""
-    ivs = [(1.0, "stock")] + list(cr.STOCK_FAST)
-    idle, rows, S = idle_cpu(), [], []
+    """9j: the stock provider at faster publish intervals (ww-1df.35), Docker, ferrofire at 50 ms as the reference. bennu 6.0.0 (pre-91fd137) swept 1 to 0.05 s;
+    bennu v2026.11.03 (ww-1df.47, the current one) ran 1 s and 0.1 s, drawn as dark markers at those x positions."""
+    ivs = [(1.0, OLD)] + list(cr.STOCK_FAST)
+    ivs_new = [(1.0, NEW)] + list(cr.NEW_FAST)
+    idle, rows = idle_cpu(), []
     ff = lat("docker", "ferrofire", "visible", "breaker", "seq", 100, 5)
     ffg = lat("docker", "ferrofire", "visible", "gen", "seq", dir="up")
-    for iv, name in ivs:
+
+    def point(iv, name):
         seq, seq1 = (lat("docker", name, "visible", "breaker", "seq", 100, R) for R in (5, 1))
         sim = {R: [q for q in phs("docker", name) if q["R"] == R and q["cell"] == "breaker:sim:100"] for R in (1, 10)}
         lost = {R: 100 * sum(q["lost"] for q in sim[R]) / sum(q["issued"] for q in sim[R]) for R in sim}
         oc = [sum(v[i] for (R, k), v in cr.order_counts("docker", name).items() if k == "breaker:sim") for i in (0, 1)]
         gen = lat("docker", name, "visible", "gen", "seq", dir="up")
-        cpu, per = cr.provider_stats(name) if name != "stock" else ([], [])
+        cpu, per = cr.provider_stats(name) if name not in (OLD, NEW) else ([], [])
         reps = len({q["rep"] for q in phs("docker", name)})
-        d = dict(iv=iv, seq50=cr.pct(seq, .5), seq95=cr.pct(seq, .95), r1=cr.pct(seq1, .5), lost1=lost[1], lost10=lost[10], gen=cr.pct(gen, .5), cpu=cr.pct(cpu, .5) if cpu else None, idle=idle.get(iv),
+        d = dict(iv=iv, seq50=cr.pct(seq, .5), seq95=cr.pct(seq, .95), r1=cr.pct(seq1, .5), lost1=lost[1], lost10=lost[10], gen=cr.pct(gen, .5), cpu=cr.pct(cpu, .5) if cpu else None, idle=None if name.startswith(NEW) else idle.get(iv),   # idle CPU (stock-capacity.txt) was measured on 6.0.0 only,
                  per=cr.pct(per, .5) if per else None)
-        S.append(d)
-        rows.append((f"{iv:g}" + (" (as shipped)" if name == "stock" else ""), reps, f"{d['per']:.0f}" if d["per"] else ("1000 (nominal)" if name == "stock" else ""), p(seq, .5), p(seq, .95), p(seq1, .5), p(seq1, .95), f"{lost[1]:.0f}", f"{lost[10]:.0f}",
-                     oc[0], oc[1], p(gen, .5), f"{d['idle']:.0f}" if d["idle"] is not None else "", f"{d['cpu']:.0f}" if d["cpu"] else ""))
+        shipped = " (as shipped)" if name in (OLD, NEW) else ""
+        rows.append((SNAME[OLD if name == OLD or not name.startswith(NEW) else NEW].split(" (")[0], f"{iv:g}{shipped}", reps, f"{d['per']:.0f}" if d["per"] else ("1000 (nominal)" if shipped else ""), p(seq, .5), p(seq, .95), p(seq1, .5), p(seq1, .95),
+                     f"{lost[1]:.0f}", f"{lost[10]:.0f}", oc[0], oc[1], p(gen, .5), f"{d['idle']:.0f}" if d["idle"] is not None else ("not measured" if name.startswith(NEW) else ""), f"{d['cpu']:.0f}" if d["cpu"] else ""))
+        return d
+
+    S = [point(iv, name) for iv, name in ivs]
+    SN = [point(iv, name) for iv, name in ivs_new if phs("docker", name)]
     f50, g50 = cr.pct(ff, .5), cr.pct(ffg, .5)
     pc = cr.provider_stats(ivs[-1][1])
     TABLES["09j-period"], TABLES["09j-peak"] = f"{cr.pct(pc[1], .5):.0f}", f"{pc[0][-1]:.0f}"
     cap = [dict(re.findall(r"(\w+) ([\d.]+)", l)) for l in (cr.CTL / "stock-capacity.txt").read_text().splitlines() if l.startswith("interval ")]
     TABLES["09k-stock-capacity"] = "\n".join(["| interval s | pack ms | send ms | one publish ms | effective period ms | publishes per s | CPU % of a core (idle) | solve p50 ms | solve p95 ms |", "|" + "---|" * 9] +
         ["| " + " | ".join([c["interval"], c["pack_ms_mean"], c["send_ms_mean"], c["work_ms"], c["effective_period_ms"], c["publishes_per_s"], c["cpu_pct"], *solve(n)]) + " |" for c, (_, n) in zip(cap, ivs)])
+    TABLES["09k-solve-new"] = " and ".join(f"{solve(n)[0]} ms (p95 {solve(n)[1]})" for _, n in ivs_new[:1] if phs("docker", n))
     ff1 = lat("docker", "ferrofire", "visible", "breaker", "seq", 100, 1)
     ffo = [sum(v[i] for (R, k), v in cr.order_counts("docker", "ferrofire").items() if k == "breaker:sim") for i in (0, 1)]
-    rows.append(("ferrofire, 0.05", 5, "50", p(ff, .5), p(ff, .95), p(ff1, .5), p(ff1, .95), "0", "0", ffo[0], ffo[1], p(ffg, .5), "not measured", "not measured"))
+    rows.append(("ferrofire", "0.05", 5, "50", p(ff, .5), p(ff, .95), p(ff1, .5), p(ff1, .95), "0", "0", ffo[0], ffo[1], p(ffg, .5), "not measured", "not measured"))
     xs, labels = range(len(S)), [f"{d['iv']:g} s" for d in S]
+    xn = [labels.index(f"{d['iv']:g} s") for d in SN]
     fig, axs = plt.subplots(2, 2, figsize=(7.4, 5.6))
     for a in axs.flat:
         a.grid(axis="x", visible=False)
         a.set_xticks(xs, labels)
         a.tick_params(length=0)
     ref = lambda a, v, txt: (a.axhline(v, color=FF, lw=1.2, ls="--"), a.text(-0.1, v, txt, color=FF, fontsize=7.5, ha="left", va="bottom"))
+    new = lambda a, key, **kw: a.plot(xn, [d[key] for d in SN], color=STK, marker="o", ms=7, ls="", **{k: v for k, v in kw.items() if k not in ("lw", "ls")}) if SN else None   # bennu v2026.11.03, the main comparison: markers only (two intervals measured)
     a = axs[0][0]
-    a.plot(xs, [d["seq50"] for d in S], color=STK, marker="o", lw=1.6, label="p50")
-    a.plot(xs, [d["seq95"] for d in S], color=STK, marker="o", mfc=SURFACE, lw=1.2, ls=":", label="p95")
-    a.plot(xs, [d["r1"] for d in S], color=STK, marker="s", lw=1.0, ls="--", label="p50, 1 RTU")
+    a.plot(xs, [d["seq50"] for d in S], color=STK_OLD, marker="o", lw=1.6, label="6.0.0 p50")
+    a.plot(xs, [d["seq95"] for d in S], color=STK_OLD, marker="o", mfc=SURFACE, lw=1.2, ls=":", label="6.0.0 p95")
+    a.plot(xs, [d["r1"] for d in S], color=STK_OLD, marker="s", lw=1.0, ls="--", label="6.0.0 p50, 1 RTU")
+    new(a, "seq50", lw=1.6, label="v2026.11.03 p50")
+    new(a, "r1", lw=1.0, ls="--", label="v2026.11.03 p50, 1 RTU")
     ref(a, f50, "ferrofire 50 ms: p50 %.0f ms" % f50)
     a.set_title("sequential breaker flip visible, 5 RTUs, ms", fontsize=8.5, color=INK2, loc="left")
-    a.legend(loc="upper right")
+    a.legend(loc="upper right", fontsize=6)
     a = axs[0][1]
-    a.plot(xs, [d["lost1"] for d in S], color=STK, marker="o", lw=1.6, label="1 RTU")
-    a.plot(xs, [d["lost10"] for d in S], color=STK, marker="o", mfc=SURFACE, lw=1.2, ls=":", label="10 RTUs")
+    a.plot(xs, [d["lost1"] for d in S], color=STK_OLD, marker="o", lw=1.6, label="6.0.0, 1 RTU")
+    a.plot(xs, [d["lost10"] for d in S], color=STK_OLD, marker="o", mfc=SURFACE, lw=1.2, ls=":", label="6.0.0, 10 RTUs")
+    new(a, "lost1", lw=1.6, label="v2026.11.03, 1 RTU")
     ref(a, 0, "ferrofire: 0")
     a.set_title("100 simultaneous flips lost, %", fontsize=8.5, color=INK2, loc="left")
-    a.legend(loc="center right")
+    a.legend(loc="center right", fontsize=6)
     a = axs[1][0]
-    a.plot(xs, [d["gen"] for d in S], color=STK, marker="o", lw=1.6)
+    a.plot(xs, [d["gen"] for d in S], color=STK_OLD, marker="o", lw=1.6)
+    new(a, "gen", lw=1.6)
     ref(a, g50, "ferrofire: %.0f ms" % g50)
     a.set_title("generator spin-up, status on at the SCADA, p50, ms", fontsize=8.5, color=INK2, loc="left")
     a = axs[1][1]
-    a.plot(xs, [d["idle"] for d in S], color=STK, marker="o", mfc=SURFACE, lw=1.2, ls=":", label="idle (no commands)")
-    a.plot([i for i, d in enumerate(S) if d["cpu"]], [d["cpu"] for d in S if d["cpu"]], color=STK, marker="o", lw=1.6, label="during the bench cells")
-    a.set_title("stock provider CPU, % of one core", fontsize=8.5, color=INK2, loc="left")
-    a.legend(loc="upper left")
+    a.plot(xs, [d["idle"] for d in S], color=STK_OLD, marker="o", mfc=SURFACE, lw=1.2, ls=":", label="6.0.0 idle (no commands)")
+    a.plot([i for i, d in enumerate(S) if d["cpu"]], [d["cpu"] for d in S if d["cpu"]], color=STK_OLD, marker="o", lw=1.6, label="6.0.0 during the bench cells")
+    a.set_title("stock provider CPU, % of one core (6.0.0 only)", fontsize=8.5, color=INK2, loc="left")
+    a.legend(loc="upper left", fontsize=6)
     for a in axs.flat:
         a.set_ylim(bottom=0)
         a.set_xlabel("stock publish interval (as shipped: 1 s)", color=INK2, fontsize=8)
     fig.subplots_adjust(hspace=0.55)
-    finish(fig, "09j-stock-intervals", rows, ["publish interval s", "reps", "effective period ms", "seq p50 ms (5 RTUs)", "seq p95 ms (5 RTUs)", "seq p50 ms (1 RTU)", "seq p95 ms (1 RTU)", "100 sim lost % (1 RTU)", "100 sim lost % (10 RTUs)",
+    finish(fig, "09j-stock-intervals", rows, ["stock bennu", "publish interval s", "reps", "effective period ms", "seq p50 ms (5 RTUs)", "seq p95 ms (5 RTUs)", "seq p50 ms (1 RTU)", "seq p95 ms (1 RTU)", "100 sim lost % (1 RTU)", "100 sim lost % (10 RTUs)",
                                               "reordered", "chunk skew", "gen status-on p50 ms", "idle CPU %", "bench CPU %"],
            "Stock bennu at faster publish intervals vs ferrofire at 50 ms, Docker", None, axs[0][0],
-           note="Stock grey, ferrofire blue dashed. Intervals are the sleep of stock's publish loop (bench/stock_provider.py); sequential = 100 flips on 5 RTUs (and 1 RTU); generator spin-up = all R pooled; ferrofire reference = its 5-rep runs.")
+           note="bennu 6.0.0 (pre-91fd137) light grey, bennu v2026.11.03 dark grey (1 s and 0.1 s only), ferrofire blue dashed. Intervals are the sleep of stock's publish loop (bench/stock_provider.py); sequential = 100 flips on 5 RTUs (and 1 RTU); generator spin-up = all R pooled; ferrofire reference = its 5-rep runs.")
 
 
-CROSS_NAMES = {"cross-ferrofire-ferrofire": "ferrofire + ferrofire FD", "cross-ferrofire-stock": "ferrofire + stock FD",
-               "cross-stock-stock-0.1s": "stock 0.1 s + stock FD", "cross-stock-stock": "stock 1 s + stock FD"}
+CROSS_NAMES = {"cross-ferrofire-ferrofire": "ferrofire + ferrofire FD",
+               "cross-ferrofire-stock-v2026.11.03": "ferrofire + bennu v2026.11.03 FD", "cross-stock-stock-v2026.11.03-0.1s": "bennu v2026.11.03 at 0.1 s + its FD", "cross-stock-stock-v2026.11.03": "bennu v2026.11.03 at 1 s + its FD",
+               "cross-ferrofire-stock": "ferrofire + bennu 6.0.0 FD", "cross-stock-stock-0.1s": "bennu 6.0.0 at 0.1 s + its FD", "cross-stock-stock": "bennu 6.0.0 at 1 s + its FD"}
 
 
 def chart_cross():
-    """9l/9m: the 2x2 provider x field-device cross matrix (ww-1df.40), Docker. Colour = provider (ferrofire blue, stock grey; lighter grey = stock tuned to 0.1 s), hatch = stock field device."""
+    """9l/9m: the 2x2 provider x field-device cross matrix (ww-1df.40), Docker. Colour = provider (ferrofire blue, stock grey; lighter grey = stock tuned to 0.1 s), hatch = stock field device (/ bennu v2026.11.03, \\ bennu 6.0.0)."""
     names = [n for n in CROSS_NAMES if n in cr.CROSS and phs("docker", n)]
-    col = {"cross-ferrofire-ferrofire": (FF, ""), "cross-ferrofire-stock": (FF, "////"), "cross-stock-stock-0.1s": ("#b9b8b0", "////"), "cross-stock-stock": (STK, "////")}
+    OLDH = "\\\\\\\\"   # hatch: / = bennu v2026.11.03 field device, \\ = bennu 6.0.0 (pre-91fd137) field device
+    col = {"cross-ferrofire-ferrofire": (FF, ""), "cross-ferrofire-stock-v2026.11.03": (FF, "////"), "cross-stock-stock-v2026.11.03-0.1s": ("#b9b8b0", "////"), "cross-stock-stock-v2026.11.03": (STK, "////"),
+           "cross-ferrofire-stock": (FF, OLDH), "cross-stock-stock-0.1s": ("#b9b8b0", OLDH), "cross-stock-stock": (STK, OLDH)}
     Rs, reps = (1, 2, 5, 10), {n: len({q["rep"] for q in phs("docker", n)}) for n in names}
     f0 = lambda x: "" if x is None else f"{x:.0f}"
     seq = {(n, R): {f: lat("docker", n, f, "breaker", "seq", 100, R) for f in ("applied", "stream", "visible")} for n in names for R in Rs}
@@ -706,7 +729,7 @@ def chart_cross():
     a.set_xticks(range(2), ["reordered pairs\n(simultaneous flips)", "flaps\n(all phases)"])
     a.set_ylim(0, max(max(v[0] for v in oc.values()), max(fl.values()), 1) * 1.25)
     a.set_title("reordered visible pairs and flaps, all R and reps", fontsize=8.5, color=INK2, loc="left")
-    fig.subplots_adjust(hspace=0.5, top=0.8, bottom=0.12, left=0.08, right=0.985, wspace=0.18)
+    fig.subplots_adjust(hspace=0.5, top=0.8 if len(names) <= 4 else 0.72, bottom=0.12, left=0.08, right=0.985, wspace=0.18)
     fig.text(0.012, 0.985, "Provider vs field device: the 2x2 cross matrix, Docker", ha="left", va="top", fontsize=10, fontweight="bold", color=INK)
     fig.legend(handles=[sw(CROSS_NAMES[n], *col[n]) for n in names], loc="upper left", bbox_to_anchor=(0.005, 0.95), ncol=2, handlelength=1.1, columnspacing=1.6)
     save(fig, "09l-cross")
@@ -726,12 +749,51 @@ def chart_cross():
         w.writerows(rows)
 
 
+def chart_91fd137():
+    """The table of "What upstream 91fd137 changed in the numbers" (ww-1df.47): the same measures on bennu 6.0.0 (pre-91fd137) and v2026.11.03, from the raw runs. No chart."""
+    Rs = (1, 2, 5, 10)
+    over = lambda f, d=Rs: " / ".join(f(R) for R in d)
+    pairs = [("stock", NEW), ("stock-0.1s", "stock-v2026.11.03-0.1s"), ("cross-ferrofire-stock", "cross-ferrofire-stock-v2026.11.03"), ("cross-stock-stock", "cross-stock-stock-v2026.11.03"),
+             ("cross-stock-stock-0.1s", "cross-stock-stock-v2026.11.03-0.1s")]
+    ok = lambda o, n: (o, n) if ("docker", o) in cr.DIRS and ("docker", n) in cr.DIRS and phs("docker", o) and phs("docker", n) else None
+    p50 = lambda n, R: lat("docker", n, "visible", "breaker", "seq", 100, R)
+    lost = lambda n, R, c="breaker:sim:100": 100 * sum(q["lost"] for q in phs("docker", n) if q["R"] == R and q["cell"] == c) / max(1, sum(q["issued"] for q in phs("docker", n) if q["R"] == R and q["cell"] == c))
+    oc = lambda n: [sum(v[i] for (R, k), v in cr.order_counts("docker", n).items() if k == "breaker:sim") for i in (0, 1)]
+    flaps = lambda n: (int(sum(q["flaps"] for q in phs("docker", n))), int(sum(q["issued"] for q in phs("docker", n))))
+    rows = []
+
+    def row(label, f, o, n):
+        rows.append((label, f(o), f(n)))
+
+    for o, n in (x for x in (ok(*p) for p in pairs[:2]) if x):
+        t = " at 1 s" if o == "stock" else " at 0.1 s"
+        row("100 sequential flips, p50 ms, 1 / 2 / 5 / 10 RTUs" + t, lambda x: over(lambda R: p(p50(x, R), .5)), o, n)
+        row("100 simultaneous flips lost, %, 1 / 2 / 5 / 10 RTUs" + t, lambda x: over(lambda R: f"{lost(x, R):.0f}"), o, n)
+        row("1 000 simultaneous flips lost, %, 1 / 2 / 5 / 10 RTUs" + t, lambda x: over(lambda R: f"{lost(x, R, 'breaker:sim:1000'):.0f}"), o, n)
+        row("1 000 simultaneous flips, flips done per s, 1 / 10 RTUs" + t, lambda x: over(lambda R: f"{st.median(q['per_s'] for q in phs('docker', x) if q['R'] == R and q['cell'] == 'breaker:sim:1000'):,.0f}".replace(",", " "), (1, 10)), o, n)
+        row("reordered pairs / chunk-skew pairs, simultaneous breaker flips" + t, lambda x: " / ".join(map(str, oc(x))), o, n)
+        row("flaps (read-back new, old, new) / commands" + t, lambda x: "{} / {}".format(*flaps(x)), o, n)
+    for o, n in (x for x in (ok(*p) for p in pairs[2:]) if x):
+        t = {"cross-ferrofire-stock": " (ferrofire provider, 50 ms)", "cross-stock-stock": " (stock provider, 1 s)", "cross-stock-stock-0.1s": " (stock provider, 0.1 s)"}[o]
+        row("100 sequential flips with that field device, p50 ms, 1 / 2 / 5 / 10 RTUs" + t, lambda x: over(lambda R: p(p50(x, R), .5)), o, n)
+        row("100 simultaneous flips lost with that field device, %, 1 / 2 / 5 / 10 RTUs" + t, lambda x: over(lambda R: f"{lost(x, R):.0f}"), o, n)
+        row("reordered pairs / chunk-skew pairs with that field device" + t, lambda x: " / ".join(map(str, oc(x))), o, n)
+        row("flaps / commands with that field device" + t, lambda x: "{} / {}".format(*flaps(x)), o, n)
+    if fm.DATA:
+        quick = lambda s: [100 - v for pr in fm.PROFILES for v in fm.vals(s, pr, "mb", "write", "rapid", "lost")]
+        if quick(fm.OLD) and quick(fm.NEW):
+            row("field-device microbench: rapid writes (one per 60-150 ms) forwarded to the provider, of 100, range over the runs", lambda s: f"{min(quick(s)):.0f} to {max(quick(s)):.0f}", fm.OLD, fm.NEW)
+            fwd = lambda s: [fm.med(s, pr, "mb", "write", "spaced", "forward_ms_p50") for pr in fm.PROFILES]
+            row("field-device microbench: write to WRITE= at the provider, spaced writes, p50 ms, profiles S / M / L", lambda s: " / ".join(f"{v:.0f}" for v in fwd(s)), fm.OLD, fm.NEW)
+    TABLES["91fd137"] = "\n".join(["| measure | bennu 6.0.0 (pre-91fd137) | bennu v2026.11.03 |", "|---|---|---|"] + [f"| {a} | {b} | {c} |" for a, b, c in rows])
+
+
 def chart_fdmicro():
     """12a-12e: the field-device microbench (ww-1df.41): ferrofire field-device vs stock bennu-field-deviced, one scripted provider, Docker. Median over reps unless a table says pooled."""
     if not fm.DATA:
         return
-    SK = ("ferrofire", "stock")
-    col = {"ferrofire": FF, "stock": STK}
+    SK = tuple(s for s in fm.STACKS if any(k[0] == s for k in fm.DATA))   # ferrofire, bennu v2026.11.03 (current), bennu 6.0.0 (pre-91fd137)
+    col = SCOL
     n = lambda s, pr, proto="mb": len(fm.reps(s, pr, proto))
     f1 = lambda x: "" if x is None else f"{x:.1f}"
     f3 = lambda x: "" if x is None else f"{x:.3f}"
@@ -871,7 +933,7 @@ def chart_fdmicro():
 
 
 def main():
-    for f in (chart_age, chart_loss, chart_reorder, chart_stale, chart_fanout, chart_nng, chart_live, chart_ovs, chart_bennu, chart_control, chart_stock_intervals, chart_cross, chart_fdmicro):
+    for f in (chart_age, chart_loss, chart_reorder, chart_stale, chart_fanout, chart_nng, chart_live, chart_ovs, chart_bennu, chart_control, chart_stock_intervals, chart_cross, chart_fdmicro, chart_91fd137):
         f()
     for tin, tout in (("results.md.in", ROOT / "docs/results.md"), ("control_latency.md.in", ROOT / "docs/bench/control-latency.md"), ("field_device.md.in", ROOT / "docs/bench/field-device.md")):
         text = (HERE / tin).read_text()

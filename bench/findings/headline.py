@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Headline findings: how fast and how reliably a SCADA command takes effect, ferrofire vs stock bennu as shipped.
+"""Headline findings: how fast and how reliably a SCADA command takes effect, ferrofire vs stock bennu as shipped (v2026.11.03, the current one; 6.0.0 as the historical one).
 
     python3 bench/findings/headline.py      (stdlib only; rerun is byte-identical)
 
-Reads docs/bench/results/control/{ferrofire,stock,range/ferrofire,range/stock}/R*_rep*.{cmds,cells}.csv,
+Reads docs/bench/results/control/{ferrofire,stock-v2026.11.03,stock,range/ferrofire,range/stock}/R*_rep*.{cmds,cells}.csv (the range has no v2026.11.03 run),
 recomputes every number, writes docs/img/findings/headline-{1-latency,2-loss,3-burst}.svg and prints the numbers as JSON.
 'lost' in cells.csv = not done within 10 s (12 s for a generator), per docs/bench/control-latency.md.
 """
@@ -12,7 +12,8 @@ from collections import defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 RAW, OUT = f"{ROOT}/docs/bench/results/control", f"{ROOT}/docs/img/findings"
-STACKS = {"ferrofire": "ferrofire", "stock": "stock bennu 6.0.0"}   # 6.0.0 predates upstream 91fd137 (batched writes); rerun: ww-1df.47
+NEW, OLD = "stock-v2026.11.03", "stock"   # the directory of bennu v2026.11.03 (has upstream 91fd137, batched writes) and of 6.0.0 (before it); ww-1df.47
+STACKS = {"ferrofire": "ferrofire", NEW: "bennu v2026.11.03", OLD: "bennu 6.0.0 (pre-91fd137)"}
 
 
 def pct(v, p):
@@ -48,6 +49,8 @@ def compute():
     n = {}
     for env, Rs in (("docker", (1, 2, 5, 10)), ("range", (1, 2, 5))):
         for s in STACKS:
+            if env == "range" and s == NEW:
+                continue   # the range was not rerun with v2026.11.03
             lat, sp, cells = load(env, s)
             e = n.setdefault(env, {}).setdefault(s, {})
             e["seq100"] = {R: dict(n=len(v), p50=round(pct(v, .5)), p95=round(pct(v, .95)))
@@ -75,10 +78,10 @@ CSS = """
 text{font-family:'DejaVu Sans',Verdana,sans-serif}
 .bg{fill:#fcfcfb}.t{fill:#0b0b0b;font-weight:bold;font-size:15px}.s{fill:#52514e;font-size:12px}
 .v{fill:#0b0b0b;font-size:12px}.m{fill:#898781;font-size:11px}
-.g{stroke:#e1e0d9;stroke-width:1}.a{stroke:#c3c2b7;stroke-width:1}.ff{fill:#2a78d6}.st{fill:#898781}
+.g{stroke:#e1e0d9;stroke-width:1}.a{stroke:#c3c2b7;stroke-width:1}.ff{fill:#2a78d6}.st{fill:#898781}.old{fill:#c9c8c0}
 .rg{fill:#fcfcfb;stroke:#0b0b0b;stroke-width:1.5}.ln{stroke:#c3c2b7;stroke-width:2}.ring{stroke:#fcfcfb;stroke-width:2}
 """.strip()
-CLS = {"ferrofire": "ff", "stock": "st"}
+CLS = {"ferrofire": "ff", NEW: "st", OLD: "old"}
 
 
 def num(x):
@@ -93,7 +96,7 @@ def diamond(x, y, tip, r=5):
     return f'<path d="M{x:.1f} {y - r:.1f}l{r} {r}l-{r} {r}l-{r} -{r}z" class="rg"><title>{tip}</title></path>'
 
 
-def frame(h, title, sub, note, body, legend=("ferrofire", "stock", "range")):
+def frame(h, title, sub, note, body, legend=("ferrofire", NEW, OLD, "range")):
     o = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {h}" width="{W}" height="{h}" role="img" aria-label="{title}">',
          f"<style>{CSS}</style>", f'<rect width="{W}" height="{h}" class="bg"/>', text(16, 26, title, "t"), text(16, 46, sub)]
     x = 16
@@ -117,7 +120,7 @@ def bars(n, title, sub, note, ymax, step, unit, val, label, tip, rng):
     for t in range(0, ymax + 1, step):
         b += [f'<line x1="{x0}" x2="{x1}" y1="{Y(t):.1f}" y2="{Y(t):.1f}" class="{"a" if t == 0 else "g"}"/>', text(x0 - 8, Y(t) + 4, num(t), "m", "end")]
     b.append(text(x0 - 40, y1 - 12, unit, "m"))
-    Rs, gw, bw = (1, 2, 5, 10), (x1 - x0) / 4, 56
+    Rs, gw, bw = (1, 2, 5, 10), (x1 - x0) / 4, 46
     for i, R in enumerate(Rs):
         cx = x0 + gw * (i + .5)
         b.append(text(cx, y0 + 20, f"{R} RTU{'s' if R > 1 else ''}", "s", "middle"))
@@ -128,25 +131,25 @@ def bars(n, title, sub, note, ymax, step, unit, val, label, tip, rng):
                 r = min(4, hh)
                 b.append(f'<path d="M{bx:.1f} {y0}v-{hh - r:.1f}q0 -{r} {r} -{r}h{bw - 2 * r}q{r} 0 {r} {r}v{hh - r:.1f}z" class="{CLS[s]}"><title>{tip(s, R, "Docker")}</title></path>')
             b.append(text(bx + bw / 2, top - 8, label(n["docker"][s], R), "v", "middle"))
-            if R in rng:
+            if R in rng and s in n["range"]:
                 b.append(diamond(bx + bw / 2, Y(val(n["range"][s], R)), tip(s, R, "range")))
     return frame(h, title, sub, note, b)
 
 
 def chart_latency(n):
     d, r = n["docker"], n["range"]
-    return bars(n, "A breaker flip shows up in 0.1 s on ferrofire, 1 s on stock bennu",
+    return bars(n, "A breaker flip shows up in 0.1 s on ferrofire, 1 s on bennu",
                 "Median time from SCADA write to the new state read back at the RTU; flips sent one at a time",
-                f"Docker: {d['ferrofire']['seq100'][1]['n']} flips per bar (5 reps). Live range: {r['ferrofire']['seq100'][1]['n']} per point (3 reps, 1/2/5 RTUs). Stock bennu as shipped publishes once a second.",
+                f"Docker: {d['ferrofire']['seq100'][1]['n']} flips per ferrofire / 6.0.0 bar (5 reps), {d[NEW]['seq100'][1]['n']} per v2026.11.03 bar (3 reps). Live range: {r['ferrofire']['seq100'][1]['n']} per point (3 reps, 1/2/5 RTUs, no v2026.11.03). Bennu publishes once a second.",
                 1200, 200, "ms", lambda e, R: e["seq100"][R]["p50"], lambda e, R: num(e["seq100"][R]["p50"]),
                 lambda s, R, env: f"{STACKS[s]}, {R} RTU, {env}: p50 {n[env.lower()][s]['seq100'][R]['p50']} ms, p95 {n[env.lower()][s]['seq100'][R]['p95']} ms", (1, 2, 5))
 
 
 def chart_loss(n):
     d = n["docker"]
-    return bars(n, "100 flips at once: ferrofire lands all, stock bennu 6.0.0 misses 81 %",
+    return bars(n, f"100 flips at once: v2026.11.03 loses none, bennu 6.0.0 missed {d[OLD]['sim100'][1]['pct']:.0f} %",
                 "Share of 100 simultaneous breaker flips not visible at the RTU within 10 s",
-                f"Docker: {d['stock']['sim100'][1]['issued']} flips per bar (5 x 100). Live range: 300 per point. Stock loses fewer as RTUs are added. Stock = bennu 6.0.0, before upstream fix 91fd137; rerun pending.",
+                f"Docker: {d[OLD]['sim100'][1]['issued']} flips per 6.0.0 bar (5 x 100), {d[NEW]['sim100'][1]['issued']} per v2026.11.03 bar. Live range: 300 per point (ferrofire and 6.0.0). 6.0.0 predates upstream 91fd137 (batched writes), which removed its 500 ms sleep per write.",
                 100, 20, "% missed", lambda e, R: e["sim100"][R]["pct"], lambda e, R: f"{e['sim100'][R]['pct']:.0f} %",
                 lambda s, R, env: f"{STACKS[s]}, {R} RTU, {env}: lost {n[env.lower()][s]['sim100'][R]['lost']} of {n[env.lower()][s]['sim100'][R]['issued']}", (1, 2, 5))
 
@@ -160,31 +163,35 @@ def chart_burst(n):
         b += [f'<line x1="{X(10 ** e):.1f}" x2="{X(10 ** e):.1f}" y1="{y1 - 10}" y2="{y1 + 150}" class="g"/>', text(X(10 ** e), y1 + 168, num(10 ** e), "m", "middle")]
     b.append(text((x0 + x1) / 2, y1 + 186, "flips completed per second (log scale)", "s", "middle"))
     for i, R in enumerate((1, 2, 5, 10)):
-        y, f, s = y1 + 12 + 40 * i, d["ferrofire"]["sim1000"][R], d["stock"]["sim1000"][R]
+        y, f, s, o = y1 + 12 + 40 * i, d["ferrofire"]["sim1000"][R], d[NEW]["sim1000"][R], d[OLD]["sim1000"][R]
         b += [text(x0 - 12, y + 4, f"{R} RTU{'s' if R > 1 else ''}", "s", "end"),
-              f'<line x1="{X(s["per_s"]):.1f}" x2="{X(f["per_s"]):.1f}" y1="{y}" y2="{y}" class="ln"/>',
-              f'<circle cx="{X(s["per_s"]):.1f}" cy="{y}" r="6" class="st ring"><title>stock bennu 6.0.0, {R} RTU: {s["per_s"]} flips/s, lost {s["lost"]} of {s["issued"]}</title></circle>',
+              f'<line x1="{X(o["per_s"]):.1f}" x2="{X(f["per_s"]):.1f}" y1="{y}" y2="{y}" class="ln"/>',
+              f'<circle cx="{X(o["per_s"]):.1f}" cy="{y}" r="6" class="old ring"><title>bennu 6.0.0, {R} RTU: {o["per_s"]} flips/s, lost {o["lost"]} of {o["issued"]}</title></circle>',
+              f'<circle cx="{X(s["per_s"]):.1f}" cy="{y}" r="6" class="st ring"><title>bennu v2026.11.03, {R} RTU: {s["per_s"]} flips/s, lost {s["lost"]} of {s["issued"]}</title></circle>',
               f'<circle cx="{X(f["per_s"]):.1f}" cy="{y}" r="6" class="ff ring"><title>ferrofire, {R} RTU: {f["per_s"]} flips/s, lost {f["lost"]} of {f["issued"]}</title></circle>',
-              text(X(s["per_s"]), y - 12, f"{s['per_s']:.1f}", "v", "middle"), text(X(f["per_s"]) + 12, y + 4, num(f["per_s"]), "v")]
-    lo, hi = d["stock"]["sim1000"], d["ferrofire"]["sim1000"]
-    return frame(h, "1 000 flips at once: ferrofire 7 000+ per second, stock bennu 6.0.0 2-18",
+              text(X(o["per_s"]), y - 12, f"{o['per_s']:.1f}", "v", "middle"), text(X(s["per_s"]), y - 12, num(s["per_s"]), "v", "middle"), text(X(f["per_s"]) + 12, y + 4, num(f["per_s"]), "v")]
+    lo, mid, hi = d[OLD]["sim1000"], d[NEW]["sim1000"], d["ferrofire"]["sim1000"]
+    return frame(h, f"1 000 at once: ferrofire {num(min(v['per_s'] for v in hi.values()) // 1000 * 1000)}+ flips/s, v2026.11.03 {num(min(v['per_s'] for v in mid.values()) // 100 * 100)}+, 6.0.0 2-18",
                  "Breaker flips completed per second when 1 000 are issued at once (Docker)",
-                 f"ferrofire: median of 5 reps, 0 of {num(hi[1]['issued'])} missed per row. Stock 6.0.0 (before upstream fix 91fd137; rerun pending): 1 rep, and {lo[1]['lost']}, {lo[2]['lost']}, {lo[5]['lost']}, {lo[10]['lost']} of its 1 000 missed the 10 s deadline; rate counts those done.",
-                 b, legend=("ferrofire", "stock"))
+                 f"ferrofire: median of 5 reps, 0 of {num(hi[1]['issued'])} missed per row. v2026.11.03: 1 rep, 0 missed. 6.0.0 (before upstream 91fd137): 1 rep, {lo[1]['lost']}, {lo[2]['lost']}, {lo[5]['lost']}, {lo[10]['lost']} of its 1 000 missed the 10 s deadline; rate counts those done.",
+                 b, legend=("ferrofire", NEW, OLD))
 
 
 def check(n):
     """The titles and findings are only true if these hold."""
     d, r = n["docker"], n["range"]
-    for env in (d, r):
+    for env, stacks in ((d, ("ferrofire", NEW, OLD)), (r, ("ferrofire", OLD))):
         assert env["ferrofire"]["total"]["lost"] == 0
         assert all(95 <= v["p50"] <= 105 for v in env["ferrofire"]["seq100"].values())
-        assert all(1000 <= v["p50"] <= 1050 for v in env["stock"]["seq100"].values())
-        assert env["stock"]["seq_all"]["lost"] == 0
-    assert round(d["stock"]["sim100"][1]["pct"]) == 81 and d["stock"]["sim100"][10]["lost"] == 0
+        for s in stacks[1:]:
+            assert all(1000 <= v["p50"] <= 1050 for v in env[s]["seq100"].values())
+            assert env[s]["seq_all"]["lost"] == 0
+    assert round(d[OLD]["sim100"][1]["pct"]) == 81 and d[OLD]["sim100"][10]["lost"] == 0
+    assert d[NEW]["total"]["lost"] == 0 and all(v["lost"] == 0 for v in d[NEW]["sim100"].values())
     assert all(v["per_s"] > 7000 for v in d["ferrofire"]["sim1000"].values())
-    assert all(1.5 < v["per_s"] < 18.5 for v in d["stock"]["sim1000"].values())
-    assert d["stock"]["gen"]["pg_at_setpoint"]["n"] == 0
+    assert all(1000 <= v["per_s"] < 1500 for v in d[NEW]["sim1000"].values())
+    assert all(1.5 < v["per_s"] < 18.5 for v in d[OLD]["sim1000"].values())
+    assert d[OLD]["gen"]["pg_at_setpoint"]["n"] == 0 and d[NEW]["gen"]["pg_at_setpoint"]["n"] == 0
 
 
 if __name__ == "__main__":

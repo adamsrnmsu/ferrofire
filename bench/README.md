@@ -154,6 +154,26 @@ done
 
 `PROVIDER=stock FD=ferrofire` does not run: ferrofire's field-device receiver drops every datagram of the stock provider (no NUL terminator, `Receiver::body_of`), see section 9 of the report.
 
+## Which stock bennu (ww-1df.47)
+
+Every stock-side result up to ww-1df.46 used **bennu 6.0.0** (the phenix overlay image `ffc-stock:22.04`, sceptre-bennu `c9c2cf6`), which predates upstream `91fd137` ("batch field-device writes": no 500 ms sleep in `Client::send`,
+one batched WRITE per scan, compare-and-erase of queued tags), released as **v2026.11.03**. The stock side was rerun with that release; the 6.0.0 results stay in their directories as the historical series.
+
+```
+sh bench/stock_image.sh                      # ffc-stock-2026.11.03:22.04 from `git archive v2026.11.03` of sceptre-bennu (make -j2; tens of minutes on the 7.7 GB VM); the 6.0.0 image is kept
+export STOCK_IMAGE=ffc-stock-2026.11.03:22.04 STOCK_VERSION=2026.11.03 NOBUILD=1 RS=1,2,5,10
+STACK=stock REPS=3 SLOW=breaker:seq:1000,breaker:sim:1000 SLOW_REPS=1 OUTDIR=docs/bench/results/control/stock-v2026.11.03 python3 bench/run_control.py
+STACK=stock STOCK_PUBLISH_S=0.1 REPS=3 SLOW=breaker:seq:1000,breaker:sim:1000 SLOW_REPS=1 OUTDIR=docs/bench/results/control/stock-v2026.11.03-0.1s python3 bench/run_control.py
+# the cross pairings with a stock field device (CELLS and the rep loop as in the 2x2 section; results in cross-<provider>-<fd>-v2026.11.03[-<s>s]/)
+STACKS=stock REPS=3 python3 bench/fdmicro/run.py             # stock-v2026.11.03_<P>_<proto>_rep<k>.* in docs/bench/results/fdmicro/
+```
+
+`STOCK_IMAGE` / `STOCK_VERSION` default to the 6.0.0 image and `6.0.0`, so the old commands behave as before; a non-default version is written to every `env.txt` (`stock_version`, `stock_image`) and suffixes the default output directory or file prefix.
+`bench/Dockerfile.stock-build` is the image recipe (phenix `bennu-arm64.Dockerfile` plus five documented deviations: no opendssdirect, a draft-API pyzmq, `make -j2`, `pip install -U pip` before the pyzmq build,
+and `ZMQ_DRAFT_API=1` again for pybennu's git-pinned pyzmq; the vendored x86 `libzmq.a` swap of the 6.0.0 recipe is gone because v2026.11.03 fetches and builds libzmq itself).
+`bench/stock_provider.py` still applies unchanged to pybennu v2026.11.03 (`PyPower.write` and `periodic_publish` have the same shape; the one difference, the publish error is logged with loguru, is handled by `log_error`).
+The reports label every stock series with its version: `bennu v2026.11.03` is the current one and the main comparison, `bennu 6.0.0 (pre-91fd137)` the historical one (`control_report.LABEL`, `fdmicro_report.STACKS`).
+
 ## Control-latency on the live range (ww-1df.23.5)
 
 The same driver, grid, cells and raw layout on real VMs: `bench/range/run_range.py` (host, stdlib) + `bench/range/vm.sh` (inside the VMs). Topology: `topologies/control-bench-arm64`
@@ -189,3 +209,6 @@ docker run --rm --platform linux/arm64 -v $PWD:/src -w /src ff-rust:22.04 gcc -O
 python3 bench/cppprov/run.py                    # PAIRS=cpp:stock,ferrofire:stock,cpp:ferrofire,ferrofire:ferrofire NS=100,1250 PUBS=0.1,0.05 RS=10 REPS=3; about 1.5 h, Docker, nothing else heavy running
 python3 bench/cppprov/report.py docs/bench/results/cppprov > docs/bench/results/cppprov/summary.md
 ```
+
+With bennu v2026.11.03 (ww-1df.47): the C++ provider and the stock field device both come from the stock image, so the three pairings that use either are rerun with `STOCK_IMAGE=ffc-stock-2026.11.03:22.04 PAIRS=cpp:stock,ferrofire:stock,cpp:ferrofire OUTDIR=docs/bench/results/cppprov-v2026.11.03 python3 bench/cppprov/run.py`
+(ferrofire + ferrofire FD has no stock program and is shared with the 6.0.0 run); `python3 bench/cppprov/report.py docs/bench/results/cppprov-v2026.11.03 > docs/bench/results/cppprov-v2026.11.03/summary.md`. The first runs above are bennu 6.0.0 (pre-91fd137).

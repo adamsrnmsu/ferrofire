@@ -2,6 +2,9 @@ stack,event,generators done,p50 ms,p95 ms,p99 ms,max ms
 ferrofire,status on,360,110,118,123,127
 ferrofire,PG at setpoint,360,1098,1106,1109,1110
 ferrofire,status off,360,1098,1107,1115,1134
-stock bennu,status on,360,1020,1031,1035,1038
-stock bennu,PG at setpoint,0,,,,
-stock bennu,status off,360,1020,1033,1037,1048
+bennu v2026.11.03,status on,216,1027,1036,1039,1041
+bennu v2026.11.03,PG at setpoint,0,,,,
+bennu v2026.11.03,status off,216,1028,1038,1041,1047
+bennu 6.0.0 (pre-91fd137),status on,360,1020,1031,1035,1038
+bennu 6.0.0 (pre-91fd137),PG at setpoint,0,,,,
+bennu 6.0.0 (pre-91fd137),status off,360,1020,1033,1037,1048

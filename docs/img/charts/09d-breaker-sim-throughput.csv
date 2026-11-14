@@ -5,21 +5,33 @@ ferrofire,1,10,5,119.5
 ferrofire,1,50,5,542.9
 ferrofire,1,100,5,1006.0
 ferrofire,1,1000,5,7128.1
-stock bennu,1,1,5,1.2
-stock bennu,1,5,5,1.8
-stock bennu,1,10,5,2.1
-stock bennu,1,50,5,1.8
-stock bennu,1,100,5,1.9
-stock bennu,1,1000,1,1.7
+bennu v2026.11.03,1,1,3,1.2
+bennu v2026.11.03,1,5,3,5.8
+bennu v2026.11.03,1,10,3,11.8
+bennu v2026.11.03,1,50,3,59.5
+bennu v2026.11.03,1,100,3,117.9
+bennu v2026.11.03,1,1000,1,1182.9
+bennu 6.0.0 (pre-91fd137),1,1,5,1.2
+bennu 6.0.0 (pre-91fd137),1,5,5,1.8
+bennu 6.0.0 (pre-91fd137),1,10,5,2.1
+bennu 6.0.0 (pre-91fd137),1,50,5,1.8
+bennu 6.0.0 (pre-91fd137),1,100,5,1.9
+bennu 6.0.0 (pre-91fd137),1,1000,1,1.7
 ferrofire,10,1,5,13.3
 ferrofire,10,5,5,63.6
 ferrofire,10,10,5,110.5
 ferrofire,10,50,5,562.1
 ferrofire,10,100,5,1129.6
 ferrofire,10,1000,5,8318.3
-stock bennu,10,1,5,1.4
-stock bennu,10,5,5,5.5
-stock bennu,10,10,5,11.2
-stock bennu,10,50,5,17.2
-stock bennu,10,100,5,20.1
-stock bennu,10,1000,1,18.2
+bennu v2026.11.03,10,1,3,1.2
+bennu v2026.11.03,10,5,3,6.0
+bennu v2026.11.03,10,10,3,12.1
+bennu v2026.11.03,10,50,3,57.2
+bennu v2026.11.03,10,100,3,114.8
+bennu v2026.11.03,10,1000,1,1124.6
+bennu 6.0.0 (pre-91fd137),10,1,5,1.4
+bennu 6.0.0 (pre-91fd137),10,5,5,5.5
+bennu 6.0.0 (pre-91fd137),10,10,5,11.2
+bennu 6.0.0 (pre-91fd137),10,50,5,17.2
+bennu 6.0.0 (pre-91fd137),10,100,5,20.1
+bennu 6.0.0 (pre-91fd137),10,1000,1,18.2

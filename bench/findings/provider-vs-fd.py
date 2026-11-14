@@ -3,7 +3,7 @@
 
     uv run --with matplotlib python bench/findings/provider-vs-fd.py
 
-Reads docs/bench/results/control/cross-*/R*_rep*.{cmds,cells}.csv + env.txt (never *.part*), recomputes every number,
+Reads docs/bench/results/control/cross-*/R*_rep*.{cmds,cells}.csv + env.txt (never *.part*), recomputes every number (bennu v2026.11.03 = the current stock, dirs `-v2026.11.03`; bennu 6.0.0 = the older runs, ww-1df.47),
 prints them, and writes docs/img/findings/provider-vs-fd-*.svg (byte-identical on rerun over the same raw files).
 """
 import collections, csv, os, pathlib, re, statistics as st
@@ -20,11 +20,14 @@ plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 9, "text.color":
                      "axes.spines.right": False, "axes.grid": True, "axes.axisbelow": True, "grid.color": GRID, "grid.linewidth": 0.8,
                      "svg.hashsalt": "ferrofire", "hatch.linewidth": 1.6, "hatch.color": SURFACE})
 # pairing: directory, row label, fill, hatch (fill = provider colour; hatch = "the two halves differ")
-PAIRS = [("cross-stock-stock", "stock provider (1 s) + stock FD", STK, None),
-         ("cross-stock-stock-0.1s", "stock provider (0.1 s) + stock FD", STK2, None),
-         ("cross-stock-ferrofire", "stock provider (1 s) + ferrofire FD", STK, "///"),
-         ("cross-ferrofire-stock", "ferrofire provider + stock FD", FF, "///"),
-         ("cross-ferrofire-ferrofire", "ferrofire provider + ferrofire FD", FF, None)]
+PAIRS = [("cross-ferrofire-ferrofire", "ferrofire provider + ferrofire FD", FF, None),
+         ("cross-ferrofire-stock-v2026.11.03", "ferrofire provider + bennu v2026.11.03 FD", FF, "///"),
+         ("cross-stock-stock-v2026.11.03-0.1s", "bennu v2026.11.03 provider (0.1 s) + its FD", STK2, "///"),
+         ("cross-stock-stock-v2026.11.03", "bennu v2026.11.03 provider (1 s) + its FD", STK, "///"),
+         ("cross-stock-ferrofire", "bennu provider (1 s) + ferrofire FD", STK, "xxx"),
+         ("cross-ferrofire-stock", "ferrofire provider + bennu 6.0.0 FD", FF, "\\\\\\"),
+         ("cross-stock-stock-0.1s", "bennu 6.0.0 provider (0.1 s) + its FD", STK2, "\\\\\\"),
+         ("cross-stock-stock", "bennu 6.0.0 provider (1 s) + its FD", STK, "\\\\\\")]
 RS = (1, 2, 5, 10)
 RUN = re.compile(r"R(\d+)_rep(\d+)\.(cmds|cells)\.csv$")   # excludes R5_rep3.part0.* (a run in flight)
 
@@ -54,7 +57,7 @@ def load():
 
 def panels(name, title, sub, xlabel, value, text, xmax, note):
     """One row of bars per pairing, one panel per RTU count; value(d, R) -> number or None, text(d, R) -> bar-end label."""
-    fig, axs = plt.subplots(1, len(RS), figsize=(10.4, 3.8), sharey=True)
+    fig, axs = plt.subplots(1, len(RS), figsize=(10.4, 4.9), sharey=True)
     ys = range(len(PAIRS))
     for ax, R in zip(axs, RS):
         for y, (d, _, col, hatch) in zip(ys, PAIRS):
@@ -71,10 +74,10 @@ def panels(name, title, sub, xlabel, value, text, xmax, note):
         ax.tick_params(length=0)
     axs[0].set_yticks(list(ys), [p[1] for p in PAIRS])
     fig.text(0.012, 0.975, title, ha="left", va="top", fontsize=11, fontweight="bold")
-    fig.text(0.012, 0.9, sub, ha="left", va="top", fontsize=8.5, color=INK2)
-    fig.text(0.62, 0.2, xlabel, ha="center", va="top", fontsize=8.5, color=INK2)
+    fig.text(0.012, 0.92, sub, ha="left", va="top", fontsize=8.5, color=INK2)
+    fig.text(0.62, 0.16, xlabel, ha="center", va="top", fontsize=8.5, color=INK2)
     fig.text(0.012, 0.012, note, ha="left", va="bottom", fontsize=7.5, color=MUTED)
-    fig.subplots_adjust(top=0.78, bottom=0.29, left=0.265, right=0.99, wspace=0.08)
+    fig.subplots_adjust(top=0.82, bottom=0.25, left=0.28, right=0.99, wspace=0.08)
     OUT.mkdir(parents=True, exist_ok=True)
     fig.savefig(OUT / f"{name}.svg", format="svg", metadata={"Date": None, "Creator": "bench/findings/provider-vs-fd.py"})
     if os.environ.get("FF_PREVIEW"):  # PNG copy for looking at the chart while editing; not committed (as bench/charts.py)
@@ -89,8 +92,10 @@ def main():
     p50 = lambda d, R, cell="breaker:seq:100": st.median(lat[d][R, cell]) if lat[d][R, cell] else None
     lossp = lambda d, R, cell: 100 * tot[d][R, cell]["lost"] / tot[d][R, cell]["issued"] if (R, cell) in tot[d] else None
     frac = lambda d, R, cell: f"{tot[d][R, cell]['lost']}/{tot[d][R, cell]['issued']}"
-    S, M, F = "cross-stock-stock", "cross-ferrofire-stock", "cross-ferrofire-ferrofire"
+    S, M, F = "cross-stock-stock-v2026.11.03", "cross-ferrofire-stock-v2026.11.03", "cross-ferrofire-ferrofire"   # bennu v2026.11.03, the current stock
+    S6, M6 = "cross-stock-stock", "cross-ferrofire-stock"                                                       # bennu 6.0.0 (pre-91fd137), the historical one
     share = {R: 100 * (p50(S, R) - p50(M, R)) / (p50(S, R) - p50(F, R)) for R in RS}   # part of the full gain that the provider swap alone gives
+    share6 = {R: 100 * (p50(S6, R) - p50(M6, R)) / (p50(S6, R) - p50(F, R)) for R in RS}
 
     print(f"snapshot {snap}  pairings present {len(have)}/{len(PAIRS)}: {', '.join(have)}")
     for d, label, *_ in PAIRS:
@@ -103,7 +108,7 @@ def main():
             print(f"  {cell:17} reps {reps(d, cell):8} p50 ms " + "/".join(f"{p50(d, R, cell):.0f}" if p50(d, R, cell) else "-" for R in RS)
                   + "   lost " + " ".join(frac(d, R, cell) if c else "-" for R, c in zip(RS, cs))
                   + f"   flaps {sum(c['flaps'] for c in cs if c)}   wrong/write-err {sum(c['wrong_final'] + c['wrong_provider'] + c['wrong_collateral'] + c['write_errors'] for c in cs if c)}")
-    print("\nshare of the full sequential gain from the provider swap alone, % by RTUs " + "/".join(f"{share[R]:.0f}" for R in RS))
+    print("\nshare of the full sequential gain from the provider swap alone, % by RTUs: v2026.11.03 " + "/".join(f"{share[R]:.0f}" for R in RS) + "; 6.0.0 " + "/".join(f"{share6[R]:.0f}" for R in RS))
     print("flips completed per RTU, 1000 at once: " + "; ".join(f"{d} " + "/".join(f"{tot[d][R, 'breaker:sim:1000']['ok'] / len(tot[d][R, 'breaker:sim:1000']['reps']) / R:.0f}" for R in RS) for d in have))
     gen = collections.Counter()
     for d in have:
@@ -112,24 +117,25 @@ def main():
             gen[d, cell.split(":")[0], "n"] += c["issued"]
     print("flaps: " + "; ".join(f"{d} breaker {gen[d, 'breaker']}/{gen[d, 'breaker', 'n']} gen {gen[d, 'gen']}/{gen[d, 'gen', 'n']}" for d in have))
 
-    foot = lambda cell: (f"Raw data to {snap}. Stock = bennu 6.0.0 (before upstream fix 91fd137; rerun pending). Stock provider + ferrofire FD: stock's datagrams lack the NUL the FD requires (ww-y87).\nReps at 1/2/5/10 RTUs: "
-                         + "; ".join(f"{l} {reps(d, cell)}" for d, l, *_ in PAIRS if d in have).replace(" provider", "")
-                         + ".\nDocker bench, one VM. FD = field device. Colour = provider (blue ferrofire, grey stock); hatched = the FD is the other kind.")
-    ms = lambda d, R: f"{p50(d, R):.0f}" + (f"  ({share[R]:.0f} % of gain)" if d == M else "")
+    foot = lambda cell: (f"Raw data to {snap}. v2026.11.03 = current bennu; 6.0.0 (backslash hatch) = before upstream fix 91fd137.\nBennu provider + ferrofire FD cannot run: its datagrams lack the NUL the FD requires (ww-y87). Docker bench, one VM. FD = field device.\nColour = provider (blue ferrofire, grey bennu); hatched = the FD is the other kind. 3 reps per cell (1 for 1 000 flips behind a bennu provider)."
+                         )
+    sh = {M: share, M6: share6}
+    ms = lambda d, R: f"{p50(d, R):.0f}" + (f"  ({sh[d][R]:.0f} % of gain)" if d in sh else "")
     panels("provider-vs-fd-1-latency",
-           f"Swapping only the provider cuts a breaker flip from {p50(S, 1) / 1e3:.1f} s to {p50(M, 1) / 1e3:.1f} s on 1 RTU, to {p50(M, 10) / 1e3:.1f} s on 10",
-           "Median time from SCADA write to read-back, 100 sequential breaker flips (ms). In brackets: share of the full ferrofire gain. Stock = bennu 6.0.0.",
+           f"Swapping only the provider cuts a flip from {p50(S, 1) / 1e3:.1f} s to {p50(M, 1) / 1e3:.2f} s on 1 RTU (6.0.0 field device: {p50(M6, 1) / 1e3:.2f} s)",
+           "Median time from SCADA write to read-back, 100 sequential breaker flips (ms). In brackets: share of the full ferrofire gain.",
            "write to read-back, median (ms)", p50, ms, max(p50(S, R) for R in RS), foot("breaker:seq:100"))
     cell = "breaker:sim:100"
     panels("provider-vs-fd-2-burst-loss",
-           f"Burst loss follows the field device: a stock bennu 6.0.0 FD misses {lossp(M, 1, cell):.0f} % of 100 flips, even behind ferrofire",
+           f"Burst loss was the 6.0.0 field device: {lossp(M6, 1, cell):.0f} % of 100 flips missed, none with v2026.11.03 ({lossp(M, 1, cell):.0f} %)",
            "Share of 100 simultaneous breaker flips never seen on read-back (%), all reps pooled.",
            "flips missed (%)", lambda d, R: lossp(d, R, cell), lambda d, R: f"{lossp(d, R, cell):.0f} %", 100, foot(cell))
 
     # the one check: the claims the chart titles make hold in the raw data
     assert all(c["lost"] == 0 for c in tot[F].values()), "ferrofire+ferrofire lost a command"
-    assert p50(F, 1) < p50(M, 1) < p50(S, 1) and abs(p50(M, 10) - p50(F, 10)) < 10
-    assert abs(lossp(M, 1, cell) - lossp(S, 1, cell)) < 5
+    assert abs(p50(M, 1) - p50(F, 1)) < 5 and p50(F, 1) < p50(S, 1) and abs(p50(M, 10) - p50(F, 10)) < 10   # v2026.11.03 FD: the 1-RTU floor is gone
+    assert p50(M6, 1) > 5 * p50(F, 1) and abs(lossp(M6, 1, cell) - lossp(S6, 1, cell)) < 5            # 6.0.0: floor and burst loss follow the field device
+    assert all(lossp(d, R, cell) == 0 for d in (M, S, "cross-stock-stock-v2026.11.03-0.1s") for R in RS)
 
 
 if __name__ == "__main__":

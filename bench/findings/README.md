@@ -13,21 +13,21 @@ Reruns over the same raw data are byte-identical. No docker, no build, no benchm
 
 | script | section | raw data |
 |---|---|---|
-| `headline.py` | 1 | `docs/bench/results/control/{ferrofire,stock}` and `range/` |
-| `where-time-goes.py` | 2 | `control/{ferrofire,stock,stock-*s}`, `stock-capacity.txt`, `solve-time.txt` |
+| `headline.py` | 1 | `docs/bench/results/control/{ferrofire,stock-v2026.11.03,stock}` and `range/` (no v2026.11.03 there) |
+| `where-time-goes.py` | 2 | `control/{ferrofire,stock-v2026.11.03[-0.1s],stock,stock-*s}`, `stock-capacity.txt`, `solve-time.txt` |
 | `provider-vs-fd.py` | 3 | `control/cross-*` |
-| `reliability-fixes.py` | 4 | `control/{ferrofire-before-ww-1df.32,ferrofire,stock}` and `range/` |
+| `reliability-fixes.py` | 4 | `control/{ferrofire-before-ww-1df.32,ferrofire,stock-v2026.11.03,stock}` and `range/` |
 | `stream-fidelity.py` | 5 | `docs/bench/results/{raw,raw-datagram-v1,raw-datagram-v1-d4a,live}` |
 | `robustness-stock.py` | 6 | `docs/bench/results/burger` |
 | `cpu-profiling.py` | 7 | `cpu-profiling-raw/` (copied from `/var/tmp/ff-prof`) |
 | `field-device.py` | 8 | `docs/bench/results/fdmicro` (through `bench/fdmicro_report.py`) |
-| `cpp-provider.py` | 9 | `docs/bench/results/cppprov` |
+| `cpp-provider.py` | 9 | `docs/bench/results/cppprov` (bennu 6.0.0) and `cppprov-v2026.11.03` |
 
-Colours: ferrofire blue `#2a78d6`, stock bennu grey `#898781`, as in `bench/charts.py`.
+Colours: ferrofire blue `#2a78d6`, bennu v2026.11.03 (current stock) grey `#898781`, bennu 6.0.0 (historical stock) light grey `#c9c8c0`, as in `bench/charts.py`.
 
-"Stock" in the control charts is stock bennu 6.0.0 (before the upstream batched-write fix 91fd137, release v2026.11.03) and is labelled so:
-its burst losses, reordering and 0.5 s floor on 1-2 RTUs come from a fixed 500 ms sleep per write that the fix removed.
-They are not claimed for current bennu; a rerun is pending (ww-1df.47). The robustness charts (section 6) are the same 6.0.0 on the range; their results have nothing to do with that fix.
+"Stock" is two bennu versions, each labelled: **bennu v2026.11.03** (current, has the upstream batched-write fix 91fd137; ww-1df.47) is the main comparison and **bennu 6.0.0 (pre-91fd137)** the historical one.
+6.0.0's burst losses, reordering and 0.5 s floor on 1-2 RTUs came from a fixed 500 ms sleep per write that 91fd137 removed; the v2026.11.03 charts show they are gone (and what is new: flaps under bursts).
+The robustness charts (section 6) are 6.0.0 on the range; their results have nothing to do with that fix.
 
 ## Where the recomputed numbers differed from the reports
 

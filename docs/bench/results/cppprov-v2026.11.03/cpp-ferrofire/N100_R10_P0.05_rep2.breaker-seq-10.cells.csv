@@ -1,0 +1,2 @@
+stack,R,rep,cell,mode,kind,dir,n,issued,ok,lost,wrong_final,wrong_provider,wrong_collateral,order_violations,flaps,write_errors,span_s,wall_s,per_s,poll_errors,vm_load1_start_end
+cpp-ferrofire,10,2,breaker:seq:10,seq,breaker,open,10,10,10,0,0,10,0,0,0,0,1.299,2.405,7.70,0,0.82/0.75

@@ -5,13 +5,14 @@ import csv, glob, os, pathlib, statistics as st
 
 HERE = pathlib.Path(__file__).resolve().parent
 FD = HERE.parent / "docs/bench/results/fdmicro"
-STACKS = ("ferrofire", "stock")
+NEW, OLD = "stock-v2026.11.03", "stock"   # stock bennu v2026.11.03 (current, has upstream 91fd137) and 6.0.0 (pre-91fd137), ww-1df.47
+STACKS = ("ferrofire", NEW, OLD)
 PROFILES = {"S": 15, "M": 800, "L": 8112}   # tags per profile
 MAIN_HZ = {"S": "10", "M": "100", "L": "10"}    # the profile's main publish rate
 
 
 def _key(f):
-    stack, prof, proto, rep = os.path.basename(f).split(".")[0].split("_")
+    stack, prof, proto, rep = os.path.basename(f)[:-len(".metrics.csv")].split("_")   # the stack name may contain dots: stock-v2026.11.03
     return stack, prof, proto, int(rep[3:])
 
 
@@ -63,3 +64,9 @@ def pooled(stack, prof, proto, kind, variant):
 def pct(v, p):
     """Nearest rank, as the harness: v[ceil(p*n)-1], v sorted."""
     return v[max(0, min(len(v) - 1, -(-int(p * 1e6) * len(v) // 1000000) - 1))] if v else None
+
+
+if __name__ == "__main__":  # self-check: python3 bench/fdmicro_report.py
+    assert _key("x/ferrofire_S_mb_rep1.metrics.csv") == ("ferrofire", "S", "mb", 1)
+    assert _key("x/stock-v2026.11.03_L_dnp3_rep12.metrics.csv") == ("stock-v2026.11.03", "L", "dnp3", 12)
+    print("ok")

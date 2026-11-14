@@ -1,0 +1,10 @@
+stack,R,rep,cell,mode,kind,dir,n,issued,ok,lost,wrong_final,wrong_provider,wrong_collateral,order_violations,flaps,write_errors,span_s,wall_s,per_s,poll_errors,vm_load1_start_end
+cross-ferrofire-stock,5,3,breaker:seq:100,seq,breaker,open,100,100,100,0,0,0,0,0,0,0,9.944,11.066,10.06,0,1.16/1.06
+cross-ferrofire-stock,5,3,breaker:sim:10,sim,breaker,open,10,10,10,0,0,0,0,0,3,0,0.137,1.262,72.92,0,1.62/1.62
+cross-ferrofire-stock,5,3,breaker:sim:50,sim,breaker,open,50,50,50,0,0,0,0,0,0,0,0.061,1.174,823.79,0,1.62/1.62
+cross-ferrofire-stock,5,3,breaker:sim:100,sim,breaker,open,100,100,100,0,0,0,0,0,40,0,0.148,1.270,675.64,0,1.49/1.49
+cross-ferrofire-stock,5,3,breaker:sim:1000,sim,breaker,open,1000,1000,1000,0,0,0,0,0,404,0,0.123,1.248,8101.33,0,1.49/1.49
+cross-ferrofire-stock,5,3,gen:seq:5,seq,gen,down,5,5,5,0,0,0,0,0,5,0,5.426,6.546,0.92,0,1.37/1.26
+cross-ferrofire-stock,5,3,gen:seq:5,seq,gen,up,5,5,5,0,0,0,0,0,0,0,5.475,6.597,0.91,0,1.26/1.32
+cross-ferrofire-stock,5,3,gen:sim:5,sim,gen,down,5,5,5,0,0,0,0,0,5,0,1.137,2.260,4.40,0,1.32/1.21
+cross-ferrofire-stock,5,3,gen:sim:5,sim,gen,up,5,5,5,0,0,0,0,0,0,0,1.067,2.191,4.69,0,1.21/1.21
