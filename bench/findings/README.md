@@ -26,7 +26,7 @@ Colours: ferrofire blue `#2a78d6`, stock bennu grey `#898781`, as in `bench/char
 ## Where the recomputed numbers differ from the reports
 
 - 1 000-flip burst, stock, 10 RTUs: 18.2 flips/s (1 rep). The "about 20/s" in `control-latency.md` is the 100-flip cell (20.1).
-- "Lost" means not visible within 10 s (12 s for a generator), not dropped forever. The charts say "missed".
+- "Lost" in the reports means not visible within 10 s (12 s for a generator), not dropped forever. The charts and page say "missed".
 - Stock's reorders are 0.99 to 10.19 s apart (median 2.06 s), not "about 1 s".
 - ferrofire's chunk skew: stream stamps at most 0.19 ms apart in Docker (4.34 ms on the range). The 3 ms in the report is the visible inversion.
 - Raw `order_violations` for stock at 1 s is 1 190 = 1 105 reordered + 85 chunk skew.

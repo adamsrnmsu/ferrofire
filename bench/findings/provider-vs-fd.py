@@ -122,9 +122,9 @@ def main():
            "write to read-back, median (ms)", p50, ms, max(p50(S, R) for R in RS), foot("breaker:seq:100"))
     cell = "breaker:sim:100"
     panels("provider-vs-fd-2-burst-loss",
-           f"Burst loss follows the field device: a stock FD drops {lossp(M, 1, cell):.0f} % of 100 flips at once, even behind ferrofire",
+           f"Burst loss follows the field device: a stock FD misses {lossp(M, 1, cell):.0f} % of 100 flips at once, even behind ferrofire",
            "Share of 100 simultaneous breaker flips never seen on read-back (%), all reps pooled.",
-           "flips lost (%)", lambda d, R: lossp(d, R, cell), lambda d, R: f"{lossp(d, R, cell):.0f} %", 100, foot(cell))
+           "flips missed (%)", lambda d, R: lossp(d, R, cell), lambda d, R: f"{lossp(d, R, cell):.0f} %", 100, foot(cell))
 
     # the one check: the claims the chart titles make hold in the raw data
     assert all(c["lost"] == 0 for c in tot[F].values()), "ferrofire+ferrofire lost a command"

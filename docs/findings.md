@@ -5,12 +5,13 @@ Every number is recomputed from raw data by [`bench/findings/`](../bench/finding
 
 ## In 30 seconds
 
-- A breaker flip is visible in **98 ms** on ferrofire, **1 025 ms** on stock.
+- A breaker flip is visible in **98 ms** on ferrofire, **1 025 ms** on stock as shipped.
+- Stock tuned to publish at 0.1 s reaches **116 ms**, but only on 5+ RTUs.
 - Of 100 simultaneous flips on 1 RTU, stock misses **81 %**; ferrofire misses **0**.
 - The ACK hold cut ferrofire's flaps from **4 552** to **0**, latency unchanged.
 - One hour on the live range: **35 993** datagrams sent, **0** missing.
-- Stock bennu fails **5 of 5** fault checks; three upstream fixes pass all 5.
-- ferrofire's provider costs **11 %** of a core at dt 0.05 s.
+- Stock bennu fails **5 of 5** fault checks; three proposed fixes pass all 5.
+- ferrofire's provider costs **11 %** of a core at dt 0.05 s (VM, noisy).
 
 ## 1. How fast does a command take effect?
 
@@ -26,7 +27,7 @@ Every number is recomputed from raw data by [`bench/findings/`](../bench/finding
 - 100 flips at once: stock misses 81 / 63 / 7 / 0 % on 1 / 2 / 5 / 10 RTUs; ferrofire none.
 - 1 000 flips at once: 7 128-8 318 flips/s against 1.7-18.2.
 
-*"Missed" = not visible within 10 s. Stock's 1 000-flip cells are one rep.*
+*Stock is as shipped (1 s publish); tuned stock is in section 2. "Missed" = not visible within 10 s. Stock's 1 000-flip cells are one rep.*
 
 ## 2. Where does the second go?
 
@@ -38,7 +39,7 @@ Stock applies a flip in 26 ms, then waits about 995 ms for its once-a-second pub
 
 ![Burst loss at faster publish intervals](img/findings/where-time-goes-burst.svg)
 
-- Tuned to 0.1 s, stock reaches 116 ms on 5 RTUs but stays at 468-564 ms on 1.
+- Tuned to 0.1 s, stock reaches 116 ms on 5 RTUs but 512 ms on 1 (never under 468 ms).
 - Bursts are not fixed: 80 % still missed on 1 RTU, 60 % on 2.
 - Stock cannot hold 0.05 s: real period 72-79 ms, idle CPU 2.9 % -> 29.8 % of a core.
 
@@ -55,7 +56,7 @@ Swapping only the provider gives 49 % of the latency gain on 1 RTU, 79 % on 2, a
 - Burst loss follows the field device: a stock FD misses 80-81 % on 1 RTU behind either provider.
 - The mixed pairing flaps on generators: 118 of 240 commands.
 
-*Interim: snapshot 2026-11-14T08:03:27Z, 3 of 4 pairings, 3 reps (tuned stock 1-2). The FD-only swap is unmeasured.*
+*Interim, bench still running: snapshot 2026-11-14T08:09:43Z, 2-3 reps (see chart footers). The FD-only swap (stock provider + ferrofire FD) is not run yet.*
 
 ## 4. Is a command ever lost, reordered or flickering?
 
@@ -90,7 +91,7 @@ Live range, one hour at 10 Hz: 35 993 datagrams sent, 0 missing at either RTU.
 
 ## 6. What breaks a stock field device?
 
-Stock bennu fails all 5 fault checks on the live range; with fixes #79, #81, #82 all 5 pass.
+Stock bennu fails all 5 fault checks on the live range; with proposed fixes #79, #81, #82 all 5 pass.
 
 ![Fault checks, stock against fixed](img/findings/robustness-stock-1-scoreboard.svg)
 
@@ -117,7 +118,7 @@ ferrofire's provider costs 11 % of a core at dt 0.05 s, 49 % at dt 0.005 s.
 - Three of six prototypes pay: 43 %, 32 % and 19 % less provider CPU.
 - Hotspot per workload: publish bookkeeping 48 %, power sync plus solve 62 %, expression eval 53 %.
 
-*One 25 s window per point on a Docker Desktop VM. Prototypes are throwaway, 3 pairs each.*
+*One 25 s window per point on a Docker Desktop VM: absolute CPU is noisy, about 2x. Prototypes are throwaway, 3 pairs each.*
 
 ## Still running / open
 

@@ -130,19 +130,19 @@ def chart_sweep(p5, p1, ff):
     ax.text(3, p5[3] + 55, f"{p5[3]:.0f}", ha="center", va="center", fontsize=8, color=INK2)
     frame(ax, "write to read-back, ms (p50)", 1150)
     fig.subplots_adjust(top=0.8, bottom=0.2, left=0.09, right=0.985)
-    save(fig, "interval", f"Publishing faster gets stock to {min(p5):.0f} ms on 5 RTUs, but it stays near {p1[-1] / 1000:.1f} s on 1 RTU",
+    save(fig, "interval", f"Publishing faster gets stock to {min(p5):.0f} ms on 5 RTUs, but never under {min(p1):.0f} ms on 1 RTU",
          "100 sequential breaker flips, 5 reps per interval, Docker. Dashed = all flips on one RTU.")
 
 
 def chart_burst(l1, l2):
     fig, ax = plt.subplots(figsize=(7.4, 3.4))
     ax.axhline(0, color=FF, lw=2, clip_on=False, zorder=3)
-    ax.text(4.12, 5, "ferrofire: 0 lost", va="center", fontsize=8.5)
-    line(ax, l1, STK, f"stock, 1 RTU\n{l1[-1]:.0f} % lost", ls="--", fmt="{:.0f} %")
-    line(ax, l2, STK, f"stock, 2 RTUs\n{l2[-1]:.0f} % lost", fmt="{:.0f} %")
+    ax.text(4.12, 5, "ferrofire: 0 missed", va="center", fontsize=8.5)
+    line(ax, l1, STK, f"stock, 1 RTU\n{l1[-1]:.0f} % missed", ls="--", fmt="{:.0f} %")
+    line(ax, l2, STK, f"stock, 2 RTUs\n{l2[-1]:.0f} % missed", fmt="{:.0f} %")
     frame(ax, "flips not visible within 10 s, %", 100)
     fig.subplots_adjust(top=0.8, bottom=0.21, left=0.09, right=0.985)
-    save(fig, "burst", f"A burst still loses {l2[-1]:.0f} to {l1[-1]:.0f} % on stock bennu, however fast it publishes",
+    save(fig, "burst", f"A burst still misses {l2[-1]:.0f} to {l1[-1]:.0f} % on stock bennu, however fast it publishes",
          "100 simultaneous breaker flips on 1 or 2 RTUs, 500 flips per point, Docker.")
 
 
