@@ -176,3 +176,16 @@ the experiment's own mm-script stanza for rtu-3..5; `cc send` never overwrites a
 ## Field-device microbench (ww-1df.41)
 
 ferrofire `field-device` vs stock `bennu-field-deviced` with one scripted provider and the same config, no real provider: stream-to-register delay, Modbus read latency and throughput at 1/4/16 clients, write-forward, drops, cpu/RSS, DNP3 class-0 polls. Harness, phases and how to run it: [fdmicro/README.md](fdmicro/README.md) (`make bench-fdmicro`); report: [docs/bench/field-device.md](../docs/bench/field-device.md).
+
+## Provider vs Sandia's C++ bennu-simulink-provider, stub model (ww-1df.42)
+
+Plumbing only, no solver: `bench/cppprov/` runs the **unmodified** C++ `bennu-simulink-provider` (the binary of the phenix-waterway-range `bennu:arm64` image, built from a clean `git archive HEAD` of sceptre-bennu by `images/docker/bennu-arm64.Dockerfile`, here in `ffc-stock:22.04`)
+against `stub_model.c`, a C stand-in for the Simulink Coder model that speaks the `modelHooks` contract (SysV shm 10610/10613, POSIX semaphores `publish_sem`/`updates_sem`, FIFO `/tmp/updates_fifo`), publishes N breaker points at a fixed step and echoes writes;
+ferrofire gets an equally trivial `model.yaml` (N binary inputs republished by same-named outputs, `dt` = the stub's step = 0.05 s). Same field devices (stock `bennu-field-deviced`, `ferrofire field-device`), same `ffcontrol` driver, `--fresh` stack per cell.
+Report and method: [docs/bench/cpp-provider.md](../docs/bench/cpp-provider.md); raw: `docs/bench/results/cppprov/<provider>-<fd>/`.
+
+```
+docker run --rm --platform linux/arm64 -v $PWD:/src -w /src ff-rust:22.04 gcc -O2 -Wall -o /src/target-linux/cppprov/stub_model bench/cppprov/stub_model.c   # the stub
+python3 bench/cppprov/run.py                    # PAIRS=cpp:stock,ferrofire:stock,cpp:ferrofire,ferrofire:ferrofire NS=100,1250 PUBS=0.1,0.05 RS=10 REPS=3; about 1.5 h, Docker, nothing else heavy running
+python3 bench/cppprov/report.py docs/bench/results/cppprov > docs/bench/results/cppprov/summary.md
+```

@@ -191,6 +191,11 @@ Full method, Modbus read throughput at 1, 4 and 16 clients, write-forward, drops
 Both field devices expose a new value in about a tenth of a millisecond, ferrofire 0.02-0.03 ms sooner on the small and medium devices. Stock wins on delivery of an 8 112-tag stream (ferrofire's device lost 24% of the datagrams at 10 Hz, stock none) and on cpu per Modbus request with several clients (about 4 times as many requests per cpu-second at 16 clients); ferrofire wins on memory
 (12 vs 51 MB on 8 112 tags), Modbus throughput at 16 clients and on large reads, forwarding every write of a quick sequence (stock forwarded about a third), and DNP3 class-0 polls on 800 tags and up (stock 123 ms at p50 on 800 tags, ferrofire 0.4 ms; against a master that confirms each fragment, stock's figure looks like a delayed-ACK stall).
 
+## 11. Provider alone: ferrofire vs Sandia's C++ bennu-simulink-provider (stub model)
+
+Plumbing only, no solver: the unmodified C++ provider on a C stand-in for the Simulink model against ferrofire with an equally trivial model, through the same field devices and driver (100 and 1 250 points, publish 0.1 and 0.05 s, 10 RTUs, Docker, 3 reps).
+Method, deviations and all tables: [cpp-provider.md](bench/cpp-provider.md); raw: [results/cppprov/](bench/results/cppprov/). At a 0.05 s interval ferrofire shows a write in 49 ms against 118-151 ms through the C++ provider (two unsynchronised timers) and publishes at exactly the interval (the C++ provider sleeps after the work: 53-58 ms); 1 000 simultaneous writes are all delivered by ferrofire and lose about half through the C++ provider (its 256-message update FIFO fills between two 50 ms steps).
+
 ## Other results on the bench and the live range
 
 These have no chart: each is a single measured event rather than a comparison across settings.
