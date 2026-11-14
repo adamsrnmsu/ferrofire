@@ -11,6 +11,8 @@ Finished runs are skipped, so an interrupted matrix resumes.
 
 Env: STACK (ferrofire), OUTDIR, RS (1,2,5,10), REPS (5), CELLS (default: the full matrix), SLOW (cells that get SLOW_REPS reps only), SLOW_REPS,
 NOBUILD=1 (use the binaries already in target-linux), WAIT (seconds to wait for other cargo containers to finish before a run, 600).
+STOCK_IMAGE (ffc-stock:22.04 = bennu 6.0.0, the phenix overlay image, pre-91fd137) and STOCK_VERSION (6.0.0): which stock image and the label for it (ww-1df.47: ffc-stock-2026.11.03:22.04, 2026.11.03, from bench/stock_image.sh);
+a non-default STOCK_VERSION is recorded in env.txt and suffixes the default OUTDIR (stock-v2026.11.03, cross-stock-stock-v2026.11.03-0.1s), so old results are never overwritten.
 STOCK_PUBLISH_S (STACK=stock, default 1 = as shipped): stock publish interval, s (ww-1df.35; stock hard-codes 1 s, bench/stock_provider.py patches it); use OUTDIR=docs/bench/results/control/stock-<s>s.
 PROVIDER=ferrofire|stock and FD=ferrofire|stock (ww-1df.40, the 2x2 cross matrix): pick the provider and the field device independently (either set = cross mode, STACK ignored, the other defaults to ferrofire);
 the stack is named `cross-<provider>-<fd>`, results default to docs/bench/results/control/cross-<provider>-<fd>[-<s>s] (suffix only for PROVIDER=stock with a tuned STOCK_PUBLISH_S).
@@ -28,6 +30,8 @@ assert PROV in ("ferrofire", "stock") and FDK in ("ferrofire", "stock"), (PROV, 
 FRESH = "stock" in (PROV, FDK)   # a fresh stack per cell (see run())
 if CROSS:
     STACK = f"cross-{PROV}-{FDK}"
+STOCK_IMG, STOCK_VER = os.environ.get("STOCK_IMAGE", "ffc-stock:22.04"), os.environ.get("STOCK_VERSION", "6.0.0")
+VER = f"-v{STOCK_VER}" if FRESH and STOCK_VER != "6.0.0" else ""   # directory suffix: which stock bennu
 PUB = os.environ.get("STOCK_PUBLISH_S", "1")   # stock publish interval, s (bench/stock_provider.py; ww-1df.35)
 ENV = lambda k, d: os.environ.get(k, d).split(",")
 RS, REPS = [int(r) for r in ENV("RS", "1,2,5,10")], int(os.environ.get("REPS", "5"))
@@ -35,7 +39,7 @@ BREAKERS, GENS = [1, 5, 10, 50, 100, 1000], [1, 2, 5, 10]
 CELLS = ENV("CELLS", ",".join([f"breaker:{m}:{n}" for n in BREAKERS for m in ("seq", "sim")] + [f"gen:{m}:{n}" for n in GENS for m in ("seq", "sim")]))
 SLOW, SLOW_REPS = [c for c in ENV("SLOW", "") if c], int(os.environ.get("SLOW_REPS", str(REPS)))
 WAIT = int(os.environ.get("WAIT", "600"))
-OUT = ROOT / os.environ.get("OUTDIR", f"docs/bench/results/control/{STACK}" + (f"-{PUB}s" if CROSS and PROV == "stock" and PUB != "1" else ""))  # OUTDIR: a scratch dir for smoke runs, relative to the repo
+OUT = ROOT / os.environ.get("OUTDIR", f"docs/bench/results/control/{STACK}{VER}" + (f"-{PUB}s" if CROSS and PROV == "stock" and PUB != "1" else ""))  # OUTDIR: a scratch dir for smoke runs, relative to the repo
 GRID = ROOT / "target-linux/control-grid"
 LABEL = "ffcontrol=1"
 IMG, NET, PLAT = "ff-rust:22.04", "ffcontrol", "linux/arm64"
@@ -61,7 +65,6 @@ def grid():
     sh("python3", str(ROOT / "bench/gen_grid.py"), str(GRID), "--rtus", ",".join(map(str, RS)), stdout=subprocess.DEVNULL)
 
 
-STOCK_IMG = "ffc-stock:22.04"
 STREAM = {"ferrofire": "udp://*;239.0.1.{n}:40000", "stock": "udp://*;239.0.0.1:40000"}   # the provider's stream endpoint per RTU n
 
 
@@ -178,7 +181,7 @@ def run(rep, r):
     binary = hashlib.sha256((ROOT / "target-linux/release/ferrofire").read_bytes()).hexdigest()[:16]
     if "stock" in (PROV, FDK):
         binary = f"stock image {out('docker', 'image', 'inspect', STOCK_IMG, '--format', '{{.Id}}')[:23]} (driver ffcontrol, ferrofire {binary})"
-    pub_line = f"stock_publish_s {PUB}\n" if PROV == "stock" else ""
+    pub_line = (f"stock_publish_s {PUB}\n" if PROV == "stock" else "") + (f"stock_version {STOCK_VER}\nstock_image {STOCK_IMG}\n" if FRESH else "")
     (OUT / f"{base.name}.env.txt").write_text(
         f"stack {STACK} provider {PROV} fd {FDK} R {r} rep {rep}\nstart {t0} end {time.strftime('%FT%TZ', time.gmtime())}\ndriver_exit {drv_rc}\n"
         f"commit {out('git', '-C', str(ROOT), 'rev-parse', 'HEAD')} dirty {bool(out('git', '-C', str(ROOT), 'status', '--porcelain', '--', 'src', 'bench/control'))}\n"

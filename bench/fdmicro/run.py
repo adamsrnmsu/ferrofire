@@ -5,6 +5,7 @@ the other, the order alternating with the rep; per run: a fresh device container
 device's PID namespace so it can read the device's cpu, RSS and UDP counters from /proc). Own label ffmicro=1 and network ffmicro: only the label is used to find or remove containers.
 Raw output in docs/bench/results/fdmicro/: <stack>_<P>_<proto>_rep<k>.{metrics.csv,s2r.csv,wf.csv,env.txt,fd.log.gz}. Finished runs are skipped (a run resumes).
 Env: REPS (3), PROFILES (S,M,L), PROTOS (mb,dnp3), STACKS (ferrofire,stock), OUTDIR, SECS (5, window and read-phase length), FLIPS (100), RATES (S: 1,10,100),
+STOCK_IMAGE (ffc-stock:22.04 = bennu 6.0.0, pre-91fd137) and STOCK_VERSION (6.0.0; ww-1df.47: ffc-stock-2026.11.03:22.04, 2026.11.03): a non-default version names the stock files stock-v<version>_<P>_<proto>_rep<k>.*,
 NOBUILD=1, WAIT (seconds to wait for other cargo containers before a run, 600).
 """
 import gzip, hashlib, os, pathlib, subprocess, sys, time
@@ -15,7 +16,9 @@ REPS, PROFILES, PROTOS, STACKS = int(os.environ.get("REPS", "3")), ENV("PROFILES
 SECS, FLIPS, WAIT = os.environ.get("SECS", "5"), os.environ.get("FLIPS", "100"), int(os.environ.get("WAIT", "600"))
 OUT = ROOT / os.environ.get("OUTDIR", "docs/bench/results/fdmicro")
 CFG = ROOT / "target-linux/fdmicro/cfg"
-LABEL, NET, PLAT, IMG, STOCK = "ffmicro=1", "ffmicro", "linux/arm64", "ff-rust:22.04", "ffc-stock:22.04"
+LABEL, NET, PLAT, IMG = "ffmicro=1", "ffmicro", "linux/arm64", "ff-rust:22.04"
+STOCK, STOCK_VER = os.environ.get("STOCK_IMAGE", "ffc-stock:22.04"), os.environ.get("STOCK_VERSION", "6.0.0")
+NAME = lambda stack: stack if stack != "stock" or STOCK_VER == "6.0.0" else f"stock-v{STOCK_VER}"   # file-name prefix of a stack
 MNT = ["-v", f"{ROOT}:/src"]
 HARNESS = "/src/target-linux/fdmicro-build/release/fdmicro"
 FF = "/src/target-linux/release/ferrofire"
@@ -65,7 +68,7 @@ def start_fd(stack, cfg):
 
 
 def run(rep, prof, proto, stack):
-    base = OUT / f"{stack}_{prof}_{proto}_rep{rep}"
+    base = OUT / f"{NAME(stack)}_{prof}_{proto}_rep{rep}"
     if pathlib.Path(f"{base}.metrics.csv").exists():
         return print("skip", base.name, flush=True)
     print("run ", base.name, time.strftime("%H:%M:%S"), flush=True)
@@ -92,7 +95,7 @@ def run(rep, prof, proto, stack):
     (OUT / f"{base.name}.env.txt").write_text(
         f"stack {stack} profile {prof} proto {proto} rep {rep}\nstart {t0} end {time.strftime('%FT%TZ', time.gmtime())}\nharness_exit {drv.returncode}\n"
         f"commit {out('git', '-C', str(ROOT), 'rev-parse', 'HEAD')} dirty {bool(out('git', '-C', str(ROOT), 'status', '--porcelain', '--', 'src', 'bench/fdmicro'))}\n"
-        f"ferrofire_sha256 {binary}\nstock_image {out('docker', 'image', 'inspect', STOCK, '--format', '{{.Id}}')[:23]}\nconfig_sha256 {cfgsum}\n"
+        f"ferrofire_sha256 {binary}\nstock_version {STOCK_VER}\nstock_image {STOCK} {out('docker', 'image', 'inspect', STOCK, '--format', '{{.Id}}')[:23]}\nconfig_sha256 {cfgsum}\n"
         f"host_load_start {load0}\ndocker_vm {out('docker', 'info', '--format', 'cpus={{.NCPU}} mem={{.MemTotal}}')}\n"
         f"contended_at_start {bool(others0)}{(' (waited ' + str(WAIT) + ' s, still running: ' + '; '.join(busy) + ')') if busy else ''}\n"
         f"other_containers_start {'; '.join(others0) or 'none'}\nother_containers_end {'; '.join(others()) or 'none'}\nstale_containers_ignored {'; '.join(others(True)) or 'none'}\n")

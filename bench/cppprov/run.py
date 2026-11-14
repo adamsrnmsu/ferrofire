@@ -19,7 +19,7 @@ OUT = ROOT / os.environ.get("OUTDIR", "docs/bench/results/cppprov")
 CELLS = {100: "breaker:seq:10,breaker:seq:50,breaker:sim:10,breaker:sim:100", 1250: "breaker:seq:10,breaker:seq:50,breaker:sim:10,breaker:sim:100,breaker:sim:1000"}
 CELLS = {n: os.environ["CELLS"] if "CELLS" in os.environ else CELLS.get(n, CELLS[1250]) for n in NS}
 CFG, LABEL, NET, PLAT = ROOT / "target-linux/cppprov/cfg", "ffcpp=1", "ffcpp", "linux/arm64"
-FF_IMG, STOCK_IMG = "ff-rust:22.04", "ffc-stock:22.04"
+FF_IMG, STOCK_IMG = "ff-rust:22.04", os.environ.get("STOCK_IMAGE", "ffc-stock:22.04")   # STOCK_IMAGE: ww-1df.47, see run_control.py
 FF, CTL, STUB = "/src/target-linux/release/ferrofire", "/src/target-linux/ctl/release/ffcontrol", "/src/target-linux/cppprov/stub_model"
 GROUP = {"cpp": "239.0.0.1", "ferrofire": "239.0.1.{n}"}   # the provider's stream group per RTU n (cpp: one for all, like stock pybennu; ferrofire: one per RTU slice, gen_grid.py)
 MNT = ["-v", f"{ROOT}:/src"]
