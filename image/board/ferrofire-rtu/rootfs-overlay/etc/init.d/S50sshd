@@ -1,0 +1,8 @@
+#!/bin/sh
+# OpenSSH; host keys live on the data partition (the root is read-only), generated on first boot.
+[ "$1" = start ] || exit 0
+for t in ed25519 ecdsa rsa; do
+	k=/data/ssh/ssh_host_${t}_key
+	[ -f "$k" ] || ssh-keygen -q -t "$t" -N '' -f "$k"
+done
+/usr/sbin/sshd

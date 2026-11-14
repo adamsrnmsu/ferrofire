@@ -16,3 +16,6 @@ tools/zeek/iccp/tests/.tmp/
 tests/pcaps/iccp/real/
 tests/pcaps/public/data/
 target-mut/
+
+# Buildroot RTU image output
+image/out/

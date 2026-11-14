@@ -1,0 +1,4 @@
+#!/bin/sh
+# BusyBox telnetd on 23, logging in through /bin/login (root refused off the serial console: /etc/securetty).
+[ "$1" = start ] || exit 0
+telnetd

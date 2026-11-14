@@ -1,0 +1,10 @@
+#!/bin/sh
+# minimega's agent, if phenix injected it (phenix image inject-miniexe), over the virtio-serial port named cc.
+[ "$1" = start ] || exit 0
+m=/opt/minimega/bin/miniccc
+[ -f "$m" ] || exit 0
+# No udev/mdev: make the /dev/virtio-ports/cc name udev would.
+for p in /sys/class/virtio-ports/*; do
+	[ "$(cat "$p/name" 2>/dev/null)" = cc ] && mkdir -p /dev/virtio-ports && ln -sf "/dev/${p##*/}" /dev/virtio-ports/cc
+done
+"$m" -v=false -serial /dev/virtio-ports/cc -logfile /var/log/miniccc.log </dev/null >/dev/null 2>&1 &

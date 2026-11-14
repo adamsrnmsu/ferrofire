@@ -1,0 +1,7 @@
+# On top of board/qemu/aarch64-virt/linux.config: boot as an EFI application from GRUB, find root by GPT PARTLABEL.
+CONFIG_EFI=y
+CONFIG_EFI_STUB=y
+CONFIG_PARTITION_ADVANCED=y
+CONFIG_EFI_PARTITION=y
+# QEMU virt under ACPI exposes no PL031: the wall clock comes from UEFI runtime services.
+CONFIG_RTC_DRV_EFI=y

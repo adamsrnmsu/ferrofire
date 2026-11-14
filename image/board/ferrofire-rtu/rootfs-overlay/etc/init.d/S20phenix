@@ -1,0 +1,8 @@
+#!/bin/sh
+# phenix startup scripts (injected into the root partition offline), in name order, as root, with bash.
+[ "$1" = start ] || exit 0
+for f in /etc/phenix/startup/*; do
+	[ -f "$f" ] || continue
+	echo "$(date) $f"
+	bash "$f"
+done >>/var/log/phenix-startup.log 2>&1
