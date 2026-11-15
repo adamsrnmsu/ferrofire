@@ -24,7 +24,7 @@ PAIRS = [("cross-ferrofire-ferrofire", "ferrofire provider + ferrofire FD", FF, 
          ("cross-ferrofire-stock-v2026.11.03", "ferrofire provider + bennu v2026.11.03 FD", FF, "///"),
          ("cross-stock-stock-v2026.11.03-0.1s", "bennu v2026.11.03 provider (0.1 s) + its FD", STK2, "///"),
          ("cross-stock-stock-v2026.11.03", "bennu v2026.11.03 provider (1 s) + its FD", STK, "///"),
-         ("cross-stock-ferrofire", "bennu provider (1 s) + ferrofire FD", STK, "xxx"),
+         ("cross-stock-ferrofire-v2026.11.03", "bennu v2026.11.03 provider (1 s) + ferrofire FD", STK, "xxx"),
          ("cross-ferrofire-stock", "ferrofire provider + bennu 6.0.0 FD", FF, "\\\\\\"),
          ("cross-stock-stock-0.1s", "bennu 6.0.0 provider (0.1 s) + its FD", STK2, "\\\\\\"),
          ("cross-stock-stock", "bennu 6.0.0 provider (1 s) + its FD", STK, "\\\\\\")]
@@ -100,7 +100,7 @@ def main():
     print(f"snapshot {snap}  pairings present {len(have)}/{len(PAIRS)}: {', '.join(have)}")
     for d, label, *_ in PAIRS:
         if d not in have:
-            print(f"\n{label}: NO DATA ({d}/ has no cells.csv: the ferrofire FD rejects stock's datagrams, control-latency.md section 9)")
+            print(f"\n{label}: NO DATA ({d}/ has no cells.csv)")
             continue
         print(f"\n{label}   [{d}]")
         for cell in ("breaker:seq:100", "breaker:sim:10", "breaker:sim:50", "breaker:sim:100", "breaker:sim:1000", "gen:seq:5", "gen:sim:5"):
@@ -117,7 +117,7 @@ def main():
             gen[d, cell.split(":")[0], "n"] += c["issued"]
     print("flaps: " + "; ".join(f"{d} breaker {gen[d, 'breaker']}/{gen[d, 'breaker', 'n']} gen {gen[d, 'gen']}/{gen[d, 'gen', 'n']}" for d in have))
 
-    foot = lambda cell: (f"Raw data to {snap}. v2026.11.03 = current bennu; 6.0.0 (backslash hatch) = before upstream fix 91fd137.\nBennu provider + ferrofire FD cannot run: its datagrams lack the NUL the FD requires (ww-y87). Docker bench, one VM. FD = field device.\nColour = provider (blue ferrofire, grey bennu); hatched = the FD is the other kind. 3 reps per cell (1 for 1 000 flips behind a bennu provider)."
+    foot = lambda cell: (f"Raw data to {snap}. v2026.11.03 = current bennu; 6.0.0 (backslash hatch) = before upstream fix 91fd137.\nBennu provider + ferrofire FD (crossed hatch) runs since ww-y87 (the FD accepts pybennu's NUL-less datagrams). Docker bench, one VM. FD = field device.\nColour = provider (blue ferrofire, grey bennu); hatched = the FD is the other kind. 3 reps per cell (1 for 1 000 flips behind a bennu provider)."
                          )
     sh = {M: share, M6: share6}
     ms = lambda d, R: f"{p50(d, R):.0f}" + (f"  ({sh[d][R]:.0f} % of gain)" if d in sh else "")
@@ -135,7 +135,7 @@ def main():
     assert all(c["lost"] == 0 for c in tot[F].values()), "ferrofire+ferrofire lost a command"
     assert abs(p50(M, 1) - p50(F, 1)) < 5 and p50(F, 1) < p50(S, 1) and abs(p50(M, 10) - p50(F, 10)) < 10   # v2026.11.03 FD: the 1-RTU floor is gone
     assert p50(M6, 1) > 5 * p50(F, 1) and abs(lossp(M6, 1, cell) - lossp(S6, 1, cell)) < 5            # 6.0.0: floor and burst loss follow the field device
-    assert all(lossp(d, R, cell) == 0 for d in (M, S, "cross-stock-stock-v2026.11.03-0.1s") for R in RS)
+    assert all(lossp(d, R, cell) == 0 for d in (M, S, "cross-stock-stock-v2026.11.03-0.1s", "cross-stock-ferrofire-v2026.11.03") for R in RS)
 
 
 if __name__ == "__main__":

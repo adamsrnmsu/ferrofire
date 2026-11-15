@@ -1,5 +1,6 @@
 provider + field device,reps,100 sim lost % 1 RTU,2 RTUs,5 RTUs,10 RTUs,1000 sim lost % 1 RTU,10 RTUs,reordered,chunk skew,flaps,gen status-on p50 ms
 ferrofire + ferrofire FD,3,0,0,0,0,0,0,0,126,0,110
+bennu v2026.11.03 at 1 s + ferrofire FD,3,0,0,0,0,0,0,0,4241,0,1025
 ferrofire + bennu v2026.11.03 FD,3,0,0,0,0,0,0,0,105,1287,109
 bennu v2026.11.03 at 0.1 s + its FD,3,0,0,0,0,0,0,0,1649,161,117
 bennu v2026.11.03 at 1 s + its FD,3,0,0,0,0,0,0,0,1744,9,1026

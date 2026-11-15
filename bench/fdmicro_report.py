@@ -5,6 +5,7 @@ import csv, glob, os, pathlib, statistics as st
 
 HERE = pathlib.Path(__file__).resolve().parent
 FD = HERE.parent / "docs/bench/results/fdmicro"
+FD_RX = HERE.parent / "docs/bench/results/fdmicro-rx"   # ferrofire L profile, Modbus, rerun after the receive-path fix (ww-c2i); stack name "ferrofire" in the files
 NEW, OLD = "stock-v2026.11.03", "stock"   # stock bennu v2026.11.03 (current, has upstream 91fd137) and 6.0.0 (pre-91fd137), ww-1df.47
 STACKS = ("ferrofire", NEW, OLD)
 PROFILES = {"S": 15, "M": 800, "L": 8112}   # tags per profile
@@ -16,16 +17,23 @@ def _key(f):
     return stack, prof, proto, int(rep[3:])
 
 
-def load():
+def load(d=FD):
     """{(stack, profile, proto): {rep: {(phase, variant, metric): value}}}"""
     out = {}
-    for f in sorted(glob.glob(f"{FD}/*.metrics.csv")):
+    for f in sorted(glob.glob(f"{d}/*.metrics.csv")):
         stack, prof, proto, rep = _key(f)
         out.setdefault((stack, prof, proto), {})[rep] = {(r["phase"], r["variant"], r["metric"]): float(r["value"]) for r in csv.DictReader(open(f))}
     return out
 
 
 DATA = load()
+RX = load(FD_RX)
+
+
+def rx_total(phase, variant, metric, prof="L", proto="mb"):
+    """Sum over the reps of the post-fix ferrofire run (ww-c2i); None when there is none."""
+    v = [m[phase, variant, metric] for m in RX.get(("ferrofire", prof, proto), {}).values() if (phase, variant, metric) in m]
+    return sum(v) if v else None
 
 
 def reps(stack, prof, proto):

@@ -11,7 +11,7 @@ ferrofire against stock bennu as shipped: Docker bench on one VM plus a live phe
 - A breaker flip is visible in **98 ms** on ferrofire, **1 025-1 029 ms** on bennu as shipped (either version), **114-120 ms** on bennu v2026.11.03 tuned to 0.1 s (any number of RTUs; 6.0.0: 512 ms on 1 RTU).
 - Of 100 simultaneous flips on 1 RTU, bennu v2026.11.03 misses **0 %** and ferrofire **0**; bennu 6.0.0 missed **81 %**.
 - With the v2026.11.03 field device the provider alone gives **all** of the latency gain on any RTU count (6.0.0: **49 %** on 1 RTU).
-- **Stock wins** on a full 8 112-tag stream: ferrofire's field device drops **23.6 %**, bennu none (either version). Bennu also serves **4.5x** the Modbus requests per CPU-second at 16 clients.
+- Ferrofire's field device used to drop **23.6 %** of a full 8 112-tag stream (bennu none); after the receive-path fix (ww-c2i) it drops **0** (116 486 of 116 486 datagrams, 3 reps). **Stock wins** on cpu: bennu serves **4.5x** the Modbus requests per CPU-second at 16 clients.
 - **New with v2026.11.03: flaps.** Behind a ferrofire provider its field device flapped on **27 %** of 100 simultaneous flips on 5 RTUs and **33 %** of 1 000 (ferrofire's own field device: 0); cause not traced.
 - Against the C++ provider (stub model): **49 ms** against 148-150 ms at a 0.05 s publish (bennu v2026.11.03), indicative only; its 1 000-flip loss of 49-53 % on 6.0.0 is gone.
 - One hour on the live range: **35 993** datagrams sent, **0** missing.
@@ -60,7 +60,7 @@ Against bennu v2026.11.03 as shipped (1 s publish), swapping only the provider g
 - Burst loss followed the 6.0.0 field device (80-81 % on 1 RTU behind either provider); with the v2026.11.03 field device nothing is lost behind either provider.
 - The mixed pairing ferrofire provider + v2026.11.03 field device flaps: 120 of 240 generator commands (118 with 6.0.0) and, new, 1 167 of 13 920 simultaneous breaker flips (on 5 RTUs 1 099 of 3 480, pooled over the 10-1 000-flip phases). Cause not traced; ferrofire's field device has none.
 
-*Final, 3 reps. Bennu provider + ferrofire FD cannot run: pybennu's datagrams lack the trailing NUL ferrofire's receiver requires (ww-y87).*
+*Final, 3 reps. Bennu provider + ferrofire FD runs since ww-y87 (the receiver accepts pybennu's NUL-less datagrams): 1 026-1 028 ms, no loss, no flap, the provider's 1 s.*
 
 ## 4. Is a command ever lost, reordered or flickering?
 
@@ -130,7 +130,7 @@ Same scripted provider, same config: stock wins stream delivery and CPU per requ
 
 ![DNP3 class-0 poll time](img/findings/field-device-3-dnp3-poll.svg)
 
-- Stock wins: ferrofire drops 23.6 % of an 8 112-tag 10 Hz stream, bennu (either version) none; 800 tags at 100 Hz is clean on all.
+- Fixed (ww-c2i): ferrofire dropped 23.6 % of an 8 112-tag 10 Hz stream, bennu (either version) none; with an 8 MiB SO_RCVBUF and a drain-then-parse loop ferrofire drops 0 of 116 486; 800 tags at 100 Hz was clean on all.
 - Stock wins: 4.5x the Modbus requests per CPU-second at 16 clients, where ferrofire serves 32 % more on 6.1 cores.
 - ferrofire wins: a DNP3 poll of 800 tags takes 0.4 ms against 123 ms on bennu (both versions; 6.0.0 was ahead at 15 tags, v2026.11.03 is not).
 - Quick writes: ferrofire and bennu v2026.11.03 forward all 100; bennu 6.0.0 forwarded 34-35. No longer an advantage against current bennu.
@@ -154,9 +154,7 @@ Plumbing only: at a 0.05 s publish ferrofire shows a flip in 49 ms, the C++ `ben
 ## Open
 
 - Flaps of the v2026.11.03 field device under bursts (behind a ferrofire provider and a fast bennu provider): cause not traced.
-- Maximum publish rate (ww-1df.43): blocked on ww-c2i.
-- ferrofire FD drops 23.6 % of an 8 112-tag stream (ww-c2i): open.
-- ferrofire FD rejects pybennu's NUL-less datagrams (ww-y87): open.
+- Maximum publish rate (ww-1df.43): was blocked on ww-c2i, which is fixed.
 - Upstream bennu issue about the burst loss: not needed, 91fd137 fixed it.
 
 ## Sources
