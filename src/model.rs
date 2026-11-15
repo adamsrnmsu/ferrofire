@@ -826,12 +826,14 @@ impl Model {
                 rejected.push(tag.clone());
             }
         }
-        if std::mem::take(&mut self.power_written) {
-            if let Some(p) = self.power.as_ref() {
-                p.sync(&mut self.v);
+        if rejected.len() < writes.len() {
+            if std::mem::take(&mut self.power_written) {
+                if let Some(p) = self.power.as_ref() {
+                    p.sync(&mut self.v);
+                }
             }
+            self.eval();
         }
-        self.eval();
         rejected
     }
 
@@ -883,14 +885,19 @@ impl Model {
 
     /// ponytail: drive targets are compared and re-set every step (exact compare, 1e-9 abs), so an expression that
     /// changes continuously re-solves every step; add a drive tolerance if a big case is driven by a ramp.
-    fn power_update(&mut self) {
-        let Some(p) = self.power.as_mut() else { return };
+    /// True when it changed any slot of the model (the expression outputs are then stale until the next `eval`).
+    fn power_update(&mut self) -> bool {
+        let Some(p) = self.power.as_mut() else {
+            return false;
+        };
+        let mut changed = false;
         for (ti, f) in &p.drive {
             let x = f.eval(&self.v);
             if (p.pw.get(*ti) - x).abs() > 1e-9 {
                 p.pw.set(*ti, x);
                 p.dirty = true;
                 p.sync(&mut self.v); // later drive entries may read this one (`load-1_bus-3`.mw)
+                changed = true;
             }
         }
         if p.dirty || self.time - p.last_solve >= p.max_interval - 1e-9 {
@@ -898,15 +905,18 @@ impl Model {
             p.dirty = false;
             p.last_solve = self.time;
             p.sync(&mut self.v);
+            changed = true;
         }
+        changed
     }
 
+    /// One step of `dt`. The expression outputs are current on entry (every public method that moves a value ends
+    /// with an `eval`), so the step only evaluates again where something moved.
     pub fn step(&mut self, dt: f64) {
-        self.eval();
         if let Some(p) = self.power.as_mut() {
             p.dirty |= p.pw.advance(dt);
         }
-        self.power_update();
+        let mut fresh = !self.power_update();
         // toward states and bodies read the instant-t values; compute first, commit after the ODE advance
         let tw: Vec<f64> = self
             .towards
@@ -920,7 +930,8 @@ impl Model {
 
         let h = dt / self.substeps as f64;
         for _ in 0..self.substeps {
-            self.rk4(h);
+            self.rk4(h, fresh);
+            fresh = false; // later substeps start from the advanced states
         }
 
         for (t, x) in self.towards.iter().zip(tw) {
@@ -952,25 +963,28 @@ impl Model {
     }
 
     // ponytail: toward states/bodies are frozen at instant t inside RK stages; fine for dt <= 0.1 s models.
-    fn rk4(&mut self, h: f64) {
+    /// `fresh`: the expression outputs already match the current values, so stage 1 need not evaluate them.
+    fn rk4(&mut self, h: f64, fresh: bool) {
         if self.odes.is_empty() {
             return;
         }
         let y0: Vec<f64> = self.odes.iter().map(|o| self.v[o.slot]).collect();
-        let k = |m: &mut Model, y: &[f64]| -> Vec<f64> {
+        let k = |m: &mut Model, y: &[f64], eval: bool| -> Vec<f64> {
             for (o, yi) in m.odes.iter().zip(y) {
                 m.v[o.slot] = *yi;
             }
-            m.eval();
+            if eval {
+                m.eval();
+            }
             m.odes.iter().map(|o| o.f.eval(&m.v)).collect()
         };
         let at = |y: &[f64], d: &[f64], s: f64| -> Vec<f64> {
             y.iter().zip(d).map(|(a, b)| a + s * b).collect()
         };
-        let k1 = k(self, &y0);
-        let k2 = k(self, &at(&y0, &k1, h / 2.0));
-        let k3 = k(self, &at(&y0, &k2, h / 2.0));
-        let k4 = k(self, &at(&y0, &k3, h));
+        let k1 = k(self, &y0, !fresh);
+        let k2 = k(self, &at(&y0, &k1, h / 2.0), true);
+        let k3 = k(self, &at(&y0, &k2, h / 2.0), true);
+        let k4 = k(self, &at(&y0, &k3, h), true);
         for (i, o) in self.odes.iter().enumerate() {
             self.v[o.slot] = y0[i] + h / 6.0 * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]);
         }
