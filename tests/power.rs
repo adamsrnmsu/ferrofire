@@ -632,3 +632,77 @@ fn power_applies_the_model_option_and_live_limit_writes() {
     // gen 3 stays pinned at its lower limit, so the freed gen settles at 12.62, not the unconstrained 14.46
     assert!((p.get(q) - 12.62).abs() < 0.01 && !p.alert, "{}", p.get(q));
 }
+
+/// Every published tag, compared as bits.
+fn bits(m: &Model) -> Vec<(String, u64)> {
+    m.snapshot()
+        .into_iter()
+        .map(|(t, v)| (t.to_string(), num(Some(v)).to_bits()))
+        .collect()
+}
+
+const MESH: &str = "version: 1\ndt: 0.1\ninputs:\n  k: {type: analog, default: 1, min: 0, max: 10}\nstates:\n  s: {toward: {target: 1, rate: 1}, init: 0}\noutputs:\n  s: {type: analog}\n  k: {type: analog}\n  k2: {type: analog, expr: \"k * 2 + `bus-3`.voltage\"}\npower:\n  tags: pypower\n  inline:\n    buses: [{id: 1, type: slack}, {id: 2, type: pq, pd: 10}, {id: 3, type: pq, pd: 5}, {id: 4, type: pq, pd: 8}]\n    branches: [{from: 1, to: 2, r: 0.01, x: 0.05}, {from: 2, to: 3, r: 0.01, x: 0.05}, {from: 1, to: 3, r: 0.02, x: 0.08}, {from: 3, to: 4, r: 0.02, x: 0.08}]\n    gens: [{bus: 1, qmax: 50, qmin: -50, pmax: 50}, {bus: 3, pg: 5, vg: 1.01, qmax: 20, qmin: -20, pmax: 30}]\n";
+
+/// A batch of writes leaves the model exactly where the same writes one at a time do, and the solver then agrees
+/// bit for bit as the model steps on (the power state is synced once per batch, not once per write).
+#[test]
+fn a_write_batch_equals_the_same_writes_one_by_one() {
+    let w = |t: &str, x: f64| (t.to_string(), Value::Analog(x));
+    let b = |t: &str, x: bool| (t.to_string(), Value::Binary(x));
+    let batches: Vec<Vec<(String, Value)>> = vec![
+        // dependent: open a branch, then change the load behind it, then a generator
+        vec![
+            b("branch-1_3-4.active", false),
+            w("load-1_bus-4.mw", 2.0),
+            b("generator-1_bus-1.active", false),
+            w("k", 4.0),
+        ],
+        // the same tag twice (last wins), a rejected read-only tag in the middle, an unknown tag
+        vec![
+            w("load-1_bus-2.mw", 3.0),
+            w("bus-2.gen_mw", 1.0),
+            w("load-1_bus-2.mw", 6.0),
+            w("nope", 1.0),
+            b("branch-1_1-2.active", false),
+        ],
+        // restore
+        vec![
+            b("branch-1_3-4.active", true),
+            b("branch-1_1-2.active", true),
+            b("generator-1_bus-1.active", true),
+            w("load-1_bus-4.mw", 8.0),
+        ],
+        vec![],
+    ];
+    let (mut one, mut all) = (Model::load(MESH).unwrap(), Model::load(MESH).unwrap());
+    assert_eq!(bits(&one), bits(&all));
+    for (n, batch) in batches.iter().enumerate() {
+        let rej_one: Vec<String> = batch
+            .iter()
+            .flat_map(|x| one.apply_writes(std::slice::from_ref(x)))
+            .collect();
+        let rej_all = all.apply_writes(batch);
+        assert_eq!(rej_one, rej_all, "batch {n}: rejected tags");
+        // an accepted write reads back at once (last write wins), before the next step solves anything
+        for (i, (t, v)) in batch.iter().enumerate() {
+            let later = batch[i + 1..].iter().any(|(u, _)| u == t);
+            if !rej_all.contains(t) && !later {
+                assert_eq!(all.get(t), Some(*v), "batch {n}: {t} reads back");
+                assert_eq!(one.get(t), Some(*v), "batch {n}: {t} reads back");
+            }
+        }
+        assert_eq!(
+            bits(&one),
+            bits(&all),
+            "batch {n}: state right after the writes"
+        );
+        for k in 0..20 {
+            one.step(0.1);
+            all.step(0.1);
+            assert_eq!(bits(&one), bits(&all), "batch {n}: step {k}");
+        }
+    }
+    // the writes did something (this is not a comparison of two idle models)
+    let idle = Model::load(MESH).unwrap();
+    assert_ne!(bits(&idle), bits(&all).into_iter().collect::<Vec<_>>());
+}

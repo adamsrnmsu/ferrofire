@@ -100,6 +100,42 @@ fn requests() {
     assert_eq!(sh.lock().unwrap().queue.len(), 2);
 }
 
+/// The QUERY reply is cached in `Meta`; it must stay what the per-request format produced, follow the tag set of
+/// the model the `Meta` was built from, and not move when values or write limits do.
+#[test]
+fn query_reply_is_the_tag_list_of_its_model() {
+    let old = |m: &Model| -> String {
+        let body: String = m.tags().map(|(t, _)| format!("{t},")).collect();
+        format!("ACK={body}\0")
+    };
+    let q = |meta: &Meta| {
+        let sh = Mutex::new(Shared::default());
+        String::from_utf8(handle(b"QUERY=\0", meta, &sh)).unwrap()
+    };
+    let wat = Model::load(include_str!("../models/waterway.yaml")).unwrap();
+    let pump = Model::load(include_str!("../models/pump-station.yaml")).unwrap();
+    let (mw, mp) = (Meta::of(&wat), Meta::of(&pump));
+    assert_eq!(q(&mw), old(&wat));
+    assert_eq!(q(&mp), old(&pump));
+    assert_ne!(q(&mw), q(&mp));
+    assert_eq!(q(&mw), q(&mw), "repeatable");
+    let two = |lim: &str| {
+        Model::load(&format!("version: 1\ndt: 0.1\ninputs:\n  sp: {{type: analog, min: 0, max: {lim}}}\noutputs:\n  sp: {{type: analog}}\n")).unwrap()
+    };
+    let (a, b) = (two("10"), two("20"));
+    assert_eq!(q(&Meta::of(&a)), "ACK=sp,\0");
+    assert_eq!(q(&Meta::of(&b)), "ACK=sp,\0", "limits are not in the reply");
+    let grown = Model::load("version: 1\ndt: 0.1\ninputs:\n  sp: {type: analog}\n  en: {type: binary}\noutputs:\n  sp: {type: analog}\n  en: {type: binary}\n").unwrap();
+    assert_eq!(q(&Meta::of(&grown)), old(&grown));
+    assert_ne!(q(&Meta::of(&grown)), q(&Meta::of(&a)), "a new tag shows up");
+    // a write that changes a value does not change the reply
+    let sh = Mutex::new(Shared::default());
+    let meta = Meta::of(&grown);
+    let before = handle(b"QUERY=\0", &meta, &sh);
+    assert_eq!(handle(b"WRITE=sp:3\0", &meta, &sh), b"ACK=\0");
+    assert_eq!(handle(b"QUERY=\0", &meta, &sh), before);
+}
+
 #[test]
 fn rep_round_trip() {
     let (meta, sh) = setup();
@@ -311,16 +347,19 @@ impl ferrofire::transport::Publisher for Sink {
     }
 }
 
-fn sink(tags: Option<&[&str]>) -> (Target, Arc<Mutex<Vec<String>>>) {
+/// A target over `Sink`; a slice is built for the snapshot tag order `order`.
+fn sink(tags: Option<&[&str]>, order: &[String]) -> (Target, Arc<Mutex<Vec<String>>>) {
     let log = Arc::new(Mutex::new(vec![]));
-    let tags = tags.map(|t| t.iter().map(|s| s.to_string()).collect());
-    (
-        Target {
-            out: Box::new(Sink(log.clone())),
-            tags,
-        },
-        log,
-    )
+    let out = Box::new(Sink(log.clone()));
+    let target = match tags {
+        None => Target::all(out),
+        Some(t) => Target::slice(out, t.iter().map(|s| s.to_string()).collect(), order),
+    };
+    (target, log)
+}
+
+fn names(snap: &[(String, Value)]) -> Vec<String> {
+    snap.iter().map(|(n, _)| n.clone()).collect()
 }
 
 #[test]
@@ -328,7 +367,7 @@ fn publish_happens_once_per_tick_and_every_nth_tick() {
     let mut m = Model::load(include_str!("../models/waterway.yaml")).unwrap();
     let (meta, sh) = setup();
     let _ = meta;
-    let (all, log) = sink(None);
+    let (all, log) = sink(None, &[]);
     for k in 0..6 {
         tick_and_publish(&mut m, &sh, std::slice::from_ref(&all), k, 1);
     }
@@ -344,9 +383,10 @@ fn publish_happens_once_per_tick_and_every_nth_tick() {
 #[test]
 fn slices_get_their_own_tags_and_may_overlap() {
     let snap = big_snap(10);
-    let (a, la) = sink(Some(&["bus-3.voltage", "sim.t"]));
-    let (b, lb) = sink(Some(&["bus-3.voltage", "bus-9.voltage"]));
-    let (all, lall) = sink(None);
+    let order = names(&snap);
+    let (a, la) = sink(Some(&["bus-3.voltage", "sim.t"]), &order);
+    let (b, lb) = sink(Some(&["bus-3.voltage", "bus-9.voltage"]), &order);
+    let (all, lall) = sink(None, &order);
     publish_all(&[a, b, all], &snap);
     // snapshot order, not slice order; the overlapping tag goes to both
     assert!(la.lock().unwrap()[0].starts_with("sim.t:0.5,bus-3.voltage:"));
@@ -354,6 +394,120 @@ fn slices_get_their_own_tags_and_may_overlap() {
     assert_eq!(lb.lock().unwrap()[0].matches(',').count(), 2);
     assert!(lb.lock().unwrap()[0].contains("bus-9.voltage:"));
     assert_eq!(lall.lock().unwrap()[0].matches(',').count(), 10);
+}
+
+/// The publish path before ww-1df.38: a `HashSet` filter that clones points, text from `format!`.
+fn old_msg(snap: &[(String, Value)]) -> String {
+    snap.iter()
+        .map(|(t, v)| format!("{t}:{},", fmt_value(*v)))
+        .collect()
+}
+
+fn old_part(snap: &[(String, Value)], tags: &[&str]) -> String {
+    let set: std::collections::HashSet<&str> = tags.iter().copied().collect();
+    let part: Vec<_> = snap
+        .iter()
+        .filter(|(n, _)| set.contains(n.as_str()))
+        .cloned()
+        .collect();
+    old_msg(&part)
+}
+
+#[test]
+fn publish_slices_and_all_are_byte_for_byte_what_they_were() {
+    use Value::{Analog as A, Binary as B};
+    let mut snap = big_snap(40);
+    snap.extend([
+        ("x.nan".into(), A(f64::NAN)),
+        ("x.inf".into(), A(f64::INFINITY)),
+        ("x.ninf".into(), A(f64::NEG_INFINITY)),
+        ("x.nz".into(), A(-0.0)),
+        ("x.big".into(), A(1e300)),
+        ("x.tiny".into(), A(5e-324)),
+        ("x.third".into(), A(1.0 / 3.0)),
+        ("x.on".into(), B(true)),
+        ("x.off".into(), B(false)),
+    ]);
+    let order = names(&snap);
+    let every: Vec<&str> = order.iter().map(String::as_str).collect();
+    let slices: [&[&str]; 6] = [
+        &["bus-3.voltage", "sim.t"],
+        &["x.off", "x.nan", "bus-9.voltage", "x.on"], // not in snapshot order
+        &["bus-3.voltage", "no.such.tag", "x.big"],   // one tag the snapshot lacks
+        &["no.such.tag"],                             // nothing of it present
+        &["x.inf", "x.ninf", "x.nz", "x.tiny", "x.third"],
+        &every,
+    ];
+    let mut targets = vec![];
+    let mut logs = vec![];
+    for tags in slices.iter().map(|s| Some(*s)).chain([None]) {
+        let (t, l) = sink(tags, &order);
+        targets.push(t);
+        logs.push(l);
+    }
+    for round in 0..3 {
+        for (i, (_, v)) in snap.iter_mut().enumerate() {
+            if let A(x) = v {
+                if x.is_finite() && round > 0 {
+                    *x = *x * 1.0000001 + i as f64 * 0.001;
+                }
+            }
+        }
+        for l in &logs {
+            l.lock().unwrap().clear();
+        }
+        publish_all(&targets, &snap);
+        for (i, s) in slices.iter().enumerate() {
+            assert_eq!(
+                logs[i].lock().unwrap().as_slice(),
+                [old_part(&snap, s)],
+                "slice {i} round {round}"
+            );
+        }
+        assert_eq!(
+            logs[6].lock().unwrap().as_slice(),
+            [old_msg(&snap)],
+            "all, round {round}"
+        );
+        assert_eq!(snapshot_msg(&snap), old_msg(&snap));
+    }
+    // a snapshot of another length than the slice was built for is still filtered by name
+    let short = &snap[..20];
+    for l in &logs {
+        l.lock().unwrap().clear();
+    }
+    publish_all(&targets, short);
+    for (i, s) in slices.iter().enumerate() {
+        assert_eq!(
+            logs[i].lock().unwrap().as_slice(),
+            [old_part(short, s)],
+            "short snapshot, slice {i}"
+        );
+    }
+}
+
+/// A slice is resolved against `Meta::tags` once, so the engine's snapshot must keep that order.
+#[test]
+fn the_engines_snapshot_is_in_meta_tag_order() {
+    for yaml in [
+        include_str!("../models/waterway.yaml"),
+        include_str!("../models/pump-station.yaml"),
+    ] {
+        let mut m = Model::load(yaml).unwrap();
+        let meta = Meta::of(&m);
+        let (all, log) = sink(None, &[]);
+        let sh = Mutex::new(Shared::default());
+        for k in 0..3 {
+            tick_and_publish(&mut m, &sh, std::slice::from_ref(&all), k, 1);
+        }
+        let msg = log.lock().unwrap()[2].clone();
+        let got: Vec<&str> = msg
+            .split(',')
+            .filter(|p| !p.is_empty())
+            .map(|p| p.split(':').next().unwrap())
+            .collect();
+        assert_eq!(got, meta.tags);
+    }
 }
 
 #[test]
