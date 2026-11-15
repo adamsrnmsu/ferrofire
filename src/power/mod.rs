@@ -7,6 +7,7 @@
 //! - `islands: deenergize` publishes VM = 0 for buses no reference generator can reach.
 
 pub mod case;
+mod lu;
 pub mod pf;
 
 use crate::model::Kind;
