@@ -367,7 +367,7 @@ impl Module for Server {
         log.log(
             "info",
             "iccp server init",
-            &format!("{} objects, {} peers.", objects.len(), peers.len()),
+            format!("{} objects, {} peers.", objects.len(), peers.len()),
         );
         Ok(Server {
             endpoint: require(node, "endpoint")?,
@@ -386,7 +386,7 @@ impl Module for Server {
                 self.log.log(
                     "error",
                     "iccp server init",
-                    &format!("failed to listen: {e}"),
+                    format!("failed to listen: {e}"),
                 );
                 tracing::error!("iccp-server: {e}");
                 return;
@@ -613,7 +613,7 @@ impl Device {
         self.log.log(
             "info",
             "iccp write",
-            &format!("{} wrote {} = {datum:?}", show(who), show(o)),
+            format!("{} wrote {} = {datum:?}", show(who), show(o)),
         );
         Ok(())
     }
@@ -638,7 +638,7 @@ impl Device {
         self.log.log(
             "info",
             "iccp transfer set",
-            &format!(
+            format!(
                 "{t}: data set {} interval {}s {}",
                 show(&cfg.data_set),
                 cfg.interval,
@@ -845,7 +845,7 @@ impl Device {
         self.log.log(
             "info",
             "iccp data set",
-            &format!("defined {} ({} members)", show(item), members.len()),
+            format!("defined {} ({} members)", show(item), members.len()),
         );
         Answer::DataSetCreated
     }
@@ -1145,7 +1145,7 @@ impl Handler for Device {
             self.log.log(
                 "warn",
                 "iccp associate",
-                &format!("refused {peer:?}: not in the bilateral table"),
+                format!("refused {peer:?}: not in the bilateral table"),
             );
         }
         ok
@@ -1168,7 +1168,7 @@ impl Handler for Device {
             self.log.log(
                 "info",
                 "iccp associate",
-                &format!("{} associated", show(&self.peers[p].name)),
+                format!("{} associated", show(&self.peers[p].name)),
             );
         }
     }
@@ -1189,7 +1189,7 @@ impl Handler for Device {
             self.log.log(
                 "info",
                 "iccp associate",
-                &format!("{} released", show(&self.peers[s.peer].name)),
+                format!("{} released", show(&self.peers[s.peer].name)),
             );
         }
     }

@@ -183,7 +183,7 @@ impl Module for Server {
         log.log(
             "info",
             "iec61850 server init",
-            &format!("{} points in {}.", model.points.len(), model.domain()),
+            format!("{} points in {}.", model.points.len(), model.domain()),
         );
         Ok(Server {
             endpoint: require(node, "endpoint")?,
@@ -200,7 +200,7 @@ impl Module for Server {
                 self.log.log(
                     "error",
                     "iec61850 server init",
-                    &format!("failed to listen: {e}"),
+                    format!("failed to listen: {e}"),
                 );
                 tracing::error!("iec61850-server: {e}");
                 return;
@@ -270,7 +270,7 @@ fn goose_link(g: &Goose, log: &EventLog) -> Option<Frames> {
             log.log(
                 "info",
                 "iec61850 goose",
-                &format!("publishing {} on {}", g.cb_name, g.interface),
+                format!("publishing {} on {}", g.cb_name, g.interface),
             );
             let mac = MacAddr(link.mac().0);
             Some((
@@ -284,7 +284,7 @@ fn goose_link(g: &Goose, log: &EventLog) -> Option<Frames> {
             log.log(
                 "error",
                 "iec61850 goose",
-                &format!(
+                format!(
                     "cannot open {} (needs CAP_NET_RAW): {e}; GOOSE is off",
                     g.interface
                 ),
@@ -323,7 +323,7 @@ fn control_hook(
         log.log(
             "info",
             "iec61850 operate",
-            &format!("{} = {datum:?}", show(&ev.object)),
+            format!("{} = {datum:?}", show(&ev.object)),
         );
         Ok(())
     })

@@ -103,7 +103,7 @@ impl Module for Server {
                 self.log.log(
                     "error",
                     "modbus TCP server init",
-                    &format!("failed to start the server: {e}"),
+                    format!("failed to start the server: {e}"),
                 );
                 tracing::error!("modbus-server: {e}");
                 return;
@@ -123,7 +123,7 @@ impl Module for Server {
             log.log(
                 "error",
                 "modbus accept",
-                &format!("accept failed: {e}; retrying"),
+                format!("accept failed: {e}; retrying"),
             )
         };
         net::accept_loop(&listener, &stop, on_conn, report).await;
@@ -151,7 +151,7 @@ async fn serve(
                 log.log(
                     "error",
                     "modbus connection",
-                    &format!("closing the connection: {why}"),
+                    format!("closing the connection: {why}"),
                 );
                 break;
             }

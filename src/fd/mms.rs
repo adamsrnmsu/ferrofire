@@ -192,7 +192,7 @@ impl<H: Handler> Mms<H> {
                         log.log(
                             "error",
                             "mms accept",
-                            &format!("accept failed: {e}; retrying"),
+                            format!("accept failed: {e}; retrying"),
                         );
                     }
                     failing = true;

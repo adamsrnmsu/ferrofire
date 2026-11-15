@@ -133,7 +133,7 @@ impl Module for Outstation {
         log.log(
             "info",
             "dnp3 server init",
-            &format!(
+            format!(
                 "Binary Size is {} and Analog Size is {}.",
                 bin.len(),
                 ana.len()
@@ -155,7 +155,7 @@ impl Module for Outstation {
                 self.log.log(
                     "error",
                     "dnp3 TCP server init",
-                    &format!("failed to add TCPServer: {e}"),
+                    format!("failed to add TCPServer: {e}"),
                 );
                 tracing::error!("dnp3-server: {e}");
                 return;
@@ -192,7 +192,7 @@ impl Module for Outstation {
                         self.log.log(
                             "error",
                             "dnp3 accept",
-                            &format!("accept failed: {e}; retrying"),
+                            format!("accept failed: {e}; retrying"),
                         );
                     }
                     failing = true;
@@ -288,7 +288,7 @@ impl Sink for Commands<'_> {
         self.log.log(
             "info",
             "dnp3 Server writeBinary",
-            &format!("Binary point command at address {index} with value {v}."),
+            format!("Binary point command at address {index} with value {v}."),
         );
         let _ = self.store.write(tag, Value::Binary(value));
         self.log
@@ -299,7 +299,7 @@ impl Sink for Commands<'_> {
         self.log.log(
             "info",
             "dnp3 Server writeAnalog",
-            &format!("Analog point command at address {index} with value {v}."),
+            format!("Analog point command at address {index} with value {v}."),
         );
         let _ = self.store.write(tag, Value::Analog(f64::from(value)));
         self.log
@@ -326,7 +326,7 @@ async fn serve(mut stream: TcpStream, ctx: Ctx) {
                 ctx.log.log(
                     "error",
                     "dnp3 connection",
-                    &format!("closing the connection: {why}"),
+                    format!("closing the connection: {why}"),
                 );
                 break;
             }
