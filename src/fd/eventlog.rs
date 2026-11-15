@@ -2,12 +2,14 @@
 //! relative to the cwd and truncated at start. Messages come from the network, so control characters never reach the file.
 
 use crate::hint::lock;
+use std::fmt::Display;
 use std::io::Write;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct EventLog {
     module: String,
+    enabled: bool,
     out: Mutex<(u64, Box<dyn Write + Send>)>,
 }
 
@@ -53,11 +55,13 @@ impl EventLog {
     pub fn open(path: Option<&str>, module: &str) -> EventLog {
         let default = format!("{module}.log");
         let path = path.filter(|p| !p.is_empty()).unwrap_or(&default);
-        let sink: Box<dyn Write + Send> = match std::fs::File::create(path) {
-            Ok(f) => Box::new(f),
+        let sink = match std::fs::File::create(path) {
+            Ok(f) => Box::new(f) as Box<dyn Write + Send>,
             Err(e) => {
                 tracing::warn!("{module}: cannot open event log {path}: {e}");
-                Box::new(std::io::sink())
+                let mut log = EventLog::to(module, Box::new(std::io::sink()));
+                log.enabled = false; // nowhere to write: `log` skips the stamp and the formatting
+                return log;
             }
         };
         EventLog::to(module, sink)
@@ -66,11 +70,16 @@ impl EventLog {
     pub fn to(module: &str, sink: Box<dyn Write + Send>) -> EventLog {
         EventLog {
             module: module.into(),
+            enabled: true,
             out: Mutex::new((0, sink)),
         }
     }
 
-    pub fn log(&self, level: &str, event: &str, message: &str) {
+    /// `event` and `message` are only formatted when the log has somewhere to write; pass `format_args!`, not `format!`.
+    pub fn log(&self, level: &str, event: impl Display, message: impl Display) {
+        if !self.enabled {
+            return;
+        }
         let now = now_secs();
         let at = stamp(now + crate::sys::utc_offset(now));
         let mut g = lock(&self.out);
@@ -78,8 +87,8 @@ impl EventLog {
             "{},{at},{level},{},{},{}\n",
             g.0,
             self.module,
-            clean(event),
-            clean(message)
+            clean(&event.to_string()),
+            clean(&message.to_string())
         );
         let _ = g.1.write_all(line.as_bytes()).and_then(|_| g.1.flush());
         g.0 += 1;
@@ -134,6 +143,19 @@ mod tests {
         );
     }
 
+    struct Boom;
+    impl Display for Boom {
+        fn fmt(&self, _: &mut std::fmt::Formatter) -> std::fmt::Result {
+            panic!("formatted while disabled")
+        }
+    }
+
+    #[test]
+    fn a_disabled_log_formats_nothing() {
+        let off = EventLog::open(Some("/nonexistent-dir/x.log"), "m");
+        off.log("info", Boom, Boom);
+    }
+
     #[test]
     fn open_truncates_and_defaults_the_name() {
         let dir = std::env::temp_dir().join(format!("fd-evlog-{}", std::process::id()));
@@ -144,7 +166,10 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "");
         log.log("info", "e", "m");
         assert!(std::fs::read_to_string(&p).unwrap().starts_with("0,"));
-        EventLog::open(Some("/nonexistent-dir/x.log"), "m").log("info", "e", "dropped");
+        let off = EventLog::open(Some("/nonexistent-dir/x.log"), "m");
+        off.log("info", "e", "dropped");
+        assert!(!off.enabled);
+        assert!(EventLog::to("m", Box::new(std::io::sink())).enabled);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
