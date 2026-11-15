@@ -369,12 +369,12 @@ fn publish_happens_once_per_tick_and_every_nth_tick() {
     let _ = meta;
     let (all, log) = sink(None, &[]);
     for k in 0..6 {
-        tick_and_publish(&mut m, &sh, std::slice::from_ref(&all), k, 1);
+        tick_and_publish(&mut m, &sh, std::slice::from_ref(&all), &mut vec![], k, 1);
     }
     assert_eq!(log.lock().unwrap().len(), 6);
     log.lock().unwrap().clear();
     for k in 0..6 {
-        tick_and_publish(&mut m, &sh, std::slice::from_ref(&all), k, 3);
+        tick_and_publish(&mut m, &sh, std::slice::from_ref(&all), &mut vec![], k, 3);
     }
     assert_eq!(log.lock().unwrap().len(), 2); // ticks 0 and 3
     assert!((m.time - 12.0 * m.dt).abs() < 1e-9); // every call also stepped the engine
@@ -486,6 +486,91 @@ fn publish_slices_and_all_are_byte_for_byte_what_they_were() {
     }
 }
 
+/// The engine tick before ww-1df.51: apply the writes, snapshot into fresh Strings, step.
+fn old_tick(m: &mut Model, writes: &[(String, Value)]) -> Vec<(String, Value)> {
+    m.apply_writes(writes);
+    let snap = names_values(m);
+    m.step(m.dt);
+    snap
+}
+
+fn names_values(m: &Model) -> Vec<(String, Value)> {
+    m.snapshot()
+        .into_iter()
+        .map(|(t, v)| (t.to_string(), v))
+        .collect()
+}
+
+/// Writes the model accepts: each writable tag, nudged.
+fn nudges(m: &Model, round: u64) -> Vec<(String, Value)> {
+    let meta = Meta::of(m);
+    names_values(m)
+        .into_iter()
+        .filter(|(t, _)| meta.writable.contains(t))
+        .map(|(t, v)| match v {
+            Value::Binary(b) => (t, Value::Binary(!b)),
+            Value::Analog(x) => (t, Value::Analog(x + 0.25 * round as f64)),
+        })
+        .collect()
+}
+
+/// The reused snapshot buffers must hold exactly what a fresh snapshot per tick held: published bytes, the REP side's
+/// copy and the model state, over ticks with writes, from an empty, a stale (short and same-length) and a wrong-length start.
+#[test]
+fn engine_ticks_publish_and_store_what_a_fresh_snapshot_per_tick_did() {
+    for yaml in [
+        include_str!("../models/waterway.yaml"),
+        include_str!("../models/pump-station.yaml"),
+    ] {
+        let stale = vec![("not.a.tag".to_string(), Value::Analog(7.0)); 3];
+        let n = Model::load(yaml).unwrap().snapshot().len();
+        let same_len = vec![("not.a.tag".to_string(), Value::Analog(7.0)); n];
+        for start in [vec![], stale, same_len, big_snap(2)] {
+            let mut new = Model::load(yaml).unwrap();
+            let mut old = Model::load(yaml).unwrap();
+            let (all, log) = sink(None, &[]);
+            let sh = Mutex::new(Shared {
+                snap: start,
+                queue: vec![],
+            });
+            let mut writes_seen = 0;
+            let mut snap = vec![];
+            for k in 0..8u64 {
+                let w = if k % 3 == 1 { nudges(&new, k) } else { vec![] };
+                writes_seen += w.len();
+                sh.lock().unwrap().queue = w.clone();
+                tick(&mut new, &sh, &all, &mut snap, k, 2);
+                let want = old_tick(&mut old, &w);
+                assert_eq!(sh.lock().unwrap().snap.len(), n);
+                assert_eq!(
+                    snapshot_msg(&sh.lock().unwrap().snap),
+                    old_msg(&want),
+                    "stored, tick {k}"
+                );
+                let published = log.lock().unwrap().clone();
+                assert_eq!(published.len() as u64, k / 2 + 1, "tick {k}");
+                if k % 2 == 0 {
+                    assert_eq!(published.last().unwrap(), &old_msg(&want), "tick {k}");
+                }
+            }
+            assert!(writes_seen > 0);
+            assert_eq!(new.time, old.time);
+            assert_eq!(old_msg(&names_values(&new)), old_msg(&names_values(&old)));
+        }
+    }
+}
+
+fn tick(
+    m: &mut Model,
+    sh: &Mutex<Shared>,
+    all: &Target,
+    snap: &mut Vec<(String, Value)>,
+    k: u64,
+    every: u64,
+) {
+    tick_and_publish(m, sh, std::slice::from_ref(all), snap, k, every);
+}
+
 /// A slice is resolved against `Meta::tags` once, so the engine's snapshot must keep that order.
 #[test]
 fn the_engines_snapshot_is_in_meta_tag_order() {
@@ -498,7 +583,7 @@ fn the_engines_snapshot_is_in_meta_tag_order() {
         let (all, log) = sink(None, &[]);
         let sh = Mutex::new(Shared::default());
         for k in 0..3 {
-            tick_and_publish(&mut m, &sh, std::slice::from_ref(&all), k, 1);
+            tick_and_publish(&mut m, &sh, std::slice::from_ref(&all), &mut vec![], k, 1);
         }
         let msg = log.lock().unwrap()[2].clone();
         let got: Vec<&str> = msg

@@ -6,6 +6,7 @@ use crate::hint::{did_you_mean, lock, show, RateLimit};
 use crate::model::SliceSpec;
 use crate::model::{Model, Value, WriteSpec};
 use crate::transport::{self, Publisher};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -98,20 +99,21 @@ pub fn fmt_value(v: Value) -> String {
 
 /// One publish tick as a `tag:value,...` message.
 pub fn snapshot_msg(snap: &[(String, Value)]) -> String {
-    msg_of(snap.iter().map(|(t, v)| (t.as_str(), *v)), snap.len())
+    let mut s = String::new();
+    msg_of(&mut s, snap.iter().map(|(t, v)| (t.as_str(), *v)));
+    s
 }
 
-/// `tag:value,` for each point, written straight into one buffer (`n` points, about 24 bytes each).
-fn msg_of<'a>(points: impl Iterator<Item = (&'a str, Value)>, n: usize) -> String {
+/// `tag:value,` for each point, written straight into `s` (emptied first, so its capacity is reused).
+fn msg_of<'a>(s: &mut String, points: impl Iterator<Item = (&'a str, Value)>) {
     use std::fmt::Write;
-    let mut s = String::with_capacity(n * 24);
+    s.clear();
     for (t, v) in points {
         let _ = match v {
             Value::Binary(b) => write!(s, "{t}:{b},"),
             Value::Analog(x) => write!(s, "{t}:{x},"),
         };
     }
-    s
 }
 
 /// The pseudo-tags appended to every datagram (ferrofire datagram v1): the per-endpoint datagram counter, the
@@ -556,6 +558,8 @@ pub type Plan = Vec<(String, Option<Vec<String>>)>;
 pub struct Target {
     out: Box<dyn Publisher>,
     part: Option<Part>,
+    /// The message text of the last publish; its capacity is reused.
+    msg: RefCell<String>,
 }
 
 /// A slice: its tags, and where they sit in the snapshot the target was built for (`len` points, fixed for the life
@@ -569,7 +573,11 @@ struct Part {
 impl Target {
     /// Carries every tag.
     pub fn all(out: Box<dyn Publisher>) -> Target {
-        Target { out, part: None }
+        Target {
+            out,
+            part: None,
+            msg: RefCell::default(),
+        }
     }
 
     /// Carries `tags`; `order` is the snapshot's tag order (`Meta::tags`).
@@ -585,6 +593,7 @@ impl Target {
         Target {
             out,
             part: Some(part),
+            msg: RefCell::default(),
         }
     }
 }
@@ -594,17 +603,16 @@ impl Target {
 pub fn publish_all(targets: &[Target], snap: &[(String, Value)]) {
     for t in targets {
         let point = |i: usize| (snap[i].0.as_str(), snap[i].1);
+        let msg = &mut *t.msg.borrow_mut();
         match &t.part {
-            None => t.out.publish(&snapshot_msg(snap)),
-            Some(p) if p.len == snap.len() => t
-                .out
-                .publish(&msg_of(p.at.iter().map(|&i| point(i)), p.at.len())),
+            None => msg_of(msg, snap.iter().map(|(n, v)| (n.as_str(), *v))),
+            Some(p) if p.len == snap.len() => msg_of(msg, p.at.iter().map(|&i| point(i))),
             Some(p) => {
                 let named = snap.iter().filter(|(n, _)| p.tags.contains(n));
-                t.out
-                    .publish(&msg_of(named.map(|(n, v)| (n.as_str(), *v)), p.tags.len()))
+                msg_of(msg, named.map(|(n, v)| (n.as_str(), *v)))
             }
         }
+        t.out.publish(msg);
     }
 }
 
@@ -624,11 +632,24 @@ pub fn publish_period(rate: Option<f64>, model: &Model) -> Result<f64, String> {
 }
 
 fn owned_snapshot(model: &Model) -> Vec<(String, Value)> {
-    model
-        .snapshot()
-        .into_iter()
-        .map(|(t, v)| (t.to_string(), v))
-        .collect()
+    let mut snap = vec![];
+    refresh(&mut snap, &model.snapshot(), false);
+    snap
+}
+
+/// Make `snap` the model's snapshot. The tag names never change for a loaded model, so the usual case only
+/// overwrites the values; a buffer of other names (the first tick, a stale one) is rebuilt. `same_names` says the
+/// names of a buffer of the right length are known to be the model's (they were checked on an earlier tick).
+fn refresh(snap: &mut Vec<(String, Value)>, now: &[(&str, Value)], same_names: bool) {
+    if snap.len() == now.len()
+        && (same_names || snap.iter().zip(now).all(|((a, _), (b, _))| a == b))
+    {
+        for ((_, v), (_, nv)) in snap.iter_mut().zip(now) {
+            *v = *nv;
+        }
+    } else {
+        *snap = now.iter().map(|&(t, v)| (t.to_string(), v)).collect();
+    }
 }
 
 /// `--stamp-writes`: log when each accepted write was applied and solved (ww-1df.23.3).
@@ -662,41 +683,54 @@ pub fn stamp_lines(
 }
 
 /// One engine tick: apply queued writes, store the snapshot for the REP side, then advance the model.
-/// Returns the snapshot taken before the step.
-fn engine_tick(model: &mut Model, sh: &Mutex<Shared>) -> Vec<(String, Value)> {
+/// With `out`, the snapshot taken before the step is also copied into it (reusing its Strings).
+/// `same_names`: the stored snapshot's names were checked against the model on an earlier tick.
+fn engine_tick(
+    model: &mut Model,
+    sh: &Mutex<Shared>,
+    out: Option<&mut Vec<(String, Value)>>,
+    same_names: bool,
+) {
     let writes = std::mem::take(&mut lock(sh).queue);
     let rejected = model.apply_writes(&writes);
     let applied = unix_ns();
     for tag in &rejected {
         println!("Warn: write to {tag} rejected");
     }
-    let snap = owned_snapshot(model);
-    lock(sh).snap = snap.clone();
+    let now = model.snapshot();
+    refresh(&mut lock(sh).snap, &now, same_names);
+    if let Some(out) = out {
+        refresh(out, &now, same_names);
+    }
     model.step(model.dt);
     if STAMP.load(Ordering::Relaxed) {
         for l in stamp_lines(applied, unix_ns(), &writes, &rejected) {
             println!("{l}");
         }
     }
-    snap
 }
 
 /// Tick `k` (0-based): tick the engine, then publish its snapshot from the same thread on every `every`-th tick.
+/// `snap` is the engine's copy of the snapshot for publishing, kept between ticks.
 pub fn tick_and_publish(
     model: &mut Model,
     sh: &Mutex<Shared>,
     targets: &[Target],
+    snap: &mut Vec<(String, Value)>,
     k: u64,
     every: u64,
 ) {
     #[cfg(feature = "elastic")]
     let t = model.time;
-    let snap = engine_tick(model, sh);
-    if k.is_multiple_of(every) {
+    let publishing = k.is_multiple_of(every);
+    // `snap` is only ever filled from the model, so once it holds a snapshot the names of both copies were checked
+    let same_names = !snap.is_empty();
+    engine_tick(model, sh, publishing.then_some(&mut *snap), same_names);
+    if publishing {
         #[cfg(feature = "elastic")]
         crate::elastic::provider::set_sim_time(t);
-        crate::top::publish(&snap, Instant::now());
-        publish_all(targets, &snap);
+        crate::top::publish(snap, Instant::now());
+        publish_all(targets, snap);
     }
 }
 
@@ -704,8 +738,9 @@ pub fn tick_and_publish(
 fn engine(model: &mut Model, sh: &Mutex<Shared>, targets: &[Target], every: u64) {
     let t0 = Instant::now();
     let mut k = 0u64;
+    let mut snap = vec![];
     while !STOP.load(Ordering::SeqCst) {
-        tick_and_publish(model, sh, targets, k, every);
+        tick_and_publish(model, sh, targets, &mut snap, k, every);
         k += 1;
         let due = t0 + Duration::from_secs_f64(k as f64 * model.dt);
         if let Some(d) = due.checked_duration_since(Instant::now()) {
