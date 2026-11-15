@@ -1,3 +1,191 @@
+# [2026.11.15](https://github.com/adamsrnmsu/ferrofire/compare/v0.1.1...v2026.11.15) - 2026-11-15
+
+### 🚀 Features
+
+- _(bench)_ STOCK_IMAGE / STOCK_VERSION selector and a build recipe for the v2026.11.03 stock image (ww-1df.47) [_(beeda84)_](https://github.com/adamsrnmsu/ferrofire/commit/beeda847dcb0b87106f1e22f93e8294cc4547aab)
+
+- _(image)_ seed and supervise the RTU firmware from the data partition [_(3d10832)_](https://github.com/adamsrnmsu/ferrofire/commit/3d108328fb28fd3061c7602c62b98e4b9d9cc631)
+
+- _(image)_ Buildroot arm64 RTU base with read-only root and data partition [_(300bc43)_](https://github.com/adamsrnmsu/ferrofire/commit/300bc43d31625c2d04faed5ee21494afd4d96315)
+
+- _(watch)_ supervise the field device from a pushable firmware file [_(c546ea7)_](https://github.com/adamsrnmsu/ferrofire/commit/c546ea78b544e50f55be00df8b7d3a74ce061433)
+
+- _(bench)_ control-latency subset on the live range, 1/2/5 RTUs, ferrofire and stock bennu, 3 reps, raw CSV (ww-1df.23.5) [_(7c9fa8f)_](https://github.com/adamsrnmsu/ferrofire/commit/7c9fa8f22d031a783aff5d2fbb9e0df0d76b369b)
+
+- _(bench)_ live-range runner for the control-latency subset (provider VM + up to 5 RTU VMs through minimega cc) (ww-1df.23.5) [_(80fe0fb)_](https://github.com/adamsrnmsu/ferrofire/commit/80fe0fb4567498eccf4f0d20df0704a763f77a24)
+
+- _(bench)_ stock bennu baseline of the control-latency matrix, raw CSV and summary (ww-1df.23.4) [_(9febe26)_](https://github.com/adamsrnmsu/ferrofire/commit/9febe26f1e5abab98f45f928fc7a17817e8a7c85)
+
+- _(bench)_ stock bennu stack for the control-latency bench (pybennu PyPower + bennu-field-deviced), one fresh stack per cell (ww-1df.23.4) [_(812b4b8)_](https://github.com/adamsrnmsu/ferrofire/commit/812b4b8098bdb07f7b753c8100414a2626b7010d)
+
+- _(bench)_ control-latency matrix on ferrofire, raw CSV per run (ww-1df.23.3) [_(0d4d4b0)_](https://github.com/adamsrnmsu/ferrofire/commit/0d4d4b0bd6af42418b5347a8cd6e2ef20875b3e0)
+
+- _(bench)_ SCADA driver and docker harness for the control-latency bench (ww-1df.23.3) [_(1f52a75)_](https://github.com/adamsrnmsu/ferrofire/commit/1f52a75bf21cb5733bff1c02f505ac44dcb2c27d)
+
+- _(run)_ --stamp-writes logs when each accepted write was applied and solved (ww-1df.23.3) [_(f33a7b9)_](https://github.com/adamsrnmsu/ferrofire/commit/f33a7b9c1d7344299401e39e57e103496634e64d)
+
+- _(power)_ generator ramp on spin-up and spin-down, with ramp state and target tags (ww-1df.23.2) [_(44bb4c7)_](https://github.com/adamsrnmsu/ferrofire/commit/44bb4c76117c15f4642c1e6cd91512cfbd1b366c)
+
+- _(bench)_ synthetic 1250-breaker grid generator for the control-latency bench [_(a7ee2ae)_](https://github.com/adamsrnmsu/ferrofire/commit/a7ee2ae4498460fb8e86536065da58086ba5c516)
+
+- _(provider)_ Q-limit enforcement loop and a ground-truth HTTP page (ww-1df.2, ww-1df.3) [_(fbea626)_](https://github.com/adamsrnmsu/ferrofire/commit/fbea6265b09deb5ce9e0e4336ed5b1c2ea3d3a19)
+
+- _(scpi)_ ferrofire scpi speaks HiSLIP and VXI-11 and finds a rejected query at once under --check (ww-otj.85) [_(f7135cf)_](https://github.com/adamsrnmsu/ferrofire/commit/f7135cf5e8c482e6dac0ed4e1545e2a72093cd4a)
+
+- _(scpi)_ shared status scope, *RST defaults, bare CR, number errors; HiSLIP and VXI-11 servers (ww-otj.85) [_(b59caf4)_](https://github.com/adamsrnmsu/ferrofire/commit/b59caf415468d1b2107e5f21d289660072369d23)
+
+- _(iccp)_ answer the ACSE release after Conclude, Zeek weirds, s7comm coexistence, Supported_Features block names [_(3847d41)_](https://github.com/adamsrnmsu/ferrofire/commit/3847d412dd3ce4531246a651136df49531614946)
+
+- _(iccp)_ preset data sets and transfer sets per partner row (ww-otj.71) [_(35ae0e2)_](https://github.com/adamsrnmsu/ferrofire/commit/35ae0e2eca3e384645069df5e919f4bb86b2d439)
+
+- _(elastic)_ ferrofire groundtruth and the provider's Elasticsearch/OpenSearch export [_(791a3cf)_](https://github.com/adamsrnmsu/ferrofire/commit/791a3cfbb5979a146abc00d55b355f69088972f9)
+
+### 🐛 Bug Fixes
+
+- _(datagram)_ accept a body without the trailing NUL (ww-y87) [_(77494f0)_](https://github.com/adamsrnmsu/ferrofire/commit/77494f020655519a6c56449fcf60b17dcd7762ae)
+
+- _(fd)_ grow the input SO_RCVBUF and drain the socket before parsing (ww-c2i) [_(416ced8)_](https://github.com/adamsrnmsu/ferrofire/commit/416ced87315df4b24fab6ea0abcfaa59db53dc13)
+
+- _(image,watch)_ no su to root over the network; signal the firmware process group [_(248a48c)_](https://github.com/adamsrnmsu/ferrofire/commit/248a48c6c38aa1934bb209954033dbe5f739f756)
+
+- _(bench)_ field-device microbench drop test, redo the M and L Modbus runs (ww-1df.41) [_(bf99841)_](https://github.com/adamsrnmsu/ferrofire/commit/bf998418e5da4bdc304d445197a8ad7be6dbd741)
+
+- _(image)_ boot as a phenix drop-in: miniccc path, e1000, no dummy link [_(6c3ca21)_](https://github.com/adamsrnmsu/ferrofire/commit/6c3ca21e343556fbf68dd427014bf88e81b09ffd)
+
+- _(fd)_ hold a provider-ACKed point against stale stream values [_(fd307c6)_](https://github.com/adamsrnmsu/ferrofire/commit/fd307c6852e69df38a1a56e11943c17d969cb083)
+
+- _(transport)_ RADIO publisher picks a multicast interface for `*` and rides out EAGAIN [_(2ed4359)_](https://github.com/adamsrnmsu/ferrofire/commit/2ed4359193ef581ed50a985fc6d01acdf4b21ff0)
+
+- _(scpi)_ the UDP portmapper never answers a message that is not a CALL [_(8120e63)_](https://github.com/adamsrnmsu/ferrofire/commit/8120e636c99d3b49da7b5196254ef5b7c3e23a54)
+
+- _(scpi)_ a HiSLIP session waiting for the lock ends when its client leaves [_(3ae64ae)_](https://github.com/adamsrnmsu/ferrofire/commit/3ae64ae68f109fda39ffecd35eeb73498b51e048)
+
+- _(iccp)_ field-shaped DSTransferSet, Transfer_Set_Name and data sets (ww-otj.64, ww-otj.65) [_(72958a1)_](https://github.com/adamsrnmsu/ferrofire/commit/72958a1b64536571bde1b5ee50c94a871c7de3c6)
+
+### 🚜 Refactor
+
+- _(scpi)_ split the RPC call, the core dispatch, the client run, HiSLIP recv and VXI-11 open under the CRAP limit (ww-otj.85) [_(a065160)_](https://github.com/adamsrnmsu/ferrofire/commit/a065160194e1511d64817692af4547eefd52a6ed)
+
+### ⚡ Performance
+
+- _(iccp)_ cheaper ReadSet path, one store lookup per member, no member-list clone (ww-1df.52) [_(158282e)_](https://github.com/adamsrnmsu/ferrofire/commit/158282eda645abe2bb50c9491a50df2bf35e4e8f)
+
+- _(bennu)_ reuse the engine's snapshot and message buffers across ticks (ww-1df.51) [_(0c76e68)_](https://github.com/adamsrnmsu/ferrofire/commit/0c76e689718a9a5a6f3c7d7e33c83ca47c633df3)
+
+- _(fd)_ drop needless borrows at EventLog::log call sites (ww-1df.50) [_(b10c23d)_](https://github.com/adamsrnmsu/ferrofire/commit/b10c23d2390a65b46ef5154aa928f116eb61dee0)
+
+- _(fd)_ EventLog::log skips stamp and formatting when the log has nowhere to write (ww-1df.50) [_(0dec7b7)_](https://github.com/adamsrnmsu/ferrofire/commit/0dec7b7c70c4215e54d1b2d77a1897be69d694c6)
+
+- _(power)_ sparse LU for the power flow (ww-1df.49) [_(f9da794)_](https://github.com/adamsrnmsu/ferrofire/commit/f9da79471e2faa6efc26cafac9e349745c23b0ae)
+
+- _(model)_ skip the evals that cannot change a value (ww-1df.39) [_(b4bb8c8)_](https://github.com/adamsrnmsu/ferrofire/commit/b4bb8c884e9fd7ae14f4e2cc79a68e4b5e1d2481)
+
+- _(bennu)_ resolve slice positions once and write publish messages in place (ww-1df.38) [_(d88fdbf)_](https://github.com/adamsrnmsu/ferrofire/commit/d88fdbf997a81bea14ad6bf75725e028a083254f)
+
+- _(model)_ sync the power state once per write batch (ww-1df.37) [_(2cc5b75)_](https://github.com/adamsrnmsu/ferrofire/commit/2cc5b755a4797289ab88d04096c8de3d4288b634)
+
+- _(bennu)_ build the QUERY reply once in Meta (ww-1df.36) [_(0add760)_](https://github.com/adamsrnmsu/ferrofire/commit/0add760e8962d0e71bff87961df58b1b13210b77)
+
+### 📚 Documentation
+
+- _(profiling)_ ICCP read path independently re-measured (ww-1df.52) [_(7106c85)_](https://github.com/adamsrnmsu/ferrofire/commit/7106c8580b1a4e3e4a27d529395e5b876b422ea9)
+
+- _(profiling)_ snapshot-buffer reuse independently re-measured (ww-1df.51) [_(0fe5002)_](https://github.com/adamsrnmsu/ferrofire/commit/0fe5002a721b720132fe0b0dfc4dbe7f9e708ba2)
+
+- _(profiling)_ EventLog disabled path independently re-measured (ww-1df.50) [_(22ea068)_](https://github.com/adamsrnmsu/ferrofire/commit/22ea068c4d7f632f3e3634f3cb0304033601648f)
+
+- _(profiling)_ EventLog disabled-path measurement (ww-1df.50) [_(8417461)_](https://github.com/adamsrnmsu/ferrofire/commit/84174611b9b8dff2499a144d910671cf2b461c56)
+
+- _(profiling)_ sparse LU independently re-measured (ww-1df.49) [_(bd108eb)_](https://github.com/adamsrnmsu/ferrofire/commit/bd108ebf6b00a504efd62c9872dc00b2d990d284)
+
+- _(profiling)_ sparse LU measured and kept (ww-1df.49) [_(653e846)_](https://github.com/adamsrnmsu/ferrofire/commit/653e846f0a965ab05787f82c8811abb3d15119c2)
+
+- _(bench)_ maximum publish rate, ferrofire to ferrofire (ww-1df.43) [_(aa66b75)_](https://github.com/adamsrnmsu/ferrofire/commit/aa66b752c25ed99ab729bcd3bbae15cea4d14565)
+
+- _(bench)_ the fixed field device rerun and the 2x2 cell completed (ww-c2i, ww-y87) [_(1cc016c)_](https://github.com/adamsrnmsu/ferrofire/commit/1cc016c98eb5d614b0a335d52d50183cc2074f31)
+
+- _(bench)_ rerun stock side with bennu v2026.11.03 (ww-1df.47) [_(f12d187)_](https://github.com/adamsrnmsu/ferrofire/commit/f12d187e4b80f874074b88b8444e36fb0c5b74c9)
+
+- _(findings)_ review fixes [_(a1b8c8e)_](https://github.com/adamsrnmsu/ferrofire/commit/a1b8c8efb5f1279d005a4dcdeb922fb49b1ea680)
+
+- _(findings)_ final cross, field-device and C++ provider results [_(d62a594)_](https://github.com/adamsrnmsu/ferrofire/commit/d62a5941411f08a8de233e87d94fe034bdefaa85)
+
+- fix report numbers that did not match the raw data (ww-1df.45) [_(b549fa9)_](https://github.com/adamsrnmsu/ferrofire/commit/b549fa9d2210bb7b20509345f5b01c69f0a87015)
+
+- _(bench)_ cross, fdmicro and cppprov report corrections [_(c51a1ce)_](https://github.com/adamsrnmsu/ferrofire/commit/c51a1ceb304e0cd60d45f1d0712e12cd14f5bfd1)
+
+- _(bench)_ ferrofire vs bennu-simulink-provider with a stub model (ww-1df.42) [_(8f1f06a)_](https://github.com/adamsrnmsu/ferrofire/commit/8f1f06a6788c63672be8894d9b4911dbbd02be5e)
+
+- _(bench)_ field-device microbench, ferrofire vs stock bennu (ww-1df.41) [_(80b466b)_](https://github.com/adamsrnmsu/ferrofire/commit/80b466bd210ac04433ae2fa604f83a1564f24125)
+
+- _(bench)_ 2x2 provider x field-device cross bench (ww-1df.40) [_(e1ed566)_](https://github.com/adamsrnmsu/ferrofire/commit/e1ed566245d5c68bedb1b8336f0c55bb1c5e6a37)
+
+- _(findings)_ review fixes [_(aa03eea)_](https://github.com/adamsrnmsu/ferrofire/commit/aa03eeac76f367fcac74f4757335e4b3bd7cc422)
+
+- _(findings)_ one-page chart-led summary of the benchmark and test results [_(a233a39)_](https://github.com/adamsrnmsu/ferrofire/commit/a233a3947d3ca715550ee59e1ce1a06c09417147)
+
+- design and plan for the ferrofire RTU image (shared base + variant 1) [_(646e4c9)_](https://github.com/adamsrnmsu/ferrofire/commit/646e4c93e31311c52abdfbec21c050d1b7a88fec)
+
+- _(bench)_ stock bennu at faster publish intervals (ww-1df.35) [_(ad478ad)_](https://github.com/adamsrnmsu/ferrofire/commit/ad478ad2f1e0e97b9a66f8bda6cbbc0b1cce1756)
+
+- _(profiling)_ where the provider and field-device CPU goes, six measured optimizations (ww-1df.34) [_(9ad6d5e)_](https://github.com/adamsrnmsu/ferrofire/commit/9ad6d5edb2966dfe3e61f862840f21cb420fcad7)
+
+- _(bench)_ split order violations into real reorders and same-publish chunk skew (ww-1df.33) [_(afe1b2d)_](https://github.com/adamsrnmsu/ferrofire/commit/afe1b2dd346105aaf238e1b05d804abc42c2ef9f)
+
+- _(bench)_ re-run the ferrofire control-latency bench after the ACK hold (ww-1df.32) [_(29daf86)_](https://github.com/adamsrnmsu/ferrofire/commit/29daf86bc0705655647a06f4422a95e6b5f5aa4b)
+
+- _(bench)_ control-latency report with charts, ferrofire vs stock bennu, Docker vs range, and a results.md section (ww-1df.23.6) [_(3a59b48)_](https://github.com/adamsrnmsu/ferrofire/commit/3a59b48d03066b9b78c54d424333fbdb4867fa29)
+
+- _(testing)_ fuzz runs of the HiSLIP and VXI-11 targets (ww-otj.85) [_(8a079c0)_](https://github.com/adamsrnmsu/ferrofire/commit/8a079c02b19aa9b2862577e7ab9a8367198ea8aa)
+
+- _(testing)_ SCPI mutation result (ww-otj.85) [_(4d557bf)_](https://github.com/adamsrnmsu/ferrofire/commit/4d557bf89aa10cac560d7e25a7dd473894d2162d)
+
+### 🎨 Styling
+
+- _(mms)_ put the LINGER constant before the POLL doc comment it split [_(6440107)_](https://github.com/adamsrnmsu/ferrofire/commit/6440107f50ddd2b5c095881b2f98b6906afd574d)
+
+### 🧪 Testing
+
+- _(iccp)_ pin the bytes of a ReadSet and a Read answer (ww-1df.52) [_(44296cf)_](https://github.com/adamsrnmsu/ferrofire/commit/44296cf85d467009cd4a0d8606f2f7defa51e39f)
+
+- _(bennu)_ cover a same-length stale snapshot start (ww-1df.51) [_(f30b2be)_](https://github.com/adamsrnmsu/ferrofire/commit/f30b2be5cb06c85a024a0113c2f1643791460b3a)
+
+- _(datagram)_ half, cut-in-value, trailing-garbage and mid-NUL bodies are still refused or harmless (ww-y87) [_(5cbed31)_](https://github.com/adamsrnmsu/ferrofire/commit/5cbed31ce1737afe5e73b098dcd573c98e77bd83)
+
+- _(watch)_ give waits_for_stable_firmware a poll well above its write gap (ww-jqo) [_(829ad54)_](https://github.com/adamsrnmsu/ferrofire/commit/829ad5438cff101b6709a5c2e74acfb599f96d05)
+
+- _(scpi)_ a for loop for the scripted peer's replies (clippy) (ww-otj.85) [_(e3edfbd)_](https://github.com/adamsrnmsu/ferrofire/commit/e3edfbd42e0127e5c1ea302919dc6e24ba087741)
+
+- _(scpi)_ an empty raw-socket response line is a response (ww-otj.85) [_(1c5dea4)_](https://github.com/adamsrnmsu/ferrofire/commit/1c5dea47571b82ab7543dd50c86fa07855c19537)
+
+- _(scpi)_ the client handshakes against a scripted HiSLIP and VXI-11 peer; pin the remaining boundaries (ww-otj.85) [_(1c22dd2)_](https://github.com/adamsrnmsu/ferrofire/commit/1c22dd2cb253dac9f9b884055ba0f4c529d13d65)
+
+- _(scpi)_ pin the HiSLIP pending-response limit at its boundary (ww-otj.85) [_(24fb50a)_](https://github.com/adamsrnmsu/ferrofire/commit/24fb50af5f48a6b01c7f1eacd86ebeb1b03c34ed)
+
+- _(scpi)_ ports without a probe socket, waits where a second connection must see the first's effect (ww-otj.85) [_(465fc1e)_](https://github.com/adamsrnmsu/ferrofire/commit/465fc1ed05ed0698f9586338e57fad22ed47a011)
+
+- _(scpi)_ unit tests for the HiSLIP and VXI-11 client wires over a scripted stream; test ports below the ephemeral range (ww-otj.85) [_(105377a)_](https://github.com/adamsrnmsu/ferrofire/commit/105377a0b9c0cd8debd40c06a688ca2b38231686)
+
+- _(scpi)_ never hand two tests of a process the same free port (ww-otj.85) [_(a959d63)_](https://github.com/adamsrnmsu/ferrofire/commit/a959d6373374a3e0dca8fac89d776489c1b0a934)
+
+- _(scpi)_ kill the mutation survivors in the pure parts (ww-otj.85) [_(a10250e)_](https://github.com/adamsrnmsu/ferrofire/commit/a10250e714d245ddd2e2e41e51cfdad1c38bc40f)
+
+- _(scpi)_ HiSLIP and VXI-11 transcript goldens (ww-otj.85) [_(33ee29c)_](https://github.com/adamsrnmsu/ferrofire/commit/33ee29c251ad926efe459c503c27f8d30b9ca328)
+
+- _(scpi)_ conformance covers lxi discover; clear the queue before the garbage section (ww-otj.85) [_(d0b045f)_](https://github.com/adamsrnmsu/ferrofire/commit/d0b045f6dcde459e243956f4db17fa4fe44d0a62)
+
+- _(scpi)_ fuzz targets for HiSLIP and the RPC/XDR decoder, conformance with PyVISA over HiSLIP and VXI-11, lxi without --raw; docs (ww-otj.85) [_(bfb3a6b)_](https://github.com/adamsrnmsu/ferrofire/commit/bfb3a6bf1cccda4a02c93e29ca997ac4829c27e8)
+
+- _(scpi)_ HiSLIP and VXI-11 socket tests (ww-otj.85) [_(6491093)_](https://github.com/adamsrnmsu/ferrofire/commit/64910931bd4c5c966ab63b9112e0cbf89f88e60e)
+
+- _(iccp)_ tolerate the one known indefinite-length weird on the real iccp capture (ww-otj.84) [_(f37b1bd)_](https://github.com/adamsrnmsu/ferrofire/commit/f37b1bdb8868be3aef8ee12470266216a3d5fb3d)
+
+### ⏩ CI/CD
+
+- _(release)_ CalVer versions (vYYYY.M.D) like sceptre-bennu (ww-1df.30) [_(27c0e0a)_](https://github.com/adamsrnmsu/ferrofire/commit/27c0e0a150d7812cc2926a0c453c335cdefce81a)
+
+- ship glibc 2.17 (gnu) release binaries next to musl [_(b337d85)_](https://github.com/adamsrnmsu/ferrofire/commit/b337d85f6ec3d31d5a5281c8eb1e80480eabf354)
+
 # [0.1.1](https://github.com/adamsrnmsu/ferrofire/compare/v0.1.0...v0.1.1) - 2026-11-11
 
 ### 🐛 Bug Fixes
