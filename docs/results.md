@@ -301,6 +301,66 @@ Both field devices expose a new value in about a tenth of a millisecond, ferrofi
 Plumbing only, no solver: the unmodified C++ provider on a C stand-in for the Simulink model against ferrofire with an equally trivial model, through the same field devices and driver (100 and 1 250 points, publish 0.1 and 0.05 s, 10 RTUs, Docker, 3 reps).
 Method, deviations and all tables: [cpp-provider.md](bench/cpp-provider.md); raw: [results/cppprov-v2026.11.03/](bench/results/cppprov-v2026.11.03/) (bennu v2026.11.03, the current release, rerun in ww-1df.47) and [results/cppprov/](bench/results/cppprov/) (bennu 6.0.0, the first run). At a 0.05 s interval ferrofire shows a write in 49 ms in every rep against 148-150 ms pooled through the C++ provider (two unsynchronised timers whose phase is fixed per run, so the 3 reps span 100 to 200 ms and the factor of 3.0x is indicative only) and publishes at exactly the interval (the C++ provider sleeps after the work: 53-56 ms). 1 000 simultaneous writes are all delivered by ferrofire and, with bennu v2026.11.03, by the C++ chain too; the first run (bennu 6.0.0) lost 49-53% through the C++ provider (its 256-message update FIFO filled between two 50 ms steps, which the release enlarged: `e59691f`) and 80% through the 6.0.0 field device. New with v2026.11.03: its field device flaps behind the C++ provider (6 411 of 8 040 commands: the read-back shows the new state, the old one, the new one again), which no ferrofire pairing nor bennu 6.0.0 did.
 
+## 12. Maximum publish rate: ferrofire provider to ferrofire field device
+
+How fast `ferrofire run` can publish to `ferrofire field-device` (real processes on both ends), Docker, 3 reps, 15 / 800 / 8 112 tags and the 1 250-breaker control grid, one and ten devices, engine tick = publish period from 50 ms down to 1 ms. Unit: percent of one core used by the provider.
+Method, the knee per size, the recommended safe rate, device cpu, loss, stream to register and the breaker-flip latency floor: [max-rate.md](bench/max-rate.md); raw: [results/maxrate/](bench/results/maxrate/).
+
+![Provider cpu against the publish rate](img/charts/13b-maxrate-provider-cpu.svg)
+
+| model | devices | target Hz | dt ms | reps | provider cpu % |
+|---|---|---|---|---|---|
+| 15 tags | 1 | 20 | 50 | 3 | 0.5 |
+| 15 tags | 1 | 50 | 20 | 3 | 0.8 |
+| 15 tags | 1 | 100 | 10 | 3 | 1.4 |
+| 15 tags | 1 | 200 | 5 | 3 | 2.3 |
+| 15 tags | 1 | 500 | 2 | 3 | 4.7 |
+| 15 tags | 1 | 1000 | 1 | 3 | 7.5 |
+| 800 tags | 1 | 20 | 50 | 3 | 1.5 |
+| 800 tags | 1 | 50 | 20 | 3 | 3.4 |
+| 800 tags | 1 | 100 | 10 | 3 | 6.6 |
+| 800 tags | 1 | 200 | 5 | 3 | 12.0 |
+| 800 tags | 1 | 500 | 2 | 3 | 28.4 |
+| 800 tags | 1 | 1000 | 1 | 3 | 55.1 |
+| 8 112 tags | 1 | 20 | 50 | 3 | 11.4 |
+| 8 112 tags | 1 | 50 | 20 | 3 | 20.9 |
+| 8 112 tags | 1 | 100 | 10 | 3 | 32.0 |
+| 8 112 tags | 1 | 200 | 5 | 3 | 53.5 |
+| 8 112 tags | 1 | 500 | 2 | 3 | 100.0 |
+| 8 112 tags | 1 | 1000 | 1 | 3 | 100.0 |
+| control grid | 1 | 20 | 50 | 3 | 7.9 |
+| control grid | 1 | 50 | 20 | 3 | 20.3 |
+| control grid | 1 | 100 | 10 | 3 | 30.7 |
+| control grid | 1 | 200 | 5 | 3 | 47.1 |
+| control grid | 1 | 500 | 2 | 3 | 83.5 |
+| control grid | 1 | 1000 | 1 | 3 | 100.1 |
+| 15 tags | 10 | 20 | 50 | 3 | 1.5 |
+| 15 tags | 10 | 50 | 20 | 3 | 3.1 |
+| 15 tags | 10 | 100 | 10 | 3 | 5.8 |
+| 15 tags | 10 | 200 | 5 | 3 | 10.6 |
+| 15 tags | 10 | 500 | 2 | 3 | 23.9 |
+| 15 tags | 10 | 1000 | 1 | 3 | 42.1 |
+| 800 tags | 10 | 20 | 50 | 3 | 2.8 |
+| 800 tags | 10 | 50 | 20 | 3 | 6.6 |
+| 800 tags | 10 | 100 | 10 | 3 | 12.2 |
+| 800 tags | 10 | 200 | 5 | 3 | 23.5 |
+| 800 tags | 10 | 500 | 2 | 3 | 54.4 |
+| 800 tags | 10 | 1000 | 1 | 3 | 67.7 |
+| 8 112 tags | 10 | 20 | 50 | 3 | 18.3 |
+| 8 112 tags | 10 | 50 | 20 | 3 | 28.0 |
+| 8 112 tags | 10 | 100 | 10 | 3 | 48.1 |
+| 8 112 tags | 10 | 200 | 5 | 3 | 85.1 |
+| 8 112 tags | 10 | 500 | 2 | 3 | 100.0 |
+| 8 112 tags | 10 | 1000 | 1 | 3 | 100.0 |
+| control grid | 10 | 20 | 50 | 3 | 10.2 |
+| control grid | 10 | 50 | 20 | 3 | 23.2 |
+| control grid | 10 | 100 | 10 | 3 | 32.2 |
+| control grid | 10 | 200 | 5 | 3 | 52.3 |
+| control grid | 10 | 500 | 2 | 3 | 100.0 |
+| control grid | 10 | 1000 | 1 | 3 | 100.1 |
+
+The provider's single engine thread is the limit: it reaches 100% at about 400 Hz for 8 112 tags with one device (236 Hz with ten) and 600 Hz for the grid, and the field devices lost no datagram anywhere (`RcvbufErrors` 0 in 156 runs). Safe rates (provider at most 60% of a core): 1 000 Hz for 15 tags, 500-1 000 Hz for 800, 100-200 Hz for 8 112, 200 Hz for the grid.
+
 ## Other results on the bench and the live range
 
 These have no chart: each is a single measured event rather than a comparison across settings.

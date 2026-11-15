@@ -22,6 +22,7 @@ Reruns over the same raw data are byte-identical. No docker, no build, no benchm
 | `cpu-profiling.py` | 7 | `cpu-profiling-raw/` (copied from `/var/tmp/ff-prof`) |
 | `field-device.py` | 8 | `docs/bench/results/fdmicro` (through `bench/fdmicro_report.py`) |
 | `cpp-provider.py` | 9 | `docs/bench/results/cppprov` (bennu 6.0.0) and `cppprov-v2026.11.03` |
+| `max-rate.py` | 10 | `docs/bench/results/maxrate` (through `bench/maxrate_report.py`) |
 
 Colours: ferrofire blue `#2a78d6`, bennu v2026.11.03 (current stock) grey `#898781`, bennu 6.0.0 (historical stock) light grey `#c9c8c0`, as in `bench/charts.py`.
 

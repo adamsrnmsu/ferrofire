@@ -10,6 +10,7 @@ Raw output in docs/bench/results/control/<stack>/: R<R>_rep<k>.cmds.csv (one row
 Finished runs are skipped, so an interrupted matrix resumes.
 
 Env: STACK (ferrofire), OUTDIR, RS (1,2,5,10), REPS (5), CELLS (default: the full matrix), SLOW (cells that get SLOW_REPS reps only), SLOW_REPS,
+FD_CYCLE_MS (field device scan cycle-time, default 50), DT_MS (ww-1df.43: tick and publish period of the ferrofire provider in ms, grids under target-linux/control-grid-dt<ms>),
 NOBUILD=1 (use the binaries already in target-linux), WAIT (seconds to wait for other cargo containers to finish before a run, 600).
 STOCK_IMAGE (ffc-stock:22.04 = bennu 6.0.0, the phenix overlay image, pre-91fd137) and STOCK_VERSION (6.0.0): which stock image and the label for it (ww-1df.47: ffc-stock-2026.11.03:22.04, 2026.11.03, from bench/stock_image.sh);
 a non-default STOCK_VERSION is recorded in env.txt and suffixes the default OUTDIR (stock-v2026.11.03, cross-stock-stock-v2026.11.03-0.1s), so old results are never overwritten.
@@ -40,7 +41,8 @@ CELLS = ENV("CELLS", ",".join([f"breaker:{m}:{n}" for n in BREAKERS for m in ("s
 SLOW, SLOW_REPS = [c for c in ENV("SLOW", "") if c], int(os.environ.get("SLOW_REPS", str(REPS)))
 WAIT = int(os.environ.get("WAIT", "600"))
 OUT = ROOT / os.environ.get("OUTDIR", f"docs/bench/results/control/{STACK}{VER}" + (f"-{PUB}s" if CROSS and PROV == "stock" and PUB != "1" else ""))  # OUTDIR: a scratch dir for smoke runs, relative to the repo
-GRID = ROOT / "target-linux/control-grid"
+DT_MS = os.environ.get("DT_MS")   # ww-1df.43: ferrofire engine tick AND publish period in ms (default: the grid as gen_grid writes it, dt 50 ms, publish 100 ms)
+GRID = ROOT / ("target-linux/control-grid" + (f"-dt{DT_MS}" if DT_MS else "") + (f"-fd{os.environ['FD_CYCLE_MS']}" if "FD_CYCLE_MS" in os.environ else ""))
 LABEL = "ffcontrol=1"
 IMG, NET, PLAT = "ff-rust:22.04", "ffcontrol", "linux/arm64"
 FF, CTL = "/src/target-linux/release/ferrofire", "/src/target-linux/ctl/release/ffcontrol"
@@ -62,14 +64,16 @@ def build():
 
 
 def grid():
-    sh("python3", str(ROOT / "bench/gen_grid.py"), str(GRID), "--rtus", ",".join(map(str, RS)), stdout=subprocess.DEVNULL)
+    dt = ["--dt", str(int(DT_MS) / 1000), "--rate", str(int(DT_MS) / 1000)] if DT_MS else []
+    dt += ["--cycle-ms", os.environ["FD_CYCLE_MS"]] if "FD_CYCLE_MS" in os.environ else []
+    sh("python3", str(ROOT / "bench/gen_grid.py"), str(GRID), "--rtus", ",".join(map(str, RS)), *dt, stdout=subprocess.DEVNULL)
 
 
 STREAM = {"ferrofire": "udp://*;239.0.1.{n}:40000", "stock": "udp://*;239.0.0.1:40000"}   # the provider's stream endpoint per RTU n
 
 
 def start_provider(prov, r):
-    d = f"/src/target-linux/control-grid/R{r}"
+    d = f"/src/{GRID.relative_to(ROOT)}/R{r}"
     if prov == "ferrofire":
         docker_run("ffc-prov", "provider", FF, "run", f"{d}/model.yaml", "--stamp-writes")
     else:  # pybennu-power-solver (PyPower; bench/stock_provider.py = stock plus `Applied:` stamps); stock publishes the whole model, once a second, to the one endpoint of config.ini
@@ -80,7 +84,7 @@ def start_provider(prov, r):
 def start_fd(fd, prov, r):
     """R field devices of kind fd subscribed to prov's stream. Native pairing: the generated config as is; mixed: a copy whose stream endpoint is prov's (gen_grid writes
     each kind's own endpoint; that is the only difference between ferrofire/rtu-N.xml and bennu/rtu-N.xml)."""
-    d, kind = f"/src/target-linux/control-grid/R{r}", "ferrofire" if fd == "ferrofire" else "bennu"
+    d, kind = f"/src/{GRID.relative_to(ROOT)}/R{r}", "ferrofire" if fd == "ferrofire" else "bennu"
     for n in range(1, r + 1):
         xml = f"{d}/{kind}/rtu-{n}.xml"
         if fd != prov:
@@ -100,7 +104,7 @@ def start_fd(fd, prov, r):
 def start_stack(r):
     start_provider(PROV, r)
     start_fd(FDK, PROV, r)
-    return f"/src/target-linux/control-grid/R{r}/scada.json", STREAM[PROV]
+    return f"/src/{GRID.relative_to(ROOT)}/R{r}/scada.json", STREAM[PROV]
 
 
 def docker_run(name, alias, *cmd, img=IMG, extra=()):

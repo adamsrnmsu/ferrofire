@@ -10,7 +10,7 @@ DRY_MIN := 0.8
 # ponytail: pid lock; a kill -9 of make leaves a stale file that src-free ignores because the pid is gone.
 MUTATE_LOCK := .mutate.lock
 
-.PHONY: netns differential diff-dnp3 diff-modbus testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report bench-control bench-fdmicro charts image rtu-image rtu-image-smoke fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
+.PHONY: netns differential diff-dnp3 diff-modbus testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report bench-control bench-fdmicro bench-maxrate bench-maxrate-control charts image rtu-image rtu-image-smoke fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
 help:    # list targets
 	@grep -E '^[a-z-]+:.*#' $(MAKEFILE_LIST) | sed -E 's/^([a-z-]+):[^#]*#/\1\t/'
 src-free:   # fail fast while make mutate is rewriting src/
@@ -63,6 +63,10 @@ bench-control: image   # control-latency matrix (breaker flips, generator spin u
 	STACK=$(STACK) python3 bench/run_control.py
 bench-fdmicro: image   # field-device microbench, ferrofire vs stock bennu-field-deviced with a scripted provider (about 2 h, 3 reps) -> docs/bench/results/fdmicro; then: make charts (bench/fdmicro/README.md)
 	python3 bench/fdmicro/run.py
+bench-maxrate: image   # maximum publish rate, ferrofire provider -> ferrofire field device (3 reps, about 1.2 h) -> docs/bench/results/maxrate; then: make charts (bench/maxrate/README.md)
+	SECS=10 python3 bench/maxrate/run.py
+bench-maxrate-control: image   # grid flip latency at each engine dt (bench/run_control.py DT_MS; about 1 h) -> docs/bench/results/maxrate/control/dt<ms>
+	for d in 50 20 10 5 2 1; do DT_MS=$$d REPS=3 RS=1,10 CELLS=breaker:seq:100,breaker:sim:100 OUTDIR=docs/bench/results/maxrate/control/dt$$d python3 bench/run_control.py || exit 1; done
 bench-dg-report:   # docs/bench/datagram-v1-bench.md from the datagram v1 raw results
 	python3 bench/dg_report.py
 FUZZ_TARGETS := request datagram expr model fd_datagram fd_config fd_modbus fd_dnp3 fd_iec61850 fd_iccp fd_mqtt fd_scpi fd_hislip fd_vxi11

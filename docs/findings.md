@@ -15,6 +15,7 @@ ferrofire against stock bennu as shipped: Docker bench on one VM plus a live phe
 - **New with v2026.11.03: flaps.** Behind a ferrofire provider its field device flapped on **27 %** of 100 simultaneous flips on 5 RTUs and **33 %** of 1 000 (ferrofire's own field device: 0); cause not traced.
 - Against the C++ provider (stub model): **49 ms** against 148-150 ms at a 0.05 s publish (bennu v2026.11.03), indicative only; its 1 000-flip loss of 49-53 % on 6.0.0 is gone.
 - One hour on the live range: **35 993** datagrams sent, **0** missing.
+- Publish rate ceiling: the provider's one thread, **398 Hz** at 8 112 tags (1 device), **607 Hz** on the control grid; nothing is lost at the device.
 - Stock bennu fails **5 of 5** fault checks; three proposed fixes pass all 5.
 
 ## 1. How fast does a command take effect?
@@ -151,14 +152,29 @@ Plumbing only: at a 0.05 s publish ferrofire shows a flip in 49 ms, the C++ `ben
 
 *Stub model with a 0.05 s step, no solver, 3 reps. The C++ latency depends on that step.*
 
+## 10. How fast can it publish?
+
+ferrofire provider to ferrofire field device, engine tick = publish period from 50 ms to 1 ms: the provider's one engine thread is the limit, not the device and not the network. Detail: [max-rate.md](bench/max-rate.md).
+
+![Publish rate achieved against the target](img/findings/max-rate-1-achieved.svg)
+
+![Breaker flip to visible against the engine tick](img/findings/max-rate-2-flip.svg)
+
+- Knee (provider at 100 % of a core): **8 112 tags 398 Hz with 1 device, 236 Hz with 10; control grid 607 and 467 Hz**; 15 and 800 tags reach the 1 kHz end of the sweep (7 % and 55-68 % of a core).
+- Safe rate (provider at most 60 % of a core, target met): 15 tags 1 000 Hz, 800 tags 500-1 000 Hz, 8 112 tags 100-200 Hz, grid 200 Hz. The default is 10 Hz.
+- The field devices lost **no datagram** in 156 runs (`RcvbufErrors` 0, up to 65 000 datagrams/s); stream to register is **0.06-0.26 ms** at every rate. A device's own ceiling is about 800 Hz at 8 112 tags (extrapolated), above the provider's.
+- Flip on the control grid: **49-54 ms at any engine tick** because the device's 50 ms scan forwards the write; with scan = dt **12.9 ms at 1 ms**, where one 9 ms AC re-solve is the floor (ww-xco, ww-aj8).
+
+*Docker, 3 reps, every value changing every tick (worst case), Modbus only, one VM. No range point, no injected loss, no lower `rmem_max`.*
+
 ## Open
 
 - Flaps of the v2026.11.03 field device under bursts (behind a ferrofire provider and a fast bennu provider): cause not traced.
-- Maximum publish rate (ww-1df.43): was blocked on ww-c2i, which is fixed.
+- Maximum publish rate (ww-1df.43): measured in Docker (section 10); a range point is not. Follow-ups: ww-xco (device forwards a write at the next scan), ww-aj8 (tick overruns not reported, grid idle tick 0.6 ms).
 - Upstream bennu issue about the burst loss: not needed, 91fd137 fixed it.
 
 ## Sources
 
-- Detail: [results](results.md), [control latency](bench/control-latency.md), [field device](bench/field-device.md), [C++ provider](bench/cpp-provider.md), [datagram bench](bench/datagram-v1-bench.md), [transports](bench/transport-comparison.md), [profiling](profiling.md), [testing](testing.md).
+- Detail: [results](results.md), [control latency](bench/control-latency.md), [maximum publish rate](bench/max-rate.md), [field device](bench/field-device.md), [C++ provider](bench/cpp-provider.md), [datagram bench](bench/datagram-v1-bench.md), [transports](bench/transport-comparison.md), [profiling](profiling.md), [testing](testing.md).
 - Raw data: [`docs/bench/results/`](bench/results/), [`bench/findings/cpu-profiling-raw/`](../bench/findings/cpu-profiling-raw/).
 - Scripts and what the raw data cannot settle: [`bench/findings/README.md`](../bench/findings/README.md).

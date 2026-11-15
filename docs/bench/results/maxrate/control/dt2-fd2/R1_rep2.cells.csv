@@ -1,0 +1,3 @@
+stack,R,rep,cell,mode,kind,dir,n,issued,ok,lost,wrong_final,wrong_provider,wrong_collateral,order_violations,flaps,write_errors,span_s,wall_s,per_s,poll_errors,vm_load1_start_end
+ferrofire,1,2,breaker:seq:100,seq,breaker,open,100,100,100,0,0,0,0,0,0,0,1.510,2.614,66.21,0,2.58/2.45
+ferrofire,1,2,breaker:sim:100,sim,breaker,open,100,100,100,0,0,0,0,0,0,0,0.023,1.130,4275.14,0,2.45/2.45

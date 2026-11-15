@@ -1,0 +1,3 @@
+== breaker:seq:100,breaker:sim:100 exit 0
+breaker:seq:100 open: 100/100 done, lost 0, wrong 0/0, flaps 0, 5.08 s
+breaker:sim:100 open: 100/100 done, lost 0, wrong 0/0, flaps 0, 0.05 s

@@ -20,6 +20,7 @@ import dg_report as dg  # noqa: E402  (stdlib only)
 import report  # noqa: E402  (matplotlib only inside its own chart functions)
 import control_report as cr  # noqa: E402  (stdlib only)
 import fdmicro_report as fm  # noqa: E402  (stdlib only)
+import maxrate_report as mr  # noqa: E402  (stdlib only)
 
 ROOT, RES = dg.ROOT, dg.RES
 OUT = ROOT / "docs/img/charts"
@@ -937,10 +938,135 @@ def chart_fdmicro():
            "DNP3 class-0 integrity poll: latency, throughput and stream-to-visible", "", axs[0], leg, note="One master, READ g60v1 (class 0), every fragment that asks for it confirmed. Poll time: p50 bar, p99 tick, 300 polls 20 ms apart; polls per second: back to back; stream to visible: p50, tight poll, probe flipped 1.5-3 s apart, pooled.", left=0.06)
 
 
+def chart_maxrate():
+    """13a-13f: the maximum publish rate, ferrofire provider -> ferrofire field device (ww-1df.43), Docker. Median over reps; x = engine tick = publish period."""
+    if not mr.DATA:
+        return
+    MC = {"S": "#6250d6", "M": "#1baf7a", "L": "#2a78d6", "G": "#eb6834"}
+    ML = {"S": "15 tags", "M": "800 tags", "L": "8 112 tags", "G": "control grid"}
+    leg = [sw(ML[m], MC[m]) for m in mr.MODELS]
+    dts = mr.DTS
+    xs = [mr.hz(d) for d in dts]
+    n = lambda m, r, d: len(mr.reps(m, r, d))
+    f1 = lambda x: "" if x is None else f"{x:.1f}"
+    f2 = lambda x: "" if x is None else f"{x:.2f}"
+    f0 = lambda x: "" if x is None else f"{x:,.0f}".replace(",", " ")
+
+    def lines(name, title, ylabel, metric, fmt, note, log=False, ref=None, head=None, diag=False, ylim=None):
+        fig, axs = fig_ax(8.2, 3.6, ncols=2, sharey=True)
+        rows = []
+        for ax, r in zip(axs, (1, 10)):
+            ax.set_title(f"{r} field device" + ("s" if r > 1 else ""), fontsize=8.5, color=INK2, loc="left")
+            for m in mr.MODELS:
+                pts = [(mr.hz(d), mr.med(m, r, d, metric)) for d in dts]
+                pts = [(x, v) for x, v in pts if v is not None]
+                if not pts:
+                    continue
+                ax.plot([x for x, _ in pts], [v for _, v in pts], color=MC[m], lw=1.4, marker="o", ms=3.5)
+                for d in dts:
+                    v = mr.med(m, r, d, metric)
+                    rows.append((ML[m], r, f"{mr.hz(d):g}", d, n(m, r, d), fmt(v)))
+            ax.set_xscale("log")
+            ax.set_xticks(xs, [f"{x:g}" for x in xs])
+            ax.minorticks_off()
+            ax.tick_params(length=0)
+            ax.set_xlabel("target rate, Hz (engine tick = publish period: 50 20 10 5 2 1 ms)", fontsize=7.5)
+            if log:
+                ax.set_yscale("log")
+            if ref is not None:
+                ax.axhline(ref, color=MUTED, lw=0.8, ls="--")
+            if diag:
+                ax.plot(xs, xs, color=MUTED, lw=0.8, ls="--")
+            if ylim:
+                ax.set_ylim(*ylim)
+        finish(fig, name, rows, ["model", "devices", "target Hz", "dt ms", "reps", head or metric], title, ylabel, axs[0], leg, note=note, left=0.07)
+
+    lines("13a-maxrate-achieved", "Publish rate achieved against the target rate", "datagram cycles per second, from the provider's own send timestamps (dashed: the target)",
+          "pub_rate_hz", f1, "Window of 10 s per cell, 3 reps, median. A cycle is one full snapshot of every published tag.", log=True, diag=True, head="achieved Hz")
+    lines("13b-maxrate-provider-cpu", "Provider cpu against the publish rate", "percent of one core (dashed: one core), whole `ferrofire run` process", "prov.cpu_pct", f1,
+          "From /proc/<pid>/stat over a 10 s window in which nobody polls any device.", log=True, ref=100, head="provider cpu %")
+    lines("13c-maxrate-fd-cpu", "Field-device cpu against the publish rate", "percent of one core, the busiest device, the stream only (nobody polls it)", "fd_cpu_max", f1,
+          "From /proc/<pid>/stat over a 10 s window. With 10 devices each carries a tenth of the tags.", log=True, ref=100, head="busiest device cpu %")
+    lines("13d-maxrate-loss", "Datagrams lost on the way to a field device", "percent of the datagrams sent (the worst device); kernel RcvbufErrors are in the table of max-rate.md", "fd_loss_max_pct", f2,
+          "Sent = span of _ff.seq in a 10 s window (seen by the observer's own socket); delivered = Udp InDatagrams of the device's network namespace. The window edges differ by a few datagrams: read |loss| < 0.1 % as zero.", head="worst device loss %")
+    lines("13e-maxrate-s2r", "Stream to register at the field device (p99)", "milliseconds from the provider's send timestamp to the first Modbus read that shows the value, p99; a tight poll on device 1 (about 30 us per read)", "s2r_p99_ms", f2,
+          "Probe: bench.cnt, one tick counter per publish cycle in RTU 1's slice. Poll round trip is in max-rate.md. p50 is in the table there.", log=True, head="p99 ms")
+
+    def table(name, head, rows):
+        TABLES[name] = "\n".join(["| " + " | ".join(head) + " |", "|" + "---|" * len(head)] + ["| " + " | ".join(str(c) for c in r) + " |" for r in rows])
+        with open(OUT / f"{name}.csv", "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(head)
+            w.writerows(rows)
+
+    cell = lambda m, r, d, pub: [f1(mr.med(m, r, d, "tick_rate_hz", pub)), f1(mr.med(m, r, d, "pub_rate_hz", pub)), f1(mr.med(m, r, d, "late_pct", pub)), f2(mr.med(m, r, d, "interval_p99_ms", pub)),
+                                 f0(mr.med(m, r, d, "prov.cpu_pct", pub)), f0(mr.med(m, r, d, "prov.rss_mb", pub)), f1(mr.med(m, r, d, "fd_cpu_max", pub)), f0(mr.med(m, r, d, "fd_rss_max", pub)),
+                                 f2(mr.med(m, r, d, "fd_loss_max_pct", pub)), f0(mr.total(m, r, d, "rcvbuf_errors_total", pub)), f2(mr.med(m, r, d, "s2r_p50_ms", pub)), f2(mr.med(m, r, d, "s2r_p99_ms", pub))]
+    h = ["ticks/s", "publishes/s", "intervals > 1.5 periods %", "interval p99 ms", "provider cpu %", "provider RSS MB", "busiest device cpu %", "device RSS MB", "worst device loss %", "RcvbufErrors", "stream to register p50 ms", "p99 ms"]
+    table("13i-maxrate-all", ["model", "devices", "dt ms", "reps", *h],
+          [(ML[m], r, d, n(m, r, d), *cell(m, r, d, d)) for m in mr.MODELS for r in (1, 10) for d in mr.DTS if mr.reps(m, r, d)])
+    table("13h-maxrate-decoupled", ["model", "devices", "dt ms", "publish ms", "reps", *h],
+          [(ML[m], 1, d, p, len(mr.reps(m, 1, d, p)), *cell(m, 1, d, p)) for m in "LG" for d, p in sorted({(k[2], k[3]) for k in mr.DATA if k[0] == m and k[1] == 1 and k[2] != k[3]})])
+
+    # knee table ---------------------------------------------------------------------------------------------------------------------------------------------------------
+    rows = []
+    for m in mr.MODELS:
+        for r in (1, 10):
+            ok = lambda d: mr.med(m, r, d, "pub_ratio") >= 99.0 and mr.med(m, r, d, "late_pct") < 1
+            good = [d for d in mr.DTS if ok(d)]
+            if not good:
+                continue
+            top = min(good)   # smallest dt (fastest rate) that was met
+            safe = [d for d in good if mr.med(m, r, d, "prov.cpu_pct") <= 60]
+            bad = [d for d in mr.DTS if not ok(d)]
+            at = lambda d, k: mr.med(m, r, d, k)
+            rows.append((ML[m], r, f"{mr.hz(top):g}", f1(at(top, "prov.cpu_pct")), f1(at(top, "fd_cpu_max")), (f"{mr.hz(min(bad)):g}: {at(min(bad), 'pub_rate_hz'):.0f}" if bad else "none below 1 ms"),
+                         f"{mr.hz(min(safe)):g}" if safe else "none",
+                         f"{mr.total(m, r, 1, 'rcvbuf_errors_total') + sum(mr.total(m, r, d, 'rcvbuf_errors_total') for d in mr.DTS[:-1]):.0f}"))
+    head = ["model", "devices", "fastest target met, Hz", "provider cpu % there", "busiest device cpu % there", "first target missed: achieved Hz", "recommended safe rate, Hz", "RcvbufErrors, all steps, all reps"]
+    TABLES["13g-maxrate-knee"] = "\n".join(["| " + " | ".join(head) + " |", "|" + "---|" * len(head)] + ["| " + " | ".join(str(c) for c in r) + " |" for r in rows])
+    with open(OUT / "13g-maxrate-knee.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(head)
+        w.writerows(rows)
+
+    # 13f: grid flip latency (ffcontrol) against the engine dt, and the same with the device's scan cycle-time = dt -------------------------------------------------
+    if any(mr.control(d, 1) for d in mr.DTS):
+        fig, axs = fig_ax(8.2, 3.6, ncols=2, sharey=True)
+        rows = []
+        var = [(False, "scan 50 ms (as shipped)", "#898781"), (True, "scan = dt", "#2a78d6")]
+        for ax, r in zip(axs, (1, 10)):
+            ax.set_title(f"{r} field device" + ("s" if r > 1 else ""), fontsize=8.5, color=INK2, loc="left")
+            for fd, label, c in var:
+                pts = []
+                for d in mr.DTS:
+                    lat, issued, lost = mr.control_latency(d, r, "breaker:seq:100", fd)
+                    if lat:
+                        pts.append((d, mr.pct(lat, .5), mr.pct(lat, .95)))
+                        sim = mr.control(d, r, fd)
+                        sl = sum(float(x["breaker:sim:100"]["lost"]) for _, x in sim)
+                        si = sum(float(x["breaker:sim:100"]["issued"]) for _, x in sim)
+                        rows.append((r, label, d, len(sim), issued, f1(pts[-1][1]), f1(pts[-1][2]), f"{lost}", f"{int(sl)} of {int(si)}"))
+                if pts:
+                    ax.plot([d for d, *_ in pts], [a for _, a, _ in pts], color=c, lw=1.4, marker="o", ms=3.5)
+                    ax.plot([d for d, *_ in pts], [b for _, _, b in pts], color=c, lw=1.0, ls="--", marker="o", ms=2.5)
+            ax.set_xscale("log")
+            ax.set_yscale("log")
+            ax.set_xticks(list(mr.DTS), [str(d) for d in mr.DTS])
+            ax.set_yticks([10, 20, 50, 100], ["10", "20", "50", "100"])
+            ax.minorticks_off()
+            ax.invert_xaxis()
+            ax.tick_params(length=0)
+            ax.set_xlabel("engine tick = publish period, ms", fontsize=7.5)
+        finish(fig, "13f-maxrate-flip", rows, ["devices", "device scan", "dt ms", "reps", "flips (seq)", "p50 ms", "p95 ms", "seq flips not seen", "sim flips lost"],
+               "Breaker flip to visible, control grid", "milliseconds from the Modbus write to the new state at the field device's register: p50 solid, p95 dashed (100 sequential flips per rep)", axs[0],
+               [sw(l, c) for _, l, c in var], note="ffcontrol cells breaker:seq:100 and breaker:sim:100 (100 flips at once), 3 reps. Lost = not visible within 10 s.", left=0.07)
+
+
 def main():
-    for f in (chart_age, chart_loss, chart_reorder, chart_stale, chart_fanout, chart_nng, chart_live, chart_ovs, chart_bennu, chart_control, chart_stock_intervals, chart_cross, chart_fdmicro, chart_91fd137):
+    for f in (chart_age, chart_loss, chart_reorder, chart_stale, chart_fanout, chart_nng, chart_live, chart_ovs, chart_bennu, chart_control, chart_stock_intervals, chart_cross, chart_fdmicro, chart_91fd137, chart_maxrate):
         f()
-    for tin, tout in (("results.md.in", ROOT / "docs/results.md"), ("control_latency.md.in", ROOT / "docs/bench/control-latency.md"), ("field_device.md.in", ROOT / "docs/bench/field-device.md")):
+    for tin, tout in (("results.md.in", ROOT / "docs/results.md"), ("control_latency.md.in", ROOT / "docs/bench/control-latency.md"), ("field_device.md.in", ROOT / "docs/bench/field-device.md"), ("max_rate.md.in", ROOT / "docs/bench/max-rate.md")):
         text = (HERE / tin).read_text()
         for k, v in TABLES.items():
             text = text.replace("{{table:" + k + "}}", v)

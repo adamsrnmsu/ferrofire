@@ -1,0 +1,5 @@
+model,devices,dt ms,publish ms,reps,ticks/s,publishes/s,intervals > 1.5 periods %,interval p99 ms,provider cpu %,provider RSS MB,busiest device cpu %,device RSS MB,worst device loss %,RcvbufErrors,stream to register p50 ms,p99 ms
+8 112 tags,1,1,5,3,861.7,172.3,0.0,6.07,100,13,23.2,12,-0.00,0,0.22,0.37
+8 112 tags,1,1,10,3,1001.2,100.1,0.0,10.36,100,13,13.1,12,0.00,0,0.23,0.39
+control grid,1,1,5,3,1000.0,200.0,0.0,5.14,78,19,3.9,6,0.00,0,0.09,0.21
+control grid,1,1,10,3,1000.0,100.0,0.0,10.19,70,19,2.1,6,0.00,0,0.10,0.23

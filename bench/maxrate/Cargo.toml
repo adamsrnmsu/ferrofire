@@ -1,0 +1,15 @@
+[package]
+name = "ffmaxrate"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Maximum-publish-rate observer (ww-1df.43): standalone, not part of ferrofire's build or gates.
+[workspace]
+
+[dependencies]
+ferrofire = { path = "../.." }
+socket2 = { version = "0.6", features = ["all"] }
+
+[profile.release]
+opt-level = 3
