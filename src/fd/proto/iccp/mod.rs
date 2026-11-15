@@ -488,12 +488,9 @@ impl Device {
     }
 
     fn value_of(&self, o: &Object) -> Value {
-        let ts = self
-            .store
-            .timestamp(&o.tag)
-            .and_then(|t| i64::try_from(t).ok())
-            .filter(|t| *t > 0);
-        o.encode(self.store.get(&o.tag), ts.unwrap_or_else(unix_secs))
+        let (datum, ts) = self.store.read(&o.tag);
+        let ts = ts.and_then(|t| i64::try_from(t).ok()).filter(|t| *t > 0);
+        o.encode(datum, ts.unwrap_or_else(unix_secs))
     }
 
     fn resolve(&self, id: AssocId, name: &ObjectName) -> Result<Target, i64> {
@@ -725,11 +722,13 @@ impl Device {
                 let Some(members) = self.set_members(id, name) else {
                     return Answer::NOT_FOUND;
                 };
+                // set_members found the peer, so this is its read ACL for every member
+                let acl = self.peer_of(id).map(|p| &p.read);
                 Answer::Read(
                     members
                         .iter()
                         .map(|m| match self.objects.get(m) {
-                            Some(o) if self.allowed(id, m, false) => Ok(self.value_of(o)),
+                            Some(o) if acl.is_some_and(|a| a.allows(m)) => Ok(self.value_of(o)),
                             Some(_) => Err(DENIED),
                             None => self
                                 .report_member(id, m, &self.reporting(id, name), u8::MIN) // nothing detected: a plain read, not a report
@@ -741,14 +740,14 @@ impl Device {
         }
     }
 
-    fn set_members(&self, id: AssocId, name: &ObjectName) -> Option<Vec<String>> {
+    fn set_members(&self, id: AssocId, name: &ObjectName) -> Option<&Vec<String>> {
         let ObjectName::DomainSpecific { domain, item } = name else {
             return None;
         };
         if self.peer_of(id)?.domain != *domain {
             return None;
         }
-        self.sessions.get(&id)?.sets.get(*item).cloned()
+        self.sessions.get(&id)?.sets.get(*item)
     }
 
     fn write(
@@ -1640,6 +1639,54 @@ mod tests {
                 values: vec![tlv],
             },
         )
+    }
+
+    /// ww-1df.52: the bytes of a ReadSet and of a Read of the same names (a state, a real, a repeat, a special variable, in the Read an unknown name) are pinned, so a cheaper encode path cannot change what goes on the wire. No qtimetag object: its time is the clock.
+    #[test]
+    fn read_set_and_read_answer_with_pinned_bytes() {
+        let mut d = device("<peer><name>EMS</name></peer>");
+        d.opened(1, vec![1, 2, 3, 4]);
+        let name = |i| ObjectName::DomainSpecific {
+            domain: "EMS",
+            item: i,
+        };
+        let mem = |i| VariableSpecification::Name(name(i));
+        let members = ["MW", "bi", "Transfer_Set_Name", "MW"];
+        let define = ConfirmedRequest::DefineNamedVariableList {
+            name: name("S1"),
+            variables: members.iter().map(|m| mem(m)).collect(),
+        };
+        assert_eq!(
+            wire(&mut d, define),
+            mms::encode(&Answer::DataSetCreated, 7)
+        );
+        let read = |access| ConfirmedRequest::Read {
+            specification_with_result: false,
+            access,
+        };
+        let hex = |b: Vec<u8>| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+        let set = hex(wire(
+            &mut d,
+            read(VariableAccess::VariableListName(name("S1"))),
+        ));
+        let list = hex(wire(
+            &mut d,
+            read(VariableAccess::ListOfVariable(
+                [&members[..], &["ghost"]]
+                    .concat()
+                    .iter()
+                    .map(|m| mem(m))
+                    .collect(),
+            )),
+        ));
+        assert_eq!(
+            set,
+            "a125020107a420a11e8705080000000084020040a20a8601018a03454d538a0087050800000000"
+        );
+        assert_eq!(
+            list,
+            "a11f020107a41aa118870508000000008402004080010a8705080000000080010a"
+        );
     }
 
     /// The client requests of the chaugan capture (192.0.2.3 -> 192.0.2.2, frames 81, 100, 125: define a data set that starts with

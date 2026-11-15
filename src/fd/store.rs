@@ -116,6 +116,18 @@ impl Store {
         lock(&self.0).get(tag)
     }
 
+    /// `get` and `timestamp` of one tag under one lock and one lookup (a ReadSet asks for both per member).
+    pub fn read(&self, tag: &str) -> (Option<Value>, Option<u64>) {
+        let s = lock(&self.0);
+        match s.alias.get(tag) {
+            Some(point) => {
+                let p = s.points.get(point);
+                (p.map(|p| p.value), p.map(|p| p.ts))
+            }
+            None => (s.internal.get(tag).copied(), None),
+        }
+    }
+
     pub fn kind(&self, tag: &str) -> Option<Kind> {
         self.get(tag).map(kind_of)
     }
@@ -310,6 +322,18 @@ mod tests {
         assert_eq!(s.kind("tb"), Some(Kind::Binary));
         assert_eq!(s.kind("n"), Some(Kind::Analog));
         assert_eq!(s.kind("nope"), None);
+    }
+
+    /// ww-1df.52: `read` is `get` and `timestamp` in one go, for an external tag, an internal one and an unknown one.
+    #[test]
+    fn read_is_get_and_timestamp_together() {
+        let s = store();
+        assert!(s.publish("in.a", 2.5, 99));
+        for tag in ["ta", "tb", "n", "s", "nope"] {
+            assert_eq!(s.read(tag), (s.get(tag), s.timestamp(tag)), "{tag}");
+        }
+        assert_eq!(s.read("ta"), (Some(Value::Analog(2.5)), Some(99)));
+        assert_eq!(s.read("n").1, None, "an internal tag has no time");
     }
 
     #[test]

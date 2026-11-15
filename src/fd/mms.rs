@@ -259,9 +259,8 @@ fn drain_events<H: Handler>(
 /// Write what the association has queued. False when the peer is gone or too slow.
 async fn flush(assoc: &mut Association, stream: &mut TcpStream) -> bool {
     while let Some(p) = assoc.poll_transmit() {
-        let p = p.to_vec();
         if !matches!(
-            tokio::time::timeout(WRITE_TIMEOUT, stream.write_all(&p)).await,
+            tokio::time::timeout(WRITE_TIMEOUT, stream.write_all(p)).await,
             Ok(Ok(()))
         ) {
             return false;
