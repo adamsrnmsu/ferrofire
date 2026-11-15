@@ -49,7 +49,7 @@ fn rig(xml: &str) -> Rig {
     log.log(
         "info",
         "dnp3 server init",
-        &format!(
+        format!(
             "Binary Size is {} and Analog Size is {}.",
             dev.bin.len(),
             dev.ana.len()

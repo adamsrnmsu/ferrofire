@@ -270,7 +270,7 @@ fn echo_span(fc: u8, addr: u16, qty: u16) -> Vec<u8> {
 fn written(log: &EventLog, table: &str) {
     log.log(
         "info",
-        &format!("write {table}"),
+        format_args!("write {table}"),
         "Data successfully written.",
     );
 }
@@ -279,8 +279,8 @@ fn written(log: &EventLog, table: &str) {
 fn refused(log: &EventLog, table: &str, addr: u16, fc: u8, code: u8) -> Vec<u8> {
     log.log(
         "error",
-        &format!("write {table}"),
-        &format!("Invalid write {table} request address: {addr}"),
+        format_args!("write {table}"),
+        format_args!("Invalid write {table} request address: {addr}"),
     );
     exception(fc, code)
 }
@@ -296,7 +296,6 @@ fn read<V>(
     n: u16,
     data: impl FnOnce() -> Vec<u8>,
 ) -> Vec<u8> {
-    let event = format!("read {}", spec.name);
     if n == 0 || n > spec.limit {
         return exception(fc, 3);
     }
@@ -306,8 +305,8 @@ fn read<V>(
     if let Some(a) = first_gap(table, addr, n) {
         log.log(
             "error",
-            &event,
-            &format!(
+            format_args!("read {}", spec.name),
+            format_args!(
                 "Invalid read {} request address{} {a}",
                 spec.name, spec.colon
             ),
@@ -316,8 +315,8 @@ fn read<V>(
     }
     log.log(
         "info",
-        &event,
-        &format!(
+        format_args!("read {}", spec.name),
+        format_args!(
             "start address for read {} request is {addr} and read {n} {}.",
             spec.name, spec.noun
         ),

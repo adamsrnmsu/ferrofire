@@ -319,8 +319,8 @@ impl Transports {
             Err(e) => {
                 self.log.log(
                     "error",
-                    &format!("{what} server init"),
-                    &format!("failed to start the server: {e}"),
+                    format!("{what} server init"),
+                    format!("failed to start the server: {e}"),
                 );
                 tracing::error!("scpi-server ({what}): {e}");
                 None
@@ -357,8 +357,8 @@ impl Transports {
         let report = |e: &std::io::Error| {
             self.log.log(
                 "error",
-                &format!("{what} accept"),
-                &format!("accept failed: {e}; retrying"),
+                format!("{what} accept"),
+                format!("accept failed: {e}; retrying"),
             )
         };
         net::accept_loop(l, &self.stop, on_conn, report).await;
@@ -423,7 +423,7 @@ impl Transports {
                 self.log.log(
                     "error",
                     "vxi11 portmapper init",
-                    &format!("no UDP portmapper: {e}"),
+                    format!("no UDP portmapper: {e}"),
                 );
             })
             .ok()
