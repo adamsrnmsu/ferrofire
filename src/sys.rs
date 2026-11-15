@@ -136,3 +136,17 @@ pub fn utc_offset(unix: i64) -> i64 {
         tm.tm_gmtoff
     }
 }
+
+/// recv(2) with MSG_DONTWAIT: the next queued datagram, or `WouldBlock` when none is waiting (whatever the socket's own blocking mode).
+pub fn recv_nowait(s: &std::net::UdpSocket, buf: &mut [u8]) -> std::io::Result<usize> {
+    // SAFETY: the pointer and length are those of a live, writable slice; recv writes at most `len` bytes.
+    let n = unsafe {
+        libc::recv(
+            s.as_raw_fd(),
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+            libc::MSG_DONTWAIT,
+        )
+    };
+    usize::try_from(n).map_err(|_| std::io::Error::last_os_error())
+}

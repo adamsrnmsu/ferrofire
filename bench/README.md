@@ -152,7 +152,7 @@ for k in 1 2 3; do   # SLOW=breaker:sim:1000 SLOW_REPS=1 for the stock-provider 
 done
 ```
 
-`PROVIDER=stock FD=ferrofire` does not run: ferrofire's field-device receiver drops every datagram of the stock provider (no NUL terminator, `Receiver::body_of`), see section 9 of the report.
+`PROVIDER=stock FD=ferrofire` runs since ww-y87 (ferrofire's field-device receiver accepts the stock provider's NUL-less datagrams; `STOCK_IMAGE=ffc-stock-2026.11.03:22.04 STOCK_VERSION=2026.11.03` -> `cross-stock-ferrofire-v2026.11.03`); with bennu 6.0.0 only the failed run before the fix is kept in `cross-stock-ferrofire`. See section 9 of the report.
 
 ## Which stock bennu (ww-1df.47)
 

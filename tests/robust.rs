@@ -270,7 +270,7 @@ fn the_receiver_ignores_garbage_truncated_unknown_duplicate_and_old_datagrams() 
     assert_eq!(r.accept(b"\xff\xff"), Err(Reject::Garbage));
     assert_eq!(r.accept(b""), Err(Reject::Garbage));
     let mut cut = dgram(&g, "a:123.5,_ff.seq:9,_ff.cyc:9,_ff.t:9999,");
-    cut.pop();
+    cut.truncate(cut.len() - 2); // the NUL and the last comma
     assert_eq!(r.accept(&cut), Err(Reject::Truncated));
     // bad values and half pairs are skipped, the good pairs of the same datagram survive
     let messy = dgram(&g, "a:zzz,b:,:3,,a,b:2,_ff.seq:10,_ff.cyc:9,_ff.t:9999,");
@@ -279,6 +279,37 @@ fn the_receiver_ignores_garbage_truncated_unknown_duplicate_and_old_datagrams() 
     let stock = dgram(&g, "a:7,");
     assert_eq!(r.accept(&stock).unwrap().len(), 1);
     assert_eq!(r.accept(&stock).unwrap().len(), 1);
+}
+
+/// ww-y87: a datagram captured from pybennu (bennu v2026.11.03 `Publisher`, endpoint udp://127.0.0.1:40000): RADIO frame, whole
+/// points, a trailing comma and NO NUL. A ferrofire field device must run behind the stock provider, so it is accepted.
+#[test]
+fn a_real_pybennu_datagram_without_a_nul_is_accepted() {
+    let d = include_bytes!("golden/pybennu-datagram.bin");
+    assert_ne!(d.last(), Some(&0));
+    let mut r = Receiver::new(
+        "9ceaac3fa29ea7c",
+        ["bus-1.active", "bus-1.voltage", "gen-1.mw", "nope"],
+    );
+    assert_eq!(
+        r.accept(d).unwrap(),
+        vec![
+            ("bus-1.active".to_string(), 1.0),
+            ("bus-1.voltage".to_string(), 1.00458),
+            ("gen-1.mw".to_string(), 12.5)
+        ]
+    );
+    // real truncation is still refused, NUL or not: cut mid-point
+    assert_eq!(r.accept(&d[..d.len() - 3]), Err(Reject::Truncated));
+    // half the datagram, a cut inside a value, a body with a trailing NUL and garbage after it, a lone NUL mid-body
+    assert_eq!(r.accept(&d[..d.len() / 2]), Err(Reject::Truncated));
+    assert_eq!(r.accept(&d[..d.len() - 1]), Err(Reject::Truncated));
+    let mut junk = d.to_vec();
+    junk.extend_from_slice(b"\0zz");
+    assert_eq!(r.accept(&junk), Err(Reject::Truncated));
+    let mut mid = d.to_vec();
+    mid.insert(d.len() - 6, 0);
+    assert!(r.accept(&mid).map_or(true, |p| p.len() < 3));
 }
 
 fn chunk(g: &str, seq: u64, cyc: u64, body: &str) -> Vec<u8> {

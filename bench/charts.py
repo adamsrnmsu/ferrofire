@@ -671,7 +671,7 @@ def chart_stock_intervals():
            note="bennu 6.0.0 (pre-91fd137) light grey, bennu v2026.11.03 dark grey (1 s and 0.1 s only), ferrofire blue dashed. Intervals are the sleep of stock's publish loop (bench/stock_provider.py); sequential = 100 flips on 5 RTUs (and 1 RTU); generator spin-up = all R pooled; ferrofire reference = its 5-rep runs.")
 
 
-CROSS_NAMES = {"cross-ferrofire-ferrofire": "ferrofire + ferrofire FD",
+CROSS_NAMES = {"cross-ferrofire-ferrofire": "ferrofire + ferrofire FD", "cross-stock-ferrofire-v2026.11.03": "bennu v2026.11.03 at 1 s + ferrofire FD",
                "cross-ferrofire-stock-v2026.11.03": "ferrofire + bennu v2026.11.03 FD", "cross-stock-stock-v2026.11.03-0.1s": "bennu v2026.11.03 at 0.1 s + its FD", "cross-stock-stock-v2026.11.03": "bennu v2026.11.03 at 1 s + its FD",
                "cross-ferrofire-stock": "ferrofire + bennu 6.0.0 FD", "cross-stock-stock-0.1s": "bennu 6.0.0 at 0.1 s + its FD", "cross-stock-stock": "bennu 6.0.0 at 1 s + its FD"}
 
@@ -680,7 +680,7 @@ def chart_cross():
     """9l/9m: the 2x2 provider x field-device cross matrix (ww-1df.40), Docker. Colour = provider (ferrofire blue, stock grey; lighter grey = stock tuned to 0.1 s), hatch = stock field device (/ bennu v2026.11.03, \\ bennu 6.0.0)."""
     names = [n for n in CROSS_NAMES if n in cr.CROSS and phs("docker", n)]
     OLDH = "\\\\\\\\"   # hatch: / = bennu v2026.11.03 field device, \\ = bennu 6.0.0 (pre-91fd137) field device
-    col = {"cross-ferrofire-ferrofire": (FF, ""), "cross-ferrofire-stock-v2026.11.03": (FF, "////"), "cross-stock-stock-v2026.11.03-0.1s": ("#b9b8b0", "////"), "cross-stock-stock-v2026.11.03": (STK, "////"),
+    col = {"cross-ferrofire-ferrofire": (FF, ""), "cross-stock-ferrofire-v2026.11.03": (STK, ""), "cross-ferrofire-stock-v2026.11.03": (FF, "////"), "cross-stock-stock-v2026.11.03-0.1s": ("#b9b8b0", "////"), "cross-stock-stock-v2026.11.03": (STK, "////"),
            "cross-ferrofire-stock": (FF, OLDH), "cross-stock-stock-0.1s": ("#b9b8b0", OLDH), "cross-stock-stock": (STK, OLDH)}
     Rs, reps = (1, 2, 5, 10), {n: len({q["rep"] for q in phs("docker", n)}) for n in names}
     f0 = lambda x: "" if x is None else f"{x:.0f}"
@@ -879,6 +879,11 @@ def chart_fdmicro():
             g = lambda m: fm.total(s, pr, "mb", "drops", f"{hz}hz", m)
             if g("udp_sent"):
                 rows.append((lab, SNAME[s], n(s, pr), f0(g("udp_sent")), f0(g("udp_in")), f1(100 * (1 - g("udp_in") / g("udp_sent"))), f0(g("rcvbuf_errors")), f0(g("sender_dropped")), f1(100 * g("counter_steps_skipped") / max(1, g("counter_changes") + g("counter_steps_skipped"))), f1(100 * g("end_state_bad_regs") / max(1, g("end_state_checked")))))
+    rx = lambda m: fm.rx_total("drops", "10hz", m)
+    if rx("udp_sent"):   # ww-c2i: the same L stream after the receive-path fix (bigger SO_RCVBUF, drain before parsing), ferrofire only
+        i = max(k for k, r in enumerate(rows) if r[0] == load[1][2] and r[1] == SNAME["ferrofire"]) + 1
+        rows.insert(i, (load[1][2], SNAME["ferrofire"] + " after the ww-c2i fix", len(fm.RX[("ferrofire", "L", "mb")]), f0(rx("udp_sent")), f0(rx("udp_in")), f1(100 * (1 - rx("udp_in") / rx("udp_sent"))), f0(rx("rcvbuf_errors")), f0(rx("sender_dropped")),
+                              f1(100 * rx("counter_steps_skipped") / max(1, rx("counter_changes") + rx("counter_steps_skipped"))), f1(100 * rx("end_state_bad_regs") / max(1, rx("end_state_checked")))))
     fig, axs = plt.subplots(1, 3, figsize=(7.4, 3.5))
     for a in axs:
         a.grid(axis="x", visible=False)

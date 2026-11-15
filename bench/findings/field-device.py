@@ -64,16 +64,21 @@ def main():
             y = j + (i - 1) * W
             ax.barh(y, lost[s, pr], height=0.25, color=col)
             ax.text(lost[s, pr] + 0.5, y, f"{lost[s, pr]:.1f} %" + (f"   ({num(tot(s, pr, hz, 'udp_sent') - tot(s, pr, hz, 'udp_in'))} of {num(tot(s, pr, hz, 'udp_sent'))} datagrams, {stale[s, pr]:.1f} % of registers stale at the end)" if lost[s, pr] else ""), va="center", fontsize=8.5)
+    rxs, rxi = fm.rx_total("drops", "10hz", "udp_sent"), fm.rx_total("drops", "10hz", "udp_in")   # ww-c2i: ferrofire after the receive-path fix, L only
+    rx_lost = 100 * (1 - rxi / rxs)
+    print(f"stream L ferrofire after the fix: sent {num(rxs)} reached {num(rxi)} lost {rx_lost:.1f} %  RcvbufErrors {num(fm.rx_total('drops', '10hz', 'rcvbuf_errors'))}")
+    ax.barh(1 + 2 * W, rx_lost, height=0.25, color=FF, hatch="////")
+    ax.text(rx_lost + 0.5, 1 + 2 * W, f"{rx_lost:.1f} %   (ferrofire after the fix, {num(rxs)} datagrams)", va="center", fontsize=8.5)
     ax.set_yticks(range(len(load)), [l for *_, l in load])
-    ax.set_ylim(len(load) - 0.5, -0.5)
+    ax.set_ylim(len(load) - 0.3, -0.5)
     ax.set_xlim(0, 60)
     ax.set_xlabel("datagrams sent that never reached the device (%)")
     ax.grid(axis="y", visible=False)
     ax.tick_params(length=0)
     frame(fig, "field-device-1-stream-loss",
-          f"Stock wins: ferrofire's field device loses {lost['ferrofire', 'L']:.1f} % of an 8 112-tag stream, bennu loses none (either version)",
+          f"Fixed: ferrofire's field device lost {lost['ferrofire', 'L']:.1f} % of an 8 112-tag stream, now {rx_lost:.1f} %; bennu loses none (either version)",
           "Share of a full-cycle stream the kernel dropped at the device's input socket (30 s, all reps pooled).",
-          NOTE + f"Per rep: {per_rep[0]:.1f}-{per_rep[-1]:.1f} %. The receive buffer overflows on a burst of 130 datagrams (ww-c2i, open).", top=0.74, bottom=0.29, left=0.2, right=0.99)
+          NOTE + f"Per rep: {per_rep[0]:.1f}-{per_rep[-1]:.1f} %. The receive buffer overflowed on a burst of 130 datagrams (last row: ferrofire after ww-c2i, 8 MiB SO_RCVBUF and a drain-then-parse loop).", top=0.74, bottom=0.29, left=0.2, right=0.99)
 
     # 2. Modbus reads, profile M, FC4 of 1 register ----------------------------------------------------------------------------------
     cl = (1, 4, 16)
