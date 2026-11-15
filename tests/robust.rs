@@ -301,6 +301,15 @@ fn a_real_pybennu_datagram_without_a_nul_is_accepted() {
     );
     // real truncation is still refused, NUL or not: cut mid-point
     assert_eq!(r.accept(&d[..d.len() - 3]), Err(Reject::Truncated));
+    // half the datagram, a cut inside a value, a body with a trailing NUL and garbage after it, a lone NUL mid-body
+    assert_eq!(r.accept(&d[..d.len() / 2]), Err(Reject::Truncated));
+    assert_eq!(r.accept(&d[..d.len() - 1]), Err(Reject::Truncated));
+    let mut junk = d.to_vec();
+    junk.extend_from_slice(b"\0zz");
+    assert_eq!(r.accept(&junk), Err(Reject::Truncated));
+    let mut mid = d.to_vec();
+    mid.insert(d.len() - 6, 0);
+    assert!(r.accept(&mid).map_or(true, |p| p.len() < 3));
 }
 
 fn chunk(g: &str, seq: u64, cyc: u64, body: &str) -> Vec<u8> {
