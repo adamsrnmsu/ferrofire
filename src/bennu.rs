@@ -98,9 +98,20 @@ pub fn fmt_value(v: Value) -> String {
 
 /// One publish tick as a `tag:value,...` message.
 pub fn snapshot_msg(snap: &[(String, Value)]) -> String {
-    snap.iter()
-        .map(|(t, v)| format!("{t}:{},", fmt_value(*v)))
-        .collect()
+    msg_of(snap.iter().map(|(t, v)| (t.as_str(), *v)), snap.len())
+}
+
+/// `tag:value,` for each point, written straight into one buffer (`n` points, about 24 bytes each).
+fn msg_of<'a>(points: impl Iterator<Item = (&'a str, Value)>, n: usize) -> String {
+    use std::fmt::Write;
+    let mut s = String::with_capacity(n * 24);
+    for (t, v) in points {
+        let _ = match v {
+            Value::Binary(b) => write!(s, "{t}:{b},"),
+            Value::Analog(x) => write!(s, "{t}:{x},"),
+        };
+    }
+    s
 }
 
 /// The pseudo-tags appended to every datagram (ferrofire datagram v1): the per-endpoint datagram counter, the
@@ -541,24 +552,57 @@ pub fn plan(publish: Option<&str>, slices: Vec<Slice>, known: &[String]) -> Resu
 /// Endpoint and tags (None: all) per publish target.
 pub type Plan = Vec<(String, Option<Vec<String>>)>;
 
-/// A publisher and the tags it carries (None: all).
+/// A publisher and the tags it carries.
 pub struct Target {
-    pub out: Box<dyn Publisher>,
-    pub tags: Option<HashSet<String>>,
+    out: Box<dyn Publisher>,
+    part: Option<Part>,
 }
 
-/// Send each target its part of `snap`, in snapshot order.
+/// A slice: its tags, and where they sit in the snapshot the target was built for (`len` points, fixed for the life
+/// of a model).
+struct Part {
+    tags: HashSet<String>,
+    at: Vec<usize>,
+    len: usize,
+}
+
+impl Target {
+    /// Carries every tag.
+    pub fn all(out: Box<dyn Publisher>) -> Target {
+        Target { out, part: None }
+    }
+
+    /// Carries `tags`; `order` is the snapshot's tag order (`Meta::tags`).
+    pub fn slice(out: Box<dyn Publisher>, tags: HashSet<String>, order: &[String]) -> Target {
+        let at = (0..order.len())
+            .filter(|&i| tags.contains(&order[i]))
+            .collect();
+        let part = Part {
+            tags,
+            at,
+            len: order.len(),
+        };
+        Target {
+            out,
+            part: Some(part),
+        }
+    }
+}
+
+/// Send each target its part of `snap`, in snapshot order. A snapshot of another length than the slice was built for
+/// is filtered by name instead of by position.
 pub fn publish_all(targets: &[Target], snap: &[(String, Value)]) {
     for t in targets {
-        match &t.tags {
+        let point = |i: usize| (snap[i].0.as_str(), snap[i].1);
+        match &t.part {
             None => t.out.publish(&snapshot_msg(snap)),
-            Some(set) => {
-                let part: Vec<_> = snap
-                    .iter()
-                    .filter(|(n, _)| set.contains(n))
-                    .cloned()
-                    .collect();
-                t.out.publish(&snapshot_msg(&part));
+            Some(p) if p.len == snap.len() => t
+                .out
+                .publish(&msg_of(p.at.iter().map(|&i| point(i)), p.at.len())),
+            Some(p) => {
+                let named = snap.iter().filter(|(n, _)| p.tags.contains(n));
+                t.out
+                    .publish(&msg_of(named.map(|(n, v)| (n.as_str(), *v)), p.tags.len()))
             }
         }
     }
@@ -670,12 +714,13 @@ fn engine(model: &mut Model, sh: &Mutex<Shared>, targets: &[Target], every: u64)
     }
 }
 
-fn targets_of(plan: Plan) -> Result<Vec<Target>, String> {
+fn targets_of(plan: Plan, order: &[String]) -> Result<Vec<Target>, String> {
     plan.into_iter()
         .map(|(ep, tags)| {
-            Ok(Target {
-                out: transport::publisher(&ep)?,
-                tags: tags.map(|t| t.into_iter().collect()),
+            let out = transport::publisher(&ep)?;
+            Ok(match tags {
+                None => Target::all(out),
+                Some(t) => Target::slice(out, t.into_iter().collect(), order),
             })
         })
         .collect()
@@ -689,10 +734,7 @@ fn elastic_target(a: &RunArgs) -> Result<Option<Target>, String> {
     };
     let publish = a.publish.as_deref().unwrap_or(transport::DEFAULT_PUBLISH);
     let es = crate::elastic::provider::from_file(config, &a.server, publish)?;
-    Ok(es.map(|es| Target {
-        out: Box::new(es),
-        tags: None,
-    }))
+    Ok(es.map(|es| Target::all(Box::new(es))))
 }
 
 #[cfg(not(feature = "elastic"))]
@@ -721,7 +763,7 @@ fn run(a: RunArgs) -> Result<(), String> {
     let base = a.path().and_then(|p| std::path::Path::new(p).parent());
 
     let slices = resolved_slices(&a, &model, base)?;
-    let mut targets = targets_of(plan(a.publish.as_deref(), slices, &meta.tags)?)?;
+    let mut targets = targets_of(plan(a.publish.as_deref(), slices, &meta.tags)?, &meta.tags)?;
     targets.extend(elastic_target(&a)?);
     let sh = Arc::new(Mutex::new(Shared {
         snap: owned_snapshot(&model),
