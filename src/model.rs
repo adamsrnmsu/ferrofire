@@ -312,6 +312,8 @@ pub struct Model {
     eval_order: Vec<(usize, Node)>, // output slots with their expression, dependency order
     published: Vec<(String, Kind, usize)>,
     power: Option<PowerRt>,
+    /// A power tag was written since the model values were last synced from the power state (see `apply_writes`).
+    power_written: bool,
 }
 
 /// Standoff when a body moving down is held at a closed barrier (keeps it in the zone it came from).
@@ -771,6 +773,7 @@ impl Model {
             eval_order,
             published,
             power,
+            power_written: false,
         })
     }
 
@@ -811,7 +814,7 @@ impl Model {
         };
         p.pw.set(i, x);
         p.dirty = true;
-        p.sync(&mut self.v);
+        self.power_written = true; // `apply_writes` syncs the values once, after the whole batch
         true
     }
 
@@ -821,6 +824,11 @@ impl Model {
         for (tag, val) in writes {
             if !self.apply_write(tag, *val) {
                 rejected.push(tag.clone());
+            }
+        }
+        if std::mem::take(&mut self.power_written) {
+            if let Some(p) = self.power.as_ref() {
+                p.sync(&mut self.v);
             }
         }
         self.eval();
