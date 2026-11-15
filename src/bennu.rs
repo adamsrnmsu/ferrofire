@@ -141,6 +141,8 @@ pub struct Shared {
 
 pub struct Meta {
     pub tags: Vec<String>,
+    /// The QUERY reply body, built with the `Meta` from `tags` (the tag list is fixed once a model is loaded).
+    query: String,
     pub writable: HashSet<String>,
     /// Type and limits of each writable tag.
     pub specs: HashMap<String, WriteSpec>,
@@ -161,8 +163,13 @@ impl Meta {
             .filter(|t| m.writable(t))
             .filter_map(|t| Some((t.clone(), m.write_spec(t)?)))
             .collect();
+        let query = format!(
+            "ACK={}",
+            tags.iter().map(|t| format!("{t},")).collect::<String>()
+        );
         Meta {
             tags,
+            query,
             writable,
             specs,
             warn: RateLimit::new(WARN_EVERY),
@@ -234,13 +241,7 @@ fn reply(req: &[u8], meta: &Meta, sh: &Mutex<Shared>) -> String {
         return format!("ERR=Malformed request '{}'", show(req));
     };
     match op.to_ascii_lowercase().as_str() {
-        "query" => format!(
-            "ACK={}",
-            meta.tags
-                .iter()
-                .map(|t| format!("{t},"))
-                .collect::<String>()
-        ),
+        "query" => meta.query.clone(),
         "read" => read(payload, sh),
         "write" => {
             let mut batch = vec![];

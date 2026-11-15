@@ -200,3 +200,13 @@ Tests run on the variants: tests/bennu (24, E and C), lib model (A: 12; B: 9), p
   the ICCP load needs a custom client; any win would be within noise at range rates.
 - The IEC 61850 MMS server, hardware counters, and any cross-campaign absolute comparison.
 - C's index cache has no old-vs-new byte-for-byte test beyond the existing tests/bennu.
+
+## Implemented
+
+The ideas above that were kept were built properly (not as the prototype patches), one commit and one bead each, and
+re-measured with the same harness (`bench/profile/mm.sh` / `alt.sh` style: base and variant alternated in the same
+block, 3 pairs, provider CPU from `/proc/PID/stat`, same Docker Desktop VM). Base is the commit before the change.
+
+| | Bead | Before -> after (3 pairs) | Tests that pin the behaviour |
+|---|---|---|---|
+| E | ww-1df.36 QUERY reply cached in `Meta` (built in `Meta::of`, `query` is private so it cannot drift from `tags`) | QUERY phase CPU 43.9/43.3/43.1 -> 24.1/23.8/24.3 %; 11.5k/12.0k/12.1k -> 15.9k/16.0k/15.9k per s; p50 81/77/76 -> 55/55/55 us; p99 188/175/149 -> 96/83/93 us. READ phase (control) 25.2/24.5/24.6 -> 24.6/24.3/24.7 % | `tests/bennu.rs::query_reply_is_the_tag_list_of_its_model`: the reply is the old per-request format for two models, differs between models, follows a new tag, ignores limits and writes |

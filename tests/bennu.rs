@@ -100,6 +100,42 @@ fn requests() {
     assert_eq!(sh.lock().unwrap().queue.len(), 2);
 }
 
+/// The QUERY reply is cached in `Meta`; it must stay what the per-request format produced, follow the tag set of
+/// the model the `Meta` was built from, and not move when values or write limits do.
+#[test]
+fn query_reply_is_the_tag_list_of_its_model() {
+    let old = |m: &Model| -> String {
+        let body: String = m.tags().map(|(t, _)| format!("{t},")).collect();
+        format!("ACK={body}\0")
+    };
+    let q = |meta: &Meta| {
+        let sh = Mutex::new(Shared::default());
+        String::from_utf8(handle(b"QUERY=\0", meta, &sh)).unwrap()
+    };
+    let wat = Model::load(include_str!("../models/waterway.yaml")).unwrap();
+    let pump = Model::load(include_str!("../models/pump-station.yaml")).unwrap();
+    let (mw, mp) = (Meta::of(&wat), Meta::of(&pump));
+    assert_eq!(q(&mw), old(&wat));
+    assert_eq!(q(&mp), old(&pump));
+    assert_ne!(q(&mw), q(&mp));
+    assert_eq!(q(&mw), q(&mw), "repeatable");
+    let two = |lim: &str| {
+        Model::load(&format!("version: 1\ndt: 0.1\ninputs:\n  sp: {{type: analog, min: 0, max: {lim}}}\noutputs:\n  sp: {{type: analog}}\n")).unwrap()
+    };
+    let (a, b) = (two("10"), two("20"));
+    assert_eq!(q(&Meta::of(&a)), "ACK=sp,\0");
+    assert_eq!(q(&Meta::of(&b)), "ACK=sp,\0", "limits are not in the reply");
+    let grown = Model::load("version: 1\ndt: 0.1\ninputs:\n  sp: {type: analog}\n  en: {type: binary}\noutputs:\n  sp: {type: analog}\n  en: {type: binary}\n").unwrap();
+    assert_eq!(q(&Meta::of(&grown)), old(&grown));
+    assert_ne!(q(&Meta::of(&grown)), q(&Meta::of(&a)), "a new tag shows up");
+    // a write that changes a value does not change the reply
+    let sh = Mutex::new(Shared::default());
+    let meta = Meta::of(&grown);
+    let before = handle(b"QUERY=\0", &meta, &sh);
+    assert_eq!(handle(b"WRITE=sp:3\0", &meta, &sh), b"ACK=\0");
+    assert_eq!(handle(b"QUERY=\0", &meta, &sh), before);
+}
+
 #[test]
 fn rep_round_trip() {
     let (meta, sh) = setup();
