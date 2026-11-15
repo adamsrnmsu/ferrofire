@@ -218,4 +218,6 @@ block, 3 pairs, provider CPU from `/proc/PID/stat`, same Docker Desktop VM). Bas
 
 Independent re-measure of LU (skeptic, fresh release builds of base and sparse, `bench/solve_time.sh`, 3 alternating pairs): 8.5/8.5/8.5 -> 4.8/4.8/4.8 ms per re-solve (-44 %). A mutant dividing L by `d * 1.0000001` fails `tests/lu.rs` (4 of 6), `dc_matches_pypower_goldens` and `eval_golden`.
 
+Independent re-measure of EL (skeptic, same release binaries, `eb.sh`, event log unopenable, 3 alternating pairs): FD CPU 55.9/55.9/57.0 -> 51.8/53.6/52.0 % (-7.5 %), 40.4k req/s both sides. Mutants (gate removed, `enabled` true -> false in `to`, `enabled = false` -> true in `open`) each fail `a_disabled_log_formats_nothing`, `lines_are_numbered_csv_with_clean_fields` or `open_truncates_and_defaults_the_name`.
+
 D (FNV `top` store) and F (bounded LU) were not implemented: D is marginal, F gives nothing. Allocator churn from `owned_snapshot` is the next cost on the big model.
