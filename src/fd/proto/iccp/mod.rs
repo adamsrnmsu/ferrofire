@@ -1642,6 +1642,54 @@ mod tests {
         )
     }
 
+    /// ww-1df.52: the bytes of a ReadSet and of a Read of the same names (a state, a real, a repeat, a special variable, in the Read an unknown name) are pinned, so a cheaper encode path cannot change what goes on the wire. No qtimetag object: its time is the clock.
+    #[test]
+    fn read_set_and_read_answer_with_pinned_bytes() {
+        let mut d = device("<peer><name>EMS</name></peer>");
+        d.opened(1, vec![1, 2, 3, 4]);
+        let name = |i| ObjectName::DomainSpecific {
+            domain: "EMS",
+            item: i,
+        };
+        let mem = |i| VariableSpecification::Name(name(i));
+        let members = ["MW", "bi", "Transfer_Set_Name", "MW"];
+        let define = ConfirmedRequest::DefineNamedVariableList {
+            name: name("S1"),
+            variables: members.iter().map(|m| mem(m)).collect(),
+        };
+        assert_eq!(
+            wire(&mut d, define),
+            mms::encode(&Answer::DataSetCreated, 7)
+        );
+        let read = |access| ConfirmedRequest::Read {
+            specification_with_result: false,
+            access,
+        };
+        let hex = |b: Vec<u8>| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+        let set = hex(wire(
+            &mut d,
+            read(VariableAccess::VariableListName(name("S1"))),
+        ));
+        let list = hex(wire(
+            &mut d,
+            read(VariableAccess::ListOfVariable(
+                [&members[..], &["ghost"]]
+                    .concat()
+                    .iter()
+                    .map(|m| mem(m))
+                    .collect(),
+            )),
+        ));
+        assert_eq!(
+            set,
+            "a125020107a420a11e8705080000000084020040a20a8601018a03454d538a0087050800000000"
+        );
+        assert_eq!(
+            list,
+            "a11f020107a41aa118870508000000008402004080010a8705080000000080010a"
+        );
+    }
+
     /// The client requests of the chaugan capture (192.0.2.3 -> 192.0.2.2, frames 81, 100, 125: define a data set that starts with
     /// Transfer_Set_Name and DSConditions_Detected, read Next_DSTransfer_Set, write a 13-member DSTransferSet with an unsigned
     /// scope), with the capture's domain, and the report layout of its server (frame 515): variableListName, one result per member.
