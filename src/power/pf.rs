@@ -233,48 +233,9 @@ fn matvec(y: &[C], v: &[C]) -> Vec<C> {
         .collect()
 }
 
-/// Row `k..n` of column `k` with the largest magnitude: (row, |value|).
-fn lu_pivot(a: &[f64], n: usize, k: usize) -> (usize, f64) {
-    (k..n)
-        .map(|i| (i, a[i * n + k].abs()))
-        .fold((k, -1.0), |m, x| if x.1 > m.1 { x } else { m })
-}
-
-/// Eliminate column `k` below the pivot row.
-fn lu_eliminate(a: &mut [f64], b: &mut [f64], n: usize, k: usize) {
-    for i in k + 1..n {
-        let f = a[i * n + k] / a[k * n + k];
-        if f == 0.0 {
-            continue;
-        }
-        for j in k..n {
-            a[i * n + j] -= f * a[k * n + j];
-        }
-        b[i] -= f * b[k];
-    }
-}
-
-/// Dense LU with partial pivoting; solves A x = b. Err when singular.
-pub fn lu_solve(mut a: Vec<f64>, n: usize, mut b: Vec<f64>) -> Result<Vec<f64>, String> {
-    let scale = a.iter().fold(0.0f64, |m, x| m.max(x.abs()));
-    for k in 0..n {
-        let (p, pv) = lu_pivot(&a, n, k);
-        if pv.is_nan() || pv <= 1e-13 * scale {
-            return Err("singular matrix".into());
-        }
-        if p != k {
-            for j in 0..n {
-                a.swap(k * n + j, p * n + j);
-            }
-            b.swap(k, p);
-        }
-        lu_eliminate(&mut a, &mut b, n, k);
-    }
-    for i in (0..n).rev() {
-        let s: f64 = (i + 1..n).map(|j| a[i * n + j] * b[j]).sum();
-        b[i] = (b[i] - s) / a[i * n + i];
-    }
-    Ok(b)
+/// Solve A x = b (sparse LU with partial pivoting, see `lu`); Err when singular.
+pub fn lu_solve(a: Vec<f64>, n: usize, b: Vec<f64>) -> Result<Vec<f64>, String> {
+    super::lu::lu_solve(&a, n, b)
 }
 
 /// Power mismatch at the unknowns: P of pv+pq, then Q of pq.

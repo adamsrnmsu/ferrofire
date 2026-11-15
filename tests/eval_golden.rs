@@ -64,12 +64,14 @@ fn traces_are_bit_identical_to_the_evaluate_everything_code() {
         run(&read("pump-station.yaml"), 2000),
         run(MESH, 2000),
     ];
-    // recorded on 16db214 (before ww-1df.36-39): osc, waterway, pump-station, mesh
+    // osc, waterway: recorded on 16db214 (before ww-1df.36-39), no power flow. pump-station, mesh: re-recorded for ww-1df.49,
+    // whose sparse LU rounds the Newton step differently from the dense one (the dense code gave e063122f1af5d474 and
+    // 87cd445d380649b8, and those runs matched the evaluate-everything code bit for bit).
     let want = [
         0xb0dc5f075c500166,
         0x9e6fcaedd1cf13c9,
-        0xe063122f1af5d474,
-        0x87cd445d380649b8,
+        0x2d1fe051c65a6c18,
+        0x96fb51b70327aab1,
     ];
     assert_eq!(got, want, "got {got:016x?}");
 }
