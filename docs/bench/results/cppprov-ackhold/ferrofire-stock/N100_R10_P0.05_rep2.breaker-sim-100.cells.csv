@@ -1,0 +1,2 @@
+stack,R,rep,cell,mode,kind,dir,n,issued,ok,lost,wrong_final,wrong_provider,wrong_collateral,order_violations,flaps,write_errors,span_s,wall_s,per_s,poll_errors,vm_load1_start_end
+ferrofire-stock,10,2,breaker:sim:100,sim,breaker,open,100,100,100,0,0,0,0,0,0,0,0.088,1.209,1139.12,0,2.45/2.45

@@ -1,0 +1,2 @@
+stack,R,rep,cell,mode,kind,dir,n,issued,ok,lost,wrong_final,wrong_provider,wrong_collateral,order_violations,flaps,write_errors,span_s,wall_s,per_s,poll_errors,vm_load1_start_end
+cpp-stock,10,1,breaker:sim:10,sim,breaker,open,10,10,10,0,0,10,0,0,0,0,0.133,1.249,75.25,0,1.76/2.26
