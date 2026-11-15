@@ -515,7 +515,7 @@ fn nudges(m: &Model, round: u64) -> Vec<(String, Value)> {
 }
 
 /// The reused snapshot buffers must hold exactly what a fresh snapshot per tick held: published bytes, the REP side's
-/// copy and the model state, over ticks with writes, from an empty, a stale and a wrong-length start.
+/// copy and the model state, over ticks with writes, from an empty, a stale (short and same-length) and a wrong-length start.
 #[test]
 fn engine_ticks_publish_and_store_what_a_fresh_snapshot_per_tick_did() {
     for yaml in [
@@ -523,10 +523,11 @@ fn engine_ticks_publish_and_store_what_a_fresh_snapshot_per_tick_did() {
         include_str!("../models/pump-station.yaml"),
     ] {
         let stale = vec![("not.a.tag".to_string(), Value::Analog(7.0)); 3];
-        for start in [vec![], stale, big_snap(2)] {
+        let n = Model::load(yaml).unwrap().snapshot().len();
+        let same_len = vec![("not.a.tag".to_string(), Value::Analog(7.0)); n];
+        for start in [vec![], stale, same_len, big_snap(2)] {
             let mut new = Model::load(yaml).unwrap();
             let mut old = Model::load(yaml).unwrap();
-            let n = new.snapshot().len();
             let (all, log) = sink(None, &[]);
             let sh = Mutex::new(Shared {
                 snap: start,
