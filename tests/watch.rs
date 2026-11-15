@@ -164,12 +164,14 @@ fn runs_firmware_without_exec_bit() {
 
 #[test]
 fn waits_for_stable_firmware() {
-    let w = spawn("stable", Some((v(1).as_bytes(), 0o755)));
+    // a poll much longer than the 30 ms gap between the two writes, so a loaded runner cannot stretch the gap
+    // past the two equal polls that make a hash stable
+    let w = spawn_with("stable", Some((v(1).as_bytes(), 0o755)), "400");
     w.wait("v1", 3, |w| w.marker().contains("v1 "));
     put(&w.path("fw"), script("echo half >> \"$MARK\"\n"), 0o755);
     std::thread::sleep(Duration::from_millis(30));
     put(&w.path("fw"), v(2), 0o755);
-    w.wait("v2", 2, |w| w.marker().contains("v2 "));
+    w.wait("v2", 4, |w| w.marker().contains("v2 "));
     assert!(!w.marker().contains("half"), "{}", w.marker());
 }
 
