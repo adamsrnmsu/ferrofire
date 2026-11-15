@@ -1,0 +1,28 @@
+# ww-1df.49 sparse LU vs dense, bench/solve_time.sh on the control grid, 3 alternating pairs (5 reps each)
+== base pair 1
+per_solve_ms 8.5 (mean seq200 minus mean none, over 200 solves, 5 reps)
+== sparse pair 1
+per_solve_ms 4.5 (mean seq200 minus mean none, over 200 solves, 5 reps)
+== base pair 2
+per_solve_ms 8.5 (mean seq200 minus mean none, over 200 solves, 5 reps)
+== sparse pair 2
+per_solve_ms 4.5 (mean seq200 minus mean none, over 200 solves, 5 reps)
+== base pair 3
+per_solve_ms 8.5 (mean seq200 minus mean none, over 200 solves, 5 reps)
+== sparse pair 3
+per_solve_ms 4.5 (mean seq200 minus mean none, over 200 solves, 5 reps)
+# grid storm dt 0.05 (provider CPU %)
+grid-storm  cpu=9.7
+grid-storm  cpu=7.2
+grid-storm  cpu=9.6
+grid-storm  cpu=7.0
+grid-storm  cpu=9.9
+grid-storm  cpu=7.3
+# grid storm dt 0.005
+gridfast-storm  cpu=41.5
+gridfast-storm  cpu=36.8
+gridfast-storm  cpu=40.8
+gridfast-storm  cpu=36.2
+gridfast-storm  cpu=40.9
+gridfast-storm  cpu=38.0
+# lines alternate base, sparse
