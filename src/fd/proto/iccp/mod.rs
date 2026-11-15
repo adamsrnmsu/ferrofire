@@ -488,12 +488,9 @@ impl Device {
     }
 
     fn value_of(&self, o: &Object) -> Value {
-        let ts = self
-            .store
-            .timestamp(&o.tag)
-            .and_then(|t| i64::try_from(t).ok())
-            .filter(|t| *t > 0);
-        o.encode(self.store.get(&o.tag), ts.unwrap_or_else(unix_secs))
+        let (datum, ts) = self.store.read(&o.tag);
+        let ts = ts.and_then(|t| i64::try_from(t).ok()).filter(|t| *t > 0);
+        o.encode(datum, ts.unwrap_or_else(unix_secs))
     }
 
     fn resolve(&self, id: AssocId, name: &ObjectName) -> Result<Target, i64> {
@@ -725,11 +722,13 @@ impl Device {
                 let Some(members) = self.set_members(id, name) else {
                     return Answer::NOT_FOUND;
                 };
+                // set_members found the peer, so this is its read ACL for every member
+                let acl = self.peer_of(id).map(|p| &p.read);
                 Answer::Read(
                     members
                         .iter()
                         .map(|m| match self.objects.get(m) {
-                            Some(o) if self.allowed(id, m, false) => Ok(self.value_of(o)),
+                            Some(o) if acl.is_some_and(|a| a.allows(m)) => Ok(self.value_of(o)),
                             Some(_) => Err(DENIED),
                             None => self
                                 .report_member(id, m, &self.reporting(id, name), u8::MIN) // nothing detected: a plain read, not a report
@@ -741,14 +740,14 @@ impl Device {
         }
     }
 
-    fn set_members(&self, id: AssocId, name: &ObjectName) -> Option<Vec<String>> {
+    fn set_members(&self, id: AssocId, name: &ObjectName) -> Option<&Vec<String>> {
         let ObjectName::DomainSpecific { domain, item } = name else {
             return None;
         };
         if self.peer_of(id)?.domain != *domain {
             return None;
         }
-        self.sessions.get(&id)?.sets.get(*item).cloned()
+        self.sessions.get(&id)?.sets.get(*item)
     }
 
     fn write(

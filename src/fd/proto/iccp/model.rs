@@ -103,13 +103,15 @@ impl Object {
     }
 
     /// What follows the timestamp: the flags alone for a state, else the number and the flags.
-    fn parts(&self, (x, state, valid): (f64, u8, u8)) -> Vec<Value> {
+    fn parts(&self, (x, state, valid): (f64, u8, u8), lead: Option<i64>) -> Vec<Value> {
         let f = flags(state, valid);
-        if self.is_state() {
-            vec![f]
-        } else {
-            vec![number(self.class, x), f]
+        let mut v = Vec::with_capacity(3);
+        v.extend(lead.map(Value::Integer));
+        if !self.is_state() {
+            v.push(number(self.class, x));
         }
+        v.push(f);
+        v
     }
 
     /// The value a read returns: `datum` is the tag's current value (`None`: unknown, reported notvalid), `ts` unix seconds.
@@ -122,12 +124,8 @@ impl Object {
             },
             Variant::Plain => number(self.class, r.0),
             Variant::Q if self.is_state() => flags(r.1, r.2),
-            Variant::Q => Value::Structure(self.parts(r)),
-            Variant::QTimeTag => {
-                let mut v = vec![Value::Integer(ts)];
-                v.extend(self.parts(r));
-                Value::Structure(v)
-            }
+            Variant::Q => Value::Structure(self.parts(r, None)),
+            Variant::QTimeTag => Value::Structure(self.parts(r, Some(ts))),
         }
     }
 
