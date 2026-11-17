@@ -1,5 +1,5 @@
 //! `<scpi-client>` against `<scpi-server>`: two ferrofire field devices in one process, a controller and an instrument, over the raw
-//! socket and HiSLIP. `<logic>` on the controller drives sets that reach the instrument's store, a query tag on the controller tracks a
+//! socket, HiSLIP and VXI-11. `<logic>` on the controller drives sets that reach the instrument's store, a query tag on the controller tracks a
 //! value written on the instrument, the default commands pair the two by tag name alone, and a restarted instrument gets every set
 //! again although nothing on the controller changed.
 
@@ -52,8 +52,33 @@ impl Drop for Device {
     }
 }
 
+/// The instrument's ports: raw socket, HiSLIP, VXI-11 portmapper and core channel, all unprivileged.
+struct Ports {
+    raw: u16,
+    hislip: u16,
+    pm: u16,
+    core: u16,
+}
+
+impl Ports {
+    fn new() -> Ports {
+        Ports {
+            raw: free_port(),
+            hislip: free_port(),
+            pm: free_port(),
+            core: free_port(),
+        }
+    }
+}
+
 /// The instrument: `volt` and `out` can be set, `level` is read, all device-local (no provider), starting at `level`.
-fn instrument(port: u16, hislip: u16, level: f64) -> String {
+fn instrument(p: &Ports, level: f64) -> String {
+    let Ports {
+        raw,
+        hislip,
+        pm,
+        core,
+    } = p;
     format!(
         r#"<field-device><name>psu</name><cycle-time>50</cycle-time>
 <tags>
@@ -61,8 +86,9 @@ fn instrument(port: u16, hislip: u16, level: f64) -> String {
  <internal-tag><name>out</name><status>false</status></internal-tag>
  <internal-tag><name>level</name><value>{level}</value></internal-tag>
 </tags>
-<comms><scpi-server><endpoint>tcp://127.0.0.1:{port}</endpoint><hislip-endpoint>tcp://127.0.0.1:{hislip}</hislip-endpoint>
- <vxi11-endpoint>none</vxi11-endpoint><event-logging>/dev/null</event-logging>
+<comms><scpi-server><endpoint>tcp://127.0.0.1:{raw}</endpoint><hislip-endpoint>tcp://127.0.0.1:{hislip}</hislip-endpoint>
+ <vxi11-endpoint>tcp://127.0.0.1:{pm}</vxi11-endpoint><vxi11-core-endpoint>tcp://127.0.0.1:{core}</vxi11-core-endpoint>
+ <event-logging>/dev/null</event-logging>
  <point><tag>volt</tag><writable>true</writable></point>
  <point><tag>out</tag><writable>true</writable></point>
  <point><tag>level</tag></point>
@@ -70,11 +96,12 @@ fn instrument(port: u16, hislip: u16, level: f64) -> String {
     )
 }
 
-/// The controller: it has no `<tags>`; the client declares them. `elements` are the `<query>` and `<set>` elements.
-fn controller(endpoint: &str, log: &Path, elements: &str) -> String {
+/// The controller: it has no `<tags>`; the client declares them. `target` is `<endpoint>` (and `<portmapper>`), `elements` the
+/// `<query>` and `<set>` elements.
+fn controller(target: &str, log: &Path, elements: &str) -> String {
     format!(
         r#"<field-device><name>ctl</name><cycle-time>50</cycle-time>
-<comms><scpi-client><endpoint>{endpoint}</endpoint><interval>50</interval><timeout>1000</timeout>
+<comms><scpi-client>{target}<interval>50</interval><timeout>1000</timeout>
  <event-logging>{}</event-logging>{elements}</scpi-client></comms>
 <logic>out = level &lt; 80
 volt = level * 2</logic></field-device>"#,
@@ -103,11 +130,11 @@ fn log_path(name: &str) -> PathBuf {
 }
 
 /// Logic on the controller sets `out` and `volt` on the instrument from the `level` it reads there.
-fn control_loop(endpoint: impl Fn(u16, u16) -> String, elements: &str, name: &str) {
-    let (port, hislip) = (free_port(), free_port());
-    let mut ins = Device::start(&instrument(port, hislip, 0.0));
+fn control_loop(target: impl Fn(&Ports) -> String, elements: &str, name: &str) {
+    let ports = Ports::new();
+    let mut ins = Device::start(&instrument(&ports, 0.0));
     let log = log_path(name);
-    let mut ctl = Device::start(&controller(&endpoint(port, hislip), &log, elements));
+    let mut ctl = Device::start(&controller(&target(&ports), &log, elements));
     wait_for("out set from level 0", || {
         ins.store.get("out") == Some(Value::Binary(true))
     });
@@ -138,24 +165,48 @@ fn control_loop(endpoint: impl Fn(u16, u16) -> String, elements: &str, name: &st
 
 #[test]
 fn logic_drives_an_instrument_over_the_raw_socket() {
-    control_loop(|port, _| format!("127.0.0.1:{port}"), COMMANDS, "raw");
+    control_loop(
+        |p| format!("<endpoint>127.0.0.1:{}</endpoint>", p.raw),
+        COMMANDS,
+        "raw",
+    );
 }
 
 #[test]
 fn two_ferrofire_devices_pair_by_tag_name_over_hislip() {
     control_loop(
-        |_, hislip| format!("TCPIP::127.0.0.1::hislip0,{hislip}::INSTR"),
+        |p| {
+            format!(
+                "<endpoint>TCPIP::127.0.0.1::hislip0,{}::INSTR</endpoint>",
+                p.hislip
+            )
+        },
         BY_NAME,
         "hislip",
     );
 }
 
 #[test]
+fn logic_drives_an_instrument_over_vxi11_through_its_portmapper() {
+    control_loop(
+        |p| {
+            format!(
+                "<endpoint>TCPIP::127.0.0.1::INSTR</endpoint><portmapper>{}</portmapper>",
+                p.pm
+            )
+        },
+        COMMANDS,
+        "vxi11",
+    );
+}
+
+#[test]
 fn a_restarted_instrument_gets_every_set_again() {
-    let (port, hislip) = (free_port(), free_port());
-    let mut ins = Device::start(&instrument(port, hislip, 50.0));
+    let ports = Ports::new();
+    let mut ins = Device::start(&instrument(&ports, 50.0));
     let log = log_path("restart");
-    let mut ctl = Device::start(&controller(&format!("127.0.0.1:{port}"), &log, BY_NAME));
+    let target = format!("<endpoint>127.0.0.1:{}</endpoint>", ports.raw);
+    let mut ctl = Device::start(&controller(&target, &log, BY_NAME));
     wait_for("the first instrument is set", || {
         ins.store.get("out") == Some(Value::Binary(true))
             && ins.store.get_f64("volt") == Some(100.0)
@@ -167,7 +218,7 @@ fn a_restarted_instrument_gets_every_set_again() {
             .contains("reconnecting")
     });
     // the same level, so nothing the controller computes changes: only the reconnect can make it send the sets again
-    let mut ins = Device::start(&instrument(port, hislip, 50.0));
+    let mut ins = Device::start(&instrument(&ports, 50.0));
     wait_for("the restarted instrument is set", || {
         ins.store.get("out") == Some(Value::Binary(true))
             && ins.store.get_f64("volt") == Some(100.0)

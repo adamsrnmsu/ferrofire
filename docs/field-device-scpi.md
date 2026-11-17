@@ -254,8 +254,9 @@ scripted sequences (`<logic>` and `delay:` cover timing), a rate per query (use 
 Tested by unit tests of the config, the due-set rule, the template, the answer parsing, a whole poll against a scripted wire, when an
 answer is written (device-local and external tags, a queued write, an ACK, a refusal, a provider value over the answer, NaN) and
 the reconnect pause (doubling while refused, 1 s again after a connection) (`src/fd/proto/scpi/client.rs`), and by `tests/scpi_controller.rs`: a ferrofire controller and a ferrofire instrument in one process over
-the raw socket (explicit commands) and HiSLIP (default commands), `<logic>` on the controller driving the instrument's tags from a value
-read there, and an instrument restarted under a running controller that gets every set again.
+the raw socket and VXI-11 (explicit commands; VXI-11 as `TCPIP::127.0.0.1::INSTR` with `<portmapper>` naming the instrument's
+unprivileged portmapper) and HiSLIP (default commands), `<logic>` on the controller driving the instrument's tags from a value read
+there, and an instrument restarted under a running controller that gets every set again.
 
 ## `ferrofire scpi`
 

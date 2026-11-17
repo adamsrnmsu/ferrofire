@@ -445,15 +445,17 @@ and `mqtt_net.rs` use `rumqttc` on both sides.
 
 ## SCPI instrument server and client
 
-`<scpi-server>` and `ferrofire scpi` ([field-device-scpi.md](field-device-scpi.md)); `src/scpi/` (message syntax, the HiSLIP frame format and
-the ONC RPC/XDR code, shared, and the client with its HiSLIP and VXI-11 wires in `transport.rs`) and `src/fd/proto/scpi/` (config and the raw
-socket in `mod.rs`, the I/O-free instrument in `device.rs`, the HiSLIP and VXI-11 servers in `hislip.rs` and `vxi11.rs`).
+`<scpi-server>`, `<scpi-client>` and `ferrofire scpi` ([field-device-scpi.md](field-device-scpi.md)); `src/scpi/` (message syntax, the HiSLIP
+frame format and the ONC RPC/XDR code, shared, and the client with its HiSLIP and VXI-11 wires in `transport.rs`) and `src/fd/proto/scpi/`
+(config and the raw socket in `mod.rs`, the I/O-free instrument in `device.rs`, the HiSLIP and VXI-11 servers in `hislip.rs` and
+`vxi11.rs`, the controller in `client.rs`).
 
 **Strategy.** The syntax (`syntax.rs`) and the instrument (`device.rs`: line framing, status registers, error queue, routes) are pure and
 need no socket. `tests/scpi_golden.rs` replays a transcript (`tests/golden/scpi.transcript`: request lines, exact responses, the write queue,
 a new connection, a second session of the same instrument) with no sockets; `tests/scpi_net.rs` runs the raw socket on real sockets,
 `tests/scpi_transport_golden.rs` replays the HiSLIP and VXI-11 transcripts with no sockets; `tests/scpi_hislip.rs` and `tests/scpi_vxi11.rs` run the other two (HiSLIP frames and ONC RPC records built by hand, so a wrong header is a
-test and not a client's guess); `tests/scpi_client.rs` runs the real `ferrofire scpi` binary against all three; `make conformance
+test and not a client's guess); `tests/scpi_client.rs` runs the real `ferrofire scpi` binary against all three; `tests/scpi_controller.rs`
+runs a `<scpi-client>` field device against a `<scpi-server>` field device in one process over all three; `make conformance
 PROTO=scpi` runs the independent client stacks.
 
 **Checked, and by what.**
@@ -491,6 +493,14 @@ PROTO=scpi` runs the independent client stacks.
 - Client: the resource strings (every form, case, board number, bad ones), the query rule, the `SYST:ERR?` loop and its limit, the timeout and the closed-connection messages, target parsing, scripts, the
   REPL loop (unit tests with in-memory streams); the exit statuses, files, stdin, `--json` and `--check` against the real server
   (`scpi_client.rs`); insta snapshots of the text and JSON formats (`tests/snapshots.rs`).
+- Controller (`<scpi-client>`): the config, the set rule (sent when the value differs from the last sent on this connection, NaN-aware,
+  all again after a reconnect), the template's NR2/NR3 numbers read back by the server's own parser, answer parsing per kind, when an
+  answer is written to the store (only when it differs or a write is queued; an external tag ACKed, refused or overwritten by the
+  provider), whole polls against a scripted wire, a stop between commands, and the reconnect pause (2 s, 4 s, then 1 s after a
+  connection, the pause injected so no test sleeps) (unit tests in `client.rs`). `tests/scpi_controller.rs`: `<logic>` on a controller
+  device drives a ferrofire instrument device from a value read there over the raw socket (explicit commands), HiSLIP (default
+  commands, paired by tag name) and VXI-11 (`TCPIP::127.0.0.1::INSTR` with `<portmapper>` at the instrument's unprivileged
+  portmapper port); a restarted instrument gets every set again; the documented example loads.
 - Wire (conformance run): 15,804 packets on port 5025, at least 2000 handshakes, 0 malformed, `expert,warn` empty after allowing connection
   resets and the window closing during the 200 KB flood (flow control; `proto.env` says why); the requests and the responses are found as
   bytes in the capture (`*IDN?` and its answer, the -222 and -363 responses, the `;`-joined answer of a compound query); Zeek's `conn.log` has
