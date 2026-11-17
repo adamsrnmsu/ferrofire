@@ -4,6 +4,7 @@
 //! connection's line buffer) all three feed, `crate::scpi::syntax` the message text; this file is the config and the sockets of the
 //! raw protocol: one task per connection, a connection limit shared by all three transports, an idle timeout.
 
+pub mod client;
 pub mod device;
 pub mod hislip;
 pub mod vxi11;

@@ -1,4 +1,4 @@
-# SCPI instrument (`<scpi-server>`) and the `ferrofire scpi` client
+# SCPI instrument (`<scpi-server>`), controller (`<scpi-client>`) and the `ferrofire scpi` client
 
 Feature `proto-scpi` (on by default, like `proto-mqtt`: the crap and mutate gates build the default features only). The field device
 presents its point map as an SCPI-99 instrument over three transports that feed one parser and one device: the raw TCP socket of LXI
@@ -174,6 +174,82 @@ which libtirpc clients try first, are answered `PROG_MISMATCH` (2, 2) so that th
 A link belongs to the connection that created it and dies with it. A call that does not decode is `GARBAGE_ARGS`, an unknown procedure
 `PROC_UNAVAIL`, an unknown program `PROG_UNAVAIL`, an RPC version other than 2 is denied, a record over 2 MiB closes the connection.
 Not implemented: the interrupt channel (SRQ), locks, DOCMD, a separate abort port, the UDP core channel, the portmapper's `CALLIT`.
+
+## The controller: `<scpi-client>`
+
+The other side of `<scpi-server>`: a field device that polls an instrument on an interval, puts the answers in tags, and sends a set
+command when a tag that `<logic>` computes changes. The control law is the `<logic>` block; the client decides nothing. SCPI instruments
+never speak first, so all the traffic starts here. The instrument may be a ferrofire `<scpi-server>` or a real one (raw socket, HiSLIP or
+VXI-11); one `<scpi-client>` talks to one instrument.
+
+```xml
+<field-device>
+  <name>bench-ctl</name>
+  <cycle-time>500</cycle-time>
+  <comms>
+    <scpi-client>
+      <endpoint>TCPIP::10.1.1.50::hislip0::INSTR</endpoint>
+      <interval>1000</interval>
+      <query><tag>psu.volt</tag><command>MEAS:VOLT?</command></query>
+      <query><tag>tank.level</tag></query>
+      <set><tag>psu.out</tag><type>binary</type><command>OUTP {}</command></set>
+    </scpi-client>
+  </comms>
+  <logic>
+    psu.out = tank.level &lt; 80
+  </logic>
+</field-device>
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `<endpoint>` | required | the instrument, in `ferrofire scpi`'s target syntax: `host[:port]` (raw socket, 5025), `TCPIP::host::port::SOCKET`, `TCPIP::host::hislip0[,port]::INSTR`, `TCPIP::host::INSTR` (VXI-11). Not `tcp://`: a host never has a `/` |
+| `<portmapper>` | 111 (1-65535) | VXI-11 only: the portmapper port (1111 for an unprivileged ferrofire instrument) |
+| `<interval>` | 1000 (50-3600000) | milliseconds from the start of one poll to the start of the next. A poll that takes longer starts the next at once; polls never overlap |
+| `<timeout>` | 5000 (100-600000) | milliseconds to connect and to wait for each response |
+| `<check>` | true | after every command read `SYST:ERR?` until it says 0 and log each error |
+| `<query>` | none | `<tag>`, optional `<type>` (`analog`, the default, or `binary`) and `<command>`, which must be a query (a header ending in `?`). Each poll sends it and writes the answer to the tag |
+| `<set>` | none | `<tag>`, optional `<type>` and `<command>`, a template in which every `{}` is the value (it must have one). Sent when the tag's value differs from the last value sent |
+| `<event-logging>` | `scpi-client.log` | the usual per-module CSV event log: connects, lost connections, instrument errors, answers that are not values |
+
+**Tags.** A `<query>` or `<set>` tag may already exist (from `<tags>`, with its initial value); then a `<type>`, if given, must match its
+kind. Otherwise the client declares it as a device-local tag of `<type>` (analog by default, starting at 0 or false), so a controller needs
+no `<tags>` block. `<logic>` is read after `<comms>`, so it can use these tags. A tag may be in a `<query>` and a `<set>` both: the client
+reads back what it sets.
+
+**Default commands.** With no `<command>` the client uses the paths a ferrofire `<scpi-server>` gives the same tag name (above): a query is
+`MEAS:SCAL:<TAG>?` for an analog tag and `MEAS:BIN:<TAG>?` for a binary one, a set is `SOUR:<TAG> {}`. Two ferrofire devices therefore
+pair up with nothing but tag names. A real instrument needs `<command>`.
+
+**A poll.**
+
+1. **Sets.** Every `<set>` whose tag's value differs from the last value sent on this connection is sent, `{}` replaced by the value: an
+   analog in Rust's shortest round-trip form with `E` for an exponent (`12.0`, `-0.25`, `1E20`, `1.5E-7`), a binary as `1` or `0`. A NaN
+   or infinite value is not sent; that is logged once per value. A set the instrument refuses (its error is logged) counts as sent and
+   is not repeated until the value changes. After a reconnect every set is sent again, because the instrument may have reset.
+2. **Queries.** Each `<query>` is sent and the first `,`- or `;`-separated field of the answer is read. An analog tag takes a number; the
+   SCPI sentinels `9.91E+37` (not a number) and `+-9.9E+37` (infinity) become NaN and infinity, and text such as `nan` or `inf` is not a
+   number. A binary tag takes `1`, `0`, `ON` or `OFF` (any case). Anything else is logged and the tag keeps its value. The value is
+   queued with every poll, the same path as a protocol write: a device-local tag changes at the end of the scan cycle, an external tag
+   goes to the provider.
+3. **Errors.** With `<check>` every command goes through the same exchange as `ferrofire scpi --check`: a query is sent as
+   `QUERY;*OPC?`, so a rejected query is seen at once and leaves its tag alone, and the error queue is drained after each command. Each
+   error is a line in the event log (`error: SOUR:OUT 1: -222,Data out of range`). Without `<check>` a rejected query is waited out for
+   `<timeout>`, which ends the connection.
+
+**Connection.** The client runs on a blocking thread (the wires are blocking sockets) and only reads the store and queues writes, so a
+dead instrument never delays the scan cycle. A send or receive failure (a refused or closed connection, a timeout, a HiSLIP FatalError, a
+VXI-11 error) ends the connection; it is logged and the client reconnects after 1 s, doubling to 30 s while the instrument stays away,
+and back to 1 s after a connection that was made (the `<mqtt-client>` rule). A failed connect is logged once, not on every retry, until a
+connect works (`connected` in the log). Stopping the device ends the task between commands.
+
+Not done: SRQ (the server sends none either), several instruments in one element (use one `<scpi-client>` per instrument), ramps or
+scripted sequences (`<logic>` and `delay:` cover timing), a rate per query (use two elements).
+
+Tested by unit tests of the config, the due-set rule, the template, the answer parsing and a whole poll against a scripted wire
+(`src/fd/proto/scpi/client.rs`), and by `tests/scpi_controller.rs`: a ferrofire controller and a ferrofire instrument in one process over
+the raw socket (explicit commands) and HiSLIP (default commands), `<logic>` on the controller driving the instrument's tags from a value
+read there, and an instrument restarted under a running controller that gets every set again.
 
 ## `ferrofire scpi`
 
