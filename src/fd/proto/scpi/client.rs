@@ -186,6 +186,11 @@ impl Module for Client {
 impl Client {
     /// Connect, poll until the connection fails, pause, again, until `stop`. A failed connect is logged once until one works.
     fn serve(&self, store: &Store, stop: &CancellationToken) {
+        self.reconnect(store, stop, |wait| pause(wait, stop));
+    }
+
+    /// `serve` with the reconnect pause passed in as `rest`.
+    fn reconnect(&self, store: &Store, stop: &CancellationToken, mut rest: impl FnMut(Duration)) {
         let (mut wait, mut quiet) = (BACKOFF_FIRST, false);
         while !stop.is_cancelled() {
             let up = match open(&self.target, self.wait, self.portmapper) {
@@ -204,7 +209,7 @@ impl Client {
                 Err(_) => false,
             };
             wait = backoff(wait, up);
-            pause(wait, stop);
+            rest(wait);
         }
     }
 
@@ -853,6 +858,42 @@ mod tests {
             "{e}"
         );
         std::fs::remove_file(&b.log).unwrap();
+    }
+
+    #[test]
+    fn the_reconnect_pause_doubles_while_refused_and_is_1_s_again_after_a_connection() {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port(); // closed again at once: refused until the test listens
+        let c = parse_with(
+            &format!(
+                "<endpoint>127.0.0.1:{port}</endpoint><check>false</check><query><tag>x</tag></query>"
+            ),
+            &mut Tags::default(),
+        )
+        .unwrap();
+        let (store, stop) = (Store::new(Layout::default()), CancellationToken::new());
+        let mut pauses = vec![];
+        c.reconnect(&store, &stop, |wait| {
+            pauses.push(wait);
+            match pauses.len() {
+                // refused twice; then one connection, which the instrument closes (the query fails); then refused again
+                2 => {
+                    let l = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+                    std::thread::spawn(move || {
+                        let (conn, _) = l.accept().unwrap();
+                        drop(l); // before the connection, so the next connect is refused
+                        drop(conn);
+                    });
+                }
+                4 => stop.cancel(),
+                _ => {}
+            }
+        });
+        let s = Duration::from_secs;
+        assert_eq!(pauses, [s(2), s(4), s(1), s(2)]);
     }
 
     #[test]

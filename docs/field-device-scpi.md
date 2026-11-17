@@ -252,8 +252,8 @@ Not done: SRQ (the server sends none either), several instruments in one element
 scripted sequences (`<logic>` and `delay:` cover timing), a rate per query (use two elements).
 
 Tested by unit tests of the config, the due-set rule, the template, the answer parsing, a whole poll against a scripted wire, when an
-answer is written (device-local and external tags, a queued write, an ACK, a refusal, a provider value over the answer, NaN)
-(`src/fd/proto/scpi/client.rs`), and by `tests/scpi_controller.rs`: a ferrofire controller and a ferrofire instrument in one process over
+answer is written (device-local and external tags, a queued write, an ACK, a refusal, a provider value over the answer, NaN) and
+the reconnect pause (doubling while refused, 1 s again after a connection) (`src/fd/proto/scpi/client.rs`), and by `tests/scpi_controller.rs`: a ferrofire controller and a ferrofire instrument in one process over
 the raw socket (explicit commands) and HiSLIP (default commands), `<logic>` on the controller driving the instrument's tags from a value
 read there, and an instrument restarted under a running controller that gets every set again.
 
