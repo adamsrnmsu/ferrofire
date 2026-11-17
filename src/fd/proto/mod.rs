@@ -99,6 +99,8 @@ pub static REGISTRY: &[(&str, Start)] = &[
     ("mqtt-client", start::<mqtt::Client>),
     #[cfg(feature = "proto-scpi")]
     ("scpi-server", start::<scpi::Server>),
+    #[cfg(feature = "proto-scpi")]
+    ("scpi-client", start::<scpi::client::Client>),
 ];
 
 /// Every `<comms>` tag a build can have, and the Cargo feature that provides it.
@@ -115,6 +117,7 @@ pub const KNOWN: &[(&str, &str)] = &[
     ("iccp-server", "proto-iccp"),
     ("mqtt-client", "proto-mqtt"),
     ("scpi-server", "proto-scpi"),
+    ("scpi-client", "proto-scpi"),
 ];
 
 /// Start the module a `<comms>` child names. `Ok(None)`: a tag nothing knows is warned about and skipped; a tag whose feature is
