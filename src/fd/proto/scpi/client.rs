@@ -861,15 +861,20 @@ mod tests {
     }
 
     #[test]
-    fn the_reconnect_pause_doubles_while_refused_and_is_1_s_again_after_a_connection() {
+    fn the_reconnect_pause_doubles_while_refused_and_is_1_s_again_after_a_connection_and_each_outage_is_logged(
+    ) {
         let port = std::net::TcpListener::bind("127.0.0.1:0")
             .unwrap()
             .local_addr()
             .unwrap()
             .port(); // closed again at once: refused until the test listens
+        let log =
+            std::env::temp_dir().join(format!("scpi-client-pause-{}.log", std::process::id()));
         let c = parse_with(
             &format!(
-                "<endpoint>127.0.0.1:{port}</endpoint><check>false</check><query><tag>x</tag></query>"
+                "<endpoint>127.0.0.1:{port}</endpoint><check>false</check><event-logging>{}</event-logging>
+                 <query><tag>x</tag></query>",
+                log.display()
             ),
             &mut Tags::default(),
         )
@@ -894,6 +899,11 @@ mod tests {
         });
         let s = Duration::from_secs;
         assert_eq!(pauses, [s(2), s(4), s(1), s(2)]);
+        // one line per outage: the one before the connection and the one after it
+        let text = std::fs::read_to_string(&log).unwrap();
+        assert_eq!(text.matches("; retrying").count(), 2, "{text}");
+        assert_eq!(text.matches(",connected").count(), 1, "{text}");
+        std::fs::remove_file(&log).unwrap();
     }
 
     #[test]
