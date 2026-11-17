@@ -67,6 +67,12 @@ impl EventLog {
         EventLog::to(module, sink)
     }
 
+    /// `log`, and the same line as a tracing warning under the module's name: what an operator should see in either place.
+    pub fn say(&self, level: &str, event: &str, msg: &str) {
+        self.log(level, event, msg);
+        tracing::warn!("{}: {event}: {msg}", self.module);
+    }
+
     pub fn to(module: &str, sink: Box<dyn Write + Send>) -> EventLog {
         EventLog {
             module: module.into(),

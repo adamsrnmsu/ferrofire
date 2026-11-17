@@ -10,9 +10,9 @@ pub mod sparkplug;
 use super::super::config::{bounded, flag, number, require, text, ConfigError, Opts, Tags};
 use super::super::eventlog::EventLog;
 use super::super::store::Store;
-use super::device_name;
 use super::point::{points, Point};
 use super::Module;
+use super::{backoff, device_name, BACKOFF_FIRST};
 use crate::hint::{show, RateLimit};
 use engine::{Engine, Out, Scheme};
 use roxmltree::Node;
@@ -26,9 +26,6 @@ use tokio_util::sync::CancellationToken;
 
 /// How often the session looks at the store for changes.
 const TICK: Duration = Duration::from_millis(100);
-/// Reconnect pause: 1 s, doubling to 30 s while the broker stays unreachable.
-const BACKOFF_FIRST: Duration = Duration::from_secs(1);
-const BACKOFF_MAX: Duration = Duration::from_secs(30);
 /// A packet larger than this (either way) is refused: commands are a few bytes, a Sparkplug birth of thousands of tags is not.
 const MAX_PACKET: usize = 1 << 20;
 const KEEP_ALIVE: Duration = Duration::from_secs(15);
@@ -225,15 +222,6 @@ enum Ended {
     Lost { was_up: bool },
 }
 
-/// The pause after a failed session: back to the first once a session got as far as being connected, else doubled up to the cap.
-fn backoff(pause: Duration, was_up: bool) -> Duration {
-    if was_up {
-        BACKOFF_FIRST
-    } else {
-        (pause * 2).min(BACKOFF_MAX)
-    }
-}
-
 fn qos(q: u8) -> QoS {
     match q {
         0 => QoS::AtMostOnce,
@@ -250,11 +238,6 @@ fn unix_ms() -> u64 {
 }
 
 impl Client {
-    fn say(&self, level: &str, event: &str, msg: &str) {
-        self.log.log(level, event, msg);
-        tracing::warn!("mqtt-client: {event}: {msg}");
-    }
-
     fn options(&self, will: Out) -> Result<MqttOptions, String> {
         let b = &self.link.broker;
         let mut o = MqttOptions::new(&self.link.client_id, &b.host, b.port);
@@ -295,7 +278,7 @@ impl Client {
             {
                 self.engine.lost();
                 if self.queue_warn.allow(Instant::now()) {
-                    self.say(
+                    self.log.say(
                         "warn",
                         "mqtt queue",
                         "publish queue full; a new birth follows",
@@ -311,7 +294,7 @@ impl Client {
         let opts = match self.options(will) {
             Ok(o) => o,
             Err(e) => {
-                self.say(
+                self.log.say(
                     "error",
                     "mqtt tls",
                     &format!("cannot read the TLS files: {e}"),
@@ -349,12 +332,12 @@ impl Client {
                             self.engine.message(&p.topic, &p.payload, store)
                         };
                         for line in lines {
-                            self.say("warn", "mqtt command", &line);
+                            self.log.say("warn", "mqtt command", &line);
                         }
                     }
                     Ok(_) => {}
                     Err(e) => {
-                        self.say("error", "mqtt connection", &format!("{e}; reconnecting"));
+                        self.log.say("error", "mqtt connection", &format!("{e}; reconnecting"));
                         return Ended::Lost { was_up: up };
                     }
                 }
@@ -655,13 +638,7 @@ mod tests {
     }
 
     #[test]
-    fn the_pause_doubles_to_a_cap_and_resets_after_a_good_session() {
-        let s = Duration::from_secs;
-        assert_eq!(backoff(s(1), false), s(2));
-        assert_eq!(backoff(s(2), false), s(4));
-        assert_eq!(backoff(s(16), false), s(30));
-        assert_eq!(backoff(s(30), false), s(30));
-        assert_eq!(backoff(s(30), true), s(1));
+    fn qos_levels_map_to_rumqttc() {
         assert_eq!(qos(0), QoS::AtMostOnce);
         assert_eq!(qos(1), QoS::AtLeastOnce);
         assert_eq!(qos(2), QoS::ExactlyOnce);

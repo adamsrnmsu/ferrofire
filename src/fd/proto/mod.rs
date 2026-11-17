@@ -21,6 +21,7 @@ use super::store::Store;
 use roxmltree::Node;
 use std::future::Future;
 use std::pin::Pin;
+use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 pub trait Module: Send + 'static {
@@ -58,6 +59,19 @@ pub fn device_name(n: Node) -> String {
         .and_then(|d| super::config::text(d, "name"))
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "ferrofire".into())
+}
+
+/// Reconnect pause of the client modules: 1 s, doubling to 30 s while the peer stays unreachable.
+pub const BACKOFF_FIRST: Duration = Duration::from_secs(1);
+const BACKOFF_MAX: Duration = Duration::from_secs(30);
+
+/// The pause after a failed session: back to the first once a session got as far as being connected, else doubled up to the cap.
+pub fn backoff(pause: Duration, was_up: bool) -> Duration {
+    if was_up {
+        BACKOFF_FIRST
+    } else {
+        (pause * 2).min(BACKOFF_MAX)
+    }
 }
 
 pub type Task = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -188,6 +202,16 @@ mod tests {
         assert!(!shown.contains("dnp3-server (feature"));
         assert!(shown.contains("iccp-server (feature proto-iccp)"));
         assert!(all.contains(&"iec61850-server"));
+    }
+
+    #[test]
+    fn the_pause_doubles_to_a_cap_and_resets_after_a_good_session() {
+        let s = Duration::from_secs;
+        assert_eq!(backoff(s(1), false), s(2));
+        assert_eq!(backoff(s(2), false), s(4));
+        assert_eq!(backoff(s(16), false), s(30));
+        assert_eq!(backoff(s(30), false), s(30));
+        assert_eq!(backoff(s(30), true), s(1));
     }
 
     #[test]

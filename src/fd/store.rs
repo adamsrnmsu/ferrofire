@@ -22,7 +22,7 @@ struct Point {
 }
 
 /// The same value; a NaN is the same value as itself (a register of zero span unscales to NaN).
-fn same(a: &Value, b: &Value) -> bool {
+pub fn same(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Analog(x), Value::Analog(y)) => x == y || (x.is_nan() && y.is_nan()),
         _ => a == b,

@@ -147,10 +147,14 @@ pub struct Link<T> {
 impl<R: BufRead, W: Write> Link<Lines<R, W>> {
     /// A raw-socket link over a reader and a writer.
     pub fn new(rd: R, wr: W, wait: Duration) -> Self {
-        Link {
-            wire: Lines { rd, wr },
-            wait,
-        }
+        Link::wired(Lines { rd, wr }, wait)
+    }
+}
+
+impl<T> Link<T> {
+    /// A link over a connection `transport::open` (or a test) made; `wait` is what a timeout message names.
+    pub fn wired(wire: T, wait: Duration) -> Self {
+        Link { wire, wait }
     }
 }
 
@@ -323,7 +327,7 @@ fn wait_of(a: &ScpiArgs) -> Result<Duration, String> {
 
 fn connect_link(a: &ScpiArgs, wait: Duration) -> Result<Link<Box<dyn Wire>>, String> {
     let wire = open(&parse_target(&a.target)?, wait, a.portmapper)?;
-    Ok(Link { wire, wait })
+    Ok(Link::wired(wire, wait))
 }
 
 /// Nothing to send and a person at the keyboard.
