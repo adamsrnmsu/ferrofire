@@ -1,7 +1,7 @@
 # ferrofire-testpeers: reference peers + blue-team tooling for the field-device acceptance harness (conformance/).
 #   docker build -t ferrofire-testpeers docker/testpeers          (arm64 and amd64: every stage is multi-arch)
 # Licence policy: opendnp3 is Apache-2.0. libiec61850 (and mbpoll, from Debian) are GPL-3.0 and are shipped here ONLY as separate test peers in
-# its own binaries; ferrofire never links it (iec61850bean Apache-2.0, go-iec61850 MIT, dnp3py MIT, igs/telcon permissive, Tahu/Paho/Mosquitto EPL-2.0), and nothing in this image is copied into a ferrofire release artefact.
+# its own binaries; ferrofire never links it (iec61850bean Apache-2.0, go-iec61850 MIT, dnp3py MIT, scpi-parser BSD-2-Clause, igs/telcon permissive, Tahu/Paho/Mosquitto EPL-2.0), and nothing in this image is copied into a ferrofire release artefact.
 ARG ZEEK_VERSION=9.0.1
 
 FROM debian:trixie AS build
@@ -56,6 +56,17 @@ COPY goiec/ /src/goiec/
 RUN cd /src/goiec && go build -trimpath -o /out/bin/ffgoiec . \
  && mkdir -p /out/licenses && cp "$(go list -m -f '{{.Dir}}' github.com/otfabric/go-iec61850)/LICENSE" /out/licenses/go-iec61850-MIT
 
+# scpi-parser (Jan Breuer, BSD-2-Clause, C; github.com/j123b567/scpi-parser), the SCPI parser library that instrument firmwares embed. Its
+# examples/test-tcp is a raw-socket instrument on 5025 (the IEEE 488.2 common commands, SYSTem:ERRor, MEASure:VOLTage:DC? ...), one client at a
+# time: the independent follower of the <scpi-client> run (conformance/scpi-client). Its own process, never linked. Pinned by commit (master,
+# 2026-03-20). The first RUN is the build stage's, so it comes from the cache.
+FROM debian:trixie AS scpipeer
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends build-essential cmake git ca-certificates >/dev/null
+ARG SCPI_PARSER=886615902b2777b71860445305bfe5a3faef4f3e
+RUN git init -q /src && git -C /src fetch -q --depth 1 https://github.com/j123b567/scpi-parser $SCPI_PARSER && git -C /src checkout -q FETCH_HEAD \
+ && make -s -C /src/libscpi static >/dev/null && make -s -C /src/examples/test-tcp >/dev/null \
+ && mkdir -p /out/bin /out/licenses && cp /src/examples/test-tcp/test /out/bin/scpi-parser-tcp && cp /src/LICENSE /out/licenses/scpi-parser-BSD-2-Clause
+
 FROM zeek/zeek:${ZEEK_VERSION}
 RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
       tshark tcpdump nmap python3 ca-certificates git cmake g++ make libpcap-dev >/dev/null \
@@ -108,4 +119,6 @@ COPY --from=gopeers /out/bin/ /usr/local/bin/
 COPY --from=gopeers /out/licenses/ /usr/share/doc/ferrofire-testpeers/
 COPY --from=build /out/bin/ /usr/local/bin/
 COPY --from=build /out/licenses/ /usr/share/doc/ferrofire-testpeers/
+COPY --from=scpipeer /out/bin/ /usr/local/bin/
+COPY --from=scpipeer /out/licenses/ /usr/share/doc/ferrofire-testpeers/
 CMD ["bash"]

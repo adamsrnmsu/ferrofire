@@ -16,9 +16,10 @@ BENNU_DATA=${BENNU_DATA:-$HOME/git/sceptre-bennu/data/configs/ep}
 . "$here/$proto/proto.env"   # sets CFG (path), STOCK_CMD, WARMUP; optional DUT_DEFAULT (rust where bennu has no such server), DUT_CAPS
 DUT=${DUT:-${DUT_DEFAULT:-stock}}
 if [ "$DUT" = stock ]; then DUT_IMAGE=bennu:arm64; DUT_CMD=$STOCK_CMD; fi
-# DUT=rust: our binary (FF_BIN, default target-linux/debug/ferrofire from make test/linux) is copied into a bennu:arm64 container
+# DUT=rust: our binary (FF_BIN, default target-linux/debug/ferrofire from make test/linux) is copied into a bennu:arm64 container, or into
+# RUST_DUT_IMAGE (the binary needs only glibc; a protocol bennu has no part in can name the testpeers image there)
 if [ "$DUT" = rust ]; then
-  DUT_IMAGE=bennu:arm64; DUT_BIN=${FF_BIN:-$here/../target-linux/debug/ferrofire}
+  DUT_IMAGE=${RUST_DUT_IMAGE:-bennu:arm64}; DUT_BIN=${FF_BIN:-$here/../target-linux/debug/ferrofire}
   DUT_CMD='ferrofire field-device --file /tmp/cfg.xml'
 fi
 : "${DUT_IMAGE:?set DUT_IMAGE and DUT_CMD}" "${DUT_CMD:?}"

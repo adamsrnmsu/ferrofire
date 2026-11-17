@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SCEPTRE>
+    <field-device>
+        <name>ctl</name>
+        <cycle-time>100</cycle-time>
+        <tags>
+            <internal-tag><name>want</name><value>0</value></internal-tag>
+        </tags>
+        <comms>
+            <!-- the instrument: scpi-parser's examples/test-tcp; *ESE is the state it keeps that a command sets and a query reads back -->
+            <scpi-client>
+                <endpoint>127.0.0.1:5025</endpoint>
+                <interval>200</interval>
+                <timeout>2000</timeout>
+                <event-logging>/tmp/ctl-scpi-client.log</event-logging>
+                <set><tag>ese_set</tag><command>*ESE {}</command></set>
+                <query><tag>ese</tag><command>*ESE?</command></query>
+                <query><tag>volt</tag><command>MEAS:VOLT:DC?</command></query>
+            </scpi-client>
+            <!-- what the controller holds, for the harness: MEAS:SCAL:ESE?, MEAS:SCAL:VOLT?, SOUR:WANT <v> -->
+            <scpi-server>
+                <endpoint>tcp://0.0.0.0:5030</endpoint>
+                <hislip-endpoint>none</hislip-endpoint>
+                <vxi11-endpoint>none</vxi11-endpoint>
+                <event-logging>/tmp/ctl-scpi-server.log</event-logging>
+                <point><tag>ese</tag></point>
+                <point><tag>volt</tag></point>
+                <point><tag>want</tag><writable>true</writable></point>
+            </scpi-server>
+        </comms>
+        <logic>
+            ese_set = want
+        </logic>
+    </field-device>
+</SCEPTRE>

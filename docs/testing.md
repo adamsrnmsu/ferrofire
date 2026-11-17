@@ -456,7 +456,8 @@ a new connection, a second session of the same instrument) with no sockets; `tes
 `tests/scpi_transport_golden.rs` replays the HiSLIP and VXI-11 transcripts with no sockets; `tests/scpi_hislip.rs` and `tests/scpi_vxi11.rs` run the other two (HiSLIP frames and ONC RPC records built by hand, so a wrong header is a
 test and not a client's guess); `tests/scpi_client.rs` runs the real `ferrofire scpi` binary against all three; `tests/scpi_controller.rs`
 runs a `<scpi-client>` field device against a `<scpi-server>` field device in one process over all three; `make conformance
-PROTO=scpi` runs the independent client stacks.
+PROTO=scpi` runs the independent client stacks, and `make conformance PROTO=scpi-client` runs a `<scpi-client>` against an independent
+instrument (scpi-parser, below).
 
 **Checked, and by what.**
 - Syntax: units split at `;` outside quotes, headers (short and long forms in any case, suffix 1 only, rooted and relative paths, `*` commands
@@ -500,7 +501,11 @@ PROTO=scpi` runs the independent client stacks.
   connection, the pause injected so no test sleeps) (unit tests in `client.rs`). `tests/scpi_controller.rs`: `<logic>` on a controller
   device drives a ferrofire instrument device from a value read there over the raw socket (explicit commands), HiSLIP (default
   commands, paired by tag name) and VXI-11 (`TCPIP::127.0.0.1::INSTR` with `<portmapper>` at the instrument's unprivileged
-  portmapper port); a restarted instrument gets every set again; the documented example loads.
+  portmapper port); a restarted instrument gets every set again; the documented example loads. Against an instrument we did not
+  write (`make conformance PROTO=scpi-client`, conformance/README.md): scpi-parser's `examples/test-tcp` (scpi-parser at commit 8866159,
+  2026-03-20, BSD-2-Clause, C, a library real instrument firmwares embed), raw socket only; `<logic>` sets `*ESE` to two values given at
+  run time and the controller reads each back with `*ESE?`, every query goes out as `QUERY;*OPC?` and comes back `;`-joined, the error
+  queue stays empty, and `MEAS:VOLT:DC?` is read as a number. Passed on 2026-11-17 (17 checks, 144 packets on 5025, 0 malformed).
 - Wire (conformance run): 15,804 packets on port 5025, at least 2000 handshakes, 0 malformed, `expert,warn` empty after allowing connection
   resets and the window closing during the 200 KB flood (flow control; `proto.env` says why); the requests and the responses are found as
   bytes in the capture (`*IDN?` and its answer, the -222 and -363 responses, the `;`-joined answer of a compound query); Zeek's `conn.log` has
@@ -519,11 +524,15 @@ PROTO=scpi` runs the independent client stacks.
   flag, the exact -420 / -410 reply shapes, the wrap of link ids, the `maxRecvSize` boundary of `opaque`, one-byte reads, an empty
   response line, and the first frames a client sends in each handshake (a scripted peer on a real socket).
 
-**Oracles.** Independent: PyVISA with pyvisa-py (a client written by others, reading values and statuses), lxi-tools (a second client), tshark
+**Oracles.** Independent: PyVISA with pyvisa-py (a client written by others, reading values and statuses), lxi-tools (a second client),
+scpi-parser's example instrument (an instrument written by others, as the controller's follower over the raw socket), tshark
 and Zeek (the TCP). Not independent: the transcript and the unit tests are our reading of SCPI-99 and IEEE 488.2 (the standards are
 not freely executable); `scpi_net.rs` and `scpi_client.rs` use our own client on both sides.
 
 **Gaps.**
+- The controller has followed an independent instrument only over the raw socket: scpi-parser's VXI-11 example needs the system rpcbind
+  and has no HiSLIP, and PyVISA-sim is an in-process PyVISA backend that serves no socket; a free HiSLIP or VXI-11 instrument was not
+  searched for further. Its HiSLIP and VXI-11 paths are checked against our own server only (`scpi_controller.rs`).
 - No stock oracle and no real instrument: the expected texts follow the standards as we read them, and where they leave room (short
   forms of tag mnemonics, units, what `*RST` does, per-connection status) docs/field-device-scpi.md says what was chosen. A real
   instrument's behaviour on a rejected query (no response, or an empty line) may differ.
@@ -733,4 +742,4 @@ Limits: each board is one run on one host; none exercises ferrofire's own field 
 8. Mutation results do not yet cover the field-device modules in the recorded numbers.
 9. MQTT is checked against Mosquitto, Paho and Tahu only; see the MQTT section for what a commercial Sparkplug host might still dislike.
 10. The drop-in pypower and stock conformance scripts need the Lima VM and are run by hand.
-11. SCPI is checked against two clients (PyVISA, lxi-tools), tshark's HiSLIP and VXI-11 dissectors and our reading of SCPI-99, IEEE 488.2 and IVI-6.1; no real instrument, no SRQ (see its section).
+11. SCPI is checked against two clients (PyVISA, lxi-tools), one independent instrument as the `<scpi-client>`'s follower (scpi-parser, raw socket only), tshark's HiSLIP and VXI-11 dissectors and our reading of SCPI-99, IEEE 488.2 and IVI-6.1; no real instrument, no SRQ (see its section).
