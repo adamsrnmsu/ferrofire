@@ -37,7 +37,7 @@ SCPI instruments never speak first, so the controller is where all the traffic s
 | `<portmapper>` | 111 | VXI-11 only: the portmapper port (1111 for an unprivileged ferrofire instrument) |
 | `<interval>` | 1000 (50-3600000) | milliseconds from the start of one poll to the start of the next. A poll that takes longer starts the next at once; polls never overlap |
 | `<timeout>` | 5000 (100-600000) | milliseconds to connect and to wait for each response |
-| `<check>` | true | after each poll, read `SYST:ERR?` until it says 0 and log each error. Real controllers do this, and it is traffic worth seeing |
+| `<check>` | true | after each command, read `SYST:ERR?` until it says 0 and log each error. Real controllers do this, and it is traffic worth seeing |
 | `<query>` | none | `<tag>`, optional `<type>` (`analog`, the default, or `binary`) and `<command>`, which must be a query (a header ending in `?`; a config error otherwise). Each poll sends the command and writes the answer to the tag |
 | `<set>` | none | `<tag>`, optional `<type>` and `<command>`, a template in which every `{}` is the value (a template without one is a config error). Sent when the tag's value differs from the last value sent |
 | `<event-logging>` | `scpi-client.log` | the usual per-module CSV event log |

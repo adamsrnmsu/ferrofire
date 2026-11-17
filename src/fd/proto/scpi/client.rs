@@ -788,4 +788,39 @@ mod tests {
         );
         std::fs::remove_file(&b.log).unwrap();
     }
+
+    #[test]
+    fn an_instrument_that_stays_away_is_logged_once_and_retried_until_stop() {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port(); // closed again at once: every connect is refused
+        let log = std::env::temp_dir().join(format!("scpi-client-away-{}.log", std::process::id()));
+        let c = parse_with(
+            &format!(
+                "<endpoint>127.0.0.1:{port}</endpoint><timeout>100</timeout><event-logging>{}</event-logging>",
+                log.display()
+            ),
+            &mut Tags::default(),
+        )
+        .unwrap();
+        let (store, stop) = (Store::new(Layout::default()), CancellationToken::new());
+        let s = stop.clone();
+        let stopper = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(2500)); // attempts at 0 s and 2 s (the pause doubles from 1 s)
+            s.cancel();
+        });
+        let t = Instant::now();
+        c.serve(&store, &stop);
+        assert!(
+            t.elapsed() < Duration::from_millis(3500),
+            "stop ends the pause"
+        );
+        stopper.join().unwrap();
+        let text = std::fs::read_to_string(&log).unwrap();
+        assert_eq!(text.matches("; retrying").count(), 1, "{text}");
+        assert!(!text.contains(",connected"), "{text}");
+        std::fs::remove_file(&log).unwrap();
+    }
 }
