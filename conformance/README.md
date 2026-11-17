@@ -214,3 +214,17 @@ There is no SCPI dissector in tshark and no Zeek analyzer, so `check.sh` asserts
 handshakes to 5025, payload both ways, the requests and the responses as bytes found in the packets (`*IDN?` and its answer, the -222
 and -363 responses, the `;`-joined answer of a compound query), 0 malformed frames and no expert errors (`expert_clean`), and Zeek's
 `conn.log` rows for port 5025. PyVISA and lxi-tools are MIT / BSD-3-Clause test peers; ferrofire links none of it.
+
+## SCPI controller (`<scpi-client>` against an instrument we did not write)
+
+    make testpeers                      # first, once: the image needs scpi-parser-tcp (docker/testpeers/Dockerfile)
+    make conformance PROTO=scpi-client  # DUT=rust; the DUT runs in the testpeers image (RUST_DUT_IMAGE), not bennu:arm64
+
+The DUT is a ferrofire controller (`conformance/scpi-client/controller.xml`). Its `<scpi-client>` polls `scpi-parser-tcp` on
+127.0.0.1:5025: the `examples/test-tcp` instrument of [scpi-parser](https://github.com/j123b567/scpi-parser) (Jan Breuer, BSD-2-Clause, C, the
+parser library instrument firmwares embed; pinned by commit, built in the image, never linked). The controller's own `<scpi-server>` on 5030
+is how the harness drives it: `peer.sh` starts the instrument after the controller (which has been retrying), sets `want` to 36 and then 4
+over 5030, `<logic>` (`ese_set = want`) makes the controller send `*ESE <v>`, the controller reads `*ESE?` back into `ese`, and the
+harness must read the same value from the controller; `MEAS:VOLT:DC?` must arrive as the number 0. `check.sh` finds in the capture the
+sets (`*ESE 36.0`, `*ESE 4.0`), the queries as `QUERY;*OPC?` with their joined answers (`36;1`, `4;1`), the error-queue reads answered
+`0,"No error"` and no error answer at all, 0 malformed frames and no expert errors, and Zeek's `conn.log` row for port 5025.

@@ -66,7 +66,9 @@ Each poll:
 2. **Queries.** Send each `<query>` and parse the first `,`- or `;`-separated field of the answer. An analog tag takes a number; the
    SCPI sentinels `9.91E+37` (not a number) and `+-9.9E+37` (infinity) become NaN and infinity (text such as `nan` or `inf` is not a
    number). A binary tag takes `1`, `0`, `ON` or `OFF`, in any case. Anything else is logged, and the tag keeps its value. The value goes to `Store::write`, the same path as a protocol write:
-   a device-local tag changes at the end of the scan cycle, and an external tag goes to the provider.
+   a device-local tag changes at the end of the scan cycle, and an external tag goes to the provider. It is written only when the tag
+   holds something else (`store::same` against `Store::get`) or a write to it is still queued (`Store::is_queued`); a refused or
+   overwritten external write differs again and is written again (ww-2io).
 3. **Errors.** With `<check>`, the client uses `Link::run(cmd, true)` on every command: a query goes out as `QUERY;*OPC?` and the
    error queue is drained after it, as `ferrofire scpi --check` does. Each error is a line in the event log. A rejected query leaves
    its tag alone.

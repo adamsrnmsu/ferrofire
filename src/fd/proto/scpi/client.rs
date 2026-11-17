@@ -1,8 +1,8 @@
 //! SCPI controller (`<scpi-client>`, docs/field-device-scpi.md): the other side of `<scpi-server>`. One task per element polls one
 //! instrument over the raw socket, HiSLIP or VXI-11 (`crate::scpi::transport`, blocking sockets, so the task is a blocking thread):
-//! each poll sends the `<set>` commands whose tag changed since it was last sent, then asks every `<query>` and queues the answer as
-//! a write. `<logic>` computes what is set; nothing here decides anything. It reads the store and queues writes, never touching the
-//! scan cycle, and reconnects with the backoff `<mqtt-client>` uses.
+//! each poll sends the `<set>` commands whose tag changed since it was last sent, then asks every `<query>` and queues an answer
+//! that differs from its tag as a write. `<logic>` computes what is set; nothing here decides anything. It reads the store and
+//! queues writes, never touching the scan cycle, and reconnects with the backoff `<mqtt-client>` uses.
 
 use super::tag_mnemonic;
 use crate::fd::config::{bounded, flag, require, text, ConfigError, Opts, Tags};
@@ -121,7 +121,8 @@ pub fn fill(template: &str, v: Value) -> Option<String> {
     parameter(v).map(|p| template.replace("{}", &p))
 }
 
-/// A set is due when its tag holds anything but the value last sent on this connection (and always on a new connection).
+/// A set is due when its tag holds anything but the value last sent on this connection (and always on a new connection); an answer
+/// is written when its tag holds anything but the answer.
 pub fn due(last: Option<Value>, now: Value) -> bool {
     !last.is_some_and(|l| same(&l, &now))
 }
@@ -185,6 +186,11 @@ impl Module for Client {
 impl Client {
     /// Connect, poll until the connection fails, pause, again, until `stop`. A failed connect is logged once until one works.
     fn serve(&self, store: &Store, stop: &CancellationToken) {
+        self.reconnect(store, stop, |wait| pause(wait, stop));
+    }
+
+    /// `serve` with the reconnect pause passed in as `rest`.
+    fn reconnect(&self, store: &Store, stop: &CancellationToken, mut rest: impl FnMut(Duration)) {
         let (mut wait, mut quiet) = (BACKOFF_FIRST, false);
         while !stop.is_cancelled() {
             let up = match open(&self.target, self.wait, self.portmapper) {
@@ -203,7 +209,7 @@ impl Client {
                 Err(_) => false,
             };
             wait = backoff(wait, up);
-            pause(wait, stop);
+            rest(wait);
         }
     }
 
@@ -260,14 +266,18 @@ impl Client {
         Ok(())
     }
 
-    /// Queue a query's answer as a write to its tag. A rejected query (no response) leaves the tag alone, as does an answer that is
-    /// not a value of its kind.
+    /// Queue a query's answer as a write to its tag when the tag holds something else, or when a write to it is still queued (the
+    /// newest answer replaces it). An unchanged answer is not written, so an external tag costs a provider write only when they differ;
+    /// one the provider refused or overwrote differs again and is written again. A rejected query (no response) leaves the tag alone,
+    /// as does an answer that is not a value of its kind.
     fn take(&self, q: &Item, response: Option<&str>, store: &Store) {
         let Some(line) = response else { return };
         match answer(line, q.kind) {
-            Some(v) => {
+            // the queue before the value: checked the other way round, a queued write applied in between would be missed
+            Some(v) if store.is_queued(&q.tag) || due(store.get(&q.tag), v) => {
                 let _ = store.write(&q.tag, v);
             }
+            Some(_) => {}
             None => self.log.say(
                 "warn",
                 "scpi answer",
@@ -717,6 +727,67 @@ mod tests {
         std::fs::remove_file(&b.log).unwrap();
     }
 
+    /// A client with one `<query>` of `lvl` (no check) over a scripted wire.
+    fn asker(store: &Store) -> impl FnMut(&str) -> bool + '_ {
+        let c = parse("<check>false</check><query><tag>lvl</tag></query>").unwrap();
+        let wire = Script::default();
+        let mut link = Link::wired(wire.clone(), Duration::from_secs(1));
+        let stop = CancellationToken::new();
+        // one poll answering `line`, without the end of the scan cycle: is a write to `lvl` queued?
+        move |line| {
+            wire.answer(&[line]);
+            c.poll(&mut link, &mut [], store, &stop).unwrap();
+            store.is_queued("lvl")
+        }
+    }
+
+    #[test]
+    fn an_answer_a_device_local_tag_already_holds_is_not_written_again() {
+        let store = Store::new(Layout {
+            internal: vec![("lvl".into(), Value::Analog(0.0))],
+            ..Layout::default()
+        });
+        let mut ask = asker(&store);
+        assert!(!ask("0"), "the tag holds 0 already");
+        assert!(ask("5"));
+        // the 5 is not applied yet when the instrument goes back to 0: the 0 must replace it
+        assert!(ask("0"));
+        store.apply_internal();
+        assert_eq!(store.get_f64("lvl"), Some(0.0));
+        assert!(ask("5"));
+        store.apply_internal();
+        assert!(!ask("5"));
+        assert!(ask("9.91E37"));
+        store.apply_internal();
+        assert!(!ask("9.91E37"), "NaN is the same as NaN");
+    }
+
+    #[test]
+    fn an_external_tag_is_written_when_it_differs_from_the_answer_and_only_then() {
+        let store = Store::new(Layout {
+            points: vec![("p.lvl".into(), Kind::Analog, None)],
+            external: vec![("lvl".into(), "p.lvl".into())],
+            ..Layout::default()
+        });
+        store.publish("p.lvl", 3.0, 1);
+        let mut ask = asker(&store);
+        assert!(!ask("3"), "the provider has the instrument's value");
+        assert!(ask("5"));
+        store.ack("lvl", Value::Analog(5.0));
+        assert!(
+            !ask("5"),
+            "no provider write per poll once it holds the answer"
+        );
+        // the provider publishes its own value once the ACK hold is over: the answer is written again
+        store.publish_at("p.lvl", 3.0, 2, Instant::now() + Duration::from_secs(3));
+        assert_eq!(store.get_f64("lvl"), Some(3.0));
+        assert!(ask("5"));
+        // the provider refuses the write: the next poll writes it again
+        store.reject("lvl", Value::Analog(5.0));
+        assert!(!store.is_queued("lvl"));
+        assert!(ask("5"));
+    }
+
     #[test]
     fn without_check_commands_go_out_alone() {
         let mut b = bench("nocheck", "<check>false</check>");
@@ -787,6 +858,52 @@ mod tests {
             "{e}"
         );
         std::fs::remove_file(&b.log).unwrap();
+    }
+
+    #[test]
+    fn the_reconnect_pause_doubles_while_refused_and_is_1_s_again_after_a_connection_and_each_outage_is_logged(
+    ) {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port(); // closed again at once: refused until the test listens
+        let log =
+            std::env::temp_dir().join(format!("scpi-client-pause-{}.log", std::process::id()));
+        let c = parse_with(
+            &format!(
+                "<endpoint>127.0.0.1:{port}</endpoint><check>false</check><event-logging>{}</event-logging>
+                 <query><tag>x</tag></query>",
+                log.display()
+            ),
+            &mut Tags::default(),
+        )
+        .unwrap();
+        let (store, stop) = (Store::new(Layout::default()), CancellationToken::new());
+        let mut pauses = vec![];
+        c.reconnect(&store, &stop, |wait| {
+            pauses.push(wait);
+            match pauses.len() {
+                // refused twice; then one connection, which the instrument closes (the query fails); then refused again
+                2 => {
+                    let l = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+                    std::thread::spawn(move || {
+                        let (conn, _) = l.accept().unwrap();
+                        drop(l); // before the connection, so the next connect is refused
+                        drop(conn);
+                    });
+                }
+                4 => stop.cancel(),
+                _ => {}
+            }
+        });
+        let s = Duration::from_secs;
+        assert_eq!(pauses, [s(2), s(4), s(1), s(2)]);
+        // one line per outage: the one before the connection and the one after it
+        let text = std::fs::read_to_string(&log).unwrap();
+        assert_eq!(text.matches("; retrying").count(), 2, "{text}");
+        assert_eq!(text.matches(",connected").count(), 1, "{text}");
+        std::fs::remove_file(&log).unwrap();
     }
 
     #[test]

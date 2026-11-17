@@ -208,7 +208,7 @@ VXI-11); one `<scpi-client>` talks to one instrument.
 | `<interval>` | 1000 (50-3600000) | milliseconds from the start of one poll to the start of the next. A poll that takes longer starts the next at once; polls never overlap |
 | `<timeout>` | 5000 (100-600000) | milliseconds to connect and to wait for each response |
 | `<check>` | true | after every command read `SYST:ERR?` until it says 0 and log each error |
-| `<query>` | none | `<tag>`, optional `<type>` (`analog`, the default, or `binary`) and `<command>`, which must be a query (a header ending in `?`). Each poll sends it and writes the answer to the tag |
+| `<query>` | none | `<tag>`, optional `<type>` (`analog`, the default, or `binary`) and `<command>`, which must be a query (a header ending in `?`). Each poll sends it and writes the answer to the tag when it differs from what the tag holds |
 | `<set>` | none | `<tag>`, optional `<type>` and `<command>`, a template in which every `{}` is the value (it must have one). Sent when the tag's value differs from the last value sent |
 | `<event-logging>` | `scpi-client.log` | the usual per-module CSV event log: connects, lost connections, instrument errors, answers that are not values |
 
@@ -230,8 +230,13 @@ pair up with nothing but tag names. A real instrument needs `<command>`.
 2. **Queries.** Each `<query>` is sent and the first `,`- or `;`-separated field of the answer is read. An analog tag takes a number; the
    SCPI sentinels `9.91E+37` (not a number) and `+-9.9E+37` (infinity) become NaN and infinity, and text such as `nan` or `inf` is not a
    number. A binary tag takes `1`, `0`, `ON` or `OFF` (any case). Anything else is logged and the tag keeps its value. The value is
-   queued with every poll, the same path as a protocol write: a device-local tag changes at the end of the scan cycle, an external tag
-   goes to the provider.
+   queued, the same path as a protocol write (a device-local tag changes at the end of the scan cycle, an external tag goes to the
+   provider), when the tag holds something else (NaN counts as the same as NaN) or when a write to the tag is still queued, which the
+   newest answer replaces. An unchanged answer is not written, so an external tag costs a provider write only when the instrument's
+   value changes, not every `<interval>`. A write the provider refuses, or a value it publishes over the answer later, leaves the tag
+   different from the instrument, and the next poll writes the answer again: a query tag is the instrument's reading, and logic should
+   not act on a value the instrument does not have. The cost is a write per poll for as long as the two disagree, and each refusal is in
+   the log. (Sets are the other way round: a refused set is not repeated, because each refusal adds an error to the instrument's queue.)
 3. **Errors.** With `<check>` every command goes through the same exchange as `ferrofire scpi --check`: a query is sent as
    `QUERY;*OPC?`, so a rejected query is seen at once and leaves its tag alone, and the error queue is drained after each command. Each
    error is a line in the event log (`error: SOUR:OUT 1: -222,Data out of range`). Without `<check>` a rejected query is waited out for
@@ -246,10 +251,14 @@ connect works (`connected` in the log). Stopping the device ends the task betwee
 Not done: SRQ (the server sends none either), several instruments in one element (use one `<scpi-client>` per instrument), ramps or
 scripted sequences (`<logic>` and `delay:` cover timing), a rate per query (use two elements).
 
-Tested by unit tests of the config, the due-set rule, the template, the answer parsing and a whole poll against a scripted wire
-(`src/fd/proto/scpi/client.rs`), and by `tests/scpi_controller.rs`: a ferrofire controller and a ferrofire instrument in one process over
-the raw socket (explicit commands) and HiSLIP (default commands), `<logic>` on the controller driving the instrument's tags from a value
-read there, and an instrument restarted under a running controller that gets every set again.
+Tested by unit tests of the config, the due-set rule, the template, the answer parsing, a whole poll against a scripted wire, when an
+answer is written (device-local and external tags, a queued write, an ACK, a refusal, a provider value over the answer, NaN) and
+the reconnect pause (doubling while refused, 1 s again after a connection) (`src/fd/proto/scpi/client.rs`), and by `tests/scpi_controller.rs`: a ferrofire controller and a ferrofire instrument in one process over
+the raw socket and VXI-11 (explicit commands; VXI-11 as `TCPIP::127.0.0.1::INSTR` with `<portmapper>` naming the instrument's
+unprivileged portmapper) and HiSLIP (default commands), `<logic>` on the controller driving the instrument's tags from a value read
+there, and an instrument restarted under a running controller that gets every set again. `make conformance PROTO=scpi-client` runs
+a controller against an instrument we did not write, scpi-parser's raw-socket example (docs/testing.md); the controller's HiSLIP and
+VXI-11 have only been tried against a ferrofire instrument.
 
 ## `ferrofire scpi`
 

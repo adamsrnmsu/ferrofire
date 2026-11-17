@@ -445,16 +445,19 @@ and `mqtt_net.rs` use `rumqttc` on both sides.
 
 ## SCPI instrument server and client
 
-`<scpi-server>` and `ferrofire scpi` ([field-device-scpi.md](field-device-scpi.md)); `src/scpi/` (message syntax, the HiSLIP frame format and
-the ONC RPC/XDR code, shared, and the client with its HiSLIP and VXI-11 wires in `transport.rs`) and `src/fd/proto/scpi/` (config and the raw
-socket in `mod.rs`, the I/O-free instrument in `device.rs`, the HiSLIP and VXI-11 servers in `hislip.rs` and `vxi11.rs`).
+`<scpi-server>`, `<scpi-client>` and `ferrofire scpi` ([field-device-scpi.md](field-device-scpi.md)); `src/scpi/` (message syntax, the HiSLIP
+frame format and the ONC RPC/XDR code, shared, and the client with its HiSLIP and VXI-11 wires in `transport.rs`) and `src/fd/proto/scpi/`
+(config and the raw socket in `mod.rs`, the I/O-free instrument in `device.rs`, the HiSLIP and VXI-11 servers in `hislip.rs` and
+`vxi11.rs`, the controller in `client.rs`).
 
 **Strategy.** The syntax (`syntax.rs`) and the instrument (`device.rs`: line framing, status registers, error queue, routes) are pure and
 need no socket. `tests/scpi_golden.rs` replays a transcript (`tests/golden/scpi.transcript`: request lines, exact responses, the write queue,
 a new connection, a second session of the same instrument) with no sockets; `tests/scpi_net.rs` runs the raw socket on real sockets,
 `tests/scpi_transport_golden.rs` replays the HiSLIP and VXI-11 transcripts with no sockets; `tests/scpi_hislip.rs` and `tests/scpi_vxi11.rs` run the other two (HiSLIP frames and ONC RPC records built by hand, so a wrong header is a
-test and not a client's guess); `tests/scpi_client.rs` runs the real `ferrofire scpi` binary against all three; `make conformance
-PROTO=scpi` runs the independent client stacks.
+test and not a client's guess); `tests/scpi_client.rs` runs the real `ferrofire scpi` binary against all three; `tests/scpi_controller.rs`
+runs a `<scpi-client>` field device against a `<scpi-server>` field device in one process over all three; `make conformance
+PROTO=scpi` runs the independent client stacks, and `make conformance PROTO=scpi-client` runs a `<scpi-client>` against an independent
+instrument (scpi-parser, below).
 
 **Checked, and by what.**
 - Syntax: units split at `;` outside quotes, headers (short and long forms in any case, suffix 1 only, rooted and relative paths, `*` commands
@@ -491,6 +494,21 @@ PROTO=scpi` runs the independent client stacks.
 - Client: the resource strings (every form, case, board number, bad ones), the query rule, the `SYST:ERR?` loop and its limit, the timeout and the closed-connection messages, target parsing, scripts, the
   REPL loop (unit tests with in-memory streams); the exit statuses, files, stdin, `--json` and `--check` against the real server
   (`scpi_client.rs`); insta snapshots of the text and JSON formats (`tests/snapshots.rs`).
+- Controller (`<scpi-client>`): the config, the set rule (sent when the value differs from the last sent on this connection, NaN-aware,
+  all again after a reconnect), the template's NR2/NR3 numbers read back by the server's own parser, answer parsing per kind, when an
+  answer is written to the store (only when it differs or a write is queued; an external tag ACKed, refused or overwritten by the
+  provider), whole polls against a scripted wire, a stop between commands, and the reconnect pause (2 s, 4 s, then 1 s after a
+  connection, the pause injected so no test sleeps) (unit tests in `client.rs`). `tests/scpi_controller.rs`: `<logic>` on a controller
+  device drives a ferrofire instrument device from a value read there over the raw socket (explicit commands), HiSLIP (default
+  commands, paired by tag name) and VXI-11 (`TCPIP::127.0.0.1::INSTR` with `<portmapper>` at the instrument's unprivileged
+  portmapper port); a restarted instrument gets every set again; the documented example loads. Against an instrument we did not
+  write (`make conformance PROTO=scpi-client`, conformance/README.md): scpi-parser's `examples/test-tcp` (scpi-parser at commit 8866159,
+  2026-03-20, BSD-2-Clause, C, a library real instrument firmwares embed), raw socket only; `<logic>` sets `*ESE` to two values given at
+  run time and the controller reads each back with `*ESE?`, every query goes out as `QUERY;*OPC?` and comes back `;`-joined, the error
+  queue stays empty, and `MEAS:VOLT:DC?` is read as a number. Passed on 2026-11-17 (17 checks, 144 packets on 5025, 0 malformed).
+  Mutation of `client.rs` (`mutator --max-workers 2 --no-coverage --mutate-all --test-command 'cargo test --lib --test scpi_controller'
+  src/fd/proto/scpi/client.rs`, one cargo invocation so no shell is needed): **23 sites, 23 killed**. The first run left one survivor,
+  `quiet = false` after a connect (a later outage would never be logged); the reconnect test now counts one line per outage.
 - Wire (conformance run): 15,804 packets on port 5025, at least 2000 handshakes, 0 malformed, `expert,warn` empty after allowing connection
   resets and the window closing during the 200 KB flood (flow control; `proto.env` says why); the requests and the responses are found as
   bytes in the capture (`*IDN?` and its answer, the -222 and -363 responses, the `;`-joined answer of a compound query); Zeek's `conn.log` has
@@ -509,86 +527,15 @@ PROTO=scpi` runs the independent client stacks.
   flag, the exact -420 / -410 reply shapes, the wrap of link ids, the `maxRecvSize` boundary of `opaque`, one-byte reads, an empty
   response line, and the first frames a client sends in each handshake (a scripted peer on a real socket).
 
-**Oracles.** Independent: Mosquitto (broker semantics, retained messages, wills), Paho and the mosquitto clients (a client not written by
-us reading and commanding), Tahu (the Sparkplug payload codec), tshark and Zeek (the MQTT framing). Not independent: the engine tests
-and `mqtt_net.rs` use `rumqttc` on both sides.
-
-**Gaps.**
-- No stock oracle and no second broker: Mosquitto only (no EMQX / HiveMQ / VerneMQ).
-- Tahu is used as a codec and a thin host; no Ignition or other commercial Sparkplug host has been tried, and the primary-host `STATE`
-  topic, DBIRTH / DDATA and Sparkplug metric types other than Int64 / Double / Boolean on output are not implemented.
-- MQTT 3.1.1 only (no MQTT 5 properties); QoS 2 is passed through to the library and not specifically tested.
-- `ssl://` needs `<tls-ca>`: the system trust store is not used. TLS is tested against Mosquitto only, with RSA certificates.
-- A tag name containing `/` cannot be commanded in the plain scheme.
-- Retained messages on a command topic are ignored, so a command cannot be made persistent through the broker either.
-- Network faults between device and broker (loss, delay) are not injected; only a refused connection, a restart and a kill.
-
-## SCPI instrument server and client
-
-`<scpi-server>` and `ferrofire scpi` ([field-device-scpi.md](field-device-scpi.md)); `src/scpi/` (message syntax, the HiSLIP frame format and
-the ONC RPC/XDR code, shared, and the client with its HiSLIP and VXI-11 wires in `transport.rs`) and `src/fd/proto/scpi/` (config and the raw
-socket in `mod.rs`, the I/O-free instrument in `device.rs`, the HiSLIP and VXI-11 servers in `hislip.rs` and `vxi11.rs`).
-
-**Strategy.** The syntax (`syntax.rs`) and the instrument (`device.rs`: line framing, status registers, error queue, routes) are pure and
-need no socket. `tests/scpi_golden.rs` replays a transcript (`tests/golden/scpi.transcript`: request lines, exact responses, the write queue,
-a new connection, a second session of the same instrument) with no sockets; `tests/scpi_net.rs` runs the raw socket on real sockets,
-`tests/scpi_transport_golden.rs` replays the HiSLIP and VXI-11 transcripts with no sockets; `tests/scpi_hislip.rs` and `tests/scpi_vxi11.rs` run the other two (HiSLIP frames and ONC RPC records built by hand, so a wrong header is a
-test and not a client's guess); `tests/scpi_client.rs` runs the real `ferrofire scpi` binary against all three; `make conformance
-PROTO=scpi` runs the independent client stacks.
-
-**Checked, and by what.**
-- Syntax: units split at `;` outside quotes, headers (short and long forms in any case, suffix 1 only, rooted and relative paths, `*` commands
-  leave the path alone), numbers (NR1 to NR3, signs, exponents, the three number errors), keywords, strings with doubled quotes: unit tests
-  and the transcript.
-- Status model: SESR class bits from the error number, clear on read and on `*CLS`; the status byte bits EAV, MAV (also the
-  `*IDN?;*STB?` case), ESB, MSS and `*SRE` bit 6; the error queue's first-in first-out order, the 16-entry bound and -350 as the last entry:
-  unit tests and the transcript, and through PyVISA in the conformance run (`*STB?` 36, `*ESR?` 16, `*STB?` 4, `SYST:ERR?` -222,
-  `*STB?` 0).
-- Writes: only a `<writable>` tag has a `SOURce` path; the type, finiteness and limits are `Point::check`, shared with MQTT; what passes is in
-  the store's write queue and not in the store (unit test, golden, `scpi_net.rs`, and a stand-in provider receiving `WRITE=` in the conformance
-  run); out-of-range is -222, a wrong type -104 or -224, `MIN`/`MAX`/`DEF` without a limit -221.
-- Robustness: a line over `<max-line>` is -363 and discarded to its newline, with the buffer never holding more than the limit; random bytes
-  and a 200 KB line leave the connection answering; the connection limit closes the extra client and serves the rest; an idle client is
-  dropped and never holds up another; 300 connections of four kinds (in `scpi_net.rs`) and **2000** (in the conformance run, read from
-  `/proc/<pid>/fd` of the device: 5 before, 5 after) leave no descriptor; a bind failure is logged and the rest of the device runs; stopping
-  closes the clients. Fuzz target `fd_scpi` (60 s locally, 800,000 runs, no finding; 10 s per target in `make fuzz-smoke`): no panic, buffer and
-  queue bounds, response bound.
-- Status scope and `*RST`: `instrument` (default) shares one error queue and one set of registers between sessions of one transport (golden
-  `@ session`), between transports (raw socket and HiSLIP, raw and VXI-11, in the socket tests; HiSLIP, VXI-11 and the raw socket
-  through PyVISA in the conformance run) and `connection` keeps them apart; `*RST` queues the defaults of the writable tags and leaves
-  SESE, SRE, SESR and the queue as they were (unit test and golden).
-- HiSLIP: header cutting from one byte at a time and from garbage (a bad prologue and an oversized payload are FatalError 1); the
-  handshake of both channels over sockets; data in several frames, responses cut to the client's maximum message size; **-410** exact
-  (a message started with RMT-delivered clear over an unread response, `Interrupted` sent, the new message still run) and **-420**
-  exact (a message without its END abandoned by another message or by the channel closing; a command in it dropped silently); device
-  clear (async clear, sync complete, dropped messages in between, no error raised); the one lock (grant, timeout, release, a waiting
-  request, a waiting `Data`, a lock dying with its session); status query with and without RMT-delivered; the fatal errors and the
-  non-fatal one. Fuzz target `fd_hislip` (frames cut at random reads, the state machine and the async replies; 60 s locally, 1,450,000 runs, no finding).
-- VXI-11: XDR opaque padding and bounds, record fragments, the portmapper (GETPORT for TCP and not UDP, DUMP, SET, rpcbind v3/v4 mismatch,
-  UDP), every RPC error class, create_link (device name, lock, limit), write/read with every read reason (size, termination
-  character, end, both at once), **-410** and **-420** exact from the write/read order, readstb with MAV, clear, the refused calls, links
-  dying with their connection. Fuzz target `fd_vxi11` (RPC records, the XDR decoder, the portmapper and core channel, UDP datagrams; 60 s locally, 1,060,000 runs, no finding).
-- Client: the resource strings (every form, case, board number, bad ones), the query rule, the `SYST:ERR?` loop and its limit, the timeout and the closed-connection messages, target parsing, scripts, the
-  REPL loop (unit tests with in-memory streams); the exit statuses, files, stdin, `--json` and `--check` against the real server
-  (`scpi_client.rs`); insta snapshots of the text and JSON formats (`tests/snapshots.rs`).
-- Wire (conformance run): 15,804 packets on port 5025, at least 2000 handshakes, 0 malformed, `expert,warn` empty after allowing connection
-  resets and the window closing during the 200 KB flood (flow control; `proto.env` says why); the requests and the responses are found as
-  bytes in the capture (`*IDN?` and its answer, the -222 and -363 responses, the `;`-joined answer of a compound query); Zeek's `conn.log` has
-  the connections (no analyzer exists).
-- Mutation, scoped to the new code (the whole-tree `make mutate` relinks every test binary per mutant, which took over 3 minutes a
-  mutant here): `mutator --max-workers 2 --no-coverage --test-command 'cargo test --lib --test scpi_golden --test scpi_net' src/fd/proto/scpi
-  src/fd/proto/point.rs` and the same with `--test-command 'cargo test --lib --test scpi_client --test snapshots' src/scpi`: **252 sites, 252 killed,
-  0 survived** (point.rs 16, scpi/mod.rs 31, device.rs 107, syntax.rs 68, client.rs 30). The first run left eight survivors in `device.rs`: three
-  were untested initial values and a boundary (tests added), one a `(min, max)` arity that was always equal (now one number), two a guard
-  that no input reaches (removed), one a filter that changed nothing (removed). Four in `client.rs` were a missing test for a failure that
-  is not a timeout under `--check`, and for the socket options (tests added); a fifth (`let mut ok = true` in the REPL) was a false survivor,
-  killed when run alone (a rewrite within the same mtime tick can leave cargo with the previous build: touch the sources after a mutation run).
-
-**Oracles.** Independent: PyVISA with pyvisa-py (a client written by others, reading values and statuses), lxi-tools (a second client), tshark
+**Oracles.** Independent: PyVISA with pyvisa-py (a client written by others, reading values and statuses), lxi-tools (a second client),
+scpi-parser's example instrument (an instrument written by others, as the controller's follower over the raw socket), tshark
 and Zeek (the TCP). Not independent: the transcript and the unit tests are our reading of SCPI-99 and IEEE 488.2 (the standards are
 not freely executable); `scpi_net.rs` and `scpi_client.rs` use our own client on both sides.
 
 **Gaps.**
+- The controller has followed an independent instrument only over the raw socket: scpi-parser's VXI-11 example needs the system rpcbind
+  and has no HiSLIP, and PyVISA-sim is an in-process PyVISA backend that serves no socket; a free HiSLIP or VXI-11 instrument was not
+  searched for further. Its HiSLIP and VXI-11 paths are checked against our own server only (`scpi_controller.rs`).
 - No stock oracle and no real instrument: the expected texts follow the standards as we read them, and where they leave room (short
   forms of tag mnemonics, units, what `*RST` does, per-connection status) docs/field-device-scpi.md says what was chosen. A real
   instrument's behaviour on a rejected query (no response, or an empty line) may differ.
@@ -798,4 +745,4 @@ Limits: each board is one run on one host; none exercises ferrofire's own field 
 8. Mutation results do not yet cover the field-device modules in the recorded numbers.
 9. MQTT is checked against Mosquitto, Paho and Tahu only; see the MQTT section for what a commercial Sparkplug host might still dislike.
 10. The drop-in pypower and stock conformance scripts need the Lima VM and are run by hand.
-11. SCPI is checked against two clients (PyVISA, lxi-tools), tshark's HiSLIP and VXI-11 dissectors and our reading of SCPI-99, IEEE 488.2 and IVI-6.1; no real instrument, no SRQ (see its section).
+11. SCPI is checked against two clients (PyVISA, lxi-tools), one independent instrument as the `<scpi-client>`'s follower (scpi-parser, raw socket only), tshark's HiSLIP and VXI-11 dissectors and our reading of SCPI-99, IEEE 488.2 and IVI-6.1; no real instrument, no SRQ (see its section).
