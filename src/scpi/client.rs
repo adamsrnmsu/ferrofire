@@ -122,7 +122,8 @@ pub fn split_target(t: &str) -> Result<(String, u16), String> {
     let bad = || format!("`{t}`: expected HOST[:PORT]");
     let (host, port) = host_port(t).ok_or_else(bad)?;
     let port = port.map_or(Ok(DEFAULT_PORT), |p| p.parse().map_err(|_| bad()))?;
-    match host.is_empty() {
+    // a `/` is never in a host: `tcp://h:5025` would otherwise be the host `tcp://h:5025`, looked up forever
+    match host.is_empty() || host.contains('/') {
         true => Err(bad()),
         false => Ok((host.to_string(), port)),
     }
@@ -477,7 +478,19 @@ mod tests {
         assert_eq!(t("[::1]:6000"), Ok(("::1".into(), 6000)));
         assert_eq!(t("fe80::1"), Ok(("fe80::1".into(), 5025)));
         for bad in [
-            "", ":5025", "h:", "h:x", "h:70000", "[::1", "[::1]x", "[::1]:", "[]", "[]:5",
+            "",
+            ":5025",
+            "h:",
+            "h:x",
+            "h:70000",
+            "[::1",
+            "[::1]x",
+            "[::1]:",
+            "[]",
+            "[]:5",
+            "tcp://h:5025",
+            "tcp://h",
+            "h/x",
         ] {
             assert!(t(bad).is_err(), "{bad:?}");
         }
