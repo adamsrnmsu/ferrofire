@@ -506,6 +506,9 @@ instrument (scpi-parser, below).
   2026-03-20, BSD-2-Clause, C, a library real instrument firmwares embed), raw socket only; `<logic>` sets `*ESE` to two values given at
   run time and the controller reads each back with `*ESE?`, every query goes out as `QUERY;*OPC?` and comes back `;`-joined, the error
   queue stays empty, and `MEAS:VOLT:DC?` is read as a number. Passed on 2026-11-17 (17 checks, 144 packets on 5025, 0 malformed).
+  Mutation of `client.rs` (`mutator --max-workers 2 --no-coverage --mutate-all --test-command 'cargo test --lib --test scpi_controller'
+  src/fd/proto/scpi/client.rs`, one cargo invocation so no shell is needed): **23 sites, 23 killed**. The first run left one survivor,
+  `quiet = false` after a connect (a later outage would never be logged); the reconnect test now counts one line per outage.
 - Wire (conformance run): 15,804 packets on port 5025, at least 2000 handshakes, 0 malformed, `expert,warn` empty after allowing connection
   resets and the window closing during the 200 KB flood (flow control; `proto.env` says why); the requests and the responses are found as
   bytes in the capture (`*IDN?` and its answer, the -222 and -363 responses, the `;`-joined answer of a compound query); Zeek's `conn.log` has
