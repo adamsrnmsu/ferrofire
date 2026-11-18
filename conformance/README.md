@@ -40,7 +40,7 @@ SCORCH `providerdata` check. See [../docs/ground-truth-elastic.md](../docs/groun
 The acceptance harness above judges what a blue team sees. The differential proves the device answers like the stock one, byte for byte.
 
     make differential PROTO=dnp3 WHO=stock SET=diff   # the transcript of probe_diff.py against bennu:arm64
-    make diff-dnp3                                    # our binary vs the recorded stock transcripts, live (build with make test first)
+    make diff-dnp3                                    # our binary vs the recorded stock transcripts, live (rebuilds target-linux/debug/ferrofire first)
 
 `conformance/dnp3/`: `probe_diff.py` (about 230 requests: link layer, reads by group and variation, events and their order, IIN, every
 control function, routing, CloseNew), `probe_big.py` (130 binary + 130 analog + 450 analog-output points: event overflow,
@@ -61,7 +61,7 @@ To re-record the stock side: `TRACE=conformance/dnp3/stock-diff.trace LOGS=confo
 
 Judged three ways, all against the same server: byte for byte against stock, by independent clients, and by what a blue team sees.
 
-    make diff-modbus                    # our binary vs the recorded stock transcripts, live in containers (build with make test first)
+    make diff-modbus                    # our binary vs the recorded stock transcripts, live in containers (rebuilds target-linux/debug/ferrofire first)
     make differential PROTO=modbus WHO=stock SET=edges   # re-record one set from bennu:arm64 (also: diff, waterway, q4, divergent)
     make conformance PROTO=modbus       # pymodbus, mbpoll and nmap modbus-discover vs the stock oracle; DUT=rust for ours
     cargo test --test modbus_golden --test modbus_net --test modbus_clients --test modbus_emfile
@@ -176,7 +176,7 @@ dissector and the Zeek package sources). `ICCP_STEPS`, `ICCP_CALLING_AP_TITLE` a
 directory to `/real` when it exists, and `check.sh` / `zeek.sh` then assert on each: 0 malformed, Lua without errors, 12-bit
 `Supported_Features`, the `TASE2_Version` of that capture, an empty Zeek weird.log and reporter.log. Without the directory the step prints SKIP.
 
-To run: `make testpeers` (use `TESTPEERS=<image>` for another tag), `make test` (builds `target-linux/debug/ferrofire` and the example),
+To run: `make testpeers` (use `TESTPEERS=<image>` for another tag),
 optionally `tests/pcaps/iccp/fetch-real.sh`, then `make conformance PROTO=iccp`. Output in `target/conformance/iccp/`: `iccp.pcap`,
 `peer.out` (every operation as `### label`, output, `rc=`), `dut.out`, `zeek/`, `zeek-real-*/`, `lua.err`.
 The peers are young and possibly AI-assisted: agreement is evidence, not proof. See docs/field-device-iccp.md for what the server serves.

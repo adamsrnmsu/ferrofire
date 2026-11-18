@@ -345,7 +345,7 @@ in the repo. Bit meanings of `Supported_Features` (bit n = block n+1; ours sets 
 itself is still not checked against the text of 503 8.2.9.
 
 **Run.** `cargo test`; `make testpeers` (builds both peers from pinned commits: about 15 minutes), `tests/pcaps/iccp/fetch-real.sh`, then
-`make test` (builds ferrofire and the example) and `make conformance PROTO=iccp`; `cargo +nightly fuzz run fd_iccp` in `fuzz/`.
+`make conformance PROTO=iccp` (builds ferrofire and the example first); `cargo +nightly fuzz run fd_iccp` in `fuzz/`.
 
 **Gaps.**
 - IEC 60870-6-503 and -802 are paywalled and not in the repo. Only the validity and current-source codes were corroborated by a vendor
