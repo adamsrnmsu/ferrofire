@@ -311,10 +311,12 @@ async fn a_nan_is_never_sent_and_a_value_past_the_range_is_clamped() {
     .await;
     tokio::time::sleep(Duration::from_millis(400)).await;
     assert_eq!(requests(&r.tap, 6), [vec![6, 0x9c, 0x40, 0xff, 0xff]]);
-    until("the clamped value read back", S(2), || {
-        near(r.fep.store.get_f64("setpoint"), 1000.0)
+    // the RTU holds the range's end; on the wire that is what was asked for, so the tag keeps the asked value
+    until("the clamped value on the RTU", S(2), || {
+        near(r.rtu.store.get_f64("setpoint"), 1000.0)
     })
     .await;
+    assert_eq!(r.fep.store.get_f64("setpoint"), Some(1e9));
     r.fep.store.write("setpoint", Analog(-1e9)).unwrap();
     until("the low clamp", S(2), || requests(&r.tap, 6).len() == 2).await;
     assert_eq!(requests(&r.tap, 6)[1], [6, 0x9c, 0x40, 0, 0]);
@@ -729,4 +731,28 @@ mod dnp3 {
         );
         assert_eq!(r.fep.store.get_f64("setpoint"), Some(2.0));
     }
+}
+
+/// Final review, finding 4: `<logic>` (here: the test) keeps a setpoint the register cannot carry exactly. It goes down once,
+/// the tag keeps the wanted value, and nothing more is written however often it is assigned.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_setpoint_off_the_register_grid_is_written_once_and_the_tag_does_not_flap() {
+    let r = rig("").await;
+    until("up", S(3), || r.fep.store.get_bool("rtu-up") == Some(true)).await;
+    let end = tokio::time::Instant::now() + Duration::from_millis(1500);
+    let mut other = 0;
+    while tokio::time::Instant::now() < end {
+        match r.fep.store.get_f64("setpoint") {
+            Some(3.3333) => {}
+            _ => {
+                other += 1;
+                r.fep.store.write("setpoint", Analog(3.3333)).unwrap();
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    // 3.3333 over 0..1000 is register 218
+    assert_eq!(requests(&r.tap, 6), [vec![6, 0x9c, 0x40, 0, 218]]);
+    assert!(other <= 12, "the tag left the wanted value {other} times");
+    assert_eq!(r.fep.store.get_f64("setpoint"), Some(3.3333));
 }

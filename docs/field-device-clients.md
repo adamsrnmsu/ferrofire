@@ -88,20 +88,22 @@ left out with a WARN (an error under `--strict`). In `fep` mode `<min-value>` eq
 - **Modbus** polls each connection every `<scan-rate>`, inputs and outputs. Contiguous addresses of a table are one request, up to 125
   registers or 2,000 bits. A merged read the device refuses with exception 2 is read address by address from the next poll on. A register
   is unscaled through its own range; a write is scaled and clamped to it.
-- **DNP3** scans as in `bennu` mode and reads the output status (groups 10 and 40) after each scan. Binary and analog values go into the
-  tag at their address, whether the outstation reports an output as output status or, as ferrofire's own outstation does, as an input.
-  As in stock's client there is one address space per kind: a binary input and a binary output of one connection cannot share an
-  address (the later one takes it), nor can an analog input and an analog output.
+- **DNP3** scans as in `bennu` mode and reads the output status (groups 10 and 40) after each scan. An input value goes into the
+  input's tag and an output status into the output's; an outstation that reports its outputs as inputs (ferrofire's own does) is
+  understood too: an input value at an index that only an output has goes to that output. (In `bennu` mode the cache is stock's:
+  one address space per kind, where an input and an output cannot share an address.)
 - **Writes down.** Once per `<cycle-time>` each connection looks at its output tags (coils, holding registers, DNP3 outputs) and sends
   the ones that changed locally: a `<logic>` assignment, a write to one of the device's servers, a command-interface `WRITE`.
 - **The echo rule.** A value is sent only when it differs both from the last value sent and from the last value polled in for that point,
-  so what a poll brought is never written back. A local change wins over a poll that arrives at the same time; the poll result for that
+  so what a poll brought is never written back. Values are compared as the wire carries them (a register after scaling, a DNP3 analog
+  output as a float32): a setpoint the device cannot hold exactly is sent once, and the tag keeps the value that was asked for. A local change wins over a poll that arrives at the same time; the poll result for that
   point is ignored until the write is answered. The value a tag starts with (0 or false) counts as sent, so a FEP does not open by
   zeroing every output.
 - **A device that is away.** A request has 1000 ms. A failed poll leaves the tags at their last values and turns `<status-tag>` false; the
   next attempts come 1, 2, 4 ... s apart (Modbus up to 30 s, DNP3 up to 60 s as in `bennu` mode). Local changes made meanwhile are not
   queued one by one: when the device returns, the newest value of each changed tag is sent, before anything is read. A write the device
-  answers but refuses (an exception, a DNP3 status other than success) is not repeated; the next poll puts the device's value back.
+  answers but refuses (an exception, a DNP3 status other than success) is not repeated; a later poll puts the device's value back. The first poll after a write is not believed when it still shows
+  another value (a device may answer a write before its read-back changes).
 - **What is never sent.** NaN (a WARN). A number past a register's range is clamped to the range's end.
 - **The command interface** answers `READ` from the tag and takes a `WRITE` to an output of the tag's kind (`true`/`false` for a binary
   tag, a number for an analog one); it goes down like any other local change.

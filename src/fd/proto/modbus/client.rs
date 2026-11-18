@@ -131,13 +131,27 @@ pub fn polled(p: &Point, raw: u16) -> Value {
     }
 }
 
-/// The single write (function, value) that takes `v` down to output point `p` in `fep` mode: FC5 for a coil, FC6 for a holding
-/// register, clamped to the range as the server scales; a binary tag on a register writes 1 or 0. `None`: nothing to send (NaN).
+/// What `v` is on the wire for point `p`, the form the echo rule compares and `wire` sends: an analog value as the register
+/// it scales to (clamped to the range, as the server scales), anything else as it is. Reading a register back gives the
+/// same register: the scaling truncates, so a hair is added before it, or `unscale` followed by `scale` could lose a count.
+pub fn key(p: &Point, v: Value) -> Value {
+    match (p.kind, v) {
+        (Kind::Analog, Value::Analog(x)) if !x.is_nan() => {
+            let slope = p.range.slope();
+            let raw = (slope.mul_add(x, p.range.intercept(slope)) + 1e-6) as u16;
+            Value::Analog(f64::from(raw))
+        }
+        _ => v,
+    }
+}
+
+/// The single write (function, value) that takes `v`, a value in `key` form, down to output point `p` in `fep` mode: FC5
+/// for a coil, FC6 for a holding register; a binary tag on a register writes 1 or 0. `None`: nothing to send (NaN).
 pub fn wire(p: &Point, v: Value) -> Option<(u8, u16)> {
     match (p.table, v) {
         (Table::Coil, Value::Binary(on)) => Some((5, if on { 0xFF00 } else { 0 })),
         (Table::Holding, Value::Binary(on)) => Some((6, u16::from(on))),
-        (Table::Holding, Value::Analog(x)) if !x.is_nan() => Some((6, p.range.scale(x))),
+        (Table::Holding, Value::Analog(raw)) if !raw.is_nan() => Some((6, raw as u16)),
         _ => None,
     }
 }
@@ -546,7 +560,13 @@ impl Session {
         let outs = points
             .iter()
             .filter(|p| p.table.output())
-            .map(|p| (p.tag.clone(), Out::new(crate::fd::store::zero(p.kind))))
+            // the tag's first value counts as sent, in the form the wire carries it
+            .map(|p| {
+                (
+                    p.tag.clone(),
+                    Out::new(key(p, crate::fd::store::zero(p.kind))),
+                )
+            })
             .collect();
         Session {
             live,
@@ -642,10 +662,8 @@ impl Session {
     async fn write_down(&mut self) -> bool {
         let store = self.live.store.clone();
         for p in self.points.clone().iter().filter(|p| p.table.output()) {
-            let due = self
-                .outs
-                .get_mut(&p.tag)
-                .and_then(|o| o.due(&store, &p.tag));
+            let out = self.outs.get_mut(&p.tag);
+            let due = out.and_then(|o| o.due(&store, &p.tag, |v| key(p, v)));
             if let Some(v) = due {
                 if !self.send(p, v).await {
                     return false;
@@ -678,12 +696,11 @@ impl Session {
     /// One read of a poll, into the tags. `false`: the connection failed.
     async fn read(&mut self, fc: u8, start: u16, qty: u16) -> bool {
         match self.live.ask(self.i, fc, start, qty).await {
+            // a local change that landed since the write-down pass goes down now, instead of the polled value in
             Ok(values) => {
-                // a local change that landed since the write-down pass goes down now, instead of the polled value in
-                for (p, v) in self.take(fc, start, &values) {
-                    if !self.send(&p, v).await {
-                        return false;
-                    }
+                let local = self.take(fc, start, &values);
+                if !self.send_all(local).await {
+                    return false;
                 }
             }
             // a merged read over a hole: read each address alone from the next poll on
@@ -700,6 +717,20 @@ impl Session {
         true
     }
 
+    /// Send local changes down, in order. `false`: the connection failed, and the ones not sent are due again.
+    async fn send_all(&mut self, local: Vec<(Point, Value)>) -> bool {
+        let mut local = local.into_iter();
+        while let Some((p, v)) = local.next() {
+            if !self.send(&p, v).await {
+                for (rest, _) in local {
+                    self.settle(&rest, None);
+                }
+                return false;
+            }
+        }
+        true
+    }
+
     /// Put the values of one read into the tags of the points it covers. Returned: output points whose tag holds a local
     /// change instead, to be sent down.
     fn take(&mut self, fc: u8, start: u16, values: &[u16]) -> Vec<(Point, Value)> {
@@ -710,13 +741,21 @@ impl Session {
                 .addr
                 .checked_sub(start)
                 .and_then(|k| values.get(usize::from(k)));
-            let Some(v) = item.map(|raw| polled(p, *raw)) else {
+            let Some(&raw) = item else {
                 continue;
             };
-            match self.outs.get_mut(&p.tag) {
-                Some(out) => local.extend(out.polled(store, &p.tag, v).map(|l| (p.clone(), l))),
-                None => shared::input_polled(store, &p.tag, v),
-            }
+            let v = polled(p, raw);
+            let Some(out) = self.outs.get_mut(&p.tag) else {
+                shared::input_polled(store, &p.tag, v);
+                continue;
+            };
+            // on the wire an analog is its register
+            let on_wire = match v {
+                Value::Analog(_) => Value::Analog(f64::from(raw)),
+                Value::Binary(_) => v,
+            };
+            let due = out.polled(store, &p.tag, v, on_wire, |x| key(p, x));
+            local.extend(due.map(|l| (p.clone(), l)));
         }
         local
     }
@@ -1017,10 +1056,14 @@ mod tests {
         assert_eq!(wire(&p, Value::Binary(true)), Some((6, 1)));
         assert_eq!(wire(&p, Value::Binary(false)), Some((6, 0)));
         p.kind = Kind::Analog;
-        assert_eq!(wire(&p, Value::Analog(50.0)), Some((6, 32767)));
-        assert_eq!(wire(&p, Value::Analog(1e9)), Some((6, 65535)));
-        assert_eq!(wire(&p, Value::Analog(-1.0)), Some((6, 0)));
-        assert_eq!(wire(&p, Value::Analog(f64::NAN)), None, "NaN is never sent");
+        assert_eq!(wire(&p, key(&p, Value::Analog(50.0))), Some((6, 32767)));
+        assert_eq!(wire(&p, key(&p, Value::Analog(1e9))), Some((6, 65535)));
+        assert_eq!(wire(&p, key(&p, Value::Analog(-1.0))), Some((6, 0)));
+        assert_eq!(
+            wire(&p, key(&p, Value::Analog(f64::NAN))),
+            None,
+            "NaN is never sent"
+        );
         assert_eq!(wire(&coil, Value::Binary(true)), Some((5, 0xFF00)));
         assert_eq!(wire(&coil, Value::Binary(false)), Some((5, 0)));
     }
@@ -1073,5 +1116,115 @@ mod tests {
             parse(&lax, &Opts { strict: true }).unwrap().0.conns[0].points[2].kind,
             Kind::Analog
         );
+    }
+
+    /// Final review, finding 4: the register a value goes down as is also what the echo rule compares, and reading a
+    /// register back gives that register again.
+    #[test]
+    fn a_register_value_and_its_read_back_are_the_same_on_the_wire() {
+        for range in [
+            Range {
+                min: 0.0,
+                max: 1000.0,
+            },
+            Range {
+                min: -1000.0,
+                max: 2000.0,
+            },
+            Range {
+                min: 0.0,
+                max: 100.0,
+            },
+            Range {
+                min: -3.3,
+                max: 7.7,
+            },
+        ] {
+            let p = Point {
+                range,
+                ..pt(Table::Holding, 0)
+            };
+            for raw in (0..=65535u16).step_by(7).chain([65535]) {
+                assert_eq!(
+                    key(&p, polled(&p, raw)),
+                    Value::Analog(f64::from(raw)),
+                    "{range:?} {raw}"
+                );
+            }
+        }
+        let p = Point {
+            range: Range {
+                min: 0.0,
+                max: 1000.0,
+            },
+            ..pt(Table::Holding, 0)
+        };
+        assert_eq!(key(&p, Value::Analog(3.3333)), Value::Analog(218.0));
+        assert_eq!(key(&p, Value::Analog(1e9)), Value::Analog(65535.0));
+        assert_eq!(key(&p, Value::Analog(-1.0)), Value::Analog(0.0));
+        assert!(matches!(key(&p, Value::Analog(f64::NAN)), Value::Analog(x) if x.is_nan()));
+        let coil = Point {
+            kind: Kind::Binary,
+            ..pt(Table::Coil, 0)
+        };
+        assert_eq!(key(&coil, Value::Binary(true)), Value::Binary(true));
+        let flag = Point {
+            kind: Kind::Binary,
+            ..pt(Table::Holding, 0)
+        };
+        assert_eq!(key(&flag, Value::Binary(true)), Value::Binary(true));
+    }
+
+    /// Final review, finding 3: when the link fails while several local changes found by a poll go down, none of them is
+    /// left marked as under way.
+    #[tokio::test]
+    async fn a_link_failure_leaves_no_write_marked_as_under_way() {
+        let points = vec![pt(Table::Holding, 0), pt(Table::Holding, 1)];
+        let store = Store::new(crate::fd::store::Layout {
+            internal: points
+                .iter()
+                .map(|p| (p.tag.clone(), Value::Analog(0.0)))
+                .collect(),
+            ..Default::default()
+        });
+        // nothing listens here
+        let dead = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let live = Arc::new(Live {
+            links: vec![Mutex::new(Link::new(format!("tcp://{dead}"), 1))],
+            ranges: vec![BTreeMap::new()],
+            points: BTreeMap::new(),
+            store: store.clone(),
+            log: Arc::new(EventLog::to("modbus-client", Box::new(std::io::sink()))),
+        });
+        let fep = Fep {
+            scan: Duration::from_secs(1),
+            status: None,
+        };
+        let mut session = Session::new(live, 0, points, fep);
+        // both tags changed locally and landed; a read of both registers then finds them
+        for tag in ["t0", "t1"] {
+            store.write(tag, Value::Analog(50.0)).unwrap();
+        }
+        store.apply_internal();
+        let local = session.take(3, 0, &[0, 0]);
+        assert_eq!(local.len(), 2);
+        assert!(!session.send_all(local).await, "the link is down");
+        for tag in ["t0", "t1"] {
+            let p = session
+                .points
+                .iter()
+                .find(|p| p.tag == tag)
+                .unwrap()
+                .clone();
+            let due = session
+                .outs
+                .get_mut(tag)
+                .unwrap()
+                .due(&store, tag, |v| key(&p, v));
+            assert!(due.is_some(), "{tag} is due again, not stuck");
+        }
     }
 }

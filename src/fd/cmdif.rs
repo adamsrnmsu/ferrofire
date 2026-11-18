@@ -54,22 +54,29 @@ fn special(s: &str) -> Option<f64> {
 /// How many bytes the decimal number at the front of `s` takes: digits, a fraction, and an exponent when it has digits.
 /// 0 when there is no digit.
 fn decimal(s: &str) -> usize {
-    let int = digits(s, 10);
-    let frac = match s[int..].starts_with('.') {
-        true => 1 + digits(&s[int + 1..], 10),
-        false => 0,
+    // on bytes: what follows the number may be any text, and a slice must not cut a character
+    let b = s.as_bytes();
+    let digits = |from: usize| {
+        let rest = &b[from.min(b.len())..];
+        rest.iter().take_while(|c| c.is_ascii_digit()).count()
     };
-    if int + frac.saturating_sub(1) == 0 {
-        return 0;
+    let int = digits(0);
+    let frac = match b.get(int) {
+        Some(b'.') => 1 + digits(int + 1),
+        _ => 0,
+    };
+    let end = int + frac;
+    if int + frac.saturating_sub(1) == 0 || !matches!(b.get(end), Some(b'e' | b'E')) {
+        return if int + frac.saturating_sub(1) == 0 {
+            0
+        } else {
+            end
+        };
     }
-    let e = &s[int + frac..];
-    let signed = usize::from(e[e.len().min(1)..].starts_with(['+', '-']));
-    match (
-        e.starts_with(['e', 'E']),
-        digits(&e[e.len().min(1 + signed)..], 10),
-    ) {
-        (true, n @ 1..) => int + frac + 1 + signed + n,
-        _ => int + frac,
+    let signed = usize::from(matches!(b.get(end + 1), Some(b'+' | b'-')));
+    match digits(end + 1 + signed) {
+        0 => end,
+        n => end + 1 + signed + n,
     }
 }
 
@@ -373,5 +380,28 @@ mod tests {
         ] {
             assert_eq!(stod(text), None, "{text:?}");
         }
+    }
+
+    /// Final review, finding 1: what follows the number may be any text, a multi-byte character included.
+    #[tokio::test]
+    async fn text_that_is_not_ascii_after_a_number_is_ignored_like_any_other() {
+        for (text, want) in [
+            ("1é", 1.0),
+            ("1eé", 1.0),
+            ("2.5\u{fffd}", 2.5),
+            ("7e+é", 7.0),
+            ("3é5", 3.0),
+        ] {
+            assert_eq!(stod(text), Some(want), "{text:?}");
+        }
+        assert_eq!(stod("é"), None);
+        assert_eq!(stod("-é1"), None);
+        let f = Fake::default();
+        let got = String::from_utf8(reply("WRITE=a:1é", &f).await).unwrap();
+        assert_eq!(got, "ACK=Wrote tag a -- 1é\0");
+        assert_eq!(
+            reply("READ=é", &f).await,
+            "ERR=Client does not have a mapping for tag 'é'\0".as_bytes()
+        );
     }
 }

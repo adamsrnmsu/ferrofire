@@ -106,6 +106,8 @@ pub struct Echo {
     last_sent: Option<Value>,
     last_polled: Option<Value>,
     pending: bool,
+    /// A write was just answered: the next poll may still show the value from before it.
+    fresh: bool,
 }
 
 impl Echo {
@@ -115,6 +117,7 @@ impl Echo {
             last_sent: Some(initial),
             last_polled: None,
             pending: false,
+            fresh: false,
         }
     }
 
@@ -125,7 +128,9 @@ impl Echo {
     /// A poll read `v`. `false`: a local write is pending and the poll is ignored. A value other than the one last sent means
     /// the device moved on, so that value may be sent again.
     pub fn polled(&mut self, v: Value) -> bool {
-        if self.pending {
+        // a device may answer a write and show the old value for a moment longer: that one poll does not count
+        let early = std::mem::take(&mut self.fresh) && !Echo::is(&self.last_sent, &v);
+        if self.pending || early {
             return false;
         }
         if !Echo::is(&self.last_sent, &v) {
@@ -148,6 +153,7 @@ impl Echo {
     pub fn sent_ok(&mut self, v: Value) {
         self.last_sent = Some(v);
         self.sent_failed();
+        self.fresh = true;
     }
 
     /// The write under way got no answer: nothing is under way any more, and the value is due again.
@@ -171,29 +177,42 @@ impl Out {
         }
     }
 
-    /// The local change to send down now, if the tag holds one. A write still queued for the tag has not landed, so the tag
-    /// is judged once it has. The caller ends the write with `echo.sent_ok` or `echo.sent_failed`.
-    pub fn due(&mut self, store: &Store, tag: &str) -> Option<Value> {
+    /// The local change to send down now, if the tag holds one, as `key` says the wire carries it (a register value, a
+    /// float32): the echo rule compares what the device can hold, so a value it cannot hold exactly is sent once, not after
+    /// every poll. A write still queued for the tag has not landed, so the tag is judged once it has. The caller ends the
+    /// write with `echo.sent_ok` (given what `due` returned) or `echo.sent_failed`.
+    pub fn due(&mut self, store: &Store, tag: &str, key: impl Fn(Value) -> Value) -> Option<Value> {
         match (store.get(tag), store.queued(tag)) {
-            (Some(now), None) => self.echo.due(now),
+            (Some(now), None) => {
+                self.wrote = None; // what this session queued has landed: a queued value from now on is somebody else's
+                self.echo.due(key(now))
+            }
             _ => None,
         }
     }
 
-    /// A poll read `v` for this output. A local change wins: one that has landed is returned to be sent down (as `due` would),
-    /// one still queued is left to land, and while one is on its way the poll is ignored. Otherwise `v` goes into the tag.
-    pub fn polled(&mut self, store: &Store, tag: &str, v: Value) -> Option<Value> {
-        if let Some(local) = self.due(store, tag) {
+    /// A poll read `v` for this output; `wire` is that value as the wire carried it. A local change wins: one that has
+    /// landed is returned to be sent down (as `due` would), one still queued is left to land, and while one is on its way
+    /// the poll is ignored. Otherwise `v` goes into the tag, unless the tag already holds a value that is the same on the wire.
+    pub fn polled(
+        &mut self,
+        store: &Store,
+        tag: &str,
+        v: Value,
+        wire: Value,
+        key: impl Fn(Value) -> Value,
+    ) -> Option<Value> {
+        if let Some(local) = self.due(store, tag, &key) {
             return Some(local);
         }
         let queued = store.queued(tag);
         let ours = |q: &Value| self.wrote.as_ref().is_some_and(|w| same(w, q));
         let theirs = queued.as_ref().is_some_and(|q| !ours(q));
-        if theirs || !self.echo.polled(v) {
+        if theirs || !self.echo.polled(wire) {
             return None;
         }
-        let settled = queued.is_none() && store.get(tag).is_some_and(|now| same(&now, &v));
-        if !settled {
+        let held = queued.or_else(|| store.get(tag));
+        if !held.is_some_and(|now| same(&key(now), &wire)) {
             let _ = store.write(tag, v);
             self.wrote = Some(v);
         }
@@ -440,6 +459,10 @@ mod tests {
         let mut e = Echo::new(Binary(false));
         assert_eq!(e.due(Binary(true)), Some(Binary(true)));
         e.sent_ok(Binary(true));
+        assert!(
+            !e.polled(Binary(false)),
+            "the first poll after a write may still show the old value"
+        );
         assert!(e.polled(Binary(false)), "someone else switched it off");
         assert_eq!(e.due(Binary(false)), None);
         assert_eq!(e.due(Binary(true)), Some(Binary(true)));
@@ -464,47 +487,58 @@ mod tests {
     fn a_polled_output_value_lands_in_the_tag_and_is_never_due() {
         let s = store(&[("t", Analog(0.0))]);
         let mut o = Out::new(Analog(0.0));
-        assert_eq!(o.polled(&s, "t", Analog(5.0)), None);
+        assert_eq!(o.polled(&s, "t", Analog(5.0), Analog(5.0), |v| v), None);
         assert_eq!(s.queued("t"), Some(Analog(5.0)));
-        assert_eq!(o.due(&s, "t"), None, "not judged while the write is queued");
+        assert_eq!(
+            o.due(&s, "t", |v| v),
+            None,
+            "not judged while the write is queued"
+        );
         s.apply_internal();
         assert_eq!(s.get("t"), Some(Analog(5.0)));
-        assert_eq!(o.due(&s, "t"), None, "what a poll brought is not sent back");
+        assert_eq!(
+            o.due(&s, "t", |v| v),
+            None,
+            "what a poll brought is not sent back"
+        );
         // a newer poll before the cycle ends replaces ours; the same value again queues nothing
-        assert_eq!(o.polled(&s, "t", Analog(6.0)), None);
-        assert_eq!(o.polled(&s, "t", Analog(7.0)), None);
+        assert_eq!(o.polled(&s, "t", Analog(6.0), Analog(6.0), |v| v), None);
+        assert_eq!(o.polled(&s, "t", Analog(7.0), Analog(7.0), |v| v), None);
         s.apply_internal();
         assert_eq!(s.get("t"), Some(Analog(7.0)));
-        assert_eq!(o.polled(&s, "t", Analog(7.0)), None);
+        assert_eq!(o.polled(&s, "t", Analog(7.0), Analog(7.0), |v| v), None);
         assert_eq!(s.queued("t"), None);
-        assert_eq!(o.due(&s, "t"), None);
+        assert_eq!(o.due(&s, "t", |v| v), None);
     }
 
     #[test]
     fn a_local_write_wins_over_a_poll_whether_it_has_landed_or_is_still_queued() {
         let s = store(&[("t", Analog(0.0))]);
         let mut o = Out::new(Analog(0.0));
-        assert_eq!(o.polled(&s, "t", Analog(5.0)), None);
+        assert_eq!(o.polled(&s, "t", Analog(5.0), Analog(5.0), |v| v), None);
         s.apply_internal();
         // landed: the poll hands the local value back to be sent, and leaves the tag
         s.write("t", Analog(9.0)).unwrap();
         s.apply_internal();
-        assert_eq!(o.polled(&s, "t", Analog(5.0)), Some(Analog(9.0)));
+        assert_eq!(
+            o.polled(&s, "t", Analog(5.0), Analog(5.0), |v| v),
+            Some(Analog(9.0))
+        );
         assert_eq!(s.queued("t"), None);
         assert_eq!(
-            o.polled(&s, "t", Analog(5.0)),
+            o.polled(&s, "t", Analog(5.0), Analog(5.0), |v| v),
             None,
             "ignored while the write is on its way"
         );
         assert_eq!(s.queued("t"), None);
         o.echo.sent_ok(Analog(9.0));
-        assert_eq!(o.due(&s, "t"), None);
+        assert_eq!(o.due(&s, "t", |v| v), None);
         // still queued: the poll does not replace it, and the next cycle finds it due
         s.write("t", Analog(11.0)).unwrap();
-        assert_eq!(o.polled(&s, "t", Analog(9.0)), None);
+        assert_eq!(o.polled(&s, "t", Analog(9.0), Analog(9.0), |v| v), None);
         assert_eq!(s.queued("t"), Some(Analog(11.0)));
         s.apply_internal();
-        assert_eq!(o.due(&s, "t"), Some(Analog(11.0)));
+        assert_eq!(o.due(&s, "t", |v| v), Some(Analog(11.0)));
     }
 
     #[test]
@@ -546,5 +580,98 @@ mod tests {
         );
         assert_eq!(s.queued("in"), None);
         assert!(p.write("nope", Analog(1.0)).await.is_err());
+    }
+
+    fn same_value(v: Value) -> Value {
+        v
+    }
+
+    /// Final review, finding 2: a value a poll once brought is, written locally later, a local write like any other.
+    #[test]
+    fn a_local_write_of_a_value_a_poll_brought_before_is_not_taken_for_the_polls_own() {
+        let s = store(&[("t", Binary(false))]);
+        let mut o = Out::new(Binary(false));
+        assert_eq!(
+            o.polled(&s, "t", Binary(true), Binary(true), same_value),
+            None
+        );
+        s.apply_internal();
+        // the operator switches it off: sent, and the device shows it
+        s.write("t", Binary(false)).unwrap();
+        s.apply_internal();
+        assert_eq!(o.due(&s, "t", same_value), Some(Binary(false)));
+        o.echo.sent_ok(Binary(false));
+        assert_eq!(
+            o.polled(&s, "t", Binary(false), Binary(false), same_value),
+            None
+        );
+        // and on again; a poll that still shows off arrives before the cycle ends
+        s.write("t", Binary(true)).unwrap();
+        assert_eq!(
+            o.polled(&s, "t", Binary(false), Binary(false), same_value),
+            None
+        );
+        assert_eq!(
+            s.queued("t"),
+            Some(Binary(true)),
+            "the local write is still the one queued"
+        );
+        s.apply_internal();
+        assert_eq!(o.due(&s, "t", same_value), Some(Binary(true)));
+    }
+
+    /// Final review, finding 4: a value the wire cannot carry exactly is judged as the wire carries it.
+    #[test]
+    fn a_value_off_the_wires_grid_is_sent_once_and_the_tag_keeps_it() {
+        let whole = |v: Value| match v {
+            Analog(x) => Analog(x.floor()),
+            b => b,
+        };
+        let s = store(&[("t", Analog(0.0))]);
+        let mut o = Out::new(Analog(0.0));
+        s.write("t", Analog(3.7)).unwrap();
+        s.apply_internal();
+        assert_eq!(
+            o.due(&s, "t", whole),
+            Some(Analog(3.0)),
+            "what goes down is what the wire carries"
+        );
+        o.echo.sent_ok(Analog(3.0));
+        // the device shows 3: the same on the wire, so the tag keeps 3.7 and nothing is due
+        for _ in 0..3 {
+            assert_eq!(o.polled(&s, "t", Analog(3.0), Analog(3.0), whole), None);
+            assert_eq!(s.queued("t"), None);
+            assert_eq!(o.due(&s, "t", whole), None);
+        }
+        // logic writing 3.7 again and again changes nothing either
+        s.write("t", Analog(3.7)).unwrap();
+        s.apply_internal();
+        assert_eq!(o.due(&s, "t", whole), None);
+        // another value on the device does land
+        assert_eq!(o.polled(&s, "t", Analog(9.0), Analog(9.0), whole), None);
+        s.apply_internal();
+        assert_eq!(s.get("t"), Some(Analog(9.0)));
+    }
+
+    /// A device may answer a write and show the old value for a moment longer: the poll right after a write does not
+    /// count when it disagrees with what was sent. The one after it does.
+    #[test]
+    fn the_first_poll_after_a_write_is_ignored_when_it_still_shows_another_value() {
+        let mut e = Echo::new(Analog(0.0));
+        assert_eq!(e.due(Analog(6.0)), Some(Analog(6.0)));
+        e.sent_ok(Analog(6.0));
+        assert!(!e.polled(Analog(0.0)), "read back too early");
+        assert_eq!(
+            e.due(Analog(6.0)),
+            None,
+            "and the value is not sent again for it"
+        );
+        assert!(e.polled(Analog(6.0)));
+        assert!(e.polled(Analog(0.0)), "now the device really went back");
+        // a poll that agrees ends the grace as well
+        assert_eq!(e.due(Analog(7.0)), Some(Analog(7.0)));
+        e.sent_ok(Analog(7.0));
+        assert!(e.polled(Analog(7.0)));
+        assert!(e.polled(Analog(1.0)));
     }
 }

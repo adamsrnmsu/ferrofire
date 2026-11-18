@@ -546,7 +546,17 @@ struct Shared {
     ana: BTreeMap<u16, String>,
     /// Stock's register cache: what a READ answers. The tags mirror it at the end of each scan cycle.
     cache: std::sync::Mutex<BTreeMap<String, Value>>,
+    /// `fep` mode: (binary, output, index) -> tag. An input and an output at one index are two points.
+    by_index: BTreeMap<(bool, bool, u16), String>,
     tx: mpsc::UnboundedSender<Command>,
+}
+
+/// An analog as the wire carries it down: a float32. The form the echo rule compares in `fep` mode.
+fn float32(v: Value) -> Value {
+    match v {
+        Value::Analog(x) => Value::Analog(f64::from(x as f32)),
+        Value::Binary(_) => v,
+    }
 }
 
 impl Shared {
@@ -565,6 +575,9 @@ impl Shared {
                     .map(|p| (p.tag.clone(), crate::fd::store::zero(p.kind)))
                     .collect(),
             ),
+            by_index: (points.iter())
+                .map(|p| ((p.kind == Kind::Binary, p.output, p.addr), p.tag.clone()))
+                .collect(),
             points: points.iter().map(|p| (p.tag.clone(), p.clone())).collect(),
             tx,
         }
@@ -583,6 +596,20 @@ impl Shared {
     /// Stock keeps an analog in a float.
     fn set_analog(&self, addr: u16, x: f64) {
         self.set(self.ana.get(&addr), Value::Analog(f64::from(x as f32)));
+    }
+
+    /// `fep` mode: the tag a value in a response belongs to. An input value goes to the input at that index; when there is
+    /// none it goes to the output there, for an outstation that reports its outputs as inputs (ferrofire's own does).
+    fn fep_tag(&self, s: &Seen) -> Option<(&String, Value)> {
+        let (binary, output, i, v) = match *s {
+            Seen::Binary(i, on) => (true, false, i, Value::Binary(on)),
+            Seen::BinaryOutput(i, on) => (true, true, i, Value::Binary(on)),
+            Seen::Analog(i, x) => (false, false, i, Value::Analog(x)),
+            Seen::AnalogOutput(i, x) => (false, true, i, Value::Analog(x)),
+        };
+        let at = |output| self.by_index.get(&(binary, output, i));
+        let tag = at(output).or_else(|| at(true));
+        tag.map(|t| (t, v))
     }
 
     /// Stock's SOE handler: binary inputs and analog inputs by index, into whichever tag has that address; the rest is ignored.
@@ -945,7 +972,7 @@ impl Session {
         if Instant::now() >= fep.next_tick {
             fep.next_tick = Instant::now() + fep.cycle;
             for (tag, out) in fep.outs.iter_mut() {
-                let due = out.due(&store, tag);
+                let due = out.due(&store, tag, float32);
                 fep.todo.extend(due.map(|v| (tag.clone(), v)));
             }
         }
@@ -993,26 +1020,20 @@ impl Session {
         sent.map(|_| ())
     }
 
-    /// The points of a response. `bennu` mode: stock's handler, into the cache. `fep` mode: binary and analog values, inputs
-    /// and output status alike, into the tag at that address, an output's through its echo state.
+    /// The points of a response. `bennu` mode: stock's handler, into the cache. `fep` mode: each value into the tag of its
+    /// point (`Shared::fep_tag`), an output's through its echo state.
     fn take(&mut self, r: &Response) {
         let Some(fep) = &mut self.fep else {
             return self.shared.take(r);
         };
-        let (store, maps) = (&self.shared.store, &self.shared);
+        let store = &self.shared.store;
         for s in &r.seen {
-            let (tag, v) = match *s {
-                Seen::Binary(i, on) | Seen::BinaryOutput(i, on) => {
-                    (maps.bin.get(&i), Value::Binary(on))
-                }
-                Seen::Analog(i, x) | Seen::AnalogOutput(i, x) => {
-                    (maps.ana.get(&i), Value::Analog(x))
-                }
+            let Some((tag, v)) = self.shared.fep_tag(s) else {
+                continue;
             };
-            let Some(tag) = tag else { continue };
             match fep.outs.get_mut(tag) {
                 Some(out) => {
-                    let local = out.polled(store, tag, v);
+                    let local = out.polled(store, tag, v, float32(v), float32);
                     fep.todo.extend(local.map(|l| (tag.clone(), l)));
                 }
                 None => shared::input_polled(store, tag, v),
@@ -1557,5 +1578,54 @@ mod tests {
         assert_eq!(cache["bi"], Value::Binary(false));
         assert_eq!(cache["ai"], Value::Analog(f64::from(0.1f32)));
         assert_eq!(cache["ao"], Value::Analog(0.0));
+    }
+
+    /// Final review, finding 5: in a real outstation binary input 0 and binary output 0 are two points.
+    #[test]
+    fn fep_keeps_an_input_and_an_output_at_one_index_apart() {
+        let pt = |tag: &str, addr, kind, output| Point {
+            tag: tag.into(),
+            addr,
+            kind,
+            output,
+            sbo: false,
+        };
+        let points = [
+            pt("bi0", 0, Kind::Binary, false),
+            pt("bo0", 0, Kind::Binary, true),
+            pt("bo5", 5, Kind::Binary, true),
+            pt("ai0", 0, Kind::Analog, false),
+            pt("ao0", 0, Kind::Analog, true),
+        ];
+        let store = Store::new(crate::fd::store::Layout::default());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let s = Shared::new(&points, store, tx);
+        let tag = |seen| s.fep_tag(&seen).map(|(t, v)| (t.as_str(), v));
+        assert_eq!(
+            tag(Seen::Binary(0, true)),
+            Some(("bi0", Value::Binary(true)))
+        );
+        assert_eq!(
+            tag(Seen::BinaryOutput(0, true)),
+            Some(("bo0", Value::Binary(true)))
+        );
+        assert_eq!(tag(Seen::Analog(0, 1.5)), Some(("ai0", Value::Analog(1.5))));
+        assert_eq!(
+            tag(Seen::AnalogOutput(0, 2.5)),
+            Some(("ao0", Value::Analog(2.5)))
+        );
+        // an outstation that reports its outputs as inputs (ours): no input has index 5, so the output takes it
+        assert_eq!(
+            tag(Seen::Binary(5, true)),
+            Some(("bo5", Value::Binary(true)))
+        );
+        assert_eq!(tag(Seen::Binary(9, true)), None);
+        assert_eq!(tag(Seen::BinaryOutput(9, true)), None);
+        // the analog output's key is the float32 that leaves
+        assert_eq!(
+            float32(Value::Analog(0.1)),
+            Value::Analog(f64::from(0.1f32))
+        );
+        assert_eq!(float32(Value::Binary(true)), Value::Binary(true));
     }
 }
