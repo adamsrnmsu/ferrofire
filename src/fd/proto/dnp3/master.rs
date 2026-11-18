@@ -6,7 +6,7 @@ use super::super::super::cmdif::{self, Points};
 use super::super::super::config::{number, require, text, ConfigError, Opts, Tags};
 use super::super::super::net;
 use super::super::super::store::Store;
-use super::super::client::{self as shared, Fep, Mode};
+use super::super::client::{self as shared, Fep, Mode, Out};
 use super::super::Module;
 use super::app::{self, func, CON, FIN, FIR, UNS};
 use super::link;
@@ -287,6 +287,8 @@ pub fn decode(fragment: &[u8]) -> Result<Response, Bad> {
 /// opendnp3's defaults, which the stock master runs with: how long a response may take, how long a failed startup task waits
 /// before it is tried again, and the reconnect pause (doubling from the first to the cap).
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+/// `fep` mode: an outstation that has not answered within this long is taken for gone and the connection is made anew.
+const FEP_TIMEOUT: Duration = Duration::from_millis(1000);
 const TASK_RETRY: Duration = Duration::from_secs(5);
 const RETRY_MIN: Duration = Duration::from_secs(1);
 const RETRY_MAX: Duration = Duration::from_secs(60);
@@ -406,11 +408,26 @@ impl Module for Client {
     }
 
     async fn run(self, store: Store, stop: CancellationToken) {
-        let mut by_tag = BTreeMap::new();
+        let (mut by_tag, mut outputs) = (BTreeMap::new(), vec![]);
         for (i, c) in self.conns.into_iter().enumerate() {
             let (tx, rx) = mpsc::unbounded_channel();
             let link = Arc::new(Shared::new(&c.points, store.clone(), tx));
             by_tag.extend(c.points.iter().map(|p| (p.tag.clone(), link.clone())));
+            outputs.extend(c.points.iter().map(|p| (p.tag.clone(), p.output)));
+            let zero = |p: &Point| match p.kind {
+                Kind::Binary => Value::Binary(false),
+                Kind::Analog => Value::Analog(0.0),
+            };
+            let fep = c.fep.map(|keys| FepState {
+                status: keys.status,
+                cycle: self.cycle,
+                outs: (c.points.iter().filter(|p| p.output))
+                    .map(|p| (p.tag.clone(), Out::new(zero(p))))
+                    .collect(),
+                todo: vec![],
+                next_tick: Instant::now(),
+                up: false,
+            });
             let session = Session {
                 shared: link,
                 name: format!("connection {} ({})", i + 1, c.endpoint),
@@ -425,15 +442,36 @@ impl Module for Client {
                 hold: Instant::now(),
                 due: c.scans.iter().map(|_| Instant::now()).collect(),
                 scans: c.scans,
+                timeout: if fep.is_some() {
+                    FEP_TIMEOUT
+                } else {
+                    RESPONSE_TIMEOUT
+                },
+                fep,
+                answered: false,
             };
             // one task per connection: a slow or dead outstation stalls neither the scan cycle nor the other connections
             tokio::spawn(session.run(stop.clone()));
         }
-        match &self.cmdif {
-            Some(ep) => cmdif::serve(ep, Bennu(by_tag), stop).await,
-            None => stop.cancelled().await,
+        match (&self.cmdif, self.mode) {
+            (Some(ep), Mode::Bennu) => cmdif::serve(ep, Bennu(by_tag), stop).await,
+            (Some(ep), Mode::Fep) => {
+                cmdif::serve(ep, shared::TagPoints::new(store, outputs), stop).await
+            }
+            (None, _) => stop.cancelled().await,
         }
     }
+}
+
+/// What `fep` mode adds to a session: the echo state of its outputs, and when it next looks for local changes.
+struct FepState {
+    status: Option<String>,
+    cycle: Duration,
+    outs: BTreeMap<String, Out>,
+    /// Local changes a poll ran into: sent before anything else.
+    todo: Vec<(String, Value)>,
+    next_tick: Instant,
+    up: bool,
 }
 
 /// A command for a session to send.
@@ -621,6 +659,11 @@ struct Session {
     scans: Vec<(Vec<u8>, Duration)>,
     /// When each scan is next due.
     due: Vec<Instant>,
+    /// How long a response may take.
+    timeout: Duration,
+    fep: Option<FepState>,
+    /// The connection in use has brought at least one response.
+    answered: bool,
 }
 
 enum Task {
@@ -636,17 +679,18 @@ impl Session {
         let (mut wait, mut pause) = (Duration::ZERO, RETRY_MIN);
         loop {
             tokio::select! { _ = stop.cancelled() => return, _ = tokio::time::sleep(wait) => {} }
-            let began = Instant::now();
+            self.answered = false;
             let stream = tokio::time::timeout(RESPONSE_TIMEOUT, net::connect(&self.endpoint)).await;
             if let Ok(Ok(stream)) = stream {
                 let _ = stream.set_nodelay(true);
                 tracing::info!("dnp3-client: {}: connected", self.name);
                 tokio::select! { _ = stop.cancelled() => return, _ = self.session(stream) => {} }
                 tracing::warn!("dnp3-client: {}: connection lost", self.name);
+                self.went_down();
             }
-            // ponytail: a connection that dies within a second (a relay in front of a dead outstation) backs off like a
-            // refused one, where opendnp3 would reconnect in a tight loop
-            (wait, pause) = match began.elapsed() >= RETRY_MIN {
+            // ponytail: a connection that never brought a response (a relay in front of a dead outstation, a silent peer)
+            // backs off like a refused one, where opendnp3 would reconnect at once, in a tight loop
+            (wait, pause) = match self.answered {
                 true => (Duration::ZERO, RETRY_MIN),
                 false => (pause, (pause * 2).min(RETRY_MAX)),
             };
@@ -672,8 +716,10 @@ impl Session {
     fn wake(&self) -> Instant {
         let scan = self.due.iter().min().copied();
         let startup = (self.clear || self.integrity).then_some(self.hold);
+        let tick = self.fep.as_ref().map(|f| f.next_tick);
         scan.into_iter()
             .chain(startup)
+            .chain(tick)
             .min()
             .unwrap_or_else(|| Instant::now() + Duration::from_secs(3600))
     }
@@ -690,7 +736,13 @@ impl Session {
         let mut seq = 0u8;
         // what was asked for while the outstation was away is not sent late
         while self.rx.try_recv().is_ok() {}
+        if let Some(fep) = &mut self.fep {
+            fep.next_tick = Instant::now(); // what changed while the outstation was away goes down before anything is read
+        }
         loop {
+            if self.write_down(&mut wire, &mut seq).await.is_err() {
+                return;
+            }
             let Some(task) = self.next() else {
                 let wake = self.wake();
                 tokio::select! {
@@ -715,17 +767,7 @@ impl Session {
     async fn run_task(&mut self, wire: &mut Wire, seq: &mut u8, task: Task) -> Result<(), Lost> {
         match task {
             Task::Command(c) => {
-                let func = if c.sbo {
-                    func::SELECT
-                } else {
-                    func::DIRECT_OPERATE
-                };
-                let echoed =
-                    |r: &Option<Response>| r.as_ref().is_some_and(|r| r.objects == c.objects);
-                let first = self.exchange(wire, seq, func, &c.objects).await?;
-                if c.sbo && echoed(&first) && !c.nan {
-                    self.exchange(wire, seq, func::OPERATE, &c.objects).await?;
-                }
+                self.command(wire, seq, &c).await?;
             }
             Task::Clear => {
                 let r = self
@@ -745,27 +787,161 @@ impl Session {
             Task::Integrity => {
                 // done once answered; a response that shows a restart asks for it again below
                 self.integrity = false;
-                if self
+                match self
                     .exchange(wire, seq, func::READ, &class_read(&[0]))
                     .await?
-                    .is_none()
                 {
-                    self.integrity = true;
-                    self.hold = Instant::now() + TASK_RETRY;
+                    Some(_) => self.polled(wire, seq).await?,
+                    None => {
+                        self.integrity = true;
+                        self.hold = Instant::now() + TASK_RETRY;
+                    }
                 }
             }
             Task::Scan(i) => {
                 let objects = class_read(&self.scans[i].0);
-                self.exchange(wire, seq, func::READ, &objects).await?;
+                if self
+                    .exchange(wire, seq, func::READ, &objects)
+                    .await?
+                    .is_some()
+                {
+                    self.polled(wire, seq).await?;
+                }
                 self.due[i] = Instant::now() + self.scans[i].1;
             }
         }
         Ok(())
     }
 
+    /// Send a command: DIRECT_OPERATE, or SELECT and, when the outstation echoes it unchanged, OPERATE. `true`: the outstation
+    /// took it (its echo carries status 0).
+    async fn command(&mut self, wire: &mut Wire, seq: &mut u8, c: &Command) -> Result<bool, Lost> {
+        let func = match c.sbo {
+            true => func::SELECT,
+            false => func::DIRECT_OPERATE,
+        };
+        let echoed = |r: &Option<Response>| r.as_ref().is_some_and(|r| r.objects == c.objects);
+        let first = self.exchange(wire, seq, func, &c.objects).await?;
+        if !c.sbo || !echoed(&first) || c.nan {
+            return Ok(!c.sbo && echoed(&first));
+        }
+        let second = self.exchange(wire, seq, func::OPERATE, &c.objects).await?;
+        Ok(echoed(&second))
+    }
+
+    /// `fep` mode, after a scan was answered: the session is up, and the outputs' status is read as well, so every output
+    /// has a polled value (an outstation that reports outputs only as output status, like stock v2026.11.03, gives none in
+    /// a class scan).
+    async fn polled(&mut self, wire: &mut Wire, seq: &mut u8) -> Result<(), Lost> {
+        if self.fep.is_none() {
+            return Ok(());
+        }
+        self.exchange(wire, seq, func::READ, &output_status())
+            .await?;
+        self.set_up(true);
+        Ok(())
+    }
+
+    fn set_up(&mut self, up: bool) {
+        let Some(fep) = &mut self.fep else { return };
+        if fep.up != up {
+            fep.up = up;
+            if let Some(tag) = &fep.status {
+                let _ = self.shared.store.write(tag, Value::Binary(up));
+            }
+        }
+    }
+
+    /// The connection is gone: the status says so, and a write that was waiting to leave is due again.
+    fn went_down(&mut self) {
+        self.set_up(false);
+        if let Some(fep) = &mut self.fep {
+            for (tag, _) in fep.todo.drain(..) {
+                if let Some(out) = fep.outs.get_mut(&tag) {
+                    out.echo.sent_failed();
+                }
+            }
+        }
+    }
+
+    /// `fep` mode: send the local changes a poll ran into and, once per cycle, every output tag's local change.
+    async fn write_down(&mut self, wire: &mut Wire, seq: &mut u8) -> Result<(), Lost> {
+        let store = self.shared.store.clone();
+        let Some(fep) = &mut self.fep else {
+            return Ok(());
+        };
+        if Instant::now() >= fep.next_tick {
+            fep.next_tick = Instant::now() + fep.cycle;
+            for (tag, out) in fep.outs.iter_mut() {
+                if let Some(v) = out.due(&store, tag) {
+                    fep.todo.push((tag.clone(), v));
+                }
+            }
+        }
+        while let Some((tag, v)) = self.fep.as_mut().and_then(|f| f.todo.pop()) {
+            let p = &self.shared.points[&tag];
+            let (objects, nan) = match v {
+                Value::Binary(on) => (crob(p.addr, on), false),
+                Value::Analog(x) => (ao_f32(p.addr, x), x.is_nan()),
+            };
+            let c = Command {
+                sbo: p.sbo,
+                objects,
+                nan,
+            };
+            // a NaN is never sent; a command the outstation refuses is not repeated: the next poll shows what it holds
+            let sent = match nan {
+                true => Ok(false),
+                false => self.command(wire, seq, &c).await,
+            };
+            if matches!(sent, Ok(false)) {
+                tracing::warn!(
+                    "dnp3-client: {}: tag `{tag}` = {v:?} was not taken by the outstation",
+                    self.name
+                );
+            }
+            if let Some(out) = self.fep.as_mut().and_then(|f| f.outs.get_mut(&tag)) {
+                match sent {
+                    Ok(_) => out.echo.sent_ok(v),
+                    Err(Lost) => out.echo.sent_failed(),
+                }
+            }
+            sent?;
+        }
+        Ok(())
+    }
+
+    /// The points of a response. `bennu` mode: stock's handler, into the cache. `fep` mode: binary and analog values, inputs
+    /// and output status alike, into the tag at that address, an output's through its echo state.
+    fn take(&mut self, r: &Response) {
+        let Some(fep) = &mut self.fep else {
+            return self.shared.take(r);
+        };
+        let (store, maps) = (&self.shared.store, &self.shared);
+        for s in &r.seen {
+            let (tag, v) = match *s {
+                Seen::Binary(i, on) | Seen::BinaryOutput(i, on) => {
+                    (maps.bin.get(&i), Value::Binary(on))
+                }
+                Seen::Analog(i, x) | Seen::AnalogOutput(i, x) => {
+                    (maps.ana.get(&i), Value::Analog(x))
+                }
+            };
+            let Some(tag) = tag else { continue };
+            match fep.outs.get_mut(tag) {
+                Some(out) => {
+                    let local = out.polled(store, tag, v);
+                    fep.todo.extend(local.map(|l| (tag.clone(), l)));
+                }
+                None => shared::input_polled(store, tag, v),
+            }
+        }
+    }
+
     /// What every response brings: its points, a confirmation when it asks for one, and the restart flag.
     async fn absorb(&mut self, wire: &mut Wire, r: &Response) -> Result<(), Lost> {
-        self.shared.take(r);
+        self.answered = true;
+        self.take(r);
         if r.con {
             wire.send(&mut self.tseq, &confirm(r.seq, r.unsol)).await?;
         }
@@ -809,14 +985,18 @@ impl Session {
         *seq = (*seq + 1) & 0x0F;
         wire.send(&mut self.tseq, &app::request(want, func, objects))
             .await?;
-        let deadline = Instant::now() + RESPONSE_TIMEOUT;
+        let deadline = Instant::now() + self.timeout;
         loop {
             let Ok(fragment) = tokio::time::timeout_at(deadline, wire.recv()).await else {
                 tracing::warn!(
                     "dnp3-client: {}: no response to function {func} (sequence {want})",
                     self.name
                 );
-                return Ok(None);
+                // stock keeps the connection and tries the next task; a FEP takes the outstation for gone
+                return match self.fep {
+                    Some(_) => Err(Lost),
+                    None => Ok(None),
+                };
             };
             let fragment = fragment?;
             match decode(&fragment) {

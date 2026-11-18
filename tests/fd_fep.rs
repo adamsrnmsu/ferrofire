@@ -410,3 +410,304 @@ async fn the_command_interface_in_fep_mode_reads_the_tag_and_writes_through_the_
     }
     assert_eq!(requests(&r.tap, 6).len(), 1);
 }
+
+// ---- the same over DNP3 -----------------------------------------------------------------------------------------------------
+
+mod dnp3 {
+    use super::*;
+    use ferrofire::fd::proto::dnp3::link::{self, Parse};
+    use ferrofire::fd::proto::dnp3::master::{self, Seen};
+
+    const POINTS: &str = r#"
+ <binary-input><address>2</address><tag>alarm</tag></binary-input>
+ <binary-output><address>5</address><tag>pump</tag></binary-output>
+ <analog-input><address>0</address><tag>level</tag></analog-input>
+ <analog-output><address>1</address><tag>setpoint</tag><sbo>1</sbo></analog-output>"#;
+
+    fn rtu_xml(port: u16) -> String {
+        format!(
+            r#"<SCEPTRE><field-device><name>rtu</name><cycle-time>20</cycle-time>
+<tags>
+ <internal-tag><name>level</name><value>0</value></internal-tag>
+ <internal-tag><name>setpoint</name><value>0</value></internal-tag>
+ <internal-tag><name>pump</name><status>false</status></internal-tag>
+ <internal-tag><name>alarm</name><status>false</status></internal-tag>
+</tags>
+<comms><dnp3-server><endpoint>tcp://127.0.0.1:{port}</endpoint><address>10</address><event-logging>/dev/null</event-logging>{POINTS}
+</dnp3-server></comms></field-device></SCEPTRE>"#
+        )
+    }
+
+    /// A FEP: a `fep` mode master scanning `rtu` every second, a 40 ms cycle, and its own outstation on `serve` over the same
+    /// tags. `more` goes into `<dnp3-client>`.
+    fn fep_xml(rtu: u16, serve: u16, mode: &str, more: &str) -> String {
+        format!(
+            r#"<SCEPTRE><field-device><name>fep</name><cycle-time>40</cycle-time>
+<comms><dnp3-client><address>1</address><scan-rate>1</scan-rate>{mode}
+ <dnp3-connection><endpoint>tcp://127.0.0.1:{rtu}</endpoint><address>10</address><status-tag>rtu-up</status-tag>{POINTS}
+ </dnp3-connection>{more}
+</dnp3-client>
+<dnp3-server><endpoint>tcp://127.0.0.1:{serve}</endpoint><address>10</address><event-logging>/dev/null</event-logging>{POINTS}
+</dnp3-server></comms></field-device></SCEPTRE>"#
+        )
+    }
+
+    struct Rig {
+        rtu: Device,
+        fep: Device,
+        tap: Tap,
+        rtu_port: u16,
+        serve: u16,
+    }
+
+    async fn rig(more: &str) -> Rig {
+        let (rtu_port, serve) = (free_port(), free_port());
+        let rtu = device(&rtu_xml(rtu_port));
+        listening(rtu_port, true).await;
+        let tap = tap(rtu_port).await;
+        let fep = device(&fep_xml(tap.port, serve, "<mode>fep</mode>", more));
+        Rig {
+            rtu,
+            fep,
+            tap,
+            rtu_port,
+            serve,
+        }
+    }
+
+    /// The application fragments (function code first, the control octet dropped) the FEP's master sent through the tap.
+    fn requests(t: &Tap) -> Vec<Vec<u8>> {
+        let mut buf: Vec<u8> = t.sent().concat();
+        let mut out = vec![];
+        while let Parse::Frame(f, used) = link::parse(&buf) {
+            out.push(f.user[2..].to_vec());
+            buf.drain(..used);
+        }
+        out
+    }
+
+    /// The control requests among them: select (3), operate (4), direct operate (5).
+    fn controls(t: &Tap) -> Vec<Vec<u8>> {
+        requests(t)
+            .into_iter()
+            .filter(|r| (3..=5).contains(&r[0]))
+            .collect()
+    }
+
+    /// One class 0 read of the outstation on `port`, as a master at address 1: the points in the response.
+    async fn class0(port: u16) -> Vec<Seen> {
+        listening(port, true).await;
+        let mut s = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        s.write_all(&link::encode(
+            master::MASTER_DATA,
+            10,
+            1,
+            &[0xC0, 0xC0, 1, 60, 1, 6],
+        ))
+        .await
+        .unwrap();
+        let mut buf = vec![];
+        loop {
+            let mut chunk = [0u8; 512];
+            // an outstation serves one master at a time: a connection made while the last one is still being let go is closed
+            let Ok(Ok(n @ 1..)) = tokio::time::timeout(S(2), s.read(&mut chunk)).await else {
+                return vec![];
+            };
+            buf.extend_from_slice(&chunk[..n]);
+            if let Parse::Frame(f, _) = link::parse(&buf) {
+                return master::decode(&f.user[1..]).unwrap().seen;
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dnp3_gateway_a_value_on_the_rtu_appears_on_the_feps_own_outstation() {
+        let r = rig("").await;
+        assert_eq!(
+            r.fep.store.get_bool("rtu-up"),
+            Some(false),
+            "false before the first connection"
+        );
+        r.rtu.store.write("level", Analog(250.5)).unwrap();
+        r.rtu.store.write("alarm", Binary(true)).unwrap();
+        r.rtu.store.write("setpoint", Analog(42.0)).unwrap();
+        let f = &r.fep.store;
+        until("the scanned values", S(6), || {
+            f.get_f64("level") == Some(250.5)
+                && f.get_bool("alarm") == Some(true)
+                && f.get_f64("setpoint") == Some(42.0)
+        })
+        .await;
+        assert_eq!(f.get_bool("rtu-up"), Some(true));
+        // the FEP's outstation refreshes its database from the tags every 100 ms
+        let mut seen = vec![];
+        for _ in 0..20 {
+            seen = class0(r.serve).await;
+            if seen.contains(&Seen::Analog(0, 250.5)) && seen.contains(&Seen::Binary(2, true)) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(
+            seen.contains(&Seen::Analog(0, 250.5)) && seen.contains(&Seen::Binary(2, true)),
+            "{seen:?}"
+        );
+        // the scan results came in through polls: nothing was commanded
+        assert_eq!(controls(&r.tap), Vec::<Vec<u8>>::new());
+        // fep mode also reads the output status, after each scan
+        let status = [&[1u8][..], &master::output_status()].concat();
+        assert!(requests(&r.tap).contains(&status), "{:?}", requests(&r.tap));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dnp3_bennu_mode_never_reads_the_output_status() {
+        let (rtu_port, serve) = (free_port(), free_port());
+        let _rtu = device(&rtu_xml(rtu_port));
+        listening(rtu_port, true).await;
+        let t = tap(rtu_port).await;
+        let xml = fep_xml(t.port, serve, "", "").replace("<status-tag>rtu-up</status-tag>", "");
+        let _fep = device(&xml);
+        until("two scans", S(6), || {
+            requests(&t).iter().filter(|r| r.len() == 13).count() >= 2
+        })
+        .await;
+        assert!(
+            requests(&t)
+                .iter()
+                .all(|r| !r.ends_with(&master::output_status())),
+            "{:?}",
+            requests(&t)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dnp3_a_local_change_is_commanded_once_and_not_echoed() {
+        let r = rig("").await;
+        until("up", S(6), || r.fep.store.get_bool("rtu-up") == Some(true)).await;
+        r.fep.store.write("pump", Binary(true)).unwrap();
+        // whole numbers: our outstation reports an analog output back as a 32-bit integer (g30v1)
+        r.fep.store.write("setpoint", Analog(43.0)).unwrap();
+        let rtu = &r.rtu.store;
+        until("the commands on the RTU", S(3), || {
+            rtu.get_bool("pump") == Some(true) && rtu.get_f64("setpoint") == Some(43.0)
+        })
+        .await;
+        // three scans later: one direct operate (the CROB), one select and one operate (the sbo analog output), no more
+        tokio::time::sleep(Duration::from_millis(3200)).await;
+        let c = controls(&r.tap);
+        let crob = [&[5u8][..], &master::crob(5, true)].concat();
+        let ao = master::ao_f32(1, 43.0);
+        let (select, operate) = ([&[3u8][..], &ao].concat(), [&[4u8][..], &ao].concat());
+        assert_eq!(c.len(), 3, "{c:?}");
+        assert!(
+            c.contains(&crob) && c.contains(&select) && c.contains(&operate),
+            "{c:?}"
+        );
+        assert_eq!(r.fep.store.get_f64("setpoint"), Some(43.0));
+        // a change made on the RTU comes up and is not commanded back
+        r.rtu.store.write("setpoint", Analog(7.0)).unwrap();
+        until("the RTU's own change", S(4), || {
+            r.fep.store.get_f64("setpoint") == Some(7.0)
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert_eq!(controls(&r.tap).len(), 3);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dnp3_a_stopped_outstation_turns_the_status_false_and_a_restart_recovers() {
+        let mut r = rig("").await;
+        r.rtu.store.write("level", Analog(100.0)).unwrap();
+        until("up", S(6), || {
+            r.fep.store.get_bool("rtu-up") == Some(true)
+                && r.fep.store.get_f64("level") == Some(100.0)
+        })
+        .await;
+        r.rtu.stop();
+        until("down", S(4), || {
+            r.fep.store.get_bool("rtu-up") == Some(false)
+        })
+        .await;
+        assert_eq!(
+            r.fep.store.get_f64("level"),
+            Some(100.0),
+            "the tags keep their last values"
+        );
+        let before = r.tap.accepted.load(Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        let attempts = r.tap.accepted.load(Ordering::SeqCst) - before;
+        assert!(attempts <= 3, "{attempts} connection attempts in 2.5 s");
+        r.rtu = device(&rtu_xml(r.rtu_port));
+        r.rtu.store.write("level", Analog(300.0)).unwrap();
+        until("recovery", S(20), || {
+            r.fep.store.get_bool("rtu-up") == Some(true)
+                && r.fep.store.get_f64("level") == Some(300.0)
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dnp3_a_silent_outstation_never_comes_up_and_the_other_connection_keeps_scanning() {
+        let silent = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let silent_port = silent.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let mut held = vec![];
+            while let Ok((s, _)) = silent.accept().await {
+                held.push(s);
+            }
+        });
+        let second = format!(
+            r#"<dnp3-connection><endpoint>tcp://127.0.0.1:{silent_port}</endpoint><address>11</address><status-tag>silent-up</status-tag>
+               <binary-input><address>0</address><tag>other</tag></binary-input></dnp3-connection>"#
+        );
+        let r = rig(&second).await;
+        until("the live connection", S(6), || {
+            r.fep.store.get_bool("rtu-up") == Some(true)
+        })
+        .await;
+        for v in [100.0, 200.0, 300.0] {
+            r.rtu.store.write("level", Analog(v)).unwrap();
+            until(
+                "a fresh value from the live RTU",
+                Duration::from_millis(2500),
+                || r.fep.store.get_f64("level") == Some(v),
+            )
+            .await;
+            assert_eq!(r.fep.store.get_bool("silent-up"), Some(false));
+        }
+        assert_eq!(r.fep.store.get_bool("rtu-up"), Some(true));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dnp3_a_change_while_the_outstation_is_down_is_sent_newest_only_after_it_returns() {
+        let mut r = rig("").await;
+        until("up", S(6), || r.fep.store.get_bool("rtu-up") == Some(true)).await;
+        r.rtu.stop();
+        until("down", S(4), || {
+            r.fep.store.get_bool("rtu-up") == Some(false)
+        })
+        .await;
+        r.tap.clear();
+        r.fep.store.write("setpoint", Analog(1.0)).unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        r.fep.store.write("setpoint", Analog(2.0)).unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        r.rtu = device(&rtu_xml(r.rtu_port));
+        until("the newest value on the RTU", S(20), || {
+            r.rtu.store.get_f64("setpoint") == Some(2.0)
+        })
+        .await;
+        until("up again", S(4), || {
+            r.fep.store.get_bool("rtu-up") == Some(true)
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        let ao = master::ao_f32(1, 2.0);
+        assert_eq!(
+            controls(&r.tap),
+            [[&[3u8][..], &ao].concat(), [&[4u8][..], &ao].concat()],
+            "1.0 never left"
+        );
+        assert_eq!(r.fep.store.get_f64("setpoint"), Some(2.0));
+    }
+}

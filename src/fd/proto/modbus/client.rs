@@ -7,7 +7,7 @@ use super::super::super::config::{number, require, text, ConfigError, Opts, Tags
 use super::super::super::eventlog::EventLog;
 use super::super::super::net;
 use super::super::super::store::Store;
-use super::super::client::{self as shared, Echo, Fep, Mode};
+use super::super::client::{self as shared, Fep, Mode, Out};
 use super::super::Module;
 use super::codec::{self, Parse};
 use super::device::{Range, DEFAULT_RANGE};
@@ -306,7 +306,14 @@ impl Module for Client {
                 tokio::spawn(session.run(self.cycle, stop.clone()));
             }
             return match &self.cmdif {
-                Some(ep) => cmdif::serve(ep, FepPoints(live), stop).await,
+                Some(ep) => {
+                    let tags = live
+                        .points
+                        .iter()
+                        .map(|(t, (_, p))| (t.clone(), p.table.output()));
+                    let points = shared::TagPoints::new(live.store.clone(), tags);
+                    cmdif::serve(ep, points, stop).await
+                }
                 None => stop.cancelled().await,
             };
         }
@@ -485,13 +492,6 @@ impl Points for Bennu {
     }
 }
 
-/// One output point of a FEP connection.
-struct Out {
-    echo: Echo,
-    /// The polled value this session last queued for the tag: a queued value that is not this one is somebody's local write.
-    wrote: Option<Value>,
-}
-
 /// One connection of a `fep` mode client: poll every `scan`, look for local changes every cycle.
 struct Session {
     live: Arc<Live>,
@@ -518,13 +518,7 @@ impl Session {
         let outs = points
             .iter()
             .filter(|p| p.table.output())
-            .map(|p| {
-                let out = Out {
-                    echo: Echo::new(zero(p.kind)),
-                    wrote: None,
-                };
-                (p.tag.clone(), out)
-            })
+            .map(|p| (p.tag.clone(), Out::new(zero(p.kind))))
             .collect();
         Session {
             live,
@@ -578,39 +572,54 @@ impl Session {
         }
     }
 
-    /// Send every output tag's local change. `false`: the connection failed (the changes stay due).
-    async fn write_down(&mut self) -> bool {
-        let store = &self.live.store;
-        for p in self.points.iter().filter(|p| p.table.output()) {
-            let Some(out) = self.outs.get_mut(&p.tag) else {
-                continue;
-            };
-            // a write still queued for the tag has not landed: judge the tag once it has
-            let (Some(now), None) = (store.get(&p.tag), store.queued(&p.tag)) else {
-                continue;
-            };
-            let Some(v) = out.echo.due(now) else {
-                continue;
-            };
-            let Some((fc, raw)) = wire(p, v) else {
+    /// Send `v` down to output point `p` and tell its echo state how it went. `false`: the connection failed.
+    async fn send(&mut self, p: &Point, v: Value) -> bool {
+        let Some((fc, raw)) = wire(p, v) else {
+            tracing::warn!(
+                "modbus-client: tag `{}` is {v:?}, which a register cannot hold: not sent",
+                p.tag
+            );
+            self.settle(p, Some(v));
+            return true;
+        };
+        match self.live.ask(self.i, fc, p.addr, raw).await {
+            Ok(_) => self.settle(p, Some(v)),
+            // a refused write is not repeated: the next poll shows what the device holds
+            Err(Fail::Exception(code)) => {
                 tracing::warn!(
-                    "modbus-client: tag `{}` is {v:?}, which a register cannot hold: not sent",
+                    "modbus-client: write of tag `{}` refused with exception {code}",
                     p.tag
                 );
-                out.echo.sent_ok(v);
-                continue;
-            };
-            match self.live.ask(self.i, fc, p.addr, raw).await {
-                Ok(_) => out.echo.sent_ok(v),
-                Err(Fail::Exception(code)) => {
-                    tracing::warn!(
-                        "modbus-client: write of tag `{}` refused with exception {code}",
-                        p.tag
-                    );
-                    out.echo.sent_failed();
-                }
-                Err(Fail::Link) => {
-                    out.echo.sent_failed();
+                self.settle(p, Some(v));
+            }
+            Err(Fail::Link) => {
+                self.settle(p, None);
+                return false;
+            }
+        }
+        true
+    }
+
+    /// End the write under way for `p`: `sent` is the value that went, `None` that it failed.
+    fn settle(&mut self, p: &Point, sent: Option<Value>) {
+        if let Some(out) = self.outs.get_mut(&p.tag) {
+            match sent {
+                Some(v) => out.echo.sent_ok(v),
+                None => out.echo.sent_failed(),
+            }
+        }
+    }
+
+    /// Send every output tag's local change. `false`: the connection failed (the changes stay due).
+    async fn write_down(&mut self) -> bool {
+        let store = self.live.store.clone();
+        for p in self.points.clone().iter().filter(|p| p.table.output()) {
+            let due = self
+                .outs
+                .get_mut(&p.tag)
+                .and_then(|o| o.due(&store, &p.tag));
+            if let Some(v) = due {
+                if !self.send(p, v).await {
                     return false;
                 }
             }
@@ -632,7 +641,14 @@ impl Session {
         }
         for (fc, start, qty) in plan_reads(&self.points, &self.split) {
             match self.live.ask(self.i, fc, start, qty).await {
-                Ok(values) => self.take(fc, start, &values),
+                Ok(values) => {
+                    // a local change that landed since the pass above goes down now, instead of the polled value in
+                    for (p, v) in self.take(fc, start, &values) {
+                        if !self.send(&p, v).await {
+                            return false;
+                        }
+                    }
+                }
                 // a merged read over a hole: read each address alone from the next poll on
                 Err(Fail::Exception(2)) if qty > 1 => {
                     self.split.extend((0..qty).map(|k| (fc, start + k)));
@@ -648,10 +664,11 @@ impl Session {
         true
     }
 
-    /// Put the values of one read into the tags of the points it covers.
-    fn take(&mut self, fc: u8, start: u16, values: &[u16]) {
-        use crate::fd::store::same;
+    /// Put the values of one read into the tags of the points it covers. Returned: output points whose tag holds a local
+    /// change instead, to be sent down.
+    fn take(&mut self, fc: u8, start: u16, values: &[u16]) -> Vec<(Point, Value)> {
         let store = &self.live.store;
+        let mut local = vec![];
         for p in self.points.iter().filter(|p| p.table.read_fc() == fc) {
             let item = p
                 .addr
@@ -660,51 +677,12 @@ impl Session {
             let Some(v) = item.map(|raw| polled(p, *raw)) else {
                 continue;
             };
-            let (queued, held) = (store.queued(&p.tag), store.get(&p.tag));
-            let settled = queued.is_none() && held.is_some_and(|now| same(&now, &v));
-            let Some(out) = self.outs.get_mut(&p.tag) else {
-                // an input: the device owns the value
-                if !settled {
-                    let _ = store.write(&p.tag, v);
-                }
-                continue;
-            };
-            if !out.echo.polled(v) {
-                continue; // a local write is on its way down
-            }
-            // a queued value that is not ours is somebody's local write waiting to land: it wins, the next cycle sends it
-            let theirs = queued.is_some_and(|q| !out.wrote.is_some_and(|w| same(&w, &q)));
-            if !settled && !theirs {
-                let _ = store.write(&p.tag, v);
-                out.wrote = Some(v);
+            match self.outs.get_mut(&p.tag) {
+                Some(out) => local.extend(out.polled(store, &p.tag, v).map(|l| (p.clone(), l))),
+                None => shared::input_polled(store, &p.tag, v),
             }
         }
-    }
-}
-
-/// The command interface of a `fep` mode client: a READ answers from the tag, a WRITE queues the tag and goes down through the
-/// echo rule like any other local change.
-struct FepPoints(Arc<Live>);
-
-impl Points for FepPoints {
-    fn names(&self) -> Vec<String> {
-        self.0.points.keys().cloned().collect()
-    }
-
-    async fn read(&self, tag: &str) -> Result<Value, String> {
-        self.0.store.get(tag).ok_or_else(|| READ_FAILED.into())
-    }
-
-    async fn write(&self, tag: &str, v: Value) -> Result<(), String> {
-        let (_, p) = self.0.points.get(tag).ok_or(WRITE_FAILED)?;
-        if !p.table.output() {
-            return Err("the point is an input".into());
-        }
-        let kind = format!("{:?}", p.kind).to_lowercase();
-        self.0
-            .store
-            .write(tag, v)
-            .map_err(|_| format!("the tag is {kind}"))
+        local
     }
 }
 

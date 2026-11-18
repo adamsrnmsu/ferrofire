@@ -2,11 +2,13 @@
 //! front-end processor, the ferrofire-only keys of the latter, device-local point tags, and the echo rule that keeps a FEP from
 //! writing a polled value straight back (docs/field-device-clients.md).
 
+use super::super::cmdif::Points;
 use super::super::config::{number, text, ConfigError, Opts, Tags};
-use super::super::store::same;
+use super::super::store::{same, Store};
 use crate::hint::show;
 use crate::model::{Kind, Value};
 use roxmltree::Node;
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 /// `<mode>`: a stock bennu fd-client (the default), or a front-end processor that polls into tags and writes changes down.
@@ -148,6 +150,99 @@ impl Echo {
 
     pub fn sent_failed(&mut self) {
         self.pending = false;
+    }
+}
+
+/// One output point of a FEP session: its echo state and the tag traffic around it.
+pub struct Out {
+    pub echo: Echo,
+    /// The polled value this session last queued for the tag: a queued value that is not this one is somebody's local write.
+    wrote: Option<Value>,
+}
+
+impl Out {
+    pub fn new(initial: Value) -> Out {
+        Out {
+            echo: Echo::new(initial),
+            wrote: None,
+        }
+    }
+
+    /// The local change to send down now, if the tag holds one. A write still queued for the tag has not landed, so the tag
+    /// is judged once it has. The caller ends the write with `echo.sent_ok` or `echo.sent_failed`.
+    pub fn due(&mut self, store: &Store, tag: &str) -> Option<Value> {
+        match (store.get(tag), store.queued(tag)) {
+            (Some(now), None) => self.echo.due(now),
+            _ => None,
+        }
+    }
+
+    /// A poll read `v` for this output. A local change wins: one that has landed is returned to be sent down (as `due` would),
+    /// one still queued is left to land, and while one is on its way the poll is ignored. Otherwise `v` goes into the tag.
+    pub fn polled(&mut self, store: &Store, tag: &str, v: Value) -> Option<Value> {
+        if let Some(local) = self.due(store, tag) {
+            return Some(local);
+        }
+        let queued = store.queued(tag);
+        let ours = |q: &Value| self.wrote.as_ref().is_some_and(|w| same(w, q));
+        let theirs = queued.as_ref().is_some_and(|q| !ours(q));
+        if theirs || !self.echo.polled(v) {
+            return None;
+        }
+        let settled = queued.is_none() && store.get(tag).is_some_and(|now| same(&now, &v));
+        if !settled {
+            let _ = store.write(tag, v);
+            self.wrote = Some(v);
+        }
+        None
+    }
+}
+
+/// A poll read `v` for an input point: the device owns the value.
+pub fn input_polled(store: &Store, tag: &str, v: Value) {
+    let settled = !store.is_queued(tag) && store.get(tag).is_some_and(|now| same(&now, &v));
+    if !settled {
+        let _ = store.write(tag, v);
+    }
+}
+
+/// The command interface of a `fep` mode client: a READ answers from the tag; a WRITE queues the tag, and the session sends it
+/// down through the echo rule like any other local change.
+pub struct TagPoints {
+    store: Store,
+    /// Tag -> whether the point is an output.
+    tags: BTreeMap<String, bool>,
+}
+
+impl TagPoints {
+    pub fn new(store: Store, tags: impl IntoIterator<Item = (String, bool)>) -> TagPoints {
+        TagPoints {
+            store,
+            tags: tags.into_iter().collect(),
+        }
+    }
+}
+
+impl Points for TagPoints {
+    fn names(&self) -> Vec<String> {
+        self.tags.keys().cloned().collect()
+    }
+
+    async fn read(&self, tag: &str) -> Result<Value, String> {
+        self.store.get(tag).ok_or_else(|| "no such tag".into())
+    }
+
+    async fn write(&self, tag: &str, v: Value) -> Result<(), String> {
+        match (self.tags.get(tag), self.store.kind(tag)) {
+            (Some(true), Some(kind)) => {
+                let kind = format!("{kind:?}").to_lowercase();
+                self.store
+                    .write(tag, v)
+                    .map_err(|_| format!("the tag is {kind}"))
+            }
+            (Some(false), _) => Err("the point is an input".into()),
+            _ => Err("no such tag".into()),
+        }
     }
 }
 
@@ -353,5 +448,100 @@ mod tests {
         assert!(e.due(Analog(f64::NAN)).is_some());
         e.sent_ok(Analog(f64::NAN));
         assert_eq!(e.due(Analog(f64::NAN)), None);
+    }
+
+    fn store(tags: &[(&str, Value)]) -> Store {
+        Store::new(crate::fd::store::Layout {
+            internal: tags.iter().map(|(t, v)| (t.to_string(), *v)).collect(),
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn a_polled_output_value_lands_in_the_tag_and_is_never_due() {
+        let s = store(&[("t", Analog(0.0))]);
+        let mut o = Out::new(Analog(0.0));
+        assert_eq!(o.polled(&s, "t", Analog(5.0)), None);
+        assert_eq!(s.queued("t"), Some(Analog(5.0)));
+        assert_eq!(o.due(&s, "t"), None, "not judged while the write is queued");
+        s.apply_internal();
+        assert_eq!(s.get("t"), Some(Analog(5.0)));
+        assert_eq!(o.due(&s, "t"), None, "what a poll brought is not sent back");
+        // a newer poll before the cycle ends replaces ours; the same value again queues nothing
+        assert_eq!(o.polled(&s, "t", Analog(6.0)), None);
+        assert_eq!(o.polled(&s, "t", Analog(7.0)), None);
+        s.apply_internal();
+        assert_eq!(s.get("t"), Some(Analog(7.0)));
+        assert_eq!(o.polled(&s, "t", Analog(7.0)), None);
+        assert_eq!(s.queued("t"), None);
+        assert_eq!(o.due(&s, "t"), None);
+    }
+
+    #[test]
+    fn a_local_write_wins_over_a_poll_whether_it_has_landed_or_is_still_queued() {
+        let s = store(&[("t", Analog(0.0))]);
+        let mut o = Out::new(Analog(0.0));
+        assert_eq!(o.polled(&s, "t", Analog(5.0)), None);
+        s.apply_internal();
+        // landed: the poll hands the local value back to be sent, and leaves the tag
+        s.write("t", Analog(9.0)).unwrap();
+        s.apply_internal();
+        assert_eq!(o.polled(&s, "t", Analog(5.0)), Some(Analog(9.0)));
+        assert_eq!(s.queued("t"), None);
+        assert_eq!(
+            o.polled(&s, "t", Analog(5.0)),
+            None,
+            "ignored while the write is on its way"
+        );
+        assert_eq!(s.queued("t"), None);
+        o.echo.sent_ok(Analog(9.0));
+        assert_eq!(o.due(&s, "t"), None);
+        // still queued: the poll does not replace it, and the next cycle finds it due
+        s.write("t", Analog(11.0)).unwrap();
+        assert_eq!(o.polled(&s, "t", Analog(9.0)), None);
+        assert_eq!(s.queued("t"), Some(Analog(11.0)));
+        s.apply_internal();
+        assert_eq!(o.due(&s, "t"), Some(Analog(11.0)));
+    }
+
+    #[test]
+    fn an_input_takes_whatever_the_device_says() {
+        let s = store(&[("i", Binary(false))]);
+        input_polled(&s, "i", Binary(false));
+        assert_eq!(s.queued("i"), None, "nothing to change");
+        input_polled(&s, "i", Binary(true));
+        assert_eq!(s.queued("i"), Some(Binary(true)));
+        // a local write to an input does not survive the next poll
+        s.apply_internal();
+        s.write("i", Binary(false)).unwrap();
+        input_polled(&s, "i", Binary(true));
+        s.apply_internal();
+        assert_eq!(s.get("i"), Some(Binary(true)));
+    }
+
+    #[tokio::test]
+    async fn the_fep_command_interface_reads_tags_and_queues_writes_to_outputs_of_the_right_kind() {
+        use crate::fd::cmdif::Points;
+        let s = store(&[("out", Analog(1.5)), ("in", Binary(true))]);
+        let p = TagPoints::new(
+            s.clone(),
+            [("out".to_string(), true), ("in".to_string(), false)],
+        );
+        assert_eq!(p.names(), ["in", "out"]);
+        assert_eq!(p.read("out").await, Ok(Analog(1.5)));
+        assert_eq!(p.read("in").await, Ok(Binary(true)));
+        assert!(p.read("nope").await.is_err());
+        assert_eq!(p.write("out", Analog(2.0)).await, Ok(()));
+        assert_eq!(s.queued("out"), Some(Analog(2.0)));
+        assert_eq!(
+            p.write("out", Binary(true)).await,
+            Err("the tag is analog".into())
+        );
+        assert_eq!(
+            p.write("in", Binary(false)).await,
+            Err("the point is an input".into())
+        );
+        assert_eq!(s.queued("in"), None);
+        assert!(p.write("nope", Analog(1.0)).await.is_err());
     }
 }
