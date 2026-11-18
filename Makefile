@@ -10,7 +10,7 @@ DRY_MIN := 0.8
 # ponytail: pid lock; a kill -9 of make leaves a stale file that src-free ignores because the pid is gone.
 MUTATE_LOCK := .mutate.lock
 
-.PHONY: netns differential diff-dnp3 diff-modbus testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report bench-control bench-fdmicro bench-maxrate bench-maxrate-control charts image rtu-image rtu-image-smoke fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
+.PHONY: dut netns differential diff-dnp3 diff-modbus testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report bench-control bench-fdmicro bench-maxrate bench-maxrate-control charts image rtu-image rtu-image-smoke fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
 help:    # list targets
 	@grep -E '^[a-z-]+:.*#' $(MAKEFILE_LIST) | sed -E 's/^([a-z-]+):[^#]*#/\1\t/'
 src-free:   # fail fast while make mutate is rewriting src/
@@ -36,6 +36,8 @@ zeek-iccp:   # build the ICCP Spicy analyzer and run its btest suite on tests/pc
 	tools/zeek/iccp/test.sh $(ZEEK_ICCP_FLAGS)
 zeek-iccp-coexist:   # ICCP analyzer next to CISA ICSNPP s7comm on tcp/102: DPD gives each its own flows (needs the testpeers image, Lima docker)
 	tools/zeek/iccp/test-coexist.sh
+dut: image src-free   # debug linux binaries the conformance targets run (target-linux/debug/ferrofire, examples/iccp-client); incremental, so a stale DUT is rebuilt (ww-tyc)
+	$(IN) cargo build --bins --examples
 linux: src-free   # glibc aarch64 binaries -> dist/ferrofire, dist/simulinksolver
 	./build-linux.sh
 rtu-image: linux   # Buildroot arm64 RTU image -> image/out/ferrofire-rtu-arm64.qc2 (clean build ~20 min; image/build.sh)
@@ -79,27 +81,23 @@ check: fmt-check lint test crap dry deny   # every gate except mutate
 # The stock oracle image bennu:arm64 lives in the Lima VM's docker (not Docker Desktop's), so the conformance targets use that daemon.
 # Override with TP_DOCKER_HOST=unix:///var/run/docker.sock (any daemon that has the DUT image).
 TP_DOCKER_HOST ?= unix://$(HOME)/.lima/phenix/sock/docker.sock
-testpeers: export DOCKER_HOST := $(TP_DOCKER_HOST)
+# Set per command, not as a target-specific export: that would leak into prerequisites (dut, image) and build on the wrong daemon.
+TP := DOCKER_HOST=$(TP_DOCKER_HOST)
 testpeers:   # build the ferrofire-testpeers image (opendnp3, libiec61850, tshark, Zeek+ICSNPP, nmap); PLATFORM=linux/amd64 also works
-	docker build --platform $(PLATFORM) -t ferrofire-testpeers docker/testpeers
-conformance: export DOCKER_HOST := $(TP_DOCKER_HOST)
-conformance:   # acceptance harness for one protocol vs the stock oracle: make conformance PROTO=dnp3 (see conformance/README.md)
+	$(TP) docker build --platform $(PLATFORM) -t ferrofire-testpeers docker/testpeers
+conformance: dut   # acceptance harness for one protocol vs the stock oracle: make conformance PROTO=dnp3 (see conformance/README.md)
 	@test -n "$(PROTO)" || { echo "usage: make conformance PROTO=dnp3"; exit 2; }
-	conformance/run.sh $(PROTO)
-conformance-selftest: export DOCKER_HOST := $(TP_DOCKER_HOST)
+	$(TP) conformance/run.sh $(PROTO)
 conformance-selftest:   # prove the harness fails on a damaged and on an empty capture (negative control)
-	SELFTEST=1 conformance/run.sh dnp3
+	$(TP) SELFTEST=1 conformance/run.sh dnp3
 
-differential: export DOCKER_HOST := $(TP_DOCKER_HOST)
-differential:   # one differential probe against the stock oracle or our binary: make differential PROTO=dnp3 WHO=stock|rust SET=diff|big
+differential: dut   # one differential probe against the stock oracle or our binary: make differential PROTO=dnp3 WHO=stock|rust SET=diff|big
 	@test -n "$(PROTO)" -a -n "$(WHO)" || { echo "usage: make differential PROTO=dnp3 WHO=stock|rust [SET=diff|big]"; exit 2; }
-	conformance/differential.sh $(PROTO) $(WHO) $(or $(SET),diff)
-diff-dnp3: export DOCKER_HOST := $(TP_DOCKER_HOST)
-diff-dnp3:   # our DNP3 outstation vs the recorded stock transcripts, live in containers (build target-linux/debug/ferrofire first: make test)
-	@for s in diff big; do conformance/differential.sh dnp3 rust $$s | diff conformance/dnp3/stock-$$s.golden - && echo "dnp3 $$s: byte-equal to stock" || exit 1; done
-diff-modbus: export DOCKER_HOST := $(TP_DOCKER_HOST)
-diff-modbus:   # our Modbus server vs the recorded stock transcripts, live in containers (build target-linux/debug/ferrofire first: make test)
-	@for s in diff waterway edges; do conformance/differential.sh modbus rust $$s | diff conformance/modbus/stock-$$s.golden - && echo "modbus $$s: byte-equal to stock" || exit 1; done
+	$(TP) conformance/differential.sh $(PROTO) $(WHO) $(or $(SET),diff)
+diff-dnp3: dut   # our DNP3 outstation vs the recorded stock transcripts, live in containers
+	@for s in diff big; do $(TP) conformance/differential.sh dnp3 rust $$s | diff conformance/dnp3/stock-$$s.golden - && echo "dnp3 $$s: byte-equal to stock" || exit 1; done
+diff-modbus: dut   # our Modbus server vs the recorded stock transcripts, live in containers
+	@for s in diff waterway edges; do $(TP) conformance/differential.sh modbus rust $$s | diff conformance/modbus/stock-$$s.golden - && echo "modbus $$s: byte-equal to stock" || exit 1; done
 
 clean:   # remove build output and metrics
 	rm -rf target target-linux dist .metrics
