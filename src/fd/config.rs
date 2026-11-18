@@ -446,6 +446,24 @@ mod tests {
         assert_eq!(c.store.get("gen-status"), Some(Value::Binary(false)));
     }
 
+    #[cfg(all(feature = "proto-modbus", feature = "proto-dnp3"))]
+    #[test]
+    fn the_stock_dnp3_client_sample_and_a_generated_fd_client_config_load() {
+        let strict = Opts { strict: true };
+        let xml = include_str!("../../tests/conformance/dnp3-client.xml");
+        let c = Config::parse(xml, crate::fd::proto::REGISTRY, &strict).unwrap();
+        assert_eq!(c.modules.len(), 1);
+        assert_eq!(c.store.get("brkr"), Some(Value::Binary(false)));
+        assert_eq!(c.store.get("load-mw-setpoint"), Some(Value::Analog(0.0)));
+        // fd_client.mako output: a DNP3 and a Modbus client, the latter closed as </modbus-tcp-client>
+        let xml = include_str!("../../tests/conformance/fd-client-generated.xml");
+        let c = Config::parse(xml, crate::fd::proto::REGISTRY, &strict).unwrap();
+        let names: Vec<_> = c.modules.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["dnp3-client", "modbus-client"]);
+        assert_eq!(c.store.get("var_rtu-1_O0"), Some(Value::Binary(false)));
+        assert_eq!(c.store.get("var_rtu-2_I0"), Some(Value::Analog(0.0)));
+    }
+
     #[test]
     fn stock_sample_loads() {
         let (head, rest) = RTU1.split_once("<comms>").unwrap();

@@ -2,7 +2,25 @@
 //! bennu) was seen to send, byte for byte (conformance/stock/client-dnp3-raw.golden), and the decoder for what an outstation
 //! answers. The link, transport and application framing are the outstation's (`link`, `transport`, `app`).
 
+use super::super::super::cmdif::{self, Points};
+use super::super::super::config::{number, require, text, ConfigError, Opts, Tags};
+use super::super::super::net;
+use super::super::super::store::Store;
+use super::super::client::{self as shared, Fep, Mode};
+use super::super::Module;
 use super::app::{self, func, CON, FIN, FIR, UNS};
+use super::link;
+use super::transport::{self, Reassembler};
+use crate::model::{Kind, Value};
+use roxmltree::Node;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tokio::sync::mpsc;
+use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
 
 /// The link control octet of every frame the master sends: DIR, PRM, unconfirmed user data.
 pub const MASTER_DATA: u8 = 0xC4;
@@ -184,7 +202,7 @@ fn take<'a>(buf: &mut &'a [u8], n: usize) -> Result<&'a [u8], Bad> {
     Ok(head)
 }
 
-fn number(buf: &mut &[u8], width: usize) -> Result<usize, Bad> {
+fn uint(buf: &mut &[u8], width: usize) -> Result<usize, Bad> {
     Ok(take(buf, width)?
         .iter()
         .rev()
@@ -199,16 +217,16 @@ fn objects(buf: &mut &[u8], seen: &mut Vec<Seen>) -> Result<(), Bad> {
     let (start, count, prefix) = match q {
         0x00 | 0x01 => {
             let w = usize::from(q) + 1;
-            let (start, stop) = (number(buf, w)?, number(buf, w)?);
+            let (start, stop) = (uint(buf, w)?, uint(buf, w)?);
             (
                 start,
                 (stop + 1).checked_sub(start).ok_or(Bad::Truncated)?,
                 0,
             )
         }
-        0x07 | 0x08 => (0, number(buf, usize::from(q) - 6)?, 0),
-        0x17 => (0, number(buf, 1)?, 1),
-        0x28 => (0, number(buf, 2)?, 2),
+        0x07 | 0x08 => (0, uint(buf, usize::from(q) - 6)?, 0),
+        0x17 => (0, uint(buf, 1)?, 1),
+        0x28 => (0, uint(buf, 2)?, 2),
         other => return Err(Bad::Qualifier(other)),
     };
     match size(g, v).ok_or(Bad::Object(g, v))? {
@@ -229,7 +247,7 @@ fn objects(buf: &mut &[u8], seen: &mut Vec<Seen>) -> Result<(), Bad> {
             for i in 0..count {
                 let idx = match prefix {
                     0 => start + i,
-                    w => number(buf, w)?,
+                    w => uint(buf, w)?,
                 };
                 seen.extend(value(g, v, idx as u16, take(buf, each)?));
             }
@@ -264,10 +282,576 @@ pub fn decode(fragment: &[u8]) -> Result<Response, Bad> {
     Ok(r)
 }
 
+// ---- the module: config, one session per connection, the command interface ------------------------------------------------
+
+/// opendnp3's defaults, which the stock master runs with: how long a response may take, how long a failed startup task waits
+/// before it is tried again, and the reconnect pause (doubling from the first to the cap).
+const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+const TASK_RETRY: Duration = Duration::from_secs(5);
+const RETRY_MIN: Duration = Duration::from_secs(1);
+const RETRY_MAX: Duration = Duration::from_secs(60);
+/// Stock's all-classes scan asks in this order.
+const ALL_CLASSES: [u8; 4] = [1, 2, 3, 0];
+
+/// One mapped point.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Point {
+    pub tag: String,
+    pub addr: u16,
+    pub kind: Kind,
+    pub output: bool,
+    /// Select-before-operate, an output's `<sbo>`.
+    pub sbo: bool,
+}
+
+pub struct Conn {
+    pub endpoint: String,
+    /// The outstation's link address.
+    pub remote: u16,
+    pub points: Vec<Point>,
+    /// The recurring class scans: the classes of each and its period.
+    pub scans: Vec<(Vec<u8>, Duration)>,
+    pub fep: Option<Fep>,
+}
+
+pub struct Client {
+    pub mode: Mode,
+    /// The master's link address.
+    pub local: u16,
+    pub conns: Vec<Conn>,
+    pub cmdif: Option<String>,
+    pub cycle: Duration,
+}
+
+const KINDS: [(&str, Kind, bool); 4] = [
+    ("binary-input", Kind::Binary, false),
+    ("binary-output", Kind::Binary, true),
+    ("analog-input", Kind::Analog, false),
+    ("analog-output", Kind::Analog, true),
+];
+
+fn needed<T: std::str::FromStr>(n: Node, key: &str) -> Result<T, ConfigError> {
+    number::<T>(n, key)?
+        .ok_or_else(|| ConfigError(format!("<{}> has no <{key}>", n.tag_name().name())))
+}
+
+fn connection(
+    c: Node,
+    rate: u32,
+    mode: Mode,
+    tags: &mut Tags,
+    opts: &Opts,
+) -> Result<Conn, ConfigError> {
+    let endpoint = require(c, "endpoint")?;
+    let remote = needed::<u16>(c, "address")?;
+    let fep = shared::fep_keys(c, mode, tags, opts)?;
+    let mut points = vec![];
+    for (name, kind, output) in KINDS {
+        for n in c.children().filter(|n| n.has_tag_name(name)) {
+            let (addr, tag) = (needed::<u16>(n, "address")?, require(n, "tag")?);
+            let sbo = output && super::flag(n, "sbo")?;
+            if shared::point_tag(tags, &tag, kind, opts)? {
+                points.push(Point {
+                    tag,
+                    addr,
+                    kind,
+                    output,
+                    sbo,
+                });
+            }
+        }
+    }
+    // the all-classes scan runs at the client's scan-rate unless the connection says otherwise; a class of its own is off at 0
+    let rates = super::super::super::config::child(c, "class-scan-rates");
+    let rate_of = |key: &str, default: u32| -> Result<u32, ConfigError> {
+        Ok(match rates {
+            Some(r) => number::<u32>(r, key)?.unwrap_or(default),
+            None => default,
+        })
+    };
+    let mut scans = vec![(ALL_CLASSES.to_vec(), rate_of("all", rate)?)];
+    for class in 0..4u8 {
+        scans.push((vec![class], rate_of(&format!("class{class}"), 0)?));
+    }
+    Ok(Conn {
+        endpoint,
+        remote,
+        points,
+        scans: scans
+            .into_iter()
+            .filter(|(_, secs)| *secs != 0)
+            .map(|(classes, secs)| (classes, Duration::from_secs(u64::from(secs))))
+            .collect(),
+        fep,
+    })
+}
+
+impl Module for Client {
+    fn parse(node: Node, tags: &mut Tags, opts: &Opts) -> Result<Self, ConfigError> {
+        let mode = shared::mode(node)?;
+        let local = needed::<u16>(node, "address")?;
+        let rate = needed::<u32>(node, "scan-rate")?;
+        let conns = node
+            .children()
+            .filter(|c| c.has_tag_name("dnp3-connection"))
+            .map(|c| connection(c, rate, mode, tags, opts))
+            .collect::<Result<_, _>>()?;
+        Ok(Client {
+            mode,
+            local,
+            conns,
+            cmdif: text(node, "command-interface"),
+            cycle: shared::cycle(node),
+        })
+    }
+
+    async fn run(self, store: Store, stop: CancellationToken) {
+        let mut by_tag = BTreeMap::new();
+        for (i, c) in self.conns.into_iter().enumerate() {
+            let (tx, rx) = mpsc::unbounded_channel();
+            let link = Arc::new(Shared::new(&c.points, store.clone(), tx));
+            by_tag.extend(c.points.iter().map(|p| (p.tag.clone(), link.clone())));
+            let session = Session {
+                shared: link,
+                name: format!("connection {} ({})", i + 1, c.endpoint),
+                endpoint: c.endpoint,
+                local: self.local,
+                remote: c.remote,
+                rx,
+                tseq: 0,
+                integrity: true,
+                clear: false,
+                clear_failed: false,
+                hold: Instant::now(),
+                due: c.scans.iter().map(|_| Instant::now()).collect(),
+                scans: c.scans,
+            };
+            // one task per connection: a slow or dead outstation stalls neither the scan cycle nor the other connections
+            tokio::spawn(session.run(stop.clone()));
+        }
+        match &self.cmdif {
+            Some(ep) => cmdif::serve(ep, Bennu(by_tag), stop).await,
+            None => stop.cancelled().await,
+        }
+    }
+}
+
+/// A command for a session to send.
+struct Command {
+    /// SELECT then OPERATE, else DIRECT_OPERATE.
+    sbo: bool,
+    objects: Vec<u8>,
+    /// The value is a NaN: stock compares the select's echo as numbers, a NaN never equals itself, and the operate is not sent.
+    nan: bool,
+}
+
+/// What a connection's session and the command interface share.
+struct Shared {
+    store: Store,
+    points: BTreeMap<String, Point>,
+    /// Stock's address maps, one per kind, inputs and outputs together: a later point at an address takes it over.
+    bin: BTreeMap<u16, String>,
+    ana: BTreeMap<u16, String>,
+    /// Stock's register cache: what a READ answers. The tags mirror it at the end of each scan cycle.
+    cache: std::sync::Mutex<BTreeMap<String, Value>>,
+    tx: mpsc::UnboundedSender<Command>,
+}
+
+impl Shared {
+    fn new(points: &[Point], store: Store, tx: mpsc::UnboundedSender<Command>) -> Shared {
+        let map = |kind| -> BTreeMap<u16, String> {
+            let of_kind = points.iter().filter(|p| p.kind == kind);
+            of_kind.map(|p| (p.addr, p.tag.clone())).collect()
+        };
+        let zero = |p: &Point| match p.kind {
+            Kind::Binary => Value::Binary(false),
+            Kind::Analog => Value::Analog(0.0),
+        };
+        Shared {
+            store,
+            bin: map(Kind::Binary),
+            ana: map(Kind::Analog),
+            cache: std::sync::Mutex::new(points.iter().map(|p| (p.tag.clone(), zero(p))).collect()),
+            points: points.iter().map(|p| (p.tag.clone(), p.clone())).collect(),
+            tx,
+        }
+    }
+
+    fn set(&self, tag: Option<&String>, v: Value) {
+        let Some(tag) = tag else { return };
+        crate::hint::lock(&self.cache).insert(tag.clone(), v);
+        let _ = self.store.write(tag, v);
+    }
+
+    fn set_binary(&self, addr: u16, on: bool) {
+        self.set(self.bin.get(&addr), Value::Binary(on));
+    }
+
+    /// Stock keeps an analog in a float.
+    fn set_analog(&self, addr: u16, x: f64) {
+        self.set(self.ana.get(&addr), Value::Analog(f64::from(x as f32)));
+    }
+
+    /// Stock's SOE handler: binary inputs and analog inputs by index, into whichever tag has that address; the rest is ignored.
+    fn take(&self, r: &Response) {
+        for s in &r.seen {
+            match *s {
+                Seen::Binary(i, on) => self.set_binary(i, on),
+                Seen::Analog(i, x) => self.set_analog(i, x),
+                Seen::BinaryOutput(..) | Seen::AnalogOutput(..) => {}
+            }
+        }
+    }
+}
+
+/// The command interface of a `bennu` mode master: a READ answers from the cache and never fails; a WRITE updates the cache
+/// first and hands the command to the session, which drops it when the outstation is away. The reply is always an ACK. Stock.
+struct Bennu(BTreeMap<String, Arc<Shared>>);
+
+impl Points for Bennu {
+    fn names(&self) -> Vec<String> {
+        self.0.keys().cloned().collect()
+    }
+
+    async fn read(&self, tag: &str) -> Result<Value, String> {
+        let link = self
+            .0
+            .get(tag)
+            .ok_or("readRegisterByTag(): Unable to find tag")?;
+        let cache = crate::hint::lock(&link.cache);
+        cache
+            .get(tag)
+            .copied()
+            .ok_or_else(|| "readRegisterByTag(): Unable to find tag".into())
+    }
+
+    /// `true`/`false` is a CROB and a number an analog output at the point's address, whatever the point is (an input too).
+    async fn write(&self, tag: &str, v: Value) -> Result<(), String> {
+        let link = self.0.get(tag).ok_or("writeBinary(): Unable to find tag")?;
+        let p = &link.points[tag];
+        let (objects, nan) = match v {
+            Value::Binary(on) => {
+                link.set_binary(p.addr, on);
+                (crob(p.addr, on), false)
+            }
+            Value::Analog(x) => {
+                link.set_analog(p.addr, x);
+                (ao_f32(p.addr, x), x.is_nan())
+            }
+        };
+        let _ = link.tx.send(Command {
+            sbo: p.sbo,
+            objects,
+            nan,
+        });
+        Ok(())
+    }
+}
+
+/// The connection is gone.
+struct Lost;
+
+/// One connection's socket: link frames out, application fragments in.
+struct Wire {
+    stream: TcpStream,
+    local: u16,
+    remote: u16,
+    buf: Vec<u8>,
+    asm: Reassembler,
+}
+
+impl Wire {
+    async fn send(&mut self, tseq: &mut u8, fragment: &[u8]) -> Result<(), Lost> {
+        let mut out = vec![];
+        for seg in transport::segment(fragment, tseq) {
+            out.extend(link::encode(MASTER_DATA, self.remote, self.local, &seg));
+        }
+        self.stream.write_all(&out).await.map_err(|_| Lost)
+    }
+
+    /// The next application fragment the outstation sent to this master. Other frames (another address, link-layer requests)
+    /// are stepped over. Cancel-safe: bytes read stay in the buffer.
+    /// ponytail: link-layer requests (link status, reset) are not answered; opendnp3 answers them. Add when an outstation needs it.
+    async fn recv(&mut self) -> Result<Vec<u8>, Lost> {
+        loop {
+            match link::parse(&self.buf) {
+                link::Parse::Frame(f, used) => {
+                    self.buf.drain(..used);
+                    let ours =
+                        f.primary() && f.func() == 4 && f.dst == self.local && f.src == self.remote;
+                    if let (true, Ok(Some(fragment))) = (ours, self.asm.push(&f.user)) {
+                        return Ok(fragment);
+                    }
+                    continue;
+                }
+                link::Parse::Bad(why) => {
+                    tracing::warn!("dnp3-client: closing the connection: {why}");
+                    return Err(Lost);
+                }
+                link::Parse::Need(_) => {}
+            }
+            let mut chunk = [0u8; 1024];
+            match self.stream.read(&mut chunk).await {
+                Ok(n @ 1..) => self.buf.extend_from_slice(&chunk[..n]),
+                _ => return Err(Lost),
+            }
+        }
+    }
+}
+
+/// One connection of the master: the stock task order (a command, clear-restart, the startup integrity poll, the scan that is
+/// due) over one request at a time.
+struct Session {
+    shared: Arc<Shared>,
+    name: String,
+    endpoint: String,
+    local: u16,
+    remote: u16,
+    rx: mpsc::UnboundedReceiver<Command>,
+    /// The transport sequence: it runs on across reconnects (stock); the application sequence restarts at 0.
+    tseq: u8,
+    /// The class 0 poll: wanted at start, and again whenever a response says the outstation restarted.
+    integrity: bool,
+    /// The write that clears IIN1.7 is wanted.
+    clear: bool,
+    /// The outstation kept IIN1.7 through a clear: it is not asked again (opendnp3 disables the task for good).
+    clear_failed: bool,
+    /// A startup task that got no answer waits until here.
+    hold: Instant,
+    scans: Vec<(Vec<u8>, Duration)>,
+    /// When each scan is next due.
+    due: Vec<Instant>,
+}
+
+enum Task {
+    Command(Command),
+    Clear,
+    Integrity,
+    Scan(usize),
+}
+
+impl Session {
+    async fn run(mut self, stop: CancellationToken) {
+        // stock: an attempt at once, then 1, 2, 4 ... 60 s apart; a session that was up is retried at once
+        let (mut wait, mut pause) = (Duration::ZERO, RETRY_MIN);
+        loop {
+            tokio::select! { _ = stop.cancelled() => return, _ = tokio::time::sleep(wait) => {} }
+            let began = Instant::now();
+            let stream = tokio::time::timeout(RESPONSE_TIMEOUT, net::connect(&self.endpoint)).await;
+            if let Ok(Ok(stream)) = stream {
+                let _ = stream.set_nodelay(true);
+                tracing::info!("dnp3-client: {}: connected", self.name);
+                tokio::select! { _ = stop.cancelled() => return, _ = self.session(stream) => {} }
+                tracing::warn!("dnp3-client: {}: connection lost", self.name);
+            }
+            // ponytail: a connection that dies within a second (a relay in front of a dead outstation) backs off like a
+            // refused one, where opendnp3 would reconnect in a tight loop
+            (wait, pause) = match began.elapsed() >= RETRY_MIN {
+                true => (Duration::ZERO, RETRY_MIN),
+                false => (pause, (pause * 2).min(RETRY_MAX)),
+            };
+        }
+    }
+
+    /// The next thing to send, by stock's priorities.
+    fn next(&mut self) -> Option<Task> {
+        if let Ok(c) = self.rx.try_recv() {
+            return Some(Task::Command(c));
+        }
+        let now = Instant::now();
+        match (now >= self.hold, self.clear, self.integrity) {
+            (true, true, _) => return Some(Task::Clear),
+            (true, _, true) => return Some(Task::Integrity),
+            _ => {}
+        }
+        let first = (0..self.due.len()).min_by_key(|i| self.due[*i])?;
+        (self.due[first] <= now).then_some(Task::Scan(first))
+    }
+
+    /// When `next` will have something without a command arriving.
+    fn wake(&self) -> Instant {
+        let scan = self.due.iter().min().copied();
+        let startup = (self.clear || self.integrity).then_some(self.hold);
+        scan.into_iter()
+            .chain(startup)
+            .min()
+            .unwrap_or_else(|| Instant::now() + Duration::from_secs(3600))
+    }
+
+    /// Serve one connection until it is lost.
+    async fn session(&mut self, stream: TcpStream) {
+        let mut wire = Wire {
+            stream,
+            local: self.local,
+            remote: self.remote,
+            buf: vec![],
+            asm: Reassembler::new(app::MAX_APDU),
+        };
+        let mut seq = 0u8;
+        // what was asked for while the outstation was away is not sent late
+        while self.rx.try_recv().is_ok() {}
+        loop {
+            let Some(task) = self.next() else {
+                let wake = self.wake();
+                tokio::select! {
+                    c = self.rx.recv() => match c {
+                        Some(c) => if self.run_task(&mut wire, &mut seq, Task::Command(c)).await.is_err() { return },
+                        None => return,
+                    },
+                    _ = tokio::time::sleep_until(wake) => {}
+                    r = wire.recv() => match r {
+                        Ok(fragment) => if self.unsolicited(&mut wire, &fragment).await.is_err() { return },
+                        Err(Lost) => return,
+                    },
+                }
+                continue;
+            };
+            if self.run_task(&mut wire, &mut seq, task).await.is_err() {
+                return;
+            }
+        }
+    }
+
+    async fn run_task(&mut self, wire: &mut Wire, seq: &mut u8, task: Task) -> Result<(), Lost> {
+        match task {
+            Task::Command(c) => {
+                let func = if c.sbo {
+                    func::SELECT
+                } else {
+                    func::DIRECT_OPERATE
+                };
+                let echoed =
+                    |r: &Option<Response>| r.as_ref().is_some_and(|r| r.objects == c.objects);
+                let first = self.exchange(wire, seq, func, &c.objects).await?;
+                if c.sbo && echoed(&first) && !c.nan {
+                    self.exchange(wire, seq, func::OPERATE, &c.objects).await?;
+                }
+            }
+            Task::Clear => {
+                let r = self
+                    .exchange(wire, seq, func::WRITE, &clear_restart())
+                    .await?;
+                match r {
+                    Some(r) => {
+                        self.clear = false;
+                        if r.restart() {
+                            tracing::warn!("dnp3-client: {}: the outstation kept IIN1.7 through a clear-restart; not asking again", self.name);
+                            self.clear_failed = true;
+                        }
+                    }
+                    None => self.hold = Instant::now() + TASK_RETRY,
+                }
+            }
+            Task::Integrity => {
+                // done once answered; a response that shows a restart asks for it again below
+                self.integrity = false;
+                if self
+                    .exchange(wire, seq, func::READ, &class_read(&[0]))
+                    .await?
+                    .is_none()
+                {
+                    self.integrity = true;
+                    self.hold = Instant::now() + TASK_RETRY;
+                }
+            }
+            Task::Scan(i) => {
+                let objects = class_read(&self.scans[i].0);
+                self.exchange(wire, seq, func::READ, &objects).await?;
+                self.due[i] = Instant::now() + self.scans[i].1;
+            }
+        }
+        Ok(())
+    }
+
+    /// What every response brings: its points, a confirmation when it asks for one, and the restart flag.
+    async fn absorb(&mut self, wire: &mut Wire, r: &Response) -> Result<(), Lost> {
+        self.shared.take(r);
+        if r.con {
+            wire.send(&mut self.tseq, &confirm(r.seq, r.unsol)).await?;
+        }
+        if r.restart() && !self.clear_failed {
+            (self.clear, self.integrity) = (true, true);
+        }
+        Ok(())
+    }
+
+    /// A fragment that arrived with no request outstanding.
+    async fn unsolicited(&mut self, wire: &mut Wire, fragment: &[u8]) -> Result<(), Lost> {
+        match decode(fragment) {
+            Ok(r) if r.unsol => self.absorb(wire, &r).await,
+            Ok(r) => {
+                tracing::warn!(
+                    "dnp3-client: {}: discarded a response (sequence {}) nothing asked for",
+                    self.name,
+                    r.seq
+                );
+                Ok(())
+            }
+            Err(why) => {
+                tracing::warn!("dnp3-client: {}: discarded a fragment: {why:?}", self.name);
+                Ok(())
+            }
+        }
+    }
+
+    /// One request and its response, `None` when none came in time. Unsolicited responses that arrive meanwhile are taken; a
+    /// response with another sequence number, or one that does not parse, is discarded and changes nothing.
+    /// ponytail: a response in several fragments is taken fragment by fragment and the last one returned; the next request's
+    /// sequence number is this request's plus one whatever the outstation counted to.
+    async fn exchange(
+        &mut self,
+        wire: &mut Wire,
+        seq: &mut u8,
+        func: u8,
+        objects: &[u8],
+    ) -> Result<Option<Response>, Lost> {
+        let mut want = *seq;
+        *seq = (*seq + 1) & 0x0F;
+        wire.send(&mut self.tseq, &app::request(want, func, objects))
+            .await?;
+        let deadline = Instant::now() + RESPONSE_TIMEOUT;
+        loop {
+            let Ok(fragment) = tokio::time::timeout_at(deadline, wire.recv()).await else {
+                tracing::warn!(
+                    "dnp3-client: {}: no response to function {func} (sequence {want})",
+                    self.name
+                );
+                return Ok(None);
+            };
+            let fragment = fragment?;
+            match decode(&fragment) {
+                Ok(r) if r.unsol => self.absorb(wire, &r).await?,
+                Ok(r) if r.seq != want => {
+                    tracing::warn!(
+                        "dnp3-client: {}: discarded a response with sequence {}, expected {want}",
+                        self.name,
+                        r.seq
+                    );
+                }
+                Ok(r) => {
+                    // the clear-restart's own answer is judged by its task
+                    let restart_is_news = func != func::WRITE;
+                    let was = (self.clear, self.integrity);
+                    self.absorb(wire, &r).await?;
+                    if !restart_is_news {
+                        (self.clear, self.integrity) = was;
+                    }
+                    if r.fin {
+                        return Ok(Some(r));
+                    }
+                    want = (want + 1) & 0x0F;
+                }
+                Err(why) => {
+                    tracing::warn!("dnp3-client: {}: discarded a response: {why:?}", self.name)
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fd::proto::dnp3::{link, transport};
 
     fn unhex(s: &str) -> Vec<u8> {
         let s = s.replace(' ', "");
@@ -504,5 +1088,217 @@ mod tests {
         let r = decode(&unhex("f38200000201170102 81")).unwrap();
         assert_eq!((r.seq, r.unsol, r.con), (3, true, true));
         assert_eq!(r.seen, [Seen::Binary(2, true)]);
+    }
+
+    fn parse(inner: &str, opts: &Opts) -> Result<(Client, Tags), ConfigError> {
+        let xml = format!("<field-device><cycle-time>200</cycle-time><comms><dnp3-client>{inner}</dnp3-client></comms></field-device>");
+        let doc = roxmltree::Document::parse(&xml).unwrap();
+        let node = doc
+            .descendants()
+            .find(|n| n.has_tag_name("dnp3-client"))
+            .unwrap();
+        let mut tags = Tags::default();
+        Client::parse(node, &mut tags, opts).map(|c| (c, tags))
+    }
+
+    const HEAD: &str = "<address>1</address><scan-rate>5</scan-rate>";
+    const CONN: &str =
+        "<dnp3-connection><endpoint>tcp://127.0.0.1:20000</endpoint><address>10</address>
+        <binary-input><address>2</address><tag>bi</tag></binary-input>
+        <binary-output><address>5</address><tag>bo</tag><sbo>1</sbo></binary-output>
+        <analog-input><address>0</address><tag>ai</tag></analog-input>
+        <analog-output><address>1</address><tag>ao</tag></analog-output>
+        </dnp3-connection>";
+
+    #[test]
+    fn the_stock_schema_is_read() {
+        let s = Duration::from_secs;
+        let (c, tags) = parse(
+            &format!("{HEAD}{CONN}<command-interface>tcp://127.0.0.1:1330</command-interface>"),
+            &Opts { strict: true },
+        )
+        .unwrap();
+        assert_eq!(
+            (c.mode, c.local, c.cmdif.as_deref()),
+            (Mode::Bennu, 1, Some("tcp://127.0.0.1:1330"))
+        );
+        let conn = &c.conns[0];
+        assert_eq!(
+            (conn.endpoint.as_str(), conn.remote, &conn.fep),
+            ("tcp://127.0.0.1:20000", 10, &None)
+        );
+        let got: Vec<_> = conn
+            .points
+            .iter()
+            .map(|p| (p.tag.as_str(), p.addr, p.kind, p.output, p.sbo))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("bi", 2, Kind::Binary, false, false),
+                ("bo", 5, Kind::Binary, true, true),
+                ("ai", 0, Kind::Analog, false, false),
+                ("ao", 1, Kind::Analog, true, false),
+            ]
+        );
+        assert_eq!(tags.kind("bo"), Some(Kind::Binary));
+        assert_eq!(tags.kind("ao"), Some(Kind::Analog));
+        // the all-classes scan at the client's scan-rate, nothing per class
+        assert_eq!(conn.scans, [(vec![1, 2, 3, 0], s(5))]);
+        let rates = |r: &str| {
+            let conn = CONN.replace(
+                "</dnp3-connection>",
+                &format!("<class-scan-rates>{r}</class-scan-rates></dnp3-connection>"),
+            );
+            parse(&format!("{HEAD}{conn}"), &Opts::default())
+                .unwrap()
+                .0
+                .conns
+                .remove(0)
+                .scans
+        };
+        assert_eq!(rates(""), [(vec![1, 2, 3, 0], s(5))]);
+        assert_eq!(rates("<all>0</all>"), []);
+        assert_eq!(
+            rates("<all>9</all><class0>3</class0><class2>7</class2>"),
+            [(vec![1, 2, 3, 0], s(9)), (vec![0], s(3)), (vec![2], s(7))]
+        );
+        assert_eq!(
+            rates("<class1>1</class1><class3>2</class3>"),
+            [(vec![1, 2, 3, 0], s(5)), (vec![1], s(1)), (vec![3], s(2))]
+        );
+        // scan-rate 0: no recurring scan at all
+        let (c, _) = parse(
+            &format!("<address>1</address><scan-rate>0</scan-rate>{CONN}"),
+            &Opts::default(),
+        )
+        .unwrap();
+        assert!(c.conns[0].scans.is_empty());
+        // an sbo on an input means nothing, as in stock
+        let odd = CONN.replace("<tag>bi</tag>", "<tag>bi</tag><sbo>1</sbo>");
+        assert!(
+            !parse(&format!("{HEAD}{odd}"), &Opts::default())
+                .unwrap()
+                .0
+                .conns[0]
+                .points[0]
+                .sbo
+        );
+    }
+
+    #[test]
+    fn missing_and_bad_keys_are_named_and_the_fep_keys_follow_the_mode() {
+        let err = |inner: &str| parse(inner, &Opts::default()).err().expect("an error").0;
+        assert!(err(&format!("<scan-rate>5</scan-rate>{CONN}"))
+            .contains("<dnp3-client> has no <address>"));
+        assert!(err(&format!("<address>1</address>{CONN}"))
+            .contains("<dnp3-client> has no <scan-rate>"));
+        assert!(err(&format!(
+            "{HEAD}<dnp3-connection><address>10</address></dnp3-connection>"
+        ))
+        .contains("<dnp3-connection> has no <endpoint>"));
+        assert!(err(&format!(
+            "{HEAD}{}",
+            CONN.replace("<address>10</address>", "")
+        ))
+        .contains("<dnp3-connection> has no <address>"));
+        assert!(err(&format!(
+            "{HEAD}{}",
+            CONN.replace("<address>2</address>", "")
+        ))
+        .contains("<binary-input> has no <address>"));
+        assert!(err(&format!("{HEAD}{}", CONN.replace("<tag>ao</tag>", "")))
+            .contains("<analog-output> has no <tag>"));
+        assert!(err(&format!(
+            "{HEAD}{}",
+            CONN.replace("<sbo>1</sbo>", "<sbo>yes</sbo>")
+        ))
+        .contains("<sbo> `yes` is not a boolean"));
+        assert!(err(&format!(
+            "{HEAD}{}",
+            CONN.replace("<address>5</address>", "<address>70000</address>")
+        ))
+        .contains("not a valid number"));
+        assert_eq!(
+            err(&format!("{HEAD}<mode>poll</mode>{CONN}")),
+            "<mode> `poll` is not bennu or fep"
+        );
+        let status = CONN.replace(
+            "</dnp3-connection>",
+            "<status-tag>up</status-tag></dnp3-connection>",
+        );
+        assert_eq!(
+            parse(&format!("{HEAD}{status}"), &Opts { strict: true })
+                .err()
+                .unwrap()
+                .0,
+            "<status-tag> is fep-only, ignored"
+        );
+        let (c, tags) = parse(
+            &format!("{HEAD}<mode>fep</mode>{status}"),
+            &Opts { strict: true },
+        )
+        .unwrap();
+        assert_eq!(
+            (c.mode, c.conns[0].fep.as_ref().unwrap().status.as_deref()),
+            (Mode::Fep, Some("up"))
+        );
+        assert_eq!(tags.kind("up"), Some(Kind::Binary));
+        // the same tag in two connections: the first keeps it
+        let twice = format!("{HEAD}{CONN}{}", CONN.replace("20000", "20001"));
+        let (c, _) = parse(&twice, &Opts::default()).unwrap();
+        assert_eq!((c.conns[0].points.len(), c.conns[1].points.len()), (4, 0));
+        assert!(parse(&twice, &Opts { strict: true }).is_err());
+    }
+
+    #[test]
+    fn the_address_maps_are_stocks_one_per_kind_with_the_later_point_winning() {
+        let pt = |tag: &str, addr, kind, output| Point {
+            tag: tag.into(),
+            addr,
+            kind,
+            output,
+            sbo: false,
+        };
+        let points = [
+            pt("bi", 5, Kind::Binary, false),
+            pt("bo", 5, Kind::Binary, true),
+            pt("ai", 0, Kind::Analog, false),
+            pt("ao", 1, Kind::Analog, true),
+        ];
+        let store = Store::new(crate::fd::store::Layout {
+            internal: points
+                .iter()
+                .map(|p| (p.tag.clone(), Value::Analog(0.0)))
+                .collect(),
+            ..Default::default()
+        });
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let s = Shared::new(&points, store, tx);
+        assert_eq!(
+            s.bin[&5], "bo",
+            "the output, declared after the input, has the address"
+        );
+        // a binary input at index 5 lands in the output's tag; output status is ignored; an analog is kept as a float32
+        s.take(&Response {
+            seq: 0,
+            iin: 0,
+            unsol: false,
+            con: false,
+            fin: true,
+            objects: vec![],
+            seen: vec![
+                Seen::Binary(5, true),
+                Seen::BinaryOutput(5, false),
+                Seen::Analog(0, 0.1),
+                Seen::AnalogOutput(1, 9.0),
+                Seen::Analog(7, 1.0),
+            ],
+        });
+        let cache = s.cache.lock().unwrap().clone();
+        assert_eq!(cache["bo"], Value::Binary(true));
+        assert_eq!(cache["bi"], Value::Binary(false));
+        assert_eq!(cache["ai"], Value::Analog(f64::from(0.1f32)));
+        assert_eq!(cache["ao"], Value::Analog(0.0));
     }
 }

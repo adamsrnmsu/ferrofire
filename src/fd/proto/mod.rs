@@ -90,6 +90,8 @@ pub fn start<M: Module>(node: Node, tags: &mut Tags, opts: &Opts) -> Result<Runn
 pub static REGISTRY: &[(&str, Start)] = &[
     #[cfg(feature = "proto-dnp3")]
     ("dnp3-server", start::<dnp3::Outstation>),
+    #[cfg(feature = "proto-dnp3")]
+    ("dnp3-client", start::<dnp3::master::Client>),
     #[cfg(feature = "proto-modbus")]
     ("modbus-server", start::<modbus::Server>),
     #[cfg(feature = "proto-modbus")]
