@@ -166,3 +166,68 @@ pub fn transcript(golden: &str) -> impl Iterator<Item = Line<'_>> {
         }
     })
 }
+
+/// A TCP relay in front of 127.0.0.1:`target` that keeps what the client side sent, chunk by chunk. With nothing listening on
+/// `target` an accepted connection is closed at once: to its client the device is down.
+pub struct Tap {
+    pub port: u16,
+    pub sent: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
+    pub accepted: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+pub async fn tap(target: u16) -> Tap {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let t = Tap {
+        port: l.local_addr().unwrap().port(),
+        sent: Default::default(),
+        accepted: Default::default(),
+    };
+    let (sent, accepted) = (t.sent.clone(), t.accepted.clone());
+    tokio::spawn(async move {
+        loop {
+            let Ok((client, _)) = l.accept().await else {
+                return;
+            };
+            accepted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let Ok(server) = tokio::net::TcpStream::connect(("127.0.0.1", target)).await else {
+                continue;
+            };
+            let sent = sent.clone();
+            tokio::spawn(async move {
+                let (mut cr, mut cw) = client.into_split();
+                let (mut sr, mut sw) = server.into_split();
+                let up = async {
+                    let mut buf = [0u8; 4096];
+                    while let Ok(n @ 1..) = cr.read(&mut buf).await {
+                        sent.lock().unwrap().push(buf[..n].to_vec());
+                        if sw.write_all(&buf[..n]).await.is_err() {
+                            break;
+                        }
+                    }
+                };
+                let down = async {
+                    let mut buf = [0u8; 4096];
+                    while let Ok(n @ 1..) = sr.read(&mut buf).await {
+                        if cw.write_all(&buf[..n]).await.is_err() {
+                            break;
+                        }
+                    }
+                };
+                // either side closing ends both
+                tokio::select! { _ = up => {}, _ = down => {} }
+            });
+        }
+    });
+    t
+}
+
+impl Tap {
+    pub fn sent(&self) -> Vec<Vec<u8>> {
+        self.sent.lock().unwrap().clone()
+    }
+
+    pub fn clear(&self) {
+        self.sent.lock().unwrap().clear();
+    }
+}

@@ -169,6 +169,11 @@ impl Store {
         lock(&self.0).queue.contains_key(tag)
     }
 
+    /// The value queued for `tag`, not yet in the store.
+    pub fn queued(&self, tag: &str) -> Option<Value> {
+        lock(&self.0).queue.get(tag).copied()
+    }
+
     /// A number the provider published for `point` (`true`/`false` arrive as 1/0). A number that is not 0 or 1 for a binary
     /// point, or any value for an unknown point, is dropped and counted.
     /// ponytail: the datagram receiver hands over f64, so `true` for an analog point lands as 1.0 instead of being dropped.
