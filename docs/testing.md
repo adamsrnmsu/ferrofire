@@ -503,9 +503,10 @@ instrument (scpi-parser, below).
   commands, paired by tag name) and VXI-11 (`TCPIP::127.0.0.1::INSTR` with `<portmapper>` at the instrument's unprivileged
   portmapper port); a restarted instrument gets every set again; the documented example loads. Against an instrument we did not
   write (`make conformance PROTO=scpi-client`, conformance/README.md): scpi-parser's `examples/test-tcp` (scpi-parser at commit 8866159,
-  2026-03-20, BSD-2-Clause, C, a library real instrument firmwares embed), raw socket only; `<logic>` sets `*ESE` to two values given at
-  run time and the controller reads each back with `*ESE?`, every query goes out as `QUERY;*OPC?` and comes back `;`-joined, the error
-  queue stays empty, and `MEAS:VOLT:DC?` is read as a number. Passed on 2026-11-17 (17 checks, 144 packets on 5025, 0 malformed).
+  2026-03-20, BSD-2-Clause, C, a library real instrument firmwares embed), over the raw socket and over VXI-11 (`examples/test-vxi11` behind
+  rpcbind; its missing rpcgen output is generated from liblxi's VXI-11 IDL, BSD-3-Clause; the instrument logic is scpi-parser's); `<logic>` sets `*ESE` to two values given at
+  run time and the controller reads each back with `*ESE?` from each, every query goes out as `QUERY;*OPC?` and comes back `;`-joined, the error
+  queue stays empty, and `MEAS:VOLT:DC?` is read as a number. Passed on 2026-11-17 (28 checks, 234 packets on 5025 and the portmapper, the VXI-11 core channel decoded from it, 0 malformed).
   Mutation of `client.rs` (`mutator --max-workers 2 --no-coverage --mutate-all --test-command 'cargo test --lib --test scpi_controller'
   src/fd/proto/scpi/client.rs`, one cargo invocation so no shell is needed): **23 sites, 23 killed**. The first run left one survivor,
   `quiet = false` after a connect (a later outage would never be logged); the reconnect test now counts one line per outage.
@@ -745,4 +746,4 @@ Limits: each board is one run on one host; none exercises ferrofire's own field 
 8. Mutation results do not yet cover the field-device modules in the recorded numbers.
 9. MQTT is checked against Mosquitto, Paho and Tahu only; see the MQTT section for what a commercial Sparkplug host might still dislike.
 10. The drop-in pypower and stock conformance scripts need the Lima VM and are run by hand.
-11. SCPI is checked against two clients (PyVISA, lxi-tools), one independent instrument as the `<scpi-client>`'s follower (scpi-parser, raw socket only), tshark's HiSLIP and VXI-11 dissectors and our reading of SCPI-99, IEEE 488.2 and IVI-6.1; no real instrument, no SRQ (see its section).
+11. SCPI is checked against two clients (PyVISA, lxi-tools), one independent instrument as the `<scpi-client>`'s follower (scpi-parser, raw socket and VXI-11), tshark's HiSLIP and VXI-11 dissectors and our reading of SCPI-99, IEEE 488.2 and IVI-6.1; no real instrument, no SRQ (see its section).

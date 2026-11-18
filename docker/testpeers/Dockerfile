@@ -59,13 +59,25 @@ RUN cd /src/goiec && go build -trimpath -o /out/bin/ffgoiec . \
 # scpi-parser (Jan Breuer, BSD-2-Clause, C; github.com/j123b567/scpi-parser), the SCPI parser library that instrument firmwares embed. Its
 # examples/test-tcp is a raw-socket instrument on 5025 (the IEEE 488.2 common commands, SYSTem:ERRor, MEASure:VOLTage:DC? ...), one client at a
 # time: the independent follower of the <scpi-client> run (conformance/scpi-client). Its own process, never linked. Pinned by commit (master,
-# 2026-03-20). The first RUN is the build stage's, so it comes from the cache.
+# 2026-03-20). examples/test-vxi11 is the same instrument as a VXI-11 (ONC RPC) server: it registers with the system portmapper
+# (pmap_set), so the final image carries rpcbind (BSD-3-Clause), which peer.sh starts. That example is incomplete upstream: vxi11.h and
+# vxi11_xdr.c are rpcgen output of an IDL that was never committed. Only that IDL comes from elsewhere: liblxi's src/vxi11core.rpcl
+# (lxi-tools/liblxi, BSD-3-Clause, the VXI-11 RPCL of the TCP/IP Instrument Protocol spec), pinned by commit, plus the interrupt channel
+# the file lacks (Device_SrqParms, DEVICE_INTR 0x0607B1, device_intr_srq 30; same spec) because main.c registers it. rpcgen makes the
+# header and the XDR code from it; the sed drops the declarations of the *_svc functions, which main.c defines with the retval
+# signature. The instrument logic (main.c, scpi-def.c, libscpi) is scpi-parser's, unmodified. The first RUN is the build stage's, so it comes from the cache.
 FROM debian:trixie AS scpipeer
-RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends build-essential cmake git ca-certificates >/dev/null
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends build-essential cmake git ca-certificates libtirpc-dev rpcsvc-proto >/dev/null
 ARG SCPI_PARSER=886615902b2777b71860445305bfe5a3faef4f3e
+ARG LIBLXI=b14716ba12f296cb0d35640df5dcb84889fd978d
 RUN git init -q /src && git -C /src fetch -q --depth 1 https://github.com/j123b567/scpi-parser $SCPI_PARSER && git -C /src checkout -q FETCH_HEAD \
+ && git init -q /liblxi && git -C /liblxi fetch -q --depth 1 https://github.com/lxi-tools/liblxi $LIBLXI && git -C /liblxi checkout -q FETCH_HEAD \
  && make -s -C /src/libscpi static >/dev/null && make -s -C /src/examples/test-tcp >/dev/null \
- && mkdir -p /out/bin /out/licenses && cp /src/examples/test-tcp/test /out/bin/scpi-parser-tcp && cp /src/LICENSE /out/licenses/scpi-parser-BSD-2-Clause
+ && cd /src/examples/test-vxi11 && rm -f vxi11.h vxi11_xdr.c && cp /liblxi/src/vxi11core.rpcl vxi11.x \
+ && printf '\nstruct Device_SrqParms { opaque handle<>; };\nprogram DEVICE_INTR { version DEVICE_INTR_VERSION { void device_intr_srq (Device_SrqParms) = 30; } = 1; } = 0x0607B1;\n' >> vxi11.x \
+ && rpcgen -h vxi11.x -o vxi11.h && rpcgen -c vxi11.x -o vxi11_xdr.c && sed -i '/_svc *(/d' vxi11.h && make -s >/dev/null && cd / \
+ && mkdir -p /out/bin /out/licenses && cp /src/examples/test-tcp/test /out/bin/scpi-parser-tcp && cp /src/examples/test-vxi11/test /out/bin/scpi-parser-vxi11 \
+ && cp /liblxi/LICENSE /out/licenses/liblxi-BSD-3-Clause && cp /src/LICENSE /out/licenses/scpi-parser-BSD-2-Clause
 
 FROM zeek/zeek:${ZEEK_VERSION}
 RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
@@ -85,6 +97,8 @@ RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq 
  && rm -rf /var/lib/apt/lists/*
 # jq: telcon's daemons answer JSON on a control socket
 RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends jq >/dev/null && rm -rf /var/lib/apt/lists/*
+# rpcbind: the portmapper scpi-parser-vxi11 registers with (conformance/scpi-client)
+RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends rpcbind >/dev/null && rm -rf /var/lib/apt/lists/*
 COPY --from=rustpeers /out/bin/ /usr/local/bin/
 COPY --from=rustpeers /out/licenses/ /usr/share/doc/ferrofire-testpeers/
 # MQTT peers (conformance/mqtt): Mosquitto (EPL-2.0 / EDL-1.0) broker and clients, Eclipse Paho for Python as the independent second
