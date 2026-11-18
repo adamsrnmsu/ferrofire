@@ -435,6 +435,17 @@ mod tests {
         r.err().expect("expected a load error").0
     }
 
+    /// The stock fd-client samples load unchanged, under `--strict` too (ww-7mw.1).
+    #[cfg(feature = "proto-modbus")]
+    #[test]
+    fn the_stock_modbus_client_sample_loads() {
+        let xml = include_str!("../../tests/conformance/modbus-client.xml");
+        let c = Config::parse(xml, crate::fd::proto::REGISTRY, &Opts { strict: true }).unwrap();
+        assert_eq!(c.modules.len(), 1);
+        assert_eq!(c.store.get("load-power"), Some(Value::Analog(0.0)));
+        assert_eq!(c.store.get("gen-status"), Some(Value::Binary(false)));
+    }
+
     #[test]
     fn stock_sample_loads() {
         let (head, rest) = RTU1.split_once("<comms>").unwrap();

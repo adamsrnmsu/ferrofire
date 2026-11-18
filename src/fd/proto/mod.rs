@@ -92,6 +92,8 @@ pub static REGISTRY: &[(&str, Start)] = &[
     ("dnp3-server", start::<dnp3::Outstation>),
     #[cfg(feature = "proto-modbus")]
     ("modbus-server", start::<modbus::Server>),
+    #[cfg(feature = "proto-modbus")]
+    ("modbus-client", start::<modbus::client::Client>),
     #[cfg(feature = "proto-iec61850")]
     ("iec61850-server", start::<iec61850::Server>),
     #[cfg(feature = "proto-iccp")]

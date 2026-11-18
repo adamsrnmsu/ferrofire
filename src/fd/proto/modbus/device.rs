@@ -22,7 +22,7 @@ pub struct Range {
 }
 
 impl Range {
-    fn slope(&self) -> f64 {
+    pub(super) fn slope(&self) -> f64 {
         65535.0 / (self.max - self.min)
     }
 
@@ -40,7 +40,7 @@ impl Range {
         (f64::from(raw) - self.intercept(slope)) / slope
     }
 
-    fn intercept(&self, slope: f64) -> f64 {
+    pub(super) fn intercept(&self, slope: f64) -> f64 {
         -slope * self.min
     }
 }
