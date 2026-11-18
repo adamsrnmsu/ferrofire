@@ -7,6 +7,7 @@ pub mod app;
 pub mod command;
 pub mod db;
 pub mod link;
+pub mod master;
 pub mod outstation;
 pub mod read;
 pub mod transport;

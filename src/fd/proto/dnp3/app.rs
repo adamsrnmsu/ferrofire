@@ -71,6 +71,13 @@ impl<'a> Request<'a> {
     }
 }
 
+/// A request fragment as a master sends it: one whole fragment (FIR and FIN), the sequence number, the function, the objects.
+pub fn request(seq: u8, func: u8, objects: &[u8]) -> Vec<u8> {
+    let mut out = vec![FIR | FIN | (seq & 0x0F), func];
+    out.extend_from_slice(objects);
+    out
+}
+
 /// A response fragment: control (`flags` are FIR/FIN/CON), RESPONSE, IIN, then `objects`.
 pub fn response(seq: u8, flags: u8, iin: u16, objects: &[u8]) -> Vec<u8> {
     let mut out = vec![(flags & (FIR | FIN | CON)) | (seq & 0x0F), func::RESPONSE];
