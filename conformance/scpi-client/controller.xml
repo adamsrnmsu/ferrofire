@@ -17,7 +17,17 @@
                 <query><tag>ese</tag><command>*ESE?</command></query>
                 <query><tag>volt</tag><command>MEAS:VOLT:DC?</command></query>
             </scpi-client>
-            <!-- what the controller holds, for the harness: MEAS:SCAL:ESE?, MEAS:SCAL:VOLT?, SOUR:WANT <v> -->
+            <!-- the same instrument over VXI-11: scpi-parser's examples/test-vxi11 (ONC RPC; the portmapper is rpcbind on 111, the core channel an ephemeral port it hands out) -->
+            <scpi-client>
+                <endpoint>TCPIP::127.0.0.1::INSTR</endpoint>
+                <interval>200</interval>
+                <timeout>2000</timeout>
+                <event-logging>/tmp/ctl-scpi-client-vxi11.log</event-logging>
+                <set><tag>vese_set</tag><command>*ESE {}</command></set>
+                <query><tag>vese</tag><command>*ESE?</command></query>
+                <query><tag>vvolt</tag><command>MEAS:VOLT:DC?</command></query>
+            </scpi-client>
+            <!-- what the controller holds, for the harness: MEAS:SCAL:ESE?, MEAS:SCAL:VESE? (the VXI-11 instrument's), MEAS:SCAL:VOLT?, MEAS:SCAL:VVOLT?, SOUR:WANT <v> -->
             <scpi-server>
                 <endpoint>tcp://0.0.0.0:5030</endpoint>
                 <hislip-endpoint>none</hislip-endpoint>
@@ -25,11 +35,14 @@
                 <event-logging>/tmp/ctl-scpi-server.log</event-logging>
                 <point><tag>ese</tag></point>
                 <point><tag>volt</tag></point>
+                <point><tag>vese</tag></point>
+                <point><tag>vvolt</tag></point>
                 <point><tag>want</tag><writable>true</writable></point>
             </scpi-server>
         </comms>
         <logic>
             ese_set = want
+            vese_set = want
         </logic>
     </field-device>
 </SCEPTRE>

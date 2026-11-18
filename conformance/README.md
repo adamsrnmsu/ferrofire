@@ -217,14 +217,20 @@ and -363 responses, the `;`-joined answer of a compound query), 0 malformed fram
 
 ## SCPI controller (`<scpi-client>` against an instrument we did not write)
 
-    make testpeers                      # first, once: the image needs scpi-parser-tcp (docker/testpeers/Dockerfile)
+    make testpeers                      # first, once: the image needs scpi-parser-tcp, scpi-parser-vxi11 and rpcbind (docker/testpeers/Dockerfile)
     make conformance PROTO=scpi-client  # DUT=rust; the DUT runs in the testpeers image (RUST_DUT_IMAGE), not bennu:arm64
 
-The DUT is a ferrofire controller (`conformance/scpi-client/controller.xml`). Its `<scpi-client>` polls `scpi-parser-tcp` on
-127.0.0.1:5025: the `examples/test-tcp` instrument of [scpi-parser](https://github.com/j123b567/scpi-parser) (Jan Breuer, BSD-2-Clause, C, the
-parser library instrument firmwares embed; pinned by commit, built in the image, never linked). The controller's own `<scpi-server>` on 5030
-is how the harness drives it: `peer.sh` starts the instrument after the controller (which has been retrying), sets `want` to 36 and then 4
-over 5030, `<logic>` (`ese_set = want`) makes the controller send `*ESE <v>`, the controller reads `*ESE?` back into `ese`, and the
-harness must read the same value from the controller; `MEAS:VOLT:DC?` must arrive as the number 0. `check.sh` finds in the capture the
-sets (`*ESE 36.0`, `*ESE 4.0`), the queries as `QUERY;*OPC?` with their joined answers (`36;1`, `4;1`), the error-queue reads answered
-`0,"No error"` and no error answer at all, 0 malformed frames and no expert errors, and Zeek's `conn.log` row for port 5025.
+The DUT is a ferrofire controller (`conformance/scpi-client/controller.xml`) with two `<scpi-client>`s, one per transport, polling the same
+independent instrument: the `examples/test-tcp` and `examples/test-vxi11` instruments of [scpi-parser](https://github.com/j123b567/scpi-parser) (Jan Breuer,
+BSD-2-Clause, C, the parser library instrument firmwares embed; pinned by commit, built in the image, never linked). The raw-socket one is on
+127.0.0.1:5025; the VXI-11 one (`TCPIP::127.0.0.1::INSTR`) registers with `rpcbind` (started by `peer.sh`) on port 111 and answers on the
+ephemeral core-channel port the portmapper hands out. scpi-parser's VXI-11 example is incomplete upstream (its rpcgen output was never
+committed), so the Dockerfile generates it from the VXI-11 IDL in [liblxi](https://github.com/lxi-tools/liblxi) (BSD-3-Clause, pinned) plus the
+spec's interrupt-channel lines; only that IDL is not scpi-parser's, the instrument is. The controller's own `<scpi-server>` on 5030
+is how the harness drives it: `peer.sh` starts the instruments after the controller (which has been retrying), sets `want` to 36 and then 4
+over 5030, `<logic>` (`ese_set = want`, `vese_set = want`) makes the controller send `*ESE <v>` to each, the controller reads `*ESE?` back into
+`ese` and `vese`, and the harness must read the same value from the controller for each; `MEAS:VOLT:DC?` must arrive as the number 0 on both. `check.sh`
+finds in the capture the sets (`*ESE 36.0`, `*ESE 4.0`), the queries as `QUERY;*OPC?` with their joined answers (`36;1`, `4;1`), the error-queue
+reads answered `0,"No error"` and no error answer at all; on VXI-11 the same sets, queries and answers as tshark-decoded `device_write` and
+`device_read` data on the core channel, and `create_link` answered without error; 0 malformed frames and no expert errors, and Zeek's `conn.log`
+rows for ports 5025 and 111. (The VXI-11 tags are `vese`/`vvolt` because a trailing digit is an SCPI numeric suffix: `ese2` would collide with `ese`.)
