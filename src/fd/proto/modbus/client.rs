@@ -203,56 +203,81 @@ const TABLES: [(&str, Table); 4] = [
     ("input-register", Table::Input),
 ];
 
-fn connection(c: Node, mode: Mode, tags: &mut Tags, opts: &Opts) -> Result<Conn, ConfigError> {
-    let endpoint = require(c, "endpoint")?;
-    let unit = number::<u8>(c, "unit-id")?.unwrap_or(0);
-    let fep = shared::fep_keys(c, mode, tags, opts)?;
+/// `fep` only: a register may feed a binary tag (`<type>`), and a range needs a width to be turned around.
+fn fep_kind(n: Node, tag: &str, range: &Range) -> Result<Kind, ConfigError> {
+    if range.min == range.max {
+        return Err(ConfigError(format!(
+            "<{}> of tag `{}`: <min-value> equals <max-value>",
+            n.tag_name().name(),
+            crate::hint::show(tag)
+        )));
+    }
+    match text(n, "type").as_deref() {
+        None | Some("analog") => Ok(Kind::Analog),
+        Some("binary") => Ok(Kind::Binary),
+        Some(other) => Err(ConfigError(format!(
+            "<type> `{}` is not analog or binary",
+            crate::hint::show(other)
+        ))),
+    }
+}
+
+/// The range and the tag kind of a point: a bit is binary; a register is analog over its range, unless `fep` mode says more.
+fn scaled(n: Node, table: Table, mode: Mode, tag: &str) -> Result<(Range, Kind), ConfigError> {
+    if table.bits() {
+        return Ok((DEFAULT_RANGE, Kind::Binary));
+    }
+    let range = super::range(n)?;
+    match mode {
+        Mode::Bennu => Ok((range, Kind::Analog)),
+        Mode::Fep => Ok((range, fep_kind(n, tag, &range)?)),
+    }
+}
+
+/// One point element of `table`.
+fn point(n: Node, table: Table, mode: Mode) -> Result<Point, ConfigError> {
+    let name = n.tag_name().name();
+    let addr = number::<u16>(n, "address")?;
+    let addr = addr.ok_or_else(|| ConfigError(format!("<{name}> has no <address>")))?;
+    let tag = require(n, "tag")?;
+    let (range, kind) = scaled(n, table, mode, &tag)?;
+    Ok(Point {
+        tag,
+        table,
+        addr,
+        range,
+        kind,
+    })
+}
+
+/// The points of a connection that got their tag, and stock's range map (which every register enters, tag or not).
+fn points(
+    c: Node,
+    mode: Mode,
+    tags: &mut Tags,
+    opts: &Opts,
+) -> Result<(Vec<Point>, BTreeMap<u16, Range>), ConfigError> {
     let (mut points, mut ranges) = (vec![], BTreeMap::new());
     for (name, table) in TABLES {
         for n in c.children().filter(|n| n.has_tag_name(name)) {
-            let addr = number::<u16>(n, "address")?
-                .ok_or_else(|| ConfigError(format!("<{name}> has no <address>")))?;
-            let tag = require(n, "tag")?;
-            let (range, mut kind) = match table.bits() {
-                true => (DEFAULT_RANGE, Kind::Binary),
-                false => (super::range(n)?, Kind::Analog),
-            };
-            // fep only: a register may feed a binary tag, and a range needs a width to be turned around
-            if mode == Mode::Fep && !table.bits() {
-                kind = match text(n, "type").as_deref() {
-                    None | Some("analog") => Kind::Analog,
-                    Some("binary") => Kind::Binary,
-                    Some(other) => {
-                        return Err(ConfigError(format!(
-                            "<type> `{}` is not analog or binary",
-                            crate::hint::show(other)
-                        )))
-                    }
-                };
-                if range.min == range.max {
-                    return Err(ConfigError(format!(
-                        "<{name}> of tag `{}`: <min-value> equals <max-value>",
-                        crate::hint::show(&tag)
-                    )));
-                }
-            }
+            let p = point(n, table, mode)?;
             if !table.bits() {
-                ranges.insert(addr, range);
+                ranges.insert(p.addr, p.range);
             }
-            if shared::point_tag(tags, &tag, kind, opts)? {
-                points.push(Point {
-                    tag,
-                    table,
-                    addr,
-                    range,
-                    kind,
-                });
+            if shared::point_tag(tags, &p.tag, p.kind, opts)? {
+                points.push(p);
             }
         }
     }
+    Ok((points, ranges))
+}
+
+fn connection(c: Node, mode: Mode, tags: &mut Tags, opts: &Opts) -> Result<Conn, ConfigError> {
+    let fep = shared::fep_keys(c, mode, tags, opts)?;
+    let (points, ranges) = points(c, mode, tags, opts)?;
     Ok(Conn {
-        endpoint,
-        unit,
+        endpoint: require(c, "endpoint")?,
+        unit: number::<u8>(c, "unit-id")?.unwrap_or(0),
         points,
         fep,
         ranges,
@@ -282,49 +307,59 @@ impl Module for Client {
     }
 
     async fn run(self, store: Store, stop: CancellationToken) {
+        let mode = self.mode;
+        let (cmdif, cycle) = (self.cmdif.clone(), self.cycle);
+        let (live, sessions) = self.live(store);
+        match mode {
+            // one task per connection: a slow or dead device stalls neither the scan cycle nor the other connections
+            Mode::Fep => {
+                for (i, points, fep) in sessions {
+                    let session = Session::new(live.clone(), i, points, fep);
+                    tokio::spawn(session.run(cycle, stop.clone()));
+                }
+            }
+            // stock connects every connection once at start and then only when a request finds it closed
+            Mode::Bennu => {
+                for link in &live.links {
+                    link.lock().await.connect().await;
+                }
+            }
+        }
+        let outputs = (live.points.iter()).map(|(t, (_, p))| (t.clone(), p.table.output()));
+        match (cmdif, mode) {
+            (None, _) => stop.cancelled().await,
+            (Some(ep), Mode::Bennu) => cmdif::serve(&ep, Bennu(live), stop).await,
+            (Some(ep), Mode::Fep) => {
+                let points =
+                    shared::TagPoints::new(live.store.clone(), outputs.collect::<Vec<_>>());
+                cmdif::serve(&ep, points, stop).await
+            }
+        }
+    }
+}
+
+/// A `fep` connection to start: its index, points and keys.
+type Polled = (usize, Vec<Point>, Fep);
+
+impl Client {
+    /// What the running client shares, and the connections that poll.
+    fn live(self, store: Store) -> (Arc<Live>, Vec<Polled>) {
         let (mut links, mut ranges, mut sessions) = (vec![], vec![], vec![]);
         let mut points = BTreeMap::new();
         for (i, c) in self.conns.into_iter().enumerate() {
-            if let Some(fep) = c.fep {
-                sessions.push((i, c.points.clone(), fep));
-            }
+            sessions.extend(c.fep.map(|fep| (i, c.points.clone(), fep)));
             points.extend(c.points.into_iter().map(|p| (p.tag.clone(), (i, p))));
             links.push(Mutex::new(Link::new(c.endpoint, c.unit)));
             ranges.push(c.ranges);
         }
-        let live = Arc::new(Live {
+        let live = Live {
             links,
             ranges,
             points,
             store,
             log: self.log,
-        });
-        if self.mode == Mode::Fep {
-            // one task per connection: a slow or dead device stalls neither the scan cycle nor the other connections
-            for (i, points, fep) in sessions {
-                let session = Session::new(live.clone(), i, points, fep);
-                tokio::spawn(session.run(self.cycle, stop.clone()));
-            }
-            return match &self.cmdif {
-                Some(ep) => {
-                    let tags = live
-                        .points
-                        .iter()
-                        .map(|(t, (_, p))| (t.clone(), p.table.output()));
-                    let points = shared::TagPoints::new(live.store.clone(), tags);
-                    cmdif::serve(ep, points, stop).await
-                }
-                None => stop.cancelled().await,
-            };
-        }
-        // stock connects every connection once at start and then only when a request finds it closed
-        for link in &live.links {
-            link.lock().await.connect().await;
-        }
-        match &self.cmdif {
-            Some(ep) => cmdif::serve(ep, Bennu(live), stop).await,
-            None => stop.cancelled().await,
-        }
+        };
+        (Arc::new(live), sessions)
     }
 }
 
@@ -506,19 +541,12 @@ struct Session {
     up: bool,
 }
 
-fn zero(kind: Kind) -> Value {
-    match kind {
-        Kind::Binary => Value::Binary(false),
-        Kind::Analog => Value::Analog(0.0),
-    }
-}
-
 impl Session {
     fn new(live: Arc<Live>, i: usize, points: Vec<Point>, fep: Fep) -> Session {
         let outs = points
             .iter()
             .filter(|p| p.table.output())
-            .map(|p| (p.tag.clone(), Out::new(zero(p.kind))))
+            .map(|p| (p.tag.clone(), Out::new(crate::fd::store::zero(p.kind))))
             .collect();
         Session {
             live,
@@ -630,36 +658,44 @@ impl Session {
     /// One poll: local changes go down first (they win over what the poll reads), then every table is read. `false`: the
     /// device gave no answer; an exception is an answer.
     async fn poll(&mut self) -> bool {
-        {
-            let mut link = self.live.links[self.i].lock().await;
-            if link.stream.is_none() && !link.connect().await {
-                return false;
-            }
-        }
-        if !self.write_down().await {
+        if !self.connected().await || !self.write_down().await {
             return false;
         }
         for (fc, start, qty) in plan_reads(&self.points, &self.split) {
-            match self.live.ask(self.i, fc, start, qty).await {
-                Ok(values) => {
-                    // a local change that landed since the pass above goes down now, instead of the polled value in
-                    for (p, v) in self.take(fc, start, &values) {
-                        if !self.send(&p, v).await {
-                            return false;
-                        }
-                    }
-                }
-                // a merged read over a hole: read each address alone from the next poll on
-                Err(Fail::Exception(2)) if qty > 1 => {
-                    self.split.extend((0..qty).map(|k| (fc, start + k)));
-                }
-                Err(Fail::Exception(code)) => {
-                    if self.refused.insert((fc, start)) {
-                        tracing::warn!("modbus-client: read (function {fc}) of address {start} refused with exception {code}");
-                    }
-                }
-                Err(Fail::Link) => return false,
+            if !self.read(fc, start, qty).await {
+                return false;
             }
+        }
+        true
+    }
+
+    /// The connection is open, or could be opened now.
+    async fn connected(&self) -> bool {
+        let mut link = self.live.links[self.i].lock().await;
+        link.stream.is_some() || link.connect().await
+    }
+
+    /// One read of a poll, into the tags. `false`: the connection failed.
+    async fn read(&mut self, fc: u8, start: u16, qty: u16) -> bool {
+        match self.live.ask(self.i, fc, start, qty).await {
+            Ok(values) => {
+                // a local change that landed since the write-down pass goes down now, instead of the polled value in
+                for (p, v) in self.take(fc, start, &values) {
+                    if !self.send(&p, v).await {
+                        return false;
+                    }
+                }
+            }
+            // a merged read over a hole: read each address alone from the next poll on
+            Err(Fail::Exception(2)) if qty > 1 => {
+                self.split.extend((0..qty).map(|k| (fc, start + k)));
+            }
+            Err(Fail::Exception(code)) => {
+                if self.refused.insert((fc, start)) {
+                    tracing::warn!("modbus-client: read (function {fc}) of address {start} refused with exception {code}");
+                }
+            }
+            Err(Fail::Link) => return false,
         }
         true
     }

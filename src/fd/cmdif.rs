@@ -37,9 +37,44 @@ fn digits(s: &str, radix: u32) -> usize {
         .count()
 }
 
+/// `inf`, `nan` (any case, whatever follows) or a hexadecimal integer at the front of `s`.
+/// ponytail: a hexadecimal number is its integer part only (no `.` fraction, no `p` exponent); add them if a tool ever sends one.
+fn special(s: &str) -> Option<f64> {
+    match s.get(..3).map(str::to_ascii_lowercase).as_deref() {
+        Some("inf") => Some(f64::INFINITY),
+        Some("nan") => Some(f64::NAN),
+        _ => {
+            let hex = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X"))?;
+            let n = digits(hex, 16);
+            Some(u64::from_str_radix(&hex[..n], 16).unwrap_or(0) as f64)
+        }
+    }
+}
+
+/// How many bytes the decimal number at the front of `s` takes: digits, a fraction, and an exponent when it has digits.
+/// 0 when there is no digit.
+fn decimal(s: &str) -> usize {
+    let int = digits(s, 10);
+    let frac = match s[int..].starts_with('.') {
+        true => 1 + digits(&s[int + 1..], 10),
+        false => 0,
+    };
+    if int + frac.saturating_sub(1) == 0 {
+        return 0;
+    }
+    let e = &s[int + frac..];
+    let signed = usize::from(e[e.len().min(1)..].starts_with(['+', '-']));
+    match (
+        e.starts_with(['e', 'E']),
+        digits(&e[e.len().min(1 + signed)..], 10),
+    ) {
+        (true, n @ 1..) => int + frac + 1 + signed + n,
+        _ => int + frac,
+    }
+}
+
 /// C++ `std::stod`: blanks, a sign, then the longest decimal, hexadecimal, `inf` or `nan` at the front; the rest is ignored.
 /// `None` where `stod` throws (no number, or one out of a double's range), which kills stock.
-/// ponytail: a hexadecimal number is its integer part only (no `.` fraction, no `p` exponent); add them if a tool ever sends one.
 pub fn stod(s: &str) -> Option<f64> {
     let s = s.trim_start_matches(|c: char| c.is_ascii_whitespace());
     let (sign, s) = match s.as_bytes().first() {
@@ -47,34 +82,10 @@ pub fn stod(s: &str) -> Option<f64> {
         Some(b'+') => (1.0, &s[1..]),
         _ => (1.0, s),
     };
-    let lower = s.get(..3).map(str::to_ascii_lowercase);
-    if lower.as_deref() == Some("inf") {
-        return Some(sign * f64::INFINITY);
+    if let Some(x) = special(s) {
+        return Some(sign * x);
     }
-    if lower.as_deref() == Some("nan") {
-        return Some(f64::NAN);
-    }
-    if s.starts_with("0x") || s.starts_with("0X") {
-        let n = digits(&s[2..], 16);
-        return Some(sign * u64::from_str_radix(&s[2..2 + n], 16).unwrap_or(0) as f64);
-    }
-    let int = digits(s, 10);
-    let frac = match s[int..].starts_with('.') {
-        true => 1 + digits(&s[int + 1..], 10),
-        false => 0,
-    };
-    if int + frac.saturating_sub(1) == 0 {
-        return None;
-    }
-    let mut end = int + frac;
-    if let Some(e) = s[end..].strip_prefix(['e', 'E']) {
-        let signed = usize::from(e.starts_with(['+', '-']));
-        let n = digits(&e[signed..], 10);
-        if n > 0 {
-            end += 1 + signed + n;
-        }
-    }
-    let x: f64 = s[..end].parse().ok()?;
+    let x: f64 = s[..decimal(s)].parse().ok()?;
     x.is_finite().then_some(sign * x)
 }
 
@@ -82,59 +93,74 @@ fn done(text: String) -> Vec<u8> {
     crate::bennu::with_nul(text)
 }
 
-/// The whole reply to one request, NUL included. `line` is the request up to its NUL.
-pub async fn reply(line: &str, p: &impl Points) -> Vec<u8> {
-    let malformed =
-        || done("ERR=Malformed request (must be QUERY=|READ=tag|WRITE=tag:value)".into());
-    let mut parts = line.split('=');
-    let (op, Some(tag)) = (parts.next().unwrap_or(""), parts.next()) else {
-        return malformed(); // stock indexes past the end of the split and dies
-    };
-    let unmapped = |tag: &str| {
-        done(format!(
-            "ERR=Client does not have a mapping for tag '{tag}'"
-        ))
-    };
-    let names = p.names();
-    match op {
-        "QUERY" | "query" if names.is_empty() => {
-            done("ERR=Client does not have any tag mappings".into())
-        }
-        "QUERY" | "query" => done(format!("ACK={},", names.join(","))),
-        "READ" | "read" if !names.iter().any(|n| n == tag) => unmapped(tag),
-        "READ" | "read" => done(match p.read(tag).await {
-            Ok(Value::Analog(x)) => format!("ACK={tag}:{}", float(x)),
-            Ok(Value::Binary(b)) => format!("ACK={tag}:{b}"),
-            Err(why) => format!("ERR=Failed reading tag '{tag}': {why}"),
-        }),
-        "WRITE" | "write" => {
-            let mut parts = tag.split(':');
-            let (tag, Some(val)) = (parts.next().unwrap_or(""), parts.next()) else {
-                return malformed(); // the same death
-            };
-            if !names.iter().any(|n| n == tag) {
-                return unmapped(tag);
-            }
-            let v = match val {
-                "true" => Value::Binary(true),
-                "false" => Value::Binary(false),
-                _ => match stod(val) {
-                    Some(x) => Value::Analog(x),
-                    // stock: `terminate called after throwing an instance of 'std::invalid_argument'`
-                    None => {
-                        return done(format!(
-                            "ERR=Failed writing tag '{tag}': value '{val}' is not true, false or a number"
-                        ))
-                    }
-                },
-            };
-            done(match p.write(tag, v).await {
-                Ok(()) => format!("ACK=Wrote tag {tag} -- {val}"),
-                Err(why) => format!("ERR=Failed writing tag '{tag}': {why}"),
-            })
-        }
-        _ => done("ERR=Unknown command type (must be QUERY|READ|WRITE)".into()),
+/// What a request that kills stock (it indexes past the end of a split) is answered.
+const MALFORMED: &str = "ERR=Malformed request (must be QUERY=|READ=tag|WRITE=tag:value)";
+
+fn unmapped(tag: &str) -> String {
+    format!("ERR=Client does not have a mapping for tag '{tag}'")
+}
+
+fn query(names: &[String]) -> String {
+    match names.is_empty() {
+        true => "ERR=Client does not have any tag mappings".into(),
+        false => format!("ACK={},", names.join(",")),
     }
+}
+
+async fn read(tag: &str, p: &impl Points) -> String {
+    if !p.names().iter().any(|n| n == tag) {
+        return unmapped(tag);
+    }
+    match p.read(tag).await {
+        Ok(Value::Analog(x)) => format!("ACK={tag}:{}", float(x)),
+        Ok(Value::Binary(b)) => format!("ACK={tag}:{b}"),
+        Err(why) => format!("ERR=Failed reading tag '{tag}': {why}"),
+    }
+}
+
+/// The value a WRITE names: `true`/`false`, or whatever `stod` makes of the text.
+fn value(text: &str) -> Option<Value> {
+    match text {
+        "true" => Some(Value::Binary(true)),
+        "false" => Some(Value::Binary(false)),
+        _ => stod(text).map(Value::Analog),
+    }
+}
+
+/// `rest` is `tag:value`; what follows a second `:` is ignored, as stock ignores it.
+async fn write(rest: &str, p: &impl Points) -> String {
+    let mut parts = rest.split(':');
+    let (tag, Some(val)) = (parts.next().unwrap_or(""), parts.next()) else {
+        return MALFORMED.into();
+    };
+    if !p.names().iter().any(|n| n == tag) {
+        return unmapped(tag);
+    }
+    // stock: `terminate called after throwing an instance of 'std::invalid_argument'`
+    let Some(v) = value(val) else {
+        return format!(
+            "ERR=Failed writing tag '{tag}': value '{val}' is not true, false or a number"
+        );
+    };
+    match p.write(tag, v).await {
+        Ok(()) => format!("ACK=Wrote tag {tag} -- {val}"),
+        Err(why) => format!("ERR=Failed writing tag '{tag}': {why}"),
+    }
+}
+
+/// The whole reply to one request, NUL included. `line` is the request up to its NUL: `op=rest`, and what follows a second
+/// `=` is ignored, as stock ignores it.
+pub async fn reply(line: &str, p: &impl Points) -> Vec<u8> {
+    let mut parts = line.split('=');
+    let (op, Some(rest)) = (parts.next().unwrap_or(""), parts.next()) else {
+        return done(MALFORMED.into());
+    };
+    done(match op {
+        "QUERY" | "query" => query(&p.names()),
+        "READ" | "read" => read(rest, p).await,
+        "WRITE" | "write" => write(rest, p).await,
+        _ => "ERR=Unknown command type (must be QUERY|READ|WRITE)".into(),
+    })
 }
 
 /// A reply that cannot be sent within this long is given up; the socket goes on.
@@ -153,7 +179,14 @@ pub async fn serve(endpoint: &str, p: impl Points + 'static, stop: CancellationT
     loop {
         let msg = tokio::select! {
             _ = stop.cancelled() => return,
-            m = rep.recv() => match m { Ok(m) => m, Err(_) => continue },
+            m = rep.recv() => match m {
+                Ok(m) => m,
+                // a client that went away mid-request: wait a moment so that a socket that keeps failing cannot spin
+                Err(_) => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    continue;
+                }
+            },
         };
         // stock reads the request as a C string
         let req = msg.get(0).map(|f| f.to_vec()).unwrap_or_default();

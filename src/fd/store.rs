@@ -65,7 +65,8 @@ pub struct Layout {
 #[derive(Clone)]
 pub struct Store(Arc<Mutex<Inner>>);
 
-fn zero(kind: Kind) -> Value {
+/// What a tag of `kind` holds before anything set it.
+pub fn zero(kind: Kind) -> Value {
     match kind {
         Kind::Binary => Value::Binary(false),
         Kind::Analog => Value::Analog(0.0),

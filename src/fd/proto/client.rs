@@ -20,14 +20,12 @@ pub enum Mode {
 
 /// The `<mode>` of a client element.
 pub fn mode(n: Node) -> Result<Mode, ConfigError> {
-    match text(n, "mode").as_deref() {
-        None | Some("bennu") => Ok(Mode::Bennu),
-        Some("fep") => Ok(Mode::Fep),
-        Some(other) => Err(ConfigError(format!(
-            "<mode> `{}` is not bennu or fep",
-            show(other)
-        ))),
-    }
+    let said = text(n, "mode").unwrap_or_else(|| "bennu".into());
+    let known = [("bennu", Mode::Bennu), ("fep", Mode::Fep)];
+    let found = known.into_iter().find(|(name, _)| *name == said);
+    found
+        .map(|(_, mode)| mode)
+        .ok_or_else(|| ConfigError(format!("<mode> `{}` is not bennu or fep", show(&said))))
 }
 
 /// The ferrofire-only keys of one connection in `fep` mode.
@@ -37,6 +35,19 @@ pub struct Fep {
     pub scan: Duration,
     /// `<status-tag>`: a binary device-local tag, true while the session is up and the last poll succeeded.
     pub status: Option<String>,
+}
+
+/// `<scan-rate>` of a connection: seconds, decimals allowed, 1 when absent.
+fn scan_rate(conn: Node) -> Result<Duration, ConfigError> {
+    let secs = number::<f64>(conn, "scan-rate")?.unwrap_or(1.0);
+    let scan = Duration::try_from_secs_f64(secs).ok();
+    scan.filter(|d| !d.is_zero()).ok_or_else(|| {
+        let said = text(conn, "scan-rate").unwrap_or_default();
+        ConfigError(format!(
+            "<scan-rate> `{}` is not a time above 0 s",
+            show(&said)
+        ))
+    })
 }
 
 /// `<scan-rate>` (seconds, default 1) and `<status-tag>` of a connection. Stock has neither, so in `bennu` mode each is a warning
@@ -55,17 +66,7 @@ pub fn fep_keys(
         }
         return Ok(None);
     }
-    let scan = number::<f64>(conn, "scan-rate")?.unwrap_or(1.0);
-    let scan = Duration::try_from_secs_f64(scan)
-        .ok()
-        .filter(|d| !d.is_zero())
-        .ok_or_else(|| {
-            let said = text(conn, "scan-rate").unwrap_or_default();
-            ConfigError(format!(
-                "<scan-rate> `{}` is not a time above 0 s",
-                show(&said)
-            ))
-        })?;
+    let scan = scan_rate(conn)?;
     let status = match text(conn, "status-tag") {
         Some(t) if point_tag(tags, &t, Kind::Binary, opts)? => Some(t),
         _ => None,
@@ -143,11 +144,13 @@ impl Echo {
         Some(now)
     }
 
+    /// The write under way was answered: `v` is what the device now has from us.
     pub fn sent_ok(&mut self, v: Value) {
-        self.pending = false;
         self.last_sent = Some(v);
+        self.sent_failed();
     }
 
+    /// The write under way got no answer: nothing is under way any more, and the value is due again.
     pub fn sent_failed(&mut self) {
         self.pending = false;
     }

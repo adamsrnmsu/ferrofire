@@ -127,63 +127,88 @@ enum Size {
     Bytes(usize),
 }
 
+/// What one object takes in a response, in octets: (groups, variations, octets).
+const SIZES: &[(&[u8], &[u8], usize)] = &[
+    (&[1, 3, 10], &[2], 1),
+    (&[2, 4, 11, 13], &[1], 1),
+    (&[2, 4, 11, 13], &[2], 7),
+    (&[2, 4], &[3], 3),
+    (&[12], &[1], 11),
+    // counters: flag and 32 or 16 bits, without the flag (20 and 21 only), with a time
+    (&[20, 21, 22, 23], &[1], 5),
+    (&[20, 21, 22, 23], &[2], 3),
+    (&[20], &[5], 4),
+    (&[21], &[9], 4),
+    (&[20], &[6], 2),
+    (&[21], &[10], 2),
+    (&[21, 22, 23], &[5], 11),
+    (&[21, 22, 23], &[6], 9),
+    // analog inputs, their events, output status, output commands and output events
+    (&[30, 32, 40, 41, 42], &[1], 5),
+    (&[30, 32, 42], &[5], 5),
+    (&[40, 41], &[3], 5),
+    (&[30, 32, 40, 41, 42], &[2], 3),
+    (&[30], &[3], 4),
+    (&[30], &[4], 2),
+    (&[30, 32, 42], &[6], 9),
+    (&[32, 42], &[4], 9),
+    (&[40, 41], &[4], 9),
+    (&[32, 42], &[3, 7], 11),
+    (&[32, 42], &[8], 15),
+    (&[50, 51], &[1, 2], 6),
+    (&[52], &[1, 2], 2),
+];
+
 fn size(group: u8, var: u8) -> Option<Size> {
-    use Size::{Bits, Bytes};
-    Some(match (group, var) {
-        (1 | 10 | 80, 1) => Bits(1),
-        (3, 1) => Bits(2),
-        (1 | 3 | 10, 2) | (2 | 4 | 11 | 13, 1) => Bytes(1),
-        (2 | 4 | 11 | 13, 2) => Bytes(7),
-        (2 | 4, 3) => Bytes(3),
-        (12, 1) => Bytes(11),
-        // counters: flag and 32 or 16 bits, without the flag (20 and 21 only), with a time
-        (20..=23, 1) => Bytes(5),
-        (20..=23, 2) => Bytes(3),
-        (20, 5) | (21, 9) => Bytes(4),
-        (20, 6) | (21, 10) => Bytes(2),
-        (21..=23, 5) => Bytes(11),
-        (21..=23, 6) => Bytes(9),
-        // analog inputs, their events, output status, output commands and output events
-        (30 | 32 | 40 | 41 | 42, 1) | (30 | 32 | 42, 5) | (40 | 41, 3) => Bytes(5),
-        (30 | 32 | 40 | 41 | 42, 2) => Bytes(3),
-        (30, 3) => Bytes(4),
-        (30, 4) => Bytes(2),
-        (30 | 32 | 42, 6) | (32 | 42, 4) | (40 | 41, 4) => Bytes(9),
-        (32 | 42, 3 | 7) => Bytes(11),
-        (32 | 42, 8) => Bytes(15),
-        (50 | 51, 1 | 2) => Bytes(6),
-        (52, 1 | 2) => Bytes(2),
-        (110 | 111, n) if n > 0 => Bytes(usize::from(n)),
-        _ => return None,
-    })
-}
-
-fn int(b: &[u8]) -> f64 {
-    match b.len() {
-        2 => f64::from(i16::from_le_bytes([b[0], b[1]])),
-        _ => f64::from(i32::from_le_bytes([b[0], b[1], b[2], b[3]])),
+    match (group, var) {
+        (1 | 10 | 80, 1) => return Some(Size::Bits(1)),
+        (3, 1) => return Some(Size::Bits(2)),
+        // an octet string is as long as its variation says
+        (110 | 111, 1..) => return Some(Size::Bytes(usize::from(var))),
+        _ => {}
     }
+    let row = SIZES
+        .iter()
+        .find(|(g, v, _)| g.contains(&group) && v.contains(&var));
+    row.map(|(_, _, octets)| Size::Bytes(*octets))
 }
 
-fn float(b: &[u8]) -> f64 {
-    match b.len() {
-        4 => f64::from(f32::from_le_bytes([b[0], b[1], b[2], b[3]])),
-        _ => f64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]),
+/// Where the number is in an analog object: (groups, variations, offset, octets, floating point).
+type Number = (&'static [u8], &'static [u8], usize, usize, bool);
+
+/// The first row that fits.
+const NUMBERS: &[Number] = &[
+    (&[30], &[3], 0, 4, false),
+    (&[30], &[4], 0, 2, false),
+    (&[40], &[3], 1, 4, true),
+    (&[40], &[4], 1, 8, true),
+    (&[30, 32, 42], &[5, 7], 1, 4, true),
+    (&[30, 32, 42], &[6, 8], 1, 8, true),
+    (&[30, 32, 40, 42], &[2], 1, 2, false),
+    (&[32, 42], &[4], 1, 2, false),
+    (&[30, 32, 40, 42], &[1, 3], 1, 4, false),
+];
+
+/// A little-endian number of 2 or 4 octets (an integer), or of 4 or 8 (floating point).
+fn number_in(b: &[u8], float: bool) -> f64 {
+    match (b, float) {
+        (&[a, b], _) => f64::from(i16::from_le_bytes([a, b])),
+        (&[a, b, c, d], false) => f64::from(i32::from_le_bytes([a, b, c, d])),
+        (&[a, b, c, d], true) => f64::from(f32::from_le_bytes([a, b, c, d])),
+        (&[a, b, c, d, e, f, g, h], _) => f64::from_le_bytes([a, b, c, d, e, f, g, h]),
+        _ => 0.0,
     }
 }
 
 /// The value in one byte-sized object `b` of group `g`, variation `v`, when it is a point value.
 fn value(g: u8, v: u8, idx: u16, b: &[u8]) -> Option<Seen> {
     let state = b[0] & 0x80 != 0;
-    let analog = match (g, v) {
-        (30, 3) => int(&b[..4]),
-        (30, 4) => int(&b[..2]),
-        (40, 3) | (30 | 32 | 42, 5 | 7) => float(&b[1..5]),
-        (40, 4) | (30 | 32 | 42, 6 | 8) => float(&b[1..9]),
-        (30 | 32 | 40 | 42, 2) | (32 | 42, 4) => int(&b[1..3]),
-        (30 | 32 | 40 | 42, _) => int(&b[1..5]),
-        _ => 0.0,
-    };
+    let row = NUMBERS
+        .iter()
+        .find(|(gs, vs, ..)| gs.contains(&g) && vs.contains(&v));
+    let analog = row.map_or(0.0, |&(_, _, at, octets, float)| {
+        number_in(&b[at..at + octets], float)
+    });
     match g {
         1 | 2 => Some(Seen::Binary(idx, state)),
         10 | 11 => Some(Seen::BinaryOutput(idx, state)),
@@ -209,50 +234,74 @@ fn uint(buf: &mut &[u8], width: usize) -> Result<usize, Bad> {
         .fold(0, |a, &x| a << 8 | usize::from(x)))
 }
 
+/// What a qualifier says about the objects that follow: (first index, count, octets of index prefix).
+fn range(buf: &mut &[u8], q: u8) -> Result<(usize, usize, usize), Bad> {
+    // (qualifier, octets of each number, a start and a stop instead of a count, octets of index prefix)
+    const FORMS: [(u8, usize, bool, usize); 6] = [
+        (0x00, 1, true, 0),
+        (0x01, 2, true, 0),
+        (0x07, 1, false, 0),
+        (0x08, 2, false, 0),
+        (0x17, 1, false, 1),
+        (0x28, 2, false, 2),
+    ];
+    let form = FORMS.iter().find(|f| f.0 == q).ok_or(Bad::Qualifier(q))?;
+    let &(_, width, start_stop, prefix) = form;
+    let first = uint(buf, width)?;
+    if !start_stop {
+        return Ok((0, first, prefix));
+    }
+    let count = (uint(buf, width)? + 1).checked_sub(first);
+    Ok((first, count.ok_or(Bad::Truncated)?, prefix))
+}
+
+/// `count` packed objects of `each` bits from index `start`.
+fn packed(
+    buf: &mut &[u8],
+    g: u8,
+    each: usize,
+    (start, count): (usize, usize),
+    seen: &mut Vec<Seen>,
+) -> Result<(), Bad> {
+    let data = take(buf, (count * each).div_ceil(8))?;
+    for i in 0..count {
+        let on = data[i * each / 8] >> (i * each % 8) & 1 == 1;
+        match g {
+            1 => seen.push(Seen::Binary((start + i) as u16, on)),
+            10 => seen.push(Seen::BinaryOutput((start + i) as u16, on)),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// `count` objects of `each` octets of group and variation `gv`, indexed from `start` or each by its own prefix.
+fn sized(
+    buf: &mut &[u8],
+    gv: (u8, u8),
+    each: usize,
+    (start, count, prefix): (usize, usize, usize),
+    seen: &mut Vec<Seen>,
+) -> Result<(), Bad> {
+    for i in 0..count {
+        let idx = match prefix {
+            0 => start + i,
+            w => uint(buf, w)?,
+        };
+        seen.extend(value(gv.0, gv.1, idx as u16, take(buf, each)?));
+    }
+    Ok(())
+}
+
 /// One object header and its objects, off the front of `buf`.
 fn objects(buf: &mut &[u8], seen: &mut Vec<Seen>) -> Result<(), Bad> {
     let head = take(buf, 3)?;
     let (g, v, q) = (head[0], head[1], head[2]);
-    // (first index, count, octets of index prefix)
-    let (start, count, prefix) = match q {
-        0x00 | 0x01 => {
-            let w = usize::from(q) + 1;
-            let (start, stop) = (uint(buf, w)?, uint(buf, w)?);
-            (
-                start,
-                (stop + 1).checked_sub(start).ok_or(Bad::Truncated)?,
-                0,
-            )
-        }
-        0x07 | 0x08 => (0, uint(buf, usize::from(q) - 6)?, 0),
-        0x17 => (0, uint(buf, 1)?, 1),
-        0x28 => (0, uint(buf, 2)?, 2),
-        other => return Err(Bad::Qualifier(other)),
-    };
-    match size(g, v).ok_or(Bad::Object(g, v))? {
-        Size::Bits(_) if prefix > 0 => Err(Bad::Qualifier(q)),
-        Size::Bits(each) => {
-            let data = take(buf, (count * each).div_ceil(8))?;
-            for i in 0..count {
-                let on = data[i * each / 8] >> (i * each % 8) & 1 == 1;
-                match g {
-                    1 => seen.push(Seen::Binary((start + i) as u16, on)),
-                    10 => seen.push(Seen::BinaryOutput((start + i) as u16, on)),
-                    _ => {}
-                }
-            }
-            Ok(())
-        }
-        Size::Bytes(each) => {
-            for i in 0..count {
-                let idx = match prefix {
-                    0 => start + i,
-                    w => uint(buf, w)?,
-                };
-                seen.extend(value(g, v, idx as u16, take(buf, each)?));
-            }
-            Ok(())
-        }
+    let (start, count, prefix) = range(buf, q)?;
+    match (size(g, v).ok_or(Bad::Object(g, v))?, prefix) {
+        (Size::Bits(each), 0) => packed(buf, g, each, (start, count), seen),
+        (Size::Bits(_), _) => Err(Bad::Qualifier(q)),
+        (Size::Bytes(each), _) => sized(buf, (g, v), each, (start, count, prefix), seen),
     }
 }
 
@@ -337,16 +386,8 @@ fn needed<T: std::str::FromStr>(n: Node, key: &str) -> Result<T, ConfigError> {
         .ok_or_else(|| ConfigError(format!("<{}> has no <{key}>", n.tag_name().name())))
 }
 
-fn connection(
-    c: Node,
-    rate: u32,
-    mode: Mode,
-    tags: &mut Tags,
-    opts: &Opts,
-) -> Result<Conn, ConfigError> {
-    let endpoint = require(c, "endpoint")?;
-    let remote = needed::<u16>(c, "address")?;
-    let fep = shared::fep_keys(c, mode, tags, opts)?;
+/// The points of a connection, in stock's order: binary inputs, binary outputs, analog inputs, analog outputs.
+fn points(c: Node, tags: &mut Tags, opts: &Opts) -> Result<Vec<Point>, ConfigError> {
     let mut points = vec![];
     for (name, kind, output) in KINDS {
         for n in c.children().filter(|n| n.has_tag_name(name)) {
@@ -363,7 +404,12 @@ fn connection(
             }
         }
     }
-    // the all-classes scan runs at the client's scan-rate unless the connection says otherwise; a class of its own is off at 0
+    Ok(points)
+}
+
+/// The recurring scans of a connection: the all-classes scan at the client's `rate` unless `<class-scan-rates>` says otherwise,
+/// and a scan per class that has a rate. 0 is off.
+fn scans(c: Node, rate: u32) -> Result<Vec<(Vec<u8>, Duration)>, ConfigError> {
     let rates = super::super::super::config::child(c, "class-scan-rates");
     let rate_of = |key: &str, default: u32| -> Result<u32, ConfigError> {
         Ok(match rates {
@@ -375,15 +421,27 @@ fn connection(
     for class in 0..4u8 {
         scans.push((vec![class], rate_of(&format!("class{class}"), 0)?));
     }
+    let on = scans.into_iter().filter(|(_, secs)| *secs != 0);
+    Ok(on
+        .map(|(classes, secs)| (classes, Duration::from_secs(u64::from(secs))))
+        .collect())
+}
+
+fn connection(
+    c: Node,
+    rate: u32,
+    mode: Mode,
+    tags: &mut Tags,
+    opts: &Opts,
+) -> Result<Conn, ConfigError> {
+    let endpoint = require(c, "endpoint")?;
+    let remote = needed::<u16>(c, "address")?;
+    let fep = shared::fep_keys(c, mode, tags, opts)?;
     Ok(Conn {
         endpoint,
         remote,
-        points,
-        scans: scans
-            .into_iter()
-            .filter(|(_, secs)| *secs != 0)
-            .map(|(classes, secs)| (classes, Duration::from_secs(u64::from(secs))))
-            .collect(),
+        points: points(c, tags, opts)?,
+        scans: scans(c, rate)?,
         fep,
     })
 }
@@ -414,15 +472,11 @@ impl Module for Client {
             let link = Arc::new(Shared::new(&c.points, store.clone(), tx));
             by_tag.extend(c.points.iter().map(|p| (p.tag.clone(), link.clone())));
             outputs.extend(c.points.iter().map(|p| (p.tag.clone(), p.output)));
-            let zero = |p: &Point| match p.kind {
-                Kind::Binary => Value::Binary(false),
-                Kind::Analog => Value::Analog(0.0),
-            };
             let fep = c.fep.map(|keys| FepState {
                 status: keys.status,
                 cycle: self.cycle,
                 outs: (c.points.iter().filter(|p| p.output))
-                    .map(|p| (p.tag.clone(), Out::new(zero(p))))
+                    .map(|p| (p.tag.clone(), Out::new(crate::fd::store::zero(p.kind))))
                     .collect(),
                 todo: vec![],
                 next_tick: Instant::now(),
@@ -501,15 +555,16 @@ impl Shared {
             let of_kind = points.iter().filter(|p| p.kind == kind);
             of_kind.map(|p| (p.addr, p.tag.clone())).collect()
         };
-        let zero = |p: &Point| match p.kind {
-            Kind::Binary => Value::Binary(false),
-            Kind::Analog => Value::Analog(0.0),
-        };
         Shared {
             store,
             bin: map(Kind::Binary),
             ana: map(Kind::Analog),
-            cache: std::sync::Mutex::new(points.iter().map(|p| (p.tag.clone(), zero(p))).collect()),
+            cache: std::sync::Mutex::new(
+                points
+                    .iter()
+                    .map(|p| (p.tag.clone(), crate::fd::store::zero(p.kind)))
+                    .collect(),
+            ),
             points: points.iter().map(|p| (p.tag.clone(), p.clone())).collect(),
             tx,
         }
@@ -612,21 +667,8 @@ impl Wire {
     /// ponytail: link-layer requests (link status, reset) are not answered; opendnp3 answers them. Add when an outstation needs it.
     async fn recv(&mut self) -> Result<Vec<u8>, Lost> {
         loop {
-            match link::parse(&self.buf) {
-                link::Parse::Frame(f, used) => {
-                    self.buf.drain(..used);
-                    let ours =
-                        f.primary() && f.func() == 4 && f.dst == self.local && f.src == self.remote;
-                    if let (true, Ok(Some(fragment))) = (ours, self.asm.push(&f.user)) {
-                        return Ok(fragment);
-                    }
-                    continue;
-                }
-                link::Parse::Bad(why) => {
-                    tracing::warn!("dnp3-client: closing the connection: {why}");
-                    return Err(Lost);
-                }
-                link::Parse::Need(_) => {}
+            if let Some(r) = self.buffered() {
+                return r;
             }
             let mut chunk = [0u8; 1024];
             match self.stream.read(&mut chunk).await {
@@ -635,7 +677,30 @@ impl Wire {
             }
         }
     }
+
+    /// The next fragment the frames already in the buffer complete; `None`: more bytes are needed.
+    fn buffered(&mut self) -> Option<Result<Vec<u8>, Lost>> {
+        loop {
+            let (f, used) = match link::parse(&self.buf) {
+                link::Parse::Frame(f, used) => (f, used),
+                link::Parse::Need(_) => return None,
+                link::Parse::Bad(why) => {
+                    tracing::warn!("dnp3-client: closing the connection: {why}");
+                    return Some(Err(Lost));
+                }
+            };
+            self.buf.drain(..used);
+            // unconfirmed user data from our outstation to us
+            let ours = f.primary() && f.func() == 4 && f.dst == self.local && f.src == self.remote;
+            if let (true, Ok(Some(fragment))) = (ours, self.asm.push(&f.user)) {
+                return Some(Ok(fragment));
+            }
+        }
+    }
 }
+
+/// No response carries this sequence number: what `answer` is told to await when nothing is.
+const NOTHING_AWAITED: u8 = 0xFF;
 
 /// One connection of the master: the stock task order (a command, clear-restart, the startup integrity poll, the scan that is
 /// due) over one request at a time.
@@ -751,8 +816,9 @@ impl Session {
                         None => return,
                     },
                     _ = tokio::time::sleep_until(wake) => {}
+                    // nothing is awaited: an unsolicited response is taken, anything else discarded
                     r = wire.recv() => match r {
-                        Ok(fragment) => if self.unsolicited(&mut wire, &fragment).await.is_err() { return },
+                        Ok(fragment) => if self.answer(&mut wire, &fragment, &mut { NOTHING_AWAITED }, 0).await.is_err() { return },
                         Err(Lost) => return,
                     },
                 }
@@ -766,50 +832,56 @@ impl Session {
 
     async fn run_task(&mut self, wire: &mut Wire, seq: &mut u8, task: Task) -> Result<(), Lost> {
         match task {
-            Task::Command(c) => {
-                self.command(wire, seq, &c).await?;
-            }
-            Task::Clear => {
-                let r = self
-                    .exchange(wire, seq, func::WRITE, &clear_restart())
-                    .await?;
-                match r {
-                    Some(r) => {
-                        self.clear = false;
-                        if r.restart() {
-                            tracing::warn!("dnp3-client: {}: the outstation kept IIN1.7 through a clear-restart; not asking again", self.name);
-                            self.clear_failed = true;
-                        }
-                    }
-                    None => self.hold = Instant::now() + TASK_RETRY,
+            Task::Command(c) => self.command(wire, seq, &c).await.map(|_| ()),
+            Task::Clear => self.clear_restart(wire, seq).await,
+            Task::Integrity => self.integrity_poll(wire, seq).await,
+            Task::Scan(i) => self.scan(wire, seq, i).await,
+        }
+    }
+
+    async fn clear_restart(&mut self, wire: &mut Wire, seq: &mut u8) -> Result<(), Lost> {
+        let r = self
+            .exchange(wire, seq, func::WRITE, &clear_restart())
+            .await?;
+        match r {
+            Some(r) => {
+                self.clear = false;
+                if r.restart() {
+                    tracing::warn!("dnp3-client: {}: the outstation kept IIN1.7 through a clear-restart; not asking again", self.name);
+                    self.clear_failed = true;
                 }
             }
-            Task::Integrity => {
-                // done once answered; a response that shows a restart asks for it again below
-                self.integrity = false;
-                match self
-                    .exchange(wire, seq, func::READ, &class_read(&[0]))
-                    .await?
-                {
-                    Some(_) => self.polled(wire, seq).await?,
-                    None => {
-                        self.integrity = true;
-                        self.hold = Instant::now() + TASK_RETRY;
-                    }
-                }
-            }
-            Task::Scan(i) => {
-                let objects = class_read(&self.scans[i].0);
-                if self
-                    .exchange(wire, seq, func::READ, &objects)
-                    .await?
-                    .is_some()
-                {
-                    self.polled(wire, seq).await?;
-                }
-                self.due[i] = Instant::now() + self.scans[i].1;
+            None => self.hold = Instant::now() + TASK_RETRY,
+        }
+        Ok(())
+    }
+
+    async fn integrity_poll(&mut self, wire: &mut Wire, seq: &mut u8) -> Result<(), Lost> {
+        // done once answered; a response that shows a restart asks for it again (`absorb`)
+        self.integrity = false;
+        match self
+            .exchange(wire, seq, func::READ, &class_read(&[0]))
+            .await?
+        {
+            Some(_) => self.polled(wire, seq).await?,
+            None => {
+                self.integrity = true;
+                self.hold = Instant::now() + TASK_RETRY;
             }
         }
+        Ok(())
+    }
+
+    async fn scan(&mut self, wire: &mut Wire, seq: &mut u8, i: usize) -> Result<(), Lost> {
+        let objects = class_read(&self.scans[i].0);
+        if self
+            .exchange(wire, seq, func::READ, &objects)
+            .await?
+            .is_some()
+        {
+            self.polled(wire, seq).await?;
+        }
+        self.due[i] = Instant::now() + self.scans[i].1;
         Ok(())
     }
 
@@ -873,42 +945,52 @@ impl Session {
         if Instant::now() >= fep.next_tick {
             fep.next_tick = Instant::now() + fep.cycle;
             for (tag, out) in fep.outs.iter_mut() {
-                if let Some(v) = out.due(&store, tag) {
-                    fep.todo.push((tag.clone(), v));
-                }
+                let due = out.due(&store, tag);
+                fep.todo.extend(due.map(|v| (tag.clone(), v)));
             }
         }
         while let Some((tag, v)) = self.fep.as_mut().and_then(|f| f.todo.pop()) {
-            let p = &self.shared.points[&tag];
-            let (objects, nan) = match v {
-                Value::Binary(on) => (crob(p.addr, on), false),
-                Value::Analog(x) => (ao_f32(p.addr, x), x.is_nan()),
-            };
-            let c = Command {
-                sbo: p.sbo,
-                objects,
-                nan,
-            };
-            // a NaN is never sent; a command the outstation refuses is not repeated: the next poll shows what it holds
-            let sent = match nan {
-                true => Ok(false),
-                false => self.command(wire, seq, &c).await,
-            };
-            if matches!(sent, Ok(false)) {
-                tracing::warn!(
-                    "dnp3-client: {}: tag `{tag}` = {v:?} was not taken by the outstation",
-                    self.name
-                );
-            }
-            if let Some(out) = self.fep.as_mut().and_then(|f| f.outs.get_mut(&tag)) {
-                match sent {
-                    Ok(_) => out.echo.sent_ok(v),
-                    Err(Lost) => out.echo.sent_failed(),
-                }
-            }
-            sent?;
+            self.send_down(wire, seq, &tag, v).await?;
         }
         Ok(())
+    }
+
+    /// Command output `tag` to `v` and tell its echo state how it went.
+    async fn send_down(
+        &mut self,
+        wire: &mut Wire,
+        seq: &mut u8,
+        tag: &str,
+        v: Value,
+    ) -> Result<(), Lost> {
+        let p = &self.shared.points[tag];
+        let (objects, nan) = match v {
+            Value::Binary(on) => (crob(p.addr, on), false),
+            Value::Analog(x) => (ao_f32(p.addr, x), x.is_nan()),
+        };
+        let c = Command {
+            sbo: p.sbo,
+            objects,
+            nan,
+        };
+        // a NaN is never sent; a command the outstation refuses is not repeated: the next poll shows what it holds
+        let sent = match nan {
+            true => Ok(false),
+            false => self.command(wire, seq, &c).await,
+        };
+        if matches!(sent, Ok(false)) {
+            tracing::warn!(
+                "dnp3-client: {}: tag `{tag}` = {v:?} was not taken by the outstation",
+                self.name
+            );
+        }
+        if let Some(out) = self.fep.as_mut().and_then(|f| f.outs.get_mut(tag)) {
+            match sent {
+                Ok(_) => out.echo.sent_ok(v),
+                Err(Lost) => out.echo.sent_failed(),
+            }
+        }
+        sent.map(|_| ())
     }
 
     /// The points of a response. `bennu` mode: stock's handler, into the cache. `fep` mode: binary and analog values, inputs
@@ -951,29 +1033,49 @@ impl Session {
         Ok(())
     }
 
-    /// A fragment that arrived with no request outstanding.
-    async fn unsolicited(&mut self, wire: &mut Wire, fragment: &[u8]) -> Result<(), Lost> {
-        match decode(fragment) {
-            Ok(r) if r.unsol => self.absorb(wire, &r).await,
+    /// One fragment that arrived while the response with sequence `want` is awaited: `Some` when it is that response's last
+    /// fragment. An unsolicited response is taken; a response with another sequence number, or a fragment that does not
+    /// parse, is discarded and changes nothing.
+    /// ponytail: a response in several fragments is taken fragment by fragment and the last one returned; the next request's
+    /// sequence number is this request's plus one whatever the outstation counted to.
+    async fn answer(
+        &mut self,
+        wire: &mut Wire,
+        fragment: &[u8],
+        want: &mut u8,
+        func: u8,
+    ) -> Result<Option<Response>, Lost> {
+        let r = match decode(fragment) {
+            Ok(r) if r.unsol => {
+                self.absorb(wire, &r).await?;
+                return Ok(None);
+            }
+            Ok(r) if r.seq == *want => r,
             Ok(r) => {
                 tracing::warn!(
-                    "dnp3-client: {}: discarded a response (sequence {}) nothing asked for",
+                    "dnp3-client: {}: discarded a response with sequence {}, not awaited",
                     self.name,
                     r.seq
                 );
-                Ok(())
+                return Ok(None);
             }
             Err(why) => {
                 tracing::warn!("dnp3-client: {}: discarded a fragment: {why:?}", self.name);
-                Ok(())
+                return Ok(None);
             }
+        };
+        // the clear-restart's own answer is judged by its task, not as news of a restart
+        let was = (self.clear, self.integrity);
+        self.absorb(wire, &r).await?;
+        if func == func::WRITE {
+            (self.clear, self.integrity) = was;
         }
+        *want = (*want + 1) & 0x0F;
+        Ok(r.fin.then_some(r))
     }
 
-    /// One request and its response, `None` when none came in time. Unsolicited responses that arrive meanwhile are taken; a
-    /// response with another sequence number, or one that does not parse, is discarded and changes nothing.
-    /// ponytail: a response in several fragments is taken fragment by fragment and the last one returned; the next request's
-    /// sequence number is this request's plus one whatever the outstation counted to.
+    /// One request and its response, `None` when none came in time (`bennu` mode: stock keeps the connection and tries the
+    /// next task; a FEP takes the outstation for gone).
     async fn exchange(
         &mut self,
         wire: &mut Wire,
@@ -992,38 +1094,13 @@ impl Session {
                     "dnp3-client: {}: no response to function {func} (sequence {want})",
                     self.name
                 );
-                // stock keeps the connection and tries the next task; a FEP takes the outstation for gone
                 return match self.fep {
                     Some(_) => Err(Lost),
                     None => Ok(None),
                 };
             };
-            let fragment = fragment?;
-            match decode(&fragment) {
-                Ok(r) if r.unsol => self.absorb(wire, &r).await?,
-                Ok(r) if r.seq != want => {
-                    tracing::warn!(
-                        "dnp3-client: {}: discarded a response with sequence {}, expected {want}",
-                        self.name,
-                        r.seq
-                    );
-                }
-                Ok(r) => {
-                    // the clear-restart's own answer is judged by its task
-                    let restart_is_news = func != func::WRITE;
-                    let was = (self.clear, self.integrity);
-                    self.absorb(wire, &r).await?;
-                    if !restart_is_news {
-                        (self.clear, self.integrity) = was;
-                    }
-                    if r.fin {
-                        return Ok(Some(r));
-                    }
-                    want = (want + 1) & 0x0F;
-                }
-                Err(why) => {
-                    tracing::warn!("dnp3-client: {}: discarded a response: {why:?}", self.name)
-                }
+            if let Some(r) = self.answer(wire, &fragment?, &mut want, func).await? {
+                return Ok(Some(r));
             }
         }
     }

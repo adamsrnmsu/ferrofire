@@ -353,3 +353,67 @@ async fn a_refused_select_is_not_operated_and_the_cache_is_optimistic_anyway() {
         "select without operate: {funcs:?}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn while_nothing_is_awaited_an_unsolicited_response_is_taken_and_anything_else_discarded() {
+    // after the answer to the first scan (request 1) come, unasked: a response numbered 9 that says load-power is 7, a fragment
+    // too short to be anything, and an unsolicited response (CON set) that says brkr is on
+    let o = scripted(|n, req| match (n, req[1]) {
+        (_, 0) => vec![],
+        (1, _) => vec![
+            answer(req, ""),
+            unhex("c98100001e03000000 07000000".replace(' ', "").as_str()),
+            vec![0xc0],
+            unhex("f28200000201170102 81".replace(' ', "").as_str()),
+        ],
+        _ => vec![answer(req, "")],
+    })
+    .await;
+    let cmdif = free_port();
+    let _client = modules(&client_xml(o.port, cmdif));
+    until("the confirm", Duration::from_secs(5), || {
+        o.got().contains(&master::confirm(2, true))
+    })
+    .await;
+    assert_eq!(
+        shown(&command(cmdif, "READ=brkr").await),
+        "ACK=brkr:true\\x00"
+    );
+    assert_eq!(
+        shown(&command(cmdif, "READ=load-power").await),
+        "ACK=load-power:0.000000\\x00"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stream_that_is_not_dnp3_is_closed_and_the_master_connects_again() {
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = l.local_addr().unwrap().port();
+    let accepted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let a2 = accepted.clone();
+    tokio::spawn(async move {
+        loop {
+            let (mut s, _) = l.accept().await.unwrap();
+            a2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            tokio::spawn(async move {
+                let mut buf = [0u8; 64];
+                let _ = s.read(&mut buf).await;
+                // a frame for another master first (stepped over), then bytes that are no link frame
+                let _ = s
+                    .write_all(&link::encode(0x44, 7, 10, &[0xC0, 0xC0, 0x81, 0, 0]))
+                    .await;
+                let _ = s.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await;
+                // the master must hang up: read until it does
+                while let Ok(1..) = s.read(&mut buf).await {}
+            });
+        }
+    });
+    let cmdif = free_port();
+    let _client = modules(&client_xml(port, cmdif));
+    let n = || accepted.load(std::sync::atomic::Ordering::SeqCst);
+    until("a second connection", Duration::from_secs(6), || n() >= 2).await;
+    assert_eq!(
+        shown(&command(cmdif, "READ=brkr").await),
+        "ACK=brkr:false\\x00"
+    );
+}
