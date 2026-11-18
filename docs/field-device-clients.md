@@ -96,7 +96,10 @@ left out with a WARN (an error under `--strict`). In `fep` mode `<min-value>` eq
   the ones that changed locally: a `<logic>` assignment, a write to one of the device's servers, a command-interface `WRITE`.
 - **The echo rule.** A value is sent only when it differs both from the last value sent and from the last value polled in for that point,
   so what a poll brought is never written back. Values are compared as the wire carries them (a register after scaling, a DNP3 analog
-  output as a float32): a setpoint the device cannot hold exactly is sent once, and the tag keeps the value that was asked for. A local change wins over a poll that arrives at the same time; the poll result for that
+  output as a float32): a setpoint a register or a float32 cannot hold exactly is sent once, and the tag keeps the value that was
+  asked for. What the device reports back in another form is a different value: an outstation that reports an analog output's status
+  as an integer (stock's and ferrofire's do) shows 42 for a setpoint of 42.5, the tag takes the 42, and logic that keeps assigning 42.5
+  sends it again after each scan. Use whole numbers there, or do not hold such a setpoint from logic. A local change wins over a poll that arrives at the same time; the poll result for that
   point is ignored until the write is answered. The value a tag starts with (0 or false) counts as sent, so a FEP does not open by
   zeroing every output.
 - **A device that is away.** A request has 1000 ms. A failed poll leaves the tags at their last values and turns `<status-tag>` false; the
@@ -152,5 +155,5 @@ every half second and is served as analog input 0. When the level passes 900 the
 
 `tests/modbus_client.rs` and `tests/dnp3_master.rs` (the stock transcripts replayed in one process, the framing rules a transcript cannot
 show), `tests/fd_fep.rs` (whole devices: gateway, write-down without echo, a peer that is down or silent, a write while it is down, NaN and
-range ends, exception 2), `tests/cmdif_net.rs`, unit tests beside the code, fuzz targets `fd_modbus_client` and `fd_dnp3_master`, and
+range ends, exception 2), `tests/cmdif_net.rs`, unit tests beside the code, fuzz targets `fd_cmdif`, `fd_modbus_client` and `fd_dnp3_master`, and
 against stock bennu: `make conformance PROTO=modbus-client` and `PROTO=dnp3-client` ([conformance/README.md](../conformance/README.md#field-device-clients)).

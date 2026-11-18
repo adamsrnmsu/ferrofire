@@ -71,7 +71,7 @@ bench-maxrate-control: image   # grid flip latency at each engine dt (bench/run_
 	for d in 50 20 10 5 2 1; do DT_MS=$$d REPS=3 RS=1,10 CELLS=breaker:seq:100,breaker:sim:100 OUTDIR=docs/bench/results/maxrate/control/dt$$d python3 bench/run_control.py || exit 1; done
 bench-dg-report:   # docs/bench/datagram-v1-bench.md from the datagram v1 raw results
 	python3 bench/dg_report.py
-FUZZ_TARGETS := request datagram expr model fd_datagram fd_config fd_modbus fd_modbus_client fd_dnp3 fd_dnp3_master fd_iec61850 fd_iccp fd_mqtt fd_scpi fd_hislip fd_vxi11
+FUZZ_TARGETS := request datagram expr model fd_datagram fd_config fd_cmdif fd_modbus fd_modbus_client fd_dnp3 fd_dnp3_master fd_iec61850 fd_iccp fd_mqtt fd_scpi fd_hislip fd_vxi11
 FUZZ_SECS ?= 10
 fuzz-smoke: image   # every fuzz target for $(FUZZ_SECS)s each (CI); crashes land in fuzz/artifacts, turn each into a test
 	$(IN) bash -c 'cd fuzz && for t in $(FUZZ_TARGETS); do cargo +nightly fuzz run $$t -- -max_total_time=$(FUZZ_SECS) -max_len=4096 || exit 1; done'
