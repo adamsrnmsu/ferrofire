@@ -411,6 +411,25 @@ async fn the_command_interface_in_fep_mode_reads_the_tag_and_writes_through_the_
     assert_eq!(requests(&r.tap, 6).len(), 1);
 }
 
+/// The gateway config in docs/field-device-clients.md loads as written, under `--strict` too.
+#[test]
+fn the_gateway_example_in_the_docs_loads() {
+    use ferrofire::fd::config::{Config, Opts};
+    let doc = include_str!("../docs/field-device-clients.md");
+    let from = doc.find("<SCEPTRE>").expect("the example");
+    let to = from + doc[from..].find("</SCEPTRE>").unwrap() + "</SCEPTRE>".len();
+    // the server would open its default event log in the working directory
+    let xml = doc[from..to].replace(
+        "<dnp3-server>",
+        "<dnp3-server><event-logging>/dev/null</event-logging>",
+    );
+    let cfg = Config::parse(&xml, ferrofire::fd::proto::REGISTRY, &Opts { strict: true }).unwrap();
+    let names: Vec<_> = cfg.modules.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["modbus-client", "dnp3-server"]);
+    assert_eq!(cfg.store.get("rtu-2-up"), Some(Binary(false)));
+    assert_eq!(cfg.cycle_ms, 100);
+}
+
 // ---- the same over DNP3 -----------------------------------------------------------------------------------------------------
 
 mod dnp3 {

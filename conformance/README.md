@@ -23,7 +23,8 @@ Output lands in `target/conformance/<PROTO>/`: the pcap, `peer.out`, `dut.out`, 
     conformance/lib.sh        expert_clean, want_field, want_zeek
     conformance/<proto>/      proto.env (DUT config, start command, capture filter), peer.sh, check.sh, zeek.sh
 
-Add a protocol: copy `conformance/dnp3/`, change the four files. Only `ff-conf-dut` and `ff-conf-peers` are created or removed.
+Add a protocol: copy `conformance/dnp3/`, change the four files. Only `ff-conf-dut` and `ff-conf-peers` are created or removed (`CONF_NAME` changes the
+prefix). A client DUT gets its stock server through `DUT_EXTRA` and `DUT_PRE` in `proto.env` (see `modbus-client/`).
 Files go in and out with `docker cp` (no bind mounts: the Lima docker daemon cannot see every host path).
 
 ## Elasticsearch / OpenSearch
@@ -112,6 +113,50 @@ function codes. **Hostile input and descriptors**: `tests/modbus_net.rs` (2000 c
 `/proc/self/fd` must not grow; 300 concurrent clients; bad frames get no answer and the next client is served), `tests/modbus_emfile.rs` (descriptor limit lowered: the
 accept loop reports once, backs off and serves again when descriptors are free), `fuzz/fuzz_targets/fd_modbus.rs`. These are the bennu #79/#81 shapes (everything-burger's
 `modbus-churn` and `modbus-badframes`).
+
+## Field-device clients
+
+`<modbus-client>` and `<dnp3-client>` in `bennu` mode ([docs/field-device-clients.md](../docs/field-device-clients.md)), judged against the stock fd-client itself:
+the client is the DUT, the **stock** server runs beside it in the same container (under `stock/servectl.py`, so the peers can stop and start it), and
+`stock/probe_cmdif.py` drives the client's command interface the way `bennu-probe` does, with tcpdump on the protocol port.
+
+    DUT=rust make conformance PROTO=modbus-client    # our client vs the stock modbus-server; check.sh wants the stock client's transcript
+    DUT=rust make conformance PROTO=dnp3-client      # our master vs the stock outstation
+    conformance/stock/run-stock.sh modbus-client     # re-record stock/client-modbus.golden and .pcap from the stock client (also: dnp3-client)
+
+The goldens were recorded from `ffc-stock-2026.11.03:22.04` (bennu v2026.11.03); `STOCK_IMAGE` names the stock image when it is not `bennu:arm64`,
+`CONF_NAME` the container prefix, `TP_DOCKER_HOST` the daemon that has the image and `ferrofire-testpeers`.
+
+**The transcript** (`stock/client-<proto>.golden`): per command `request<TAB>reply`, then what the capture saw until the next command, `>` from the client
+and `<` from the server: payload bytes, and `SYN`, `FIN`, `RST`. For Modbus that is every byte. For DNP3 a clock decides where a periodic scan falls, so the
+compared transcript shows each frame as link control, addresses and the application fragment with CRCs, the transport octet and the sequence number taken out, and
+leaves out the all-classes scans and refused connection attempts; `client-dnp3-raw.golden` has every frame as sent, and `check.sh` notes whether ours equals that
+too (it has, frame for frame). `tests/modbus_client.rs` and `tests/dnp3_master.rs` replay the commands in one process and check the exact startup and command bytes.
+
+**What stock does** (recorded; rows 7 to 9 of [the protocol plan](../docs/field-device-protocols-plan.md) carry the detail):
+- Command interface: the op is `QUERY`/`READ`/`WRITE` in upper or lower case only; a `WRITE` is a binary write for `true`/`false` and otherwise whatever `stod`
+  makes of the text (` 7`, `7x`, `0x10`, `nan`), and the reply echoes the text.
+- Modbus: one connection kept open, one reconnect attempt by the request that finds it closed, transaction ids from 3 counting every request, no polling;
+  `value*slope + intercept` through 32 bits without a clamp; one range per address for the whole connection, the last declared.
+- DNP3: class 0 poll, clear-restart, class 0 poll, then the all-classes scan every `scan-rate`; no enable- or disable-unsolicited request; `READ` from a cache that
+  only binary and analog inputs update, by address, into whichever tag has it; `WRITE` updates the cache first and always answers ACK; a command given while the
+  outstation is away is dropped; reconnects at once, then 1, 2, 4 ... s apart.
+
+**Where we differ on purpose:**
+| Stock | Ours | Why |
+|---|---|---|
+| a failed READ or WRITE answers `ERR=Failed reading tag 't': ` followed by the bytes of a destroyed string (different every time; masked `<text>` in the goldens) | the text stock meant: `readRegisterByTag(): Failure`, `writeCoil(): Failed writing coil` | never send memory |
+| a request without `=`, a `WRITE` without `:value`, a value `stod` refuses or that overflows a double (`WRITE=gen-power:TRUE`): the device dies (`terminate called after throwing an instance of 'std::invalid_argument'`) | `ERR=Malformed request (must be QUERY=\|READ=tag\|WRITE=tag:value)` or `ERR=Failed writing tag 't': value 'v' is not true, false or a number`; nothing is written | a typo must not take the FEP down |
+| Modbus: no response timeout; a server that accepts and stays silent blocks the client and its command interface for good (no reply in 100 s) | 1000 ms per request, then the `ERR=Failed ...` reply and a new connection for the next request | a dead peer must not wedge the device |
+| a tag mapped twice: the last mapping wins | the first wins, with a WARN (an error under `--strict`) | one rule for every module that declares tags |
+| a command-interface bind failure exits the device | logged; the client runs without it | the rest of the device keeps running, as for every module |
+| DNP3: a connection lost is reopened at once, also when it never carried a response (a tight loop through a relay in front of a dead outstation) | at once only after a session that was answered; otherwise the 1, 2, 4 ... 60 s pauses | no connection storm |
+| DNP3: after a clear-restart that leaves IIN1.7 set, opendnp3 stops clearing but polls class 0 again on every response that carries the bit | the class 0 poll is not re-demanded either | no poll loop against an outstation that never clears the bit |
+| DNP3: link-layer requests from the outstation (link status, reset) are answered by opendnp3 | not answered | the stock outstation and ours send none; `ponytail:` in `master.rs` |
+| DNP3: a response in several fragments advances the master's sequence as opendnp3 counts | each fragment is taken; the next request is the last request's sequence plus one | untested against stock (its responses are single fragments here) |
+| an out-of-range Modbus write is converted from double to `uint16_t`, which C++ leaves undefined: the arm64 build wraps it (`2000` over 0..1000 leaves as `fffe`), another build may not | the arm64 bytes, on every architecture | the capture is from arm64 |
+
+`fep` mode has no stock counterpart; its rules are in [docs/field-device-clients.md](../docs/field-device-clients.md) and its tests in `tests/fd_fep.rs`.
 
 ## IEC 61850 (no oracle)
 Bennu never loads an IEC 61850 server, so `conformance/iec61850/` has only the acceptance half, and `proto.env` sets `DUT_DEFAULT=rust`:

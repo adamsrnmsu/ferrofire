@@ -87,6 +87,18 @@ test = false
 doc = false
 
 [[bin]]
+name = "fd_modbus_client"
+path = "fuzz_targets/fd_modbus_client.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fd_dnp3_master"
+path = "fuzz_targets/fd_dnp3_master.rs"
+test = false
+doc = false
+
+[[bin]]
 name = "fd_scpi"
 path = "fuzz_targets/fd_scpi.rs"
 test = false
