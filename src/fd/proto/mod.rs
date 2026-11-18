@@ -2,6 +2,7 @@
 //! child, parses its own element, and serves on the shared `Store` until told to stop. To add one: write
 //! `proto/<name>.rs` implementing `Module`, add a `REGISTRY` line behind its `proto-<name>` feature, and list its tag in `KNOWN`.
 
+pub mod client;
 #[cfg(feature = "proto-dnp3")]
 pub mod dnp3;
 #[cfg(feature = "proto-iccp")]

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SCEPTRE>
+    <field-device>
+        <name>fep</name>
+        <comms>
+            <dnp3-client>
+                <address>1</address>
+                <scan-rate>5</scan-rate>
+                <dnp3-connection>
+                    <endpoint>tcp://10.0.0.11:20000</endpoint>
+                    <address>10</address>
+                    <analog-input>
+                        <address>0</address>
+                        <tag>var_rtu-1_I0</tag>
+                    </analog-input>
+                    <binary-output>
+                        <address>0</address>
+                        <tag>var_rtu-1_O0</tag>
+                    </binary-output>
+                </dnp3-connection>
+                <command-interface>tcp://10.0.0.20:1330</command-interface>
+            </dnp3-client>
+            <modbus-client>
+                <modbus-connection>
+		    <endpoint>tcp://10.0.0.12:502</endpoint>
+		    <unit-id>1</unit-id>
+                    <input-register>
+                        <address>30000</address>
+                        <max-value>1000</max-value>
+                        <min-value>0</min-value>
+                        <tag>var_rtu-2_I0</tag>
+                    </input-register>
+                    <coil>
+                        <address>0</address>
+                        <tag>var_rtu-2_O0</tag>
+                    </coil>
+                </modbus-connection>
+                <command-interface>tcp://10.0.0.20:1331</command-interface>
+            </modbus-tcp-client>
+        </comms>
+    </field-device>
+</SCEPTRE>
