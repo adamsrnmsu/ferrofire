@@ -17,7 +17,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
@@ -411,7 +410,7 @@ impl Client {
 struct Link {
     endpoint: String,
     unit: u8,
-    stream: Option<TcpStream>,
+    stream: Option<net::Conn>,
     tid: u16,
     buf: Vec<u8>,
 }
@@ -431,7 +430,7 @@ impl Link {
         self.buf.clear();
         self.stream = match tokio::time::timeout(DEADLINE, net::connect(&self.endpoint)).await {
             Ok(Ok(s)) => {
-                let _ = s.set_nodelay(true);
+                s.nodelay();
                 Some(s)
             }
             Ok(Err(e)) => {

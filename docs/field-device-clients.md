@@ -9,9 +9,17 @@ One setting per element, `<mode>`, picks what it is:
 - **`fep`**: a front-end processor or gateway. The client polls the remote devices into ferrofire tags, so `<logic>` and the device's own
   servers use and re-serve them, and a local change to an output tag is written down to the remote device.
 
-No dependency was added: the Modbus client reuses the server's MBAP codec, the DNP3 master the outstation's link, transport and
+The only dependency is `tokio-serial` (feature `proto-serial`, default on; no udev), for serial endpoints. The Modbus client reuses the server's MBAP codec, the DNP3 master the outstation's link, transport and
 application layers (`src/fd/proto/modbus/client.rs`, `src/fd/proto/dnp3/master.rs`, shared parts in `src/fd/proto/client.rs`), and the
-command interface is a `zeromq` REP socket (`src/fd/cmdif.rs`). TCP only: a serial endpoint fails as `net.rs` fails it today.
+command interface is a `zeromq` REP socket (`src/fd/cmdif.rs`).
+
+**Serial endpoints.** An `<endpoint>` without `tcp://` is a device path, opened by `net::connect` (`net::open_serial`, `src/fd/net.rs`) at 9600 8N1,
+no flow control, raw. Modbus: MBAP framing on the port, no slave byte, no CRC, as stock (`SerialChannel.cpp`); stock stores 9600 8N1 and never applies it, so
+its port runs at the OS defaults, ours at 9600 8N1; the request timeout is 1000 ms as on TCP (stock `SerialClient.hpp`). DNP3: opendnp3's `SerialSettings`
+defaults, client address 1, link, transport and application layers as on TCP; its `asyncOpenDelay` (500 ms) is declared in `SerialSettings.h` and never read by
+the library, so there is no delay after open. A port that cannot be opened is retried as a refused connection is. The servers have no serial path yet (bead
+ww-z5w), so `tests/serial_clients.rs` puts a pty pair between our client and our TCP server; stock-over-pty is not run (the stock and testpeers images have no
+`socat`).
 
 ## Config
 

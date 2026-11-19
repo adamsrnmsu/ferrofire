@@ -7,6 +7,8 @@ targets = ["aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]
 allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib", "CC0-1.0"]
 confidence-threshold = 0.9
 unused-allowed-license = "allow"
+# serialport (tokio-serial's port layer, feature proto-serial) is MPL-2.0: file-level copyleft, used unmodified as a library, so only that crate is excepted.
+exceptions = [{ allow = ["MPL-2.0"], crate = "serialport" }]
 
 [advisories]
 yanked = "deny"

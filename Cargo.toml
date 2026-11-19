@@ -22,6 +22,8 @@ roxmltree = "0.20"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "signal", "sync", "io-util", "macros"] }
 tokio-util = { version = "0.7", default-features = false }
 socket2 = { version = "0.6", features = ["all"] }
+# serial endpoints (F6, src/fd/net.rs); no udev port enumeration
+tokio-serial = { version = "5", default-features = false, optional = true }
 # IEC 61850 / MMS (MIT OR Apache-2.0, sans-IO, no unsafe). Pre-1.0 and every minor breaks, hence the exact pin (spike: bead ww-otj.45).
 iec61850-rs = { version = "=0.4.0", default-features = false, features = ["server", "goose", "net"], optional = true }
 
@@ -44,7 +46,7 @@ proto-modbus = []
 proto-dnp3 = []
 proto-iec104 = []
 proto-bacnet = []
-proto-serial = []
+proto-serial = ["dep:tokio-serial"]
 proto-iec61850 = ["dep:iec61850-rs"]
 proto-iccp = ["dep:iec61850-rs"]
 proto-mqtt = ["dep:rumqttc", "dep:prost", "dep:rustls"]

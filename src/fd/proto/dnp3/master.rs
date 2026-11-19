@@ -17,7 +17,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -691,7 +690,7 @@ struct Lost;
 
 /// One connection's socket: link frames out, application fragments in.
 struct Wire {
-    stream: TcpStream,
+    stream: net::Conn,
     local: u16,
     remote: u16,
     buf: Vec<u8>,
@@ -803,7 +802,7 @@ impl Wire {
 
     /// A secondary-station frame to the outstation. Sent without waiting: a few octets, and a full socket buffer means the
     /// outstation is not reading anyway.
-    fn reply(&self, func: u8) {
+    fn reply(&mut self, func: u8) {
         let _ = self.stream.try_write(&link::encode(
             link::DIR | func,
             self.remote,
@@ -861,7 +860,7 @@ impl Session {
             self.answered = false;
             let stream = tokio::time::timeout(RESPONSE_TIMEOUT, net::connect(&self.endpoint)).await;
             if let Ok(Ok(stream)) = stream {
-                let _ = stream.set_nodelay(true);
+                stream.nodelay();
                 tracing::info!("dnp3-client: {}: connected", self.name);
                 tokio::select! { _ = stop.cancelled() => return, _ = self.session(stream) => {} }
                 tracing::warn!("dnp3-client: {}: connection lost", self.name);
@@ -904,7 +903,7 @@ impl Session {
     }
 
     /// Serve one connection until it is lost.
-    async fn session(&mut self, stream: TcpStream) {
+    async fn session(&mut self, stream: net::Conn) {
         let mut wire = Wire {
             stream,
             local: self.local,
@@ -1245,9 +1244,12 @@ mod tests {
     async fn the_keep_alive_is_a_request_link_status_from_the_master() {
         use tokio::io::AsyncReadExt;
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let (a, b) = tokio::join!(TcpStream::connect(l.local_addr().unwrap()), l.accept());
+        let (a, b) = tokio::join!(
+            tokio::net::TcpStream::connect(l.local_addr().unwrap()),
+            l.accept()
+        );
         let mut w = Wire {
-            stream: a.unwrap(),
+            stream: net::Conn::Tcp(a.unwrap()),
             local: 1,
             remote: 10,
             buf: vec![],

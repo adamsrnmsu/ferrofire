@@ -158,6 +158,13 @@ too (it has, frame for frame). `tests/modbus_client.rs` and `tests/dnp3_master.r
 | DNP3 server: `class`, `sgvar`, `egvar`, `deadband`, `event-buffer-size` in the config are refused or ignored; a control's value reaches the output status only with the next refresh; outputs raise no events | stock v2026.11.03 takes them (default class 0, output status updated at once, skipped while a write is pending) | the generator never emits them; ASSIGN_CLASS is replicated (field-device-spec 4.2.0) |
 | an out-of-range Modbus write is converted from double to `uint16_t`, which C++ leaves undefined: the arm64 build wraps it (`2000` over 0..1000 leaves as `fffe`), another build may not | the arm64 bytes, on every architecture | the capture is from arm64 |
 
+**Serial endpoints** (plan F6, bead ww-y5q): an `<endpoint>` that is a device path is opened at 9600 8N1, no flow control, raw. Modbus puts MBAP on the port (no slave byte, no CRC);
+DNP3 uses the same link frames as on TCP. Recorded from the source, not from the stock image, because neither `ffc-stock-2026.11.03:22.04` nor `ferrofire-testpeers`
+has `socat` and our servers have no serial path yet (ww-z5w): opendnp3's `asyncOpenDelay` (500 ms) is never read, so there is no delay after open; stock Modbus never
+applies its stored 9600 8N1 (our port is 9600 8N1 raw, so a peer at the OS default of 9600 is unaffected). `tests/serial_clients.rs` runs both clients over a pty pair
+into our TCP server (the first DNP3 frame equals the TCP one, every Modbus request is 12 octets for one register); a conformance run of the stock server behind a
+pty (a `python3` `pty.openpty` relay would do, the image has python3) is the open item in ww-z5w.
+
 `fep` mode has no stock counterpart; its rules are in [docs/field-device-clients.md](../docs/field-device-clients.md) and its tests in `tests/fd_fep.rs`.
 
 ## IEC 61850 (no oracle)
