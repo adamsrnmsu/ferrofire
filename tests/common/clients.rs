@@ -77,9 +77,11 @@ pub fn device(xml: &str) -> Device {
     }
 }
 
-/// Poll `ok` every 10 ms until it holds; panics with `what` after `within`.
+/// Poll `ok` every 10 ms until it holds; panics with `what` after three times `within`. `within` is the time the step takes on
+/// an idle host; the slack is for the llvm-cov build that `make crap` runs with every test binary at once, where 2-3 s waits
+/// timed out (ww-a12, ww-ke0). A passing step returns as soon as `ok` holds, so the slack only lengthens a failure.
 pub async fn until(what: &str, within: Duration, mut ok: impl FnMut() -> bool) {
-    let end = tokio::time::Instant::now() + within;
+    let end = tokio::time::Instant::now() + within * 3;
     while !ok() {
         assert!(
             tokio::time::Instant::now() < end,

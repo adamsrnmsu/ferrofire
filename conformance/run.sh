@@ -17,6 +17,7 @@ BENNU_DATA=${BENNU_DATA:-$HOME/git/sceptre-bennu/data/configs/ep}
 DUT=${DUT:-${DUT_DEFAULT:-stock}}
 # STOCK_IMAGE: the stock oracle image (default ffc-stock-2026.11.03:22.04, bennu v2026.11.03). CONF_NAME: the container name prefix.
 STOCK_IMAGE=${STOCK_IMAGE:-ffc-stock-2026.11.03:22.04}; N=${CONF_NAME:-ff-conf}
+PEER_FLAGS=$(printf %s "${PEER_FLAGS:-}" | sed "s/ff-conf-dut/$N-dut/g")   # proto.env names the default DUT container; follow CONF_NAME
 if [ "$DUT" = stock ]; then DUT_IMAGE=$STOCK_IMAGE; DUT_CMD=$STOCK_CMD; fi
 # DUT=rust: our binary (FF_BIN, default target-linux/debug/ferrofire from make test/linux) is copied into a stock-image container, or into
 # RUST_DUT_IMAGE (the binary needs only glibc; a protocol bennu has no part in can name the testpeers image there)
