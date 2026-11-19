@@ -756,3 +756,58 @@ async fn a_setpoint_off_the_register_grid_is_written_once_and_the_tag_does_not_f
     assert!(other <= 12, "the tag left the wanted value {other} times");
     assert_eq!(r.fep.store.get_f64("setpoint"), Some(3.3333));
 }
+
+const REGS3: &str = r#"<modbus-connection><endpoint>tcp://127.0.0.1:PORT</endpoint><unit-id>1</unit-id><scan-rate>0.1</scan-rate>
+       <holding-register><address>40000</address><max-value>1000</max-value><min-value>0</min-value><tag>a</tag></holding-register>
+       <holding-register><address>40001</address><max-value>1000</max-value><min-value>0</min-value><tag>b</tag></holding-register>
+       <holding-register><address>40002</address><max-value>1000</max-value><min-value>0</min-value><tag>missing</tag></holding-register>
+       </modbus-connection>"#;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn outputs_changed_in_one_cycle_go_down_as_one_fc16_and_fall_back_on_exception_02() {
+    let (rtu_port, serve) = (free_port(), free_port());
+    let rtu = device(&rtu_xml(rtu_port));
+    listening(rtu_port, true).await;
+    let t = tap(rtu_port).await;
+    // setpoint and spare (40000, 40001) are also tags of the main connection; a, b, missing are a second view of 40000..40002
+    let fep = device(&fep_xml(
+        rtu_port,
+        serve,
+        &REGS3.replace("PORT", &t.port.to_string()),
+    ));
+    until("the first poll", S(3), || fep.store.get_f64("a").is_some()).await;
+    fep.store.write("a", Analog(100.0)).unwrap();
+    fep.store.write("b", Analog(200.0)).unwrap();
+    fep.store.write("missing", Analog(300.0)).unwrap();
+    // the RTU keeps the registers before the unmapped one, though it answers 2: wait for the fallback, not for the values
+    until("the fallback to single writes", S(4), || {
+        requests(&t, 6).len() >= 2
+    })
+    .await;
+    assert!(near(rtu.store.get_f64("setpoint"), 100.0) && near(rtu.store.get_f64("spare"), 200.0));
+    let multi = requests(&t, 16);
+    // merged first: 40000 x3, 100.0 / 200.0 / 300.0 over 0..1000 as registers; refused (the RTU lacks 40002), then alone
+    assert_eq!(multi.len(), 1, "{multi:?}");
+    assert_eq!(multi[0][..6], [16, 0x9c, 0x40, 0, 3, 6]);
+    let singles = requests(&t, 6);
+    for addr in [0x40u8, 0x41] {
+        assert!(singles.iter().any(|r| r[2] == addr), "{singles:?}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_outputs_with_a_gap_between_them_are_two_single_writes() {
+    let r = rig("").await;
+    until("the first poll", S(3), || {
+        r.fep.store.get_bool("rtu-up") == Some(true)
+    })
+    .await;
+    // setpoint 40000 and coil 0: different tables, so never one request
+    r.fep.store.write("setpoint", Analog(500.0)).unwrap();
+    r.fep.store.write("pump", Binary(true)).unwrap();
+    until("both on the RTU", S(3), || {
+        near(r.rtu.store.get_f64("setpoint"), 500.0) && r.rtu.store.get_bool("pump") == Some(true)
+    })
+    .await;
+    assert_eq!(requests(&r.tap, 16).len() + requests(&r.tap, 15).len(), 0);
+}
