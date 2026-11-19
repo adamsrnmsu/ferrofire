@@ -261,3 +261,25 @@ fn matches_the_stock_outstation_on_the_big_probe() {
         "big",
     );
 }
+
+/// ww-a12: output points raise g11/g42 events once ASSIGN_CLASS gives g10/g40 a class, and which group and variation is empty,
+/// unreadable or unknown (stock-out: g10v1, g10v3, g40v5..., g13; stock-grp: v0..12 of the groups without points).
+#[test]
+fn matches_the_stock_outstation_on_output_events() {
+    replay(
+        "diff-server.xml",
+        "stock-out.trace",
+        "stock-out.logs",
+        "out",
+    );
+}
+
+#[test]
+fn matches_the_stock_outstation_on_every_empty_group_variation() {
+    replay(
+        "diff-server.xml",
+        "stock-grp.trace",
+        "stock-grp.logs",
+        "grp",
+    );
+}

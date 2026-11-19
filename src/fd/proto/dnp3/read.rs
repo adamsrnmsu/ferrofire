@@ -43,16 +43,55 @@ enum Sel {
 #[derive(Debug, PartialEq)]
 enum Action {
     Nothing,
+    /// A variation that exists but cannot be read: IIN2.0 in the answer, which the other objects of the request still get.
+    Unreadable,
     Class0,
     /// Select events: type and class (None = every one), variation (0 = default), most to select.
-    Events(Option<Typ>, Option<u8>, u8, usize),
+    Events(Option<Table>, Option<u8>, u8, usize),
     Static(Table, u8, Sel),
 }
 
-/// Groups opendnp3 knows and the outstation answers with nothing (no such points here).
-const EMPTY_GROUPS: &[u8] = &[3, 4, 11, 20, 21, 22, 23, 42];
-/// Groups that exist but cannot be read.
-const UNREADABLE_GROUPS: &[u8] = &[12, 41, 50, 51, 52, 80];
+/// Variations of groups that have no points here and answer a READ with nothing (stock v2026.11.03, conformance/dnp3/stock-grp.golden).
+const EMPTY: &[(u8, &[u8])] = &[
+    (3, &[0, 2]),
+    (4, &[0, 1, 2, 3]),
+    (20, &[0, 1, 2, 5, 6]),
+    (21, &[0, 1, 2, 5, 6, 9, 10]),
+    (22, &[0, 1, 2, 5, 6]),
+    (23, &[0, 1, 2, 5, 6]),
+    (50, &[4]),
+];
+/// Variations that exist but cannot be read (IIN2.0 NO_FUNC_CODE_SUPPORT); every other variation is an unknown object.
+const UNREADABLE: &[(u8, &[u8])] = &[
+    (3, &[1]),
+    (10, &[1]),
+    (12, &[0, 1]),
+    (13, &[1, 2]),
+    (41, &[0, 1, 2, 3, 4]),
+    (50, &[1, 3]),
+    (51, &[1, 2]),
+    (52, &[1, 2]),
+    (80, &[1]),
+];
+
+/// The static groups with points: `(group, type, output status, variations)`. g10v1 (packed) is not readable, see `UNREADABLE`.
+const STATIC_GROUPS: [(u8, Typ, bool, &[u8]); 4] = [
+    (1, Typ::Binary, false, &[0, 1, 2]),
+    (10, Typ::Binary, true, &[0, 2]),
+    (30, Typ::Analog, false, &[0, 1, 2, 3, 4, 5, 6]),
+    (40, Typ::Analog, true, &[0, 1, 2, 3, 4]),
+];
+/// The event groups: `(group, type, output status, highest variation)`.
+const EVENTS: [(u8, Typ, bool, u8); 4] = [
+    (2, Typ::Binary, false, 3),
+    (11, Typ::Binary, true, 2),
+    (32, Typ::Analog, false, 8),
+    (42, Typ::Analog, true, 8),
+];
+
+fn listed(t: &[(u8, &[u8])], group: u8, var: u8) -> bool {
+    t.iter().any(|(g, v)| *g == group && v.contains(&var))
+}
 
 fn limit(range: &Range) -> Result<usize, u16> {
     match range {
@@ -82,10 +121,10 @@ fn class_action(var: u8, range: &Range) -> Result<Action, u16> {
 
 /// Objects that exist in opendnp3 but have no points here, or cannot be read; anything else is unknown.
 fn other_action(group: u8, var: u8) -> Result<Action, u16> {
-    if EMPTY_GROUPS.contains(&group) && var <= 10 {
+    if listed(EMPTY, group, var) {
         Ok(Action::Nothing)
-    } else if UNREADABLE_GROUPS.contains(&group) {
-        Err(iin::NO_FUNC)
+    } else if listed(UNREADABLE, group, var) {
+        Ok(Action::Unreadable)
     } else {
         Err(iin::UNKNOWN_OBJECT)
     }
@@ -95,21 +134,26 @@ fn static_action(typ: Typ, out: bool, var: u8, range: &Range) -> Result<Action, 
     Ok(Action::Static(Table { typ, out }, var, static_sel(range)?))
 }
 
-fn event_action(typ: Typ, var: u8, range: &Range) -> Result<Action, u16> {
-    Ok(Action::Events(Some(typ), None, var, limit(range)?))
+fn event_action(typ: Typ, out: bool, var: u8, range: &Range) -> Result<Action, u16> {
+    Ok(Action::Events(
+        Some(Table { typ, out }),
+        None,
+        var,
+        limit(range)?,
+    ))
 }
 
 fn classify(h: &Header) -> Result<Action, u16> {
     let (g, v) = (h.group, h.var);
-    match (g, v) {
-        (60, _) => class_action(v, &h.range),
-        (1, 0..=2) => static_action(Typ::Binary, false, v, &h.range),
-        (10, 0..=2) => static_action(Typ::Binary, true, v, &h.range),
-        (30, 0..=6) => static_action(Typ::Analog, false, v, &h.range),
-        (40, 0..=4) => static_action(Typ::Analog, true, v, &h.range),
-        (2, 0..=3) => event_action(Typ::Binary, v, &h.range),
-        (32, 0..=8) => event_action(Typ::Analog, v, &h.range),
-        _ => other_action(g, v),
+    if g == 60 {
+        return class_action(v, &h.range);
+    }
+    if let Some(&(_, typ, out, _)) = STATIC_GROUPS.iter().find(|s| s.0 == g && s.3.contains(&v)) {
+        return static_action(typ, out, v, &h.range);
+    }
+    match EVENTS.iter().find(|e| e.0 == g && v <= e.3) {
+        Some(&(_, typ, out, _)) => event_action(typ, out, v, &h.range),
+        None => other_action(g, v),
     }
 }
 
@@ -263,7 +307,7 @@ fn runs(t: Table, wide: bool, points: Vec<(u16, u8, Vec<u8>)>) -> Vec<Block> {
 fn event_blocks(events: &Events) -> Vec<Block> {
     let mut out: Vec<Block> = vec![];
     for (e, var) in events.selected() {
-        let (g, item) = (e.typ().group(), (e.id, e.encode(var)));
+        let (g, item) = (e.table().event_group(), (e.id, e.encode(var)));
         match out.last_mut() {
             Some(Block::Events {
                 group,
@@ -283,13 +327,17 @@ fn event_blocks(events: &Events) -> Vec<Block> {
 /// Plan the answer to a READ and select the events it asks for. A request that is refused as a whole selects nothing.
 pub fn plan(dev: &mut Device, objects: &[u8]) -> Result<Plan, u16> {
     let acts = actions(objects)?;
+    let mut flags = 0;
     for a in &acts {
-        if let Action::Events(typ, class, var, n) = a {
-            dev.events.select(*typ, *class, *var, *n);
+        match a {
+            Action::Events(typ, class, var, n) => {
+                dev.events.select(*typ, *class, *var, *n);
+            }
+            Action::Unreadable => flags |= iin::NO_FUNC,
+            _ => {}
         }
     }
     let mut blocks: VecDeque<Block> = event_blocks(&dev.events).into();
-    let mut flags = 0;
     for (t, var, sel) in loaders(&acts) {
         let (points, missing) = gather(dev, t, var, &sel);
         if missing {

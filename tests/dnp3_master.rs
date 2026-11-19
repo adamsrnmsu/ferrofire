@@ -429,6 +429,25 @@ async fn after_a_response_in_two_fragments_the_next_request_counts_both() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn after_a_response_that_stops_midway_the_next_request_counts_the_fragment_and_the_timeout() {
+    // ww-a12: opendnp3 adds one to its sequence for each response fragment it accepts and one more when the response times
+    // out. The integrity poll (0) gets fragment 0 (CON, not the last) and then silence: the next request carries 2, so a late
+    // fragment numbered 1 is not taken for its answer
+    let o = scripted(|n, req| match (n, req[1]) {
+        (_, 0) => vec![],
+        (0, _) => vec![app::response(0, app::FIR | app::CON, 0, &[])],
+        _ => vec![answer(req, "")],
+    })
+    .await;
+    let _client = modules(&client_xml(o.port, free_port()));
+    until("the next request", Duration::from_secs(12), || {
+        requests(&o).len() >= 2
+    })
+    .await;
+    assert_eq!(requests(&o)[1][0] & 0x0F, 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn the_masters_link_layer_answers_its_outstations_requests_as_opendnp3_does() {
     // ww-0sm: an outstation (address 10) to the master (1): REQUEST LINK STATUS, RESET LINK STATES, TEST LINK STATES
     let l = TcpListener::bind("127.0.0.1:0").await.unwrap();

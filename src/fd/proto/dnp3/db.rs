@@ -139,30 +139,15 @@ pub fn analog_object(var: u8, value: f64, flags: u8, time: Option<u64>, group32:
     out
 }
 
-/// Which kind of event.
+/// Binary or analog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Typ {
     Binary,
     Analog,
 }
 
-impl Typ {
-    /// `(group, default variation)`: g2v2 and g32v6 when the master does not name a variation.
-    const EVENT: [(u8, u8); 2] = [(2, 2), (32, 6)];
-
-    fn slot(self) -> usize {
-        self as usize
-    }
-    pub fn default_var(self) -> u8 {
-        Self::EVENT[self.slot()].1
-    }
-    pub fn group(self) -> u8 {
-        Self::EVENT[self.slot()].0
-    }
-}
-
 /// A static table. opendnp3 keeps inputs (g1, g30) and output status (g10, g40) apart, as bennu v2026.11.03 registers them.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Table {
     pub typ: Typ,
     pub out: bool,
@@ -176,6 +161,18 @@ impl Table {
             (Typ::Analog, false) => 30,
             (Typ::Analog, true) => 40,
         }
+    }
+    /// Events are kept per table: inputs as g2 and g32, output status as g11 and g42 (bennu v2026.11.03, probe_out.py).
+    fn slot(self) -> usize {
+        self.typ as usize * 2 + usize::from(self.out)
+    }
+    /// The group of this table's events.
+    pub fn event_group(self) -> u8 {
+        [2, 11, 32, 42][self.slot()]
+    }
+    /// The variation of this table's events when the master does not name one: g2v2, g11v1, g32v6, g42v1.
+    pub fn event_default_var(self) -> u8 {
+        [2, 1, 6, 1][self.slot()]
     }
 }
 
@@ -199,16 +196,19 @@ pub struct Event {
     pub id: u64,
     pub idx: u16,
     pub class: u8,
+    /// An output point's event (g11, g42), not an input's.
+    pub out: bool,
     pub data: Data,
     pub state: State,
 }
 
 impl Event {
-    pub fn typ(&self) -> Typ {
-        match self.data {
+    pub fn table(&self) -> Table {
+        let typ = match self.data {
             Data::Bin { .. } => Typ::Binary,
             Data::Ana { .. } => Typ::Analog,
-        }
+        };
+        Table { typ, out: self.out }
     }
     /// Index prefix and object bytes in variation `var`.
     pub fn encode(&self, var: u8) -> Vec<u8> {
@@ -235,37 +235,32 @@ impl Event {
 pub struct Events {
     q: VecDeque<Event>,
     next: u64,
-    overflow: [bool; 2],
+    overflow: [bool; 4],
 }
 
 impl Events {
-    pub fn push(&mut self, idx: u16, class: u8, data: Data) {
-        let typ = Event {
-            id: 0,
-            idx,
-            class,
-            data: data.clone(),
-            state: State::Unselected,
-        }
-        .typ();
-        if self.count(typ) >= EVENT_CAP {
-            if let Some(at) = self.q.iter().position(|e| e.typ() == typ) {
-                self.q.remove(at);
-            }
-            self.overflow[typ.slot()] = true;
-        }
-        self.q.push_back(Event {
+    pub fn push(&mut self, idx: u16, class: u8, out: bool, data: Data) {
+        let ev = Event {
             id: self.next,
             idx,
             class,
+            out,
             data,
             state: State::Unselected,
-        });
+        };
+        let t = ev.table();
+        if self.count(t) >= EVENT_CAP {
+            if let Some(at) = self.q.iter().position(|e| e.table() == t) {
+                self.q.remove(at);
+            }
+            self.overflow[t.slot()] = true;
+        }
+        self.q.push_back(ev);
         self.next += 1;
     }
 
-    fn count(&self, typ: Typ) -> usize {
-        self.q.iter().filter(|e| e.typ() == typ).count()
+    fn count(&self, t: Table) -> usize {
+        self.q.iter().filter(|e| e.table() == t).count()
     }
 
     /// Any event not yet selected, in class `class` (any when 0): IIN1.1-1.3.
@@ -280,16 +275,26 @@ impl Events {
     }
 
     /// Select unselected events of `typ` and `class` (any when `None`), oldest first, at most `limit`; `var` 0 means the default.
-    pub fn select(&mut self, typ: Option<Typ>, class: Option<u8>, var: u8, limit: usize) -> usize {
+    pub fn select(
+        &mut self,
+        table: Option<Table>,
+        class: Option<u8>,
+        var: u8,
+        limit: usize,
+    ) -> usize {
         let mut n = 0;
         for e in self.q.iter_mut().filter(|e| e.state == State::Unselected) {
             if n == limit
-                || typ.is_some_and(|t| t != e.typ())
+                || table.is_some_and(|t| t != e.table())
                 || class.is_some_and(|c| c != e.class)
             {
                 continue;
             }
-            let v = if var == 0 { e.typ().default_var() } else { var };
+            let v = if var == 0 {
+                e.table().event_default_var()
+            } else {
+                var
+            };
             e.state = State::Selected(v);
             n += 1;
         }
@@ -314,8 +319,11 @@ impl Events {
     pub fn clear_written(&mut self) {
         self.q.retain(|e| e.state != State::Written);
         for typ in [Typ::Binary, Typ::Analog] {
-            let full = self.count(typ) >= EVENT_CAP;
-            self.overflow[typ.slot()] &= full;
+            for out in [false, true] {
+                let t = Table { typ, out };
+                let full = self.count(t) >= EVENT_CAP;
+                self.overflow[t.slot()] &= full;
+            }
         }
     }
 
@@ -330,6 +338,23 @@ impl Events {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const IN_BIN: Table = Table {
+        typ: Typ::Binary,
+        out: false,
+    };
+    const IN_ANA: Table = Table {
+        typ: Typ::Analog,
+        out: false,
+    };
+    const OUT_BIN: Table = Table {
+        typ: Typ::Binary,
+        out: true,
+    };
+    const OUT_ANA: Table = Table {
+        typ: Typ::Analog,
+        out: true,
+    };
 
     #[test]
     fn point_events_only_in_a_class_and_only_on_change() {
@@ -404,6 +429,7 @@ mod tests {
             id: 0,
             idx: 0x0102,
             class: 1,
+            out: false,
             data: Data::Bin { flags: 0x81 },
             state: State::Unselected,
         };
@@ -414,6 +440,7 @@ mod tests {
             id: 0,
             idx: 3,
             class: 1,
+            out: false,
             data: Data::Ana {
                 value: 33.5,
                 ts: 0x0000_6AF3_3692,
@@ -438,10 +465,10 @@ mod tests {
 
     fn fill(ev: &mut Events, bin: u16, ana: u16) {
         for i in 0..bin {
-            ev.push(i, 1, Data::Bin { flags: ONLINE });
+            ev.push(i, 1, false, Data::Bin { flags: ONLINE });
         }
         for i in 0..ana {
-            ev.push(i, 1, Data::Ana { value: 0.0, ts: 0 });
+            ev.push(i, 1, false, Data::Ana { value: 0.0, ts: 0 });
         }
     }
 
@@ -450,10 +477,10 @@ mod tests {
         let mut ev = Events::default();
         fill(&mut ev, 130, 5);
         assert!(ev.overflowed() && ev.unselected(0));
-        ev.select(Some(Typ::Binary), None, 0, usize::MAX);
+        ev.select(Some(IN_BIN), None, 0, usize::MAX);
         let idx: Vec<u16> = ev.selected().map(|(e, _)| e.idx).collect();
         assert_eq!((idx.len(), idx[0], idx[99]), (100, 30, 129));
-        assert_eq!(ev.count(Typ::Analog), 5);
+        assert_eq!(ev.count(IN_ANA), 5);
     }
 
     #[test]
@@ -461,15 +488,15 @@ mod tests {
         let mut ev = Events::default();
         fill(&mut ev, 101, 100);
         assert!(ev.overflowed());
-        ev.select(Some(Typ::Binary), None, 0, 1);
+        ev.select(Some(IN_BIN), None, 0, 1);
         let ids: Vec<u64> = ev.selected().map(|(e, _)| e.id).collect();
         ev.mark_written(&ids);
         ev.clear_written();
         assert!(!ev.overflowed());
         // analog was never overflowed, but fill it past the cap now and clear one
-        ev.push(0, 1, Data::Ana { value: 1.0, ts: 0 });
+        ev.push(0, 1, false, Data::Ana { value: 1.0, ts: 0 });
         assert!(ev.overflowed());
-        ev.select(Some(Typ::Binary), None, 0, 1);
+        ev.select(Some(IN_BIN), None, 0, 1);
         let ids: Vec<u64> = ev.selected().map(|(e, _)| e.id).collect();
         ev.mark_written(&ids);
         ev.clear_written(); // frees binary only: the analog buffer is still full
@@ -479,10 +506,10 @@ mod tests {
     #[test]
     fn select_honours_type_limit_variation_and_state() {
         let mut ev = Events::default();
-        ev.push(1, 1, Data::Ana { value: 1.0, ts: 0 });
-        ev.push(2, 1, Data::Bin { flags: ONLINE });
-        ev.push(3, 1, Data::Bin { flags: ONLINE });
-        assert_eq!(ev.select(Some(Typ::Binary), None, 3, 1), 1);
+        ev.push(1, 1, false, Data::Ana { value: 1.0, ts: 0 });
+        ev.push(2, 1, false, Data::Bin { flags: ONLINE });
+        ev.push(3, 1, false, Data::Bin { flags: ONLINE });
+        assert_eq!(ev.select(Some(IN_BIN), None, 3, 1), 1);
         let sel: Vec<_> = ev.selected().map(|(e, v)| (e.idx, v)).collect();
         assert_eq!(sel, vec![(2, 3)]);
         assert_eq!(ev.select(None, None, 0, usize::MAX), 2); // the rest, defaults; the selected one is not taken again
@@ -510,11 +537,28 @@ mod tests {
     }
 
     #[test]
-    fn typ_groups_and_defaults() {
-        assert_eq!((Typ::Binary.group(), Typ::Analog.group()), (2, 32));
-        assert_eq!(
-            (Typ::Binary.default_var(), Typ::Analog.default_var()),
-            (2, 6)
-        );
+    fn event_groups_and_defaults() {
+        let t = |typ, out| Table { typ, out };
+        let all = [
+            t(Typ::Binary, false),
+            t(Typ::Binary, true),
+            t(Typ::Analog, false),
+            t(Typ::Analog, true),
+        ];
+        assert_eq!(all.map(Table::event_group), [2, 11, 32, 42]);
+        assert_eq!(all.map(Table::event_default_var), [2, 1, 6, 1]);
+    }
+
+    /// Input and output events are separate buffers: a full input buffer does not push out an output event.
+    #[test]
+    fn output_events_are_a_type_of_their_own() {
+        let mut ev = Events::default();
+        ev.push(5, 1, true, Data::Bin { flags: ONLINE });
+        fill(&mut ev, 101, 0);
+        assert!(ev.overflowed());
+        assert_eq!(ev.count(OUT_BIN), 1);
+        assert_eq!(ev.select(Some(IN_BIN), None, 0, usize::MAX), 100);
+        assert_eq!(ev.select(Some(OUT_BIN), None, 0, usize::MAX), 1);
+        assert_eq!(ev.select(Some(OUT_ANA), None, 0, usize::MAX), 0);
     }
 }

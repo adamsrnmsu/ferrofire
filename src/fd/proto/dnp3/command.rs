@@ -2,7 +2,7 @@
 
 use super::app::{self, iin, status, Control, ControlError, Range, Request};
 use super::db::Point;
-use super::outstation::{Device, Sink};
+use super::outstation::{Device, Landed, Sink};
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -59,33 +59,36 @@ fn select_status(dev: &Device, c: &Control) -> u8 {
     }
 }
 
-fn crob_status(dev: &Device, sink: &mut dyn Sink, c: &Control, selected: bool) -> u8 {
+/// A control reaches the output status at once, not with the next 1 Hz sweep (probe_out.py, stock v2026.11.03: a READ 20 ms
+/// after the control shows the value and the event), but after the response to it, whose IIN has no class bit for it: the
+/// value waits in `Device::landed` until the next frame (`Device::settle`).
+fn crob_status(dev: &mut Device, sink: &mut dyn Sink, c: &Control, selected: bool) -> u8 {
     match output(&dev.bin, c.index) {
         None => status::OUT_OF_RANGE,
         Some(p) if p.sbo && !selected => status::NO_SELECT,
         Some(p) => {
-            sink.binary(&p.tag, c.index, c.body[0] & 0x0F == 3);
+            let on = c.body[0] & 0x0F == 3;
+            sink.binary(&p.tag, c.index, on);
+            dev.landed.push(Landed::Bin(c.index, on));
             status::SUCCESS
         }
     }
 }
 
-fn analog_status(dev: &Device, sink: &mut dyn Sink, c: &Control, selected: bool) -> u8 {
+fn analog_status(dev: &mut Device, sink: &mut dyn Sink, c: &Control, selected: bool) -> u8 {
     match output(&dev.ana, c.index) {
         None => status::OUT_OF_RANGE,
         Some(p) if p.sbo && !selected => status::NO_SELECT,
         Some(p) => {
-            sink.analog(
-                &p.tag,
-                c.index,
-                f32::from_le_bytes([c.body[0], c.body[1], c.body[2], c.body[3]]),
-            );
+            let v = f32::from_le_bytes([c.body[0], c.body[1], c.body[2], c.body[3]]);
+            sink.analog(&p.tag, c.index, v);
+            dev.landed.push(Landed::Ana(c.index, f64::from(v)));
             status::SUCCESS
         }
     }
 }
 
-fn operate_status(dev: &Device, sink: &mut dyn Sink, c: &Control, selected: bool) -> u8 {
+fn operate_status(dev: &mut Device, sink: &mut dyn Sink, c: &Control, selected: bool) -> u8 {
     match (c.group, c.var) {
         (12, 1) => crob_status(dev, sink, c, selected),
         (41, 3) => analog_status(dev, sink, c, selected),
