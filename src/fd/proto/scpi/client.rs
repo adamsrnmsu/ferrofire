@@ -268,7 +268,7 @@ impl Client {
 
     /// Queue a query's answer as a write to its tag when the tag holds something else, or when a write to it is still queued (the
     /// newest answer replaces it). An unchanged answer is not written, so an external tag costs a provider write only when they differ;
-    /// one the provider refused or overwrote differs again and is written again. A rejected query (no response) leaves the tag alone,
+    /// one the provider overwrote differs again and is written again (a refused write is applied all the same). A rejected query (no response) leaves the tag alone,
     /// as does an answer that is not a value of its kind.
     fn take(&self, q: &Item, response: Option<&str>, store: &Store) {
         let Some(line) = response else { return };
@@ -782,10 +782,11 @@ mod tests {
         store.publish_at("p.lvl", 3.0, 2, Instant::now() + Duration::from_secs(3));
         assert_eq!(store.get_f64("lvl"), Some(3.0));
         assert!(ask("5"));
-        // the provider refuses the write: the next poll writes it again
-        store.reject("lvl", Value::Analog(5.0));
+        // the provider refuses a write: stock applies it all the same, so the answer is held and the next poll writes nothing
+        store.write("lvl", Value::Analog(7.0)).unwrap();
+        store.reject("lvl", Value::Analog(7.0));
         assert!(!store.is_queued("lvl"));
-        assert!(ask("5"));
+        assert!(!ask("7"));
     }
 
     #[test]

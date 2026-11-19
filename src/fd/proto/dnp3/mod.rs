@@ -19,8 +19,7 @@ use super::super::store::Store;
 use super::Module;
 use crate::hint::{lock, show};
 use crate::model::{Kind, Value};
-use db::{AnaPoint, BinPoint};
-use outstation::{Close, Conn, Device, Sink, Source};
+use outstation::{Close, Conn, Device, Sink, Slot, Source};
 use roxmltree::Node;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -40,8 +39,10 @@ pub struct Outstation {
     endpoint: String,
     local: u16,
     log: Arc<EventLog>,
-    bin: BTreeMap<u16, BinPoint>,
-    ana: BTreeMap<u16, AnaPoint>,
+    bin: Table<bool>,
+    ana: Table<f64>,
+    /// `<event-buffer-size>`: events kept per type.
+    cap: u16,
 }
 
 /// opendnp3 parsing of `<sbo>`: a boost `bool` is `0`, `1`, `true` or `false`.
@@ -56,85 +57,181 @@ fn flag(n: Node, name: &str) -> Result<bool, ConfigError> {
     }
 }
 
-/// The generator never emits DNP3 variations, classes or deadbands; v1 supports the defaults and says so.
-fn reject_options(n: Node) -> Result<(), ConfigError> {
-    for key in ["sgvar", "egvar", "class", "deadband"] {
-        if text(n, key).is_some() {
-            return Err(ConfigError(format!(
-                "<{}> <{key}> is not supported (only the stock defaults are)",
-                n.tag_name().name()
-            )));
+/// The text of the child `name` as bennu reads it: untrimmed, `None` when the element is missing.
+fn raw<'a>(n: Node<'a, '_>, name: &str) -> Option<&'a str> {
+    n.children()
+        .find(|c| c.has_tag_name(name))
+        .map(|c| c.text().unwrap_or(""))
+}
+
+/// A boost `lexical_cast` to `u16` as bennu's `get<uint16_t>(key, default)` does it: leading blanks and a sign are read, a
+/// negative number wraps, anything else (trailing text, more than 16 bits, empty) gives `default`.
+fn u16_or(raw: Option<&str>, default: u16) -> u16 {
+    let t = raw
+        .unwrap_or("")
+        .trim_start_matches([' ', '\t', '\n', '\x0b', '\x0c', '\r']);
+    let (neg, digits) = match t.as_bytes().first() {
+        Some(b'-') => (true, &t[1..]),
+        Some(b'+') => (false, &t[1..]),
+        _ => (false, t),
+    };
+    match digits
+        .bytes()
+        .all(|b| b.is_ascii_digit())
+        .then(|| digits.parse::<u16>())
+    {
+        Some(Ok(v)) if neg => v.wrapping_neg(),
+        Some(Ok(v)) => v,
+        _ => default,
+    }
+}
+
+/// opendnp3 `PointClassSpec::from_string`; an empty `<class>` is the default.
+fn class_of(raw: Option<&str>) -> Option<u8> {
+    match raw.unwrap_or("") {
+        "" | "Class0" => Some(0),
+        "Class1" => Some(1),
+        "Class2" => Some(2),
+        "Class3" => Some(3),
+        _ => None,
+    }
+}
+
+/// opendnp3 `*VariationSpec::from_string` for `Group{group}Var{n}` with n in `vars`; an empty value is the point's default.
+fn variation(
+    raw: Option<&str>,
+    group: u8,
+    vars: std::ops::RangeInclusive<u8>,
+    default: u8,
+) -> Option<u8> {
+    match raw.unwrap_or("") {
+        "" => Some(default),
+        t => vars
+            .into_iter()
+            .find(|v| t == format!("Group{group}Var{v}")),
+    }
+}
+
+type Table<V> = BTreeMap<Slot, db::Point<V>>;
+type Maps = (Table<bool>, Table<f64>);
+/// The `(group, versions)` of a point's static and of its event variations.
+type Vars = [(u8, std::ops::RangeInclusive<u8>); 2];
+
+/// One `<binary-input>` ... `<analog-output>` element as a point, or `None` when bennu leaves it out. Outputs read `<class>` and
+/// `<sbo>` only; an input reads `<class>`, `<sgvar>`, `<egvar>` and (an analog one) `<deadband>`. A name opendnp3 does not know is
+/// no error: bennu skips the point silently and the Size lines do not count it. A `<deadband>` that is not a number is: bennu
+/// aborts the whole `<dnp3-server>` setup (logs it to stdout and carries on without a DNP3 outstation); we refuse the config.
+fn point<V: db::Static>(
+    n: Node,
+    input: bool,
+    tag: &str,
+    vars: Vars,
+    analog: bool,
+) -> Result<Option<db::Point<V>>, ConfigError> {
+    let mut p = db::Point::new(tag, !input && flag(n, "sbo")?, input);
+    let Some(class) = class_of(raw(n, "class")) else {
+        return Ok(None);
+    };
+    p.class = class;
+    if input {
+        let [(sg, svars), (eg, evars)] = vars;
+        let (Some(s), Some(e)) = (
+            variation(raw(n, "sgvar"), sg, svars, p.svar),
+            variation(raw(n, "egvar"), eg, evars, p.evar),
+        ) else {
+            return Ok(None);
+        };
+        (p.svar, p.evar) = (s, e);
+        if let Some(d) = raw(n, "deadband").filter(|_| analog) {
+            p.deadband = d
+                .trim_start()
+                .parse()
+                .ok()
+                .filter(|x: &f64| x.is_finite())
+                .ok_or_else(|| {
+                    ConfigError(format!("<deadband> `{}` is not a valid number", show(d)))
+                })?;
         }
     }
-    Ok(())
+    Ok(Some(p))
 }
 
-/// One `<binary-input>`-style element: `(address, tag, sbo)`.
-fn point(n: Node, name: &str) -> Result<(u16, String, bool), ConfigError> {
-    reject_options(n)?;
-    let addr = number::<u16>(n, "address")?
-        .ok_or_else(|| ConfigError(format!("<{name}> has no <address>")))?;
-    let sbo = name.ends_with("output") && flag(n, "sbo")?;
-    Ok((addr, require(n, "tag")?, sbo))
-}
-
-/// The `<name>` children of a server whose tag exists with the right kind, as `(address, tag, sbo)`.
-fn points(
+/// The `<name>` children of a server whose tag exists with the right kind, as `(index, point)`.
+fn points<V: db::Static>(
     node: Node,
     name: &str,
     kind: Kind,
     tags: &Tags,
     opts: &Opts,
-) -> Result<Vec<(u16, String, bool)>, ConfigError> {
+    vars: &Vars,
+) -> Result<Vec<(u16, db::Point<V>)>, ConfigError> {
     let mut out = vec![];
     for n in node.children().filter(|c| c.has_tag_name(name)) {
-        let p = point(n, name)?;
-        if tags.mapped(&p.1, kind, opts)? {
-            out.push(p);
+        let addr = number::<u16>(n, "address")?
+            .ok_or_else(|| ConfigError(format!("<{name}> has no <address>")))?;
+        let tag = require(n, "tag")?;
+        if tags.mapped(&tag, kind, opts)? {
+            let input = name.ends_with("input");
+            if let Some(p) = point(n, input, &tag, vars.clone(), kind == Kind::Analog)? {
+                out.push((addr, p));
+            }
         }
     }
     Ok(out)
 }
 
-type Maps = (BTreeMap<u16, BinPoint>, BTreeMap<u16, AnaPoint>);
-
-/// Stock order and override rule: one map per kind, inputs first, a later element at the same address replaces it.
+/// Stock order and override rule: four tables (g1, g10, g30, g40), inputs first; a later element at the same index in the same
+/// table replaces it, an input and an output may share an index.
 fn collect(node: Node, tags: &Tags, opts: &Opts) -> Result<Maps, ConfigError> {
-    let (mut bin, mut ana) = (BTreeMap::new(), BTreeMap::new());
-    for (name, input) in [("binary-input", true), ("binary-output", false)] {
-        for (a, t, sbo) in points(node, name, Kind::Binary, tags, opts)? {
-            bin.insert(a, BinPoint::new(&t, sbo, input));
+    let (mut bin, mut ana) = (Table::new(), Table::new());
+    let (bv, av) = ([(1, 1..=2), (2, 1..=3)], [(30, 1..=6), (32, 1..=8)]);
+    for name in ["binary-input", "binary-output"] {
+        for (a, p) in points(node, name, Kind::Binary, tags, opts, &bv)? {
+            bin.insert((!p.input, a), p);
         }
     }
-    for (name, input) in [("analog-input", true), ("analog-output", false)] {
-        for (a, t, sbo) in points(node, name, Kind::Analog, tags, opts)? {
-            ana.insert(a, AnaPoint::new(&t, sbo, input));
+    for name in ["analog-input", "analog-output"] {
+        for (a, p) in points(node, name, Kind::Analog, tags, opts, &av)? {
+            ana.insert((!p.input, a), p);
         }
     }
     Ok((bin, ana))
 }
 
 impl Outstation {
+    /// `<event-buffer-size>`: the events kept per type.
+    pub fn cap(&self) -> u16 {
+        self.cap
+    }
+
     /// The outstation's shared state, fresh: every point at its power-up value, no events.
     pub fn device(&self) -> Device {
-        Device::new(self.local, MASTER, self.bin.clone(), self.ana.clone())
+        Device::new(
+            self.local,
+            MASTER,
+            self.bin.clone(),
+            self.ana.clone(),
+            self.cap,
+        )
     }
 }
 
 /// The three lines bennu v2026.11.03 logs at start: input counts, output counts, event buffer size.
-pub fn log_init(log: &EventLog, bin: &BTreeMap<u16, BinPoint>, ana: &BTreeMap<u16, AnaPoint>) {
-    let outs = |m: usize, all: usize| (all - m, m);
-    let (bi, bo) = outs(bin.values().filter(|p| !p.input).count(), bin.len());
-    let (ai, ao) = outs(ana.values().filter(|p| !p.input).count(), ana.len());
+pub fn log_init(log: &EventLog, bin: &Table<bool>, ana: &Table<f64>, cap: u16) {
+    let (bo, ao) = (
+        bin.values().filter(|p| !p.input).count(),
+        ana.values().filter(|p| !p.input).count(),
+    );
     let say = |m: String| log.log("info", "dnp3 server init", m);
-    say(format!("Binary Size is {bi} and Analog Size is {ai}."));
+    say(format!(
+        "Binary Size is {} and Analog Size is {}.",
+        bin.len() - bo,
+        ana.len() - ao
+    ));
     say(format!(
         "Binary Output Size is {bo} and Analog Output Size is {ao}."
     ));
-    say(format!(
-        "Event buffer size (per type) is {}.",
-        db::EVENT_CAP
-    ));
+    say(format!("Event buffer size (per type) is {cap}."));
 }
 
 impl Module for Outstation {
@@ -147,13 +244,15 @@ impl Module for Outstation {
         let endpoint = require(node, "endpoint")?;
         let local = number::<u16>(node, "address")?
             .ok_or_else(|| ConfigError("<dnp3-server> has no <address>".into()))?;
-        log_init(&log, &bin, &ana);
+        let cap = u16_or(raw(node, "event-buffer-size"), db::EVENT_CAP);
+        log_init(&log, &bin, &ana, cap);
         Ok(Outstation {
             endpoint,
             local,
             log,
             bin,
             ana,
+            cap,
         })
     }
 
@@ -417,7 +516,12 @@ mod tests {
         .unwrap();
         let d = o.device();
         assert_eq!((d.local, d.master, d.bin.len(), d.ana.len()), (10, 1, 1, 1));
-        assert!(d.bin[&2].input && !d.bin[&2].sbo && !d.ana[&1].input && d.ana[&1].sbo);
+        assert!(
+            d.bin[&(false, 2)].input
+                && !d.bin[&(false, 2)].sbo
+                && !d.ana[&(true, 1)].input
+                && d.ana[&(true, 1)].sbo
+        );
     }
 
     #[test]
@@ -432,22 +536,142 @@ mod tests {
         assert!(err("<endpoint>x</endpoint><address>-1</address>").contains("not a valid number"));
     }
 
+    fn analog(inner: &str) -> Device {
+        let xml = format!("{HEAD}{inner}");
+        parse(&xml, &Opts::default()).unwrap().device()
+    }
+
+    /// Stock v2026.11.03 (probed, conformance/dnp3/stock-cfg.golden): an input takes class, sgvar, egvar and (analog) deadband, an
+    /// output only class; the defaults are class 0 and g1v2 / g2v2, g30v6 / g32v6, g10v2 / g11v1, g40v1 / g42v1.
     #[test]
-    fn variations_classes_and_deadbands_are_refused_by_name() {
-        for key in ["sgvar", "egvar", "class", "deadband"] {
-            let e = err(&format!("{HEAD}<analog-input><address>0</address><tag>an</tag><{key}>x</{key}></analog-input>"));
+    fn class_variations_and_deadband_are_read() {
+        let d = analog(
+            "<analog-input><address>0</address><tag>an</tag><class>Class2</class><sgvar>Group30Var3</sgvar><egvar>Group32Var8</egvar><deadband>2.5</deadband></analog-input>\
+             <analog-output><address>0</address><tag>an</tag><class>Class3</class><sgvar>Group40Var3</sgvar><deadband>9</deadband></analog-output>\
+             <binary-input><address>1</address><tag>bi</tag></binary-input>\
+             <binary-output><address>1</address><tag>bi</tag></binary-output>",
+        );
+        let ai = &d.ana[&(false, 0)];
+        assert_eq!((ai.class, ai.svar, ai.evar, ai.deadband), (2, 3, 8, 2.5));
+        let ao = &d.ana[&(true, 0)];
+        assert_eq!((ao.class, ao.svar, ao.evar, ao.deadband), (3, 1, 1, 0.0));
+        let (bi, bo) = (&d.bin[&(false, 1)], &d.bin[&(true, 1)]);
+        assert_eq!((bi.class, bi.svar, bi.evar), (0, 2, 2));
+        assert_eq!((bo.class, bo.svar, bo.evar), (0, 2, 1));
+    }
+
+    /// A name opendnp3 does not know leaves the point out without a word (the Size lines do not count it): case matters, so does a
+    /// trailing blank; a variation must be one of its type's.
+    #[test]
+    fn a_name_opendnp3_does_not_know_leaves_the_point_out() {
+        for (key, v) in [
+            ("class", "class1"),
+            ("class", "Class4"),
+            ("class", "1"),
+            ("sgvar", "Group1Var1 "),
+            ("sgvar", "Group1Var0"),
+            ("sgvar", "Group2Var1"),
+            ("egvar", "Group2Var0"),
+            ("egvar", "Group2Var4"),
+            ("sgvar", "x"),
+        ] {
+            let inner = format!(
+                "<binary-input><address>0</address><tag>bi</tag><{key}>{v}</{key}></binary-input>"
+            );
+            assert_eq!(analog(&inner).bin.len(), 0, "{key} {v}");
+        }
+        for (key, v) in [
+            ("sgvar", "Group30Var0"),
+            ("sgvar", "Group30Var7"),
+            ("egvar", "Group32Var0"),
+            ("egvar", "Group32Var9"),
+        ] {
+            let inner = format!(
+                "<analog-input><address>0</address><tag>an</tag><{key}>{v}</{key}></analog-input>"
+            );
+            assert_eq!(analog(&inner).ana.len(), 0, "{key} {v}");
+        }
+        let out =
+            "<binary-output><address>0</address><tag>bi</tag><class>bogus</class></binary-output>";
+        assert_eq!(analog(out).bin.len(), 0);
+        let empty = "<binary-input><address>0</address><tag>bi</tag><class></class><sgvar></sgvar></binary-input>";
+        assert_eq!(analog(empty).bin.len(), 1, "an empty value is the default");
+        for (key, v, var) in [
+            ("sgvar", "Group1Var1", 1),
+            ("sgvar", "Group1Var2", 2),
+            ("egvar", "Group2Var3", 3),
+        ] {
+            let inner = format!(
+                "<binary-input><address>0</address><tag>bi</tag><{key}>{v}</{key}></binary-input>"
+            );
+            let p = &analog(&inner).bin[&(false, 0)].clone();
+            assert_eq!(if key == "sgvar" { p.svar } else { p.evar }, var);
+        }
+    }
+
+    /// bennu aborts its DNP3 setup on a deadband that `lexical_cast` refuses; we refuse the config. An output has no deadband.
+    #[test]
+    fn a_deadband_that_is_no_number_is_refused_on_an_analog_input_only() {
+        for v in ["abc", "", "1e", "0x10", "inf", "nan", "1e999", "5 "] {
+            let e = err(&format!("{HEAD}<analog-input><address>0</address><tag>an</tag><deadband>{v}</deadband></analog-input>"));
             assert!(
-                e.contains(&format!("<{key}> is not supported")) && e.contains("<analog-input>"),
-                "{e}"
+                e.contains("<deadband>") && e.contains("not a valid number"),
+                "{v}: {e}"
             );
         }
+        for (v, want) in [
+            ("5", 5.0),
+            ("-1", -1.0),
+            ("1e1", 10.0),
+            (".5", 0.5),
+            (" 3", 3.0),
+            ("+2", 2.0),
+        ] {
+            let d = analog(&format!("<analog-input><address>0</address><tag>an</tag><deadband>{v}</deadband></analog-input>"));
+            assert_eq!(d.ana[&(false, 0)].deadband, want, "{v}");
+        }
+        analog("<analog-output><address>0</address><tag>an</tag><deadband>abc</deadband></analog-output><binary-input><address>0</address><tag>bi</tag><deadband>abc</deadband></binary-input>");
+    }
+
+    /// `get<uint16_t>("event-buffer-size", 100)`: a number that does not read as a 16-bit integer is the default; a negative one wraps
+    /// (probed: -5 is 65531, 70000 and 1e2 and 0x10 and `4 ` are 100, ` 4` is 4).
+    #[test]
+    fn the_event_buffer_size_is_a_lexical_cast_with_a_default_of_100() {
+        for (v, want) in [
+            (Some("3"), 3),
+            (Some("0"), 0),
+            (Some("65535"), 65535),
+            (Some("65536"), 100),
+            (Some("70000"), 100),
+            (Some("-5"), 65531),
+            (Some("-65535"), 1),
+            (Some("-65536"), 100),
+            (Some("+7"), 7),
+            (Some(" 4"), 4),
+            (Some("4 "), 100),
+            (Some("2.5"), 100),
+            (Some("1e2"), 100),
+            (Some("0x10"), 100),
+            (Some("abc"), 100),
+            (Some(""), 100),
+            (Some("-"), 100),
+            (None, 100),
+        ] {
+            assert_eq!(u16_or(v, 100), want, "{v:?}");
+        }
+        let o = parse(
+            &format!("{HEAD}<event-buffer-size>3</event-buffer-size>"),
+            &Opts::default(),
+        )
+        .unwrap();
+        assert_eq!(o.cap, 3);
     }
 
     #[test]
     fn sbo_is_a_boolean_and_only_outputs_have_one() {
         let sbo = |v: &str| {
             let inner = format!("{HEAD}<binary-output><address>5</address><tag>bi</tag><sbo>{v}</sbo></binary-output>");
-            parse(&inner, &Opts::default()).map(|o| o.device().bin[&5].sbo)
+            parse(&inner, &Opts::default()).map(|o| o.device().bin[&(true, 5)].sbo)
         };
         assert_eq!(sbo("1"), Ok(true));
         assert_eq!(sbo("true"), Ok(true));
@@ -458,7 +682,7 @@ mod tests {
             "{HEAD}<binary-input><address>5</address><tag>bi</tag><sbo>1</sbo></binary-input>"
         );
         assert!(
-            !parse(&input, &Opts::default()).unwrap().device().bin[&5].sbo,
+            !parse(&input, &Opts::default()).unwrap().device().bin[&(false, 5)].sbo,
             "an input ignores <sbo>"
         );
     }
@@ -475,13 +699,14 @@ mod tests {
         let kind = format!("{HEAD}<binary-input><address>2</address><tag>an</tag></binary-input>");
         assert!(err(&kind).contains("is Analog but its mapping needs Binary"));
         let both = format!(
-            "{HEAD}<binary-output><address>2</address><tag>bi</tag></binary-output><binary-input><address>2</address><tag>bi</tag></binary-input>"
+            "{HEAD}<binary-output><address>2</address><tag>bi</tag></binary-output><binary-input><address>2</address><tag>bi</tag></binary-input><binary-input><address>2</address><tag>bi</tag><class>Class1</class></binary-input>"
         );
         let d = parse(&both, &Opts::default()).unwrap().device();
-        assert_eq!(d.bin.len(), 1);
-        assert!(
-            !d.bin[&2].input,
-            "outputs are read after inputs, so the output replaced the input at that address"
+        assert_eq!(d.bin.len(), 2, "an input and an output share an index");
+        assert_eq!(
+            d.bin[&(false, 2)].class,
+            1,
+            "a later element of a table replaces an earlier"
         );
     }
 }

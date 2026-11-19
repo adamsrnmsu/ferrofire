@@ -279,9 +279,17 @@ impl Store {
         s.forget(tag, v);
     }
 
-    /// The provider rejected `v` for `tag`: drop it from the queue unless a newer write replaced it.
+    /// The provider rejected `v` for `tag`: stock drops it from the queue and applies it all the same (ww-a7r: with a provider that
+    /// answers `ERR=` the datastore holds the written value at once, so a DNP3 input on the same tag reads it and an output status
+    /// keeps it). The point takes `v` with no hold; the queue entry goes unless a newer write replaced it.
     pub fn reject(&self, tag: &str, v: Value) {
-        lock(&self.0).forget(tag, v);
+        let mut s = lock(&self.0);
+        if s.queue.get(tag).is_some_and(|q| same(q, &v)) {
+            if let Some(p) = s.alias.get(tag).cloned().and_then(|a| s.points.get_mut(&a)) {
+                p.value = v;
+            }
+        }
+        s.forget(tag, v);
     }
 
     /// End of cycle: queued writes to device-local tags take effect.
@@ -442,14 +450,15 @@ mod tests {
     }
 
     #[test]
-    fn reject_drops_only_the_same_value() {
+    fn reject_drops_only_the_same_value_and_applies_it() {
         let s = store();
         s.write("to", Value::Analog(1.0)).unwrap();
         s.reject("to", Value::Analog(5.0));
         assert!(s.is_queued("to"));
+        assert_eq!(s.get_f64("to"), Some(0.0));
         s.reject("to", Value::Analog(1.0));
         assert!(!s.is_queued("to"));
-        assert_eq!(s.get_f64("to"), Some(0.0));
+        assert_eq!(s.get_f64("to"), Some(1.0), "applied all the same");
     }
 
     #[test]

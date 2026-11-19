@@ -91,11 +91,11 @@ conformance: dut   # acceptance harness for one protocol vs the stock oracle: ma
 conformance-selftest:   # prove the harness fails on a damaged and on an empty capture (negative control)
 	$(TP) SELFTEST=1 conformance/run.sh dnp3
 
-differential: dut   # one differential probe against the stock oracle or our binary: make differential PROTO=dnp3 WHO=stock|rust SET=diff|big|out|grp
-	@test -n "$(PROTO)" -a -n "$(WHO)" || { echo "usage: make differential PROTO=dnp3 WHO=stock|rust [SET=diff|big|out|grp]"; exit 2; }
+differential: dut   # one differential probe against the stock oracle or our binary: make differential PROTO=dnp3 WHO=stock|rust SET=diff|big|out|grp|cfg|ovf|nack|nopv
+	@test -n "$(PROTO)" -a -n "$(WHO)" || { echo "usage: make differential PROTO=dnp3 WHO=stock|rust [SET=diff|big|out|grp|cfg|ovf|nack|nopv]"; exit 2; }
 	$(TP) conformance/differential.sh $(PROTO) $(WHO) $(or $(SET),diff)
 diff-dnp3: dut   # our DNP3 outstation vs the recorded stock transcripts, live in containers
-	@for s in diff big out grp; do $(TP) conformance/differential.sh dnp3 rust $$s | diff conformance/dnp3/stock-$$s.golden - && echo "dnp3 $$s: byte-equal to stock" || exit 1; done
+	@for s in diff big out grp cfg ovf nack nopv; do $(TP) conformance/differential.sh dnp3 rust $$s | diff conformance/dnp3/stock-$$s.golden - && echo "dnp3 $$s: byte-equal to stock" || exit 1; done
 diff-modbus: dut   # our Modbus server vs the recorded stock transcripts, live in containers
 	@for s in diff waterway edges; do $(TP) conformance/differential.sh modbus rust $$s | diff conformance/modbus/stock-$$s.golden - && echo "modbus $$s: byte-equal to stock" || exit 1; done
 

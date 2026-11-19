@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SCEPTRE><field-device><name>prov</name><cycle-time>500</cycle-time><tags>
+<external-tag><name>bo0</name><io>O0</io><type>binary</type></external-tag>
+<external-tag><name>ao0</name><io>O1</io><type>analog</type></external-tag>
+</tags><comms><dnp3-server><endpoint>tcp://127.0.0.1:20000</endpoint><address>10</address><event-logging>dnp3-diff.log</event-logging>
+<binary-output><address>0</address><tag>bo0</tag><class>Class1</class></binary-output>
+<binary-input><address>0</address><tag>bo0</tag><class>Class1</class></binary-input>
+<analog-output><address>0</address><tag>ao0</tag><class>Class1</class></analog-output>
+<analog-input><address>0</address><tag>ao0</tag><class>Class1</class></analog-input>
+</dnp3-server></comms>
+<input><endpoint>udp://239.0.0.1:40000</endpoint>
+</input><output><endpoint>tcp://127.0.0.1:5555</endpoint>
+<binary><id>O0</id><name>pbo0</name></binary>
+<analog><id>O1</id><name>pao0</name></analog>
+</output></field-device></SCEPTRE>

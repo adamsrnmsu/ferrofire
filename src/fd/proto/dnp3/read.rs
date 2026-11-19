@@ -200,7 +200,8 @@ fn add_static(out: &mut Vec<(Table, u8, Sel)>, typ: Table, var: u8, sel: &Sel) {
     }
 }
 
-/// Static loaders in request order.
+/// Static loaders in the order stock answers them whatever the request's: g1, g30, g10, g40 (probed, `stock-cfg`/`stock-nack`); the
+/// loaders of one table keep their request order.
 fn loaders(acts: &[Action]) -> Vec<(Table, u8, Sel)> {
     let mut out = vec![];
     for a in acts {
@@ -210,6 +211,7 @@ fn loaders(acts: &[Action]) -> Vec<(Table, u8, Sel)> {
             _ => {}
         }
     }
+    out.sort_by_key(|l| usize::from(l.0.out) * 2 + l.0.typ as usize);
     out
 }
 
@@ -222,26 +224,20 @@ fn all_points(dev: &Device, t: Table, var: u8) -> Vec<(u16, u8, Vec<u8>)> {
             .bin
             .iter()
             .filter(|(_, p)| p.input != t.out)
-            .map(|(i, p)| {
-                (
-                    *i,
-                    pick(p.default_var()),
-                    binary_static(pick(p.default_var()), p.flags),
-                )
-            })
+            .map(|(i, p)| (i.1, pick(p.svar), binary_static(pick(p.svar), p.flags)))
             .collect(),
         Typ::Analog => dev
             .ana
             .iter()
             .filter(|(_, p)| p.input != t.out)
             .map(|(i, p)| {
-                let v = pick(p.default_var());
+                let v = pick(p.svar);
                 let wire = if t.out {
                     [0, 1, 2, 5, 6][usize::from(v)]
                 } else {
                     v
                 };
-                (*i, v, analog_object(wire, p.value, p.flags, None, false))
+                (i.1, v, analog_object(wire, p.value, p.flags, None, false))
             })
             .collect(),
     }
