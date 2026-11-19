@@ -11,12 +11,15 @@ pub const RESTART: u8 = 0x02;
 pub const OVER_RANGE: u8 = 0x20;
 pub const STATE: u8 = 0x80;
 
-/// A point. Inputs raise events; outputs (reached through the same map, bennu quirk Q5) never do.
+/// A point. Only a point in Class 1-3 raises events: bennu v2026.11.03 defaults every point to Class 0 (static data only), and a
+/// master moves it with ASSIGN_CLASS.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Point<V> {
     pub tag: String,
     pub sbo: bool,
     pub input: bool,
+    /// ponytail: the config refuses `class`, so only ASSIGN_CLASS sets it.
+    pub class: u8,
     pub value: V,
     pub flags: u8,
 }
@@ -24,8 +27,8 @@ pub struct Point<V> {
 pub type BinPoint = Point<bool>;
 pub type AnaPoint = Point<f64>;
 
-/// The static variations a point answers `READ g?v0` with: inputs g1v2 / g30v6 (flags; double), outputs g1v1 / g30v1 (packed bit;
-/// 32-bit integer).
+/// The static variations a point answers `READ g?v0` with: inputs g1v2 / g30v6 (flags; double), outputs g10v2 / g40v1 (flags;
+/// 32-bit integer and flags).
 pub trait Static: Default {
     const INPUT_VAR: u8;
     const OUTPUT_VAR: u8;
@@ -33,7 +36,7 @@ pub trait Static: Default {
 
 impl Static for bool {
     const INPUT_VAR: u8 = 2;
-    const OUTPUT_VAR: u8 = 1;
+    const OUTPUT_VAR: u8 = 2;
 }
 
 impl Static for f64 {
@@ -48,6 +51,7 @@ impl<V: Static> Point<V> {
             tag: tag.into(),
             sbo,
             input,
+            class: 0,
             value: V::default(),
             flags: RESTART,
         }
@@ -67,7 +71,7 @@ impl BinPoint {
         let flags = ONLINE | if value { STATE } else { 0 };
         let changed = flags != self.flags;
         (self.value, self.flags) = (value, flags);
-        changed && self.input
+        changed && self.class > 0
     }
 }
 
@@ -76,7 +80,7 @@ impl AnaPoint {
     pub fn update(&mut self, value: f64) -> bool {
         let changed = self.flags != ONLINE || (value - self.value).abs() > 0.0;
         (self.value, self.flags) = (value, ONLINE);
-        changed && self.input
+        changed && self.class > 0
     }
 }
 
@@ -157,6 +161,24 @@ impl Typ {
     }
 }
 
+/// A static table. opendnp3 keeps inputs (g1, g30) and output status (g10, g40) apart, as bennu v2026.11.03 registers them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Table {
+    pub typ: Typ,
+    pub out: bool,
+}
+
+impl Table {
+    pub fn group(self) -> u8 {
+        match (self.typ, self.out) {
+            (Typ::Binary, false) => 1,
+            (Typ::Binary, true) => 10,
+            (Typ::Analog, false) => 30,
+            (Typ::Analog, true) => 40,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Data {
     Bin { flags: u8 },
@@ -176,6 +198,7 @@ pub enum State {
 pub struct Event {
     pub id: u64,
     pub idx: u16,
+    pub class: u8,
     pub data: Data,
     pub state: State,
 }
@@ -216,10 +239,11 @@ pub struct Events {
 }
 
 impl Events {
-    pub fn push(&mut self, idx: u16, data: Data) {
+    pub fn push(&mut self, idx: u16, class: u8, data: Data) {
         let typ = Event {
             id: 0,
             idx,
+            class,
             data: data.clone(),
             state: State::Unselected,
         }
@@ -233,6 +257,7 @@ impl Events {
         self.q.push_back(Event {
             id: self.next,
             idx,
+            class,
             data,
             state: State::Unselected,
         });
@@ -243,20 +268,25 @@ impl Events {
         self.q.iter().filter(|e| e.typ() == typ).count()
     }
 
-    /// Any event not yet selected: IIN1.1 (class 1 events).
-    pub fn unselected(&self) -> bool {
-        self.q.iter().any(|e| e.state == State::Unselected)
+    /// Any event not yet selected, in class `class` (any when 0): IIN1.1-1.3.
+    pub fn unselected(&self, class: u8) -> bool {
+        self.q
+            .iter()
+            .any(|e| e.state == State::Unselected && (class == 0 || e.class == class))
     }
 
     pub fn overflowed(&self) -> bool {
         self.overflow.iter().any(|&o| o)
     }
 
-    /// Select unselected events of `typ` (any when `None`), oldest first, at most `limit`; `var` 0 means the default.
-    pub fn select(&mut self, typ: Option<Typ>, var: u8, limit: usize) -> usize {
+    /// Select unselected events of `typ` and `class` (any when `None`), oldest first, at most `limit`; `var` 0 means the default.
+    pub fn select(&mut self, typ: Option<Typ>, class: Option<u8>, var: u8, limit: usize) -> usize {
         let mut n = 0;
         for e in self.q.iter_mut().filter(|e| e.state == State::Unselected) {
-            if n == limit || typ.is_some_and(|t| t != e.typ()) {
+            if n == limit
+                || typ.is_some_and(|t| t != e.typ())
+                || class.is_some_and(|c| c != e.class)
+            {
                 continue;
             }
             let v = if var == 0 { e.typ().default_var() } else { var };
@@ -302,8 +332,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn binary_point_events_only_for_inputs_and_only_on_change() {
+    fn point_events_only_in_a_class_and_only_on_change() {
         let mut p = BinPoint::new("t", false, true);
+        p.class = 1;
         assert!(p.update(false)); // RESTART -> ONLINE
         assert!(!p.update(false));
         assert!(p.update(true));
@@ -318,6 +349,7 @@ mod tests {
     #[test]
     fn analog_point_events_on_first_update_and_any_change() {
         let mut p = AnaPoint::new("t", false, true);
+        p.class = 1;
         assert!(p.update(0.0));
         assert!(!p.update(0.0));
         assert!(p.update(0.5));
@@ -333,7 +365,7 @@ mod tests {
     #[test]
     fn default_variations_follow_the_point_kind() {
         assert_eq!(BinPoint::new("t", false, true).default_var(), 2);
-        assert_eq!(BinPoint::new("t", false, false).default_var(), 1);
+        assert_eq!(BinPoint::new("t", false, false).default_var(), 2);
     }
 
     #[test]
@@ -371,6 +403,7 @@ mod tests {
         let b = Event {
             id: 0,
             idx: 0x0102,
+            class: 1,
             data: Data::Bin { flags: 0x81 },
             state: State::Unselected,
         };
@@ -380,6 +413,7 @@ mod tests {
         let a = Event {
             id: 0,
             idx: 3,
+            class: 1,
             data: Data::Ana {
                 value: 33.5,
                 ts: 0x0000_6AF3_3692,
@@ -404,10 +438,10 @@ mod tests {
 
     fn fill(ev: &mut Events, bin: u16, ana: u16) {
         for i in 0..bin {
-            ev.push(i, Data::Bin { flags: ONLINE });
+            ev.push(i, 1, Data::Bin { flags: ONLINE });
         }
         for i in 0..ana {
-            ev.push(i, Data::Ana { value: 0.0, ts: 0 });
+            ev.push(i, 1, Data::Ana { value: 0.0, ts: 0 });
         }
     }
 
@@ -415,8 +449,8 @@ mod tests {
     fn the_oldest_event_of_a_full_type_is_dropped_and_overflow_flagged() {
         let mut ev = Events::default();
         fill(&mut ev, 130, 5);
-        assert!(ev.overflowed() && ev.unselected());
-        ev.select(Some(Typ::Binary), 0, usize::MAX);
+        assert!(ev.overflowed() && ev.unselected(0));
+        ev.select(Some(Typ::Binary), None, 0, usize::MAX);
         let idx: Vec<u16> = ev.selected().map(|(e, _)| e.idx).collect();
         assert_eq!((idx.len(), idx[0], idx[99]), (100, 30, 129));
         assert_eq!(ev.count(Typ::Analog), 5);
@@ -427,15 +461,15 @@ mod tests {
         let mut ev = Events::default();
         fill(&mut ev, 101, 100);
         assert!(ev.overflowed());
-        ev.select(Some(Typ::Binary), 0, 1);
+        ev.select(Some(Typ::Binary), None, 0, 1);
         let ids: Vec<u64> = ev.selected().map(|(e, _)| e.id).collect();
         ev.mark_written(&ids);
         ev.clear_written();
         assert!(!ev.overflowed());
         // analog was never overflowed, but fill it past the cap now and clear one
-        ev.push(0, Data::Ana { value: 1.0, ts: 0 });
+        ev.push(0, 1, Data::Ana { value: 1.0, ts: 0 });
         assert!(ev.overflowed());
-        ev.select(Some(Typ::Binary), 0, 1);
+        ev.select(Some(Typ::Binary), None, 0, 1);
         let ids: Vec<u64> = ev.selected().map(|(e, _)| e.id).collect();
         ev.mark_written(&ids);
         ev.clear_written(); // frees binary only: the analog buffer is still full
@@ -445,30 +479,30 @@ mod tests {
     #[test]
     fn select_honours_type_limit_variation_and_state() {
         let mut ev = Events::default();
-        ev.push(1, Data::Ana { value: 1.0, ts: 0 });
-        ev.push(2, Data::Bin { flags: ONLINE });
-        ev.push(3, Data::Bin { flags: ONLINE });
-        assert_eq!(ev.select(Some(Typ::Binary), 3, 1), 1);
+        ev.push(1, 1, Data::Ana { value: 1.0, ts: 0 });
+        ev.push(2, 1, Data::Bin { flags: ONLINE });
+        ev.push(3, 1, Data::Bin { flags: ONLINE });
+        assert_eq!(ev.select(Some(Typ::Binary), None, 3, 1), 1);
         let sel: Vec<_> = ev.selected().map(|(e, v)| (e.idx, v)).collect();
         assert_eq!(sel, vec![(2, 3)]);
-        assert_eq!(ev.select(None, 0, usize::MAX), 2); // the rest, defaults; the selected one is not taken again
+        assert_eq!(ev.select(None, None, 0, usize::MAX), 2); // the rest, defaults; the selected one is not taken again
         let sel: Vec<_> = ev.selected().map(|(e, v)| (e.idx, v)).collect();
         assert_eq!(sel, vec![(1, 6), (2, 3), (3, 2)]);
-        assert!(!ev.unselected());
+        assert!(!ev.unselected(0));
         ev.reset();
-        assert!(ev.unselected());
+        assert!(ev.unselected(0));
         assert_eq!(ev.selected().count(), 0);
-        assert_eq!(ev.select(None, 0, 0), 0);
+        assert_eq!(ev.select(None, None, 0, 0), 0);
     }
 
     #[test]
     fn written_events_are_deleted_by_a_confirm_and_returned_by_a_reset() {
         let mut ev = Events::default();
         fill(&mut ev, 3, 0);
-        ev.select(None, 0, usize::MAX);
+        ev.select(None, None, 0, usize::MAX);
         ev.mark_written(&[0, 1]);
         ev.reset();
-        assert_eq!(ev.select(None, 0, usize::MAX), 3);
+        assert_eq!(ev.select(None, None, 0, usize::MAX), 3);
         ev.mark_written(&[0, 1]);
         ev.clear_written();
         let left: Vec<u16> = ev.selected().map(|(e, _)| e.idx).collect();

@@ -245,7 +245,7 @@ file contents were not captured: UNVERIFIED on a live run). Replicate: ELK/dashb
 | Q2 | Modbus unsupported function (FC 23, 8) answered with a **7-byte header-only** frame `0001 0000 0001 01` (`O:`); FC 43 → `80 04` | replicate | `--strict` → proper exception 0x01 |
 | Q3 | Modbus read of an unmapped *coil* → exception 0x03; unmapped discrete/holding/input → 0x02 (`MOD:comms/modbus/module/Server.cpp:202-243` vs `:420-`; `O:`) | replicate | — |
 | Q4 | analog registers scaled to 16-bit over `[min,max]`, conversion `double → uint16` truncating; out-of-range input is C++ UB (arch-dependent) | truncate in range, **clamp** out of range | `--compat-wrap` UNVERIFIED target |
-| Q5 | DNP3 binary/analog *outputs* are published as **inputs** (g1v1 / g30v1, Class 0, never events) because the output entry reuses the input point map without variations (§4.2, `O:`) | replicate | — |
+| Q5 | DNP3 binary/analog *outputs*: the 2026-11-07 `bennu:arm64` published them as **inputs** (g1v1 / g30v1, Class 0, never events); **stock v2026.11.03 reports output status**, binary g10v2 and analog g40v1 (flags + 32-bit integer), in tables of their own, so an input and an output may share an index and a control touches outputs only (ww-270, `O:` from `ffc-stock-2026.11.03:22.04`) | **replicate v2026.11.03** | — |
 | Q6 | DNP3 `AnalogOutputInt16/Int32/Double64` commands return SUCCESS and write nothing (`O:` status 0) | replicate | `--strict` → NOT_SUPPORTED |
 | Q7 | IEC 104 select/execute bit ignored, commands handled as direct operate (`O:`) | replicate | — |
 | Q8 | pidfile start guard without liveness test (§2.3) | replicate | `--strict` checks `/proc/<pid>` |
@@ -307,7 +307,7 @@ Stock behaviour (source + `O:` transcript from `conformance/stock/probe_dnp3.py`
 - Database: **binary inputs and binary outputs share one map**, likewise analog (`Server.cpp:197-210,263-274`). Inputs default to `Group1Var2` static / `Group2Var2` events / Class 1 (binary) and `Group30Var6` / `Group32Var6` /
   Class 1 (analog) (`Server.cpp:296` and the binary equivalent above it). **Outputs** are inserted without any variation or class (`addBinaryOutput`/`addAnalogOutput`, `Server.cpp:263-274`), so the library defaults
   apply: static `Group1Var1` / `Group30Var1` (32-bit integer) and no events (Class 0 behaviour). They appear in integrity polls as
-  inputs and never produce events (Q5). `O:` integrity poll response (hex, link CRCs stripped):
+  inputs and never produce events (Q5). **That is the 2026-11-07 image; v2026.11.03 registers them as output status (see 4.2.1, "v2026.11.03") and the transcript below is the old one.** `O:` integrity poll response (hex, link CRCs stripped):
 
   ```
   e0 81 90 00                       app ctl FIR|FIN|CON, RESPONSE, IIN1=0x90 (DEVICE_RESTART|NEED_TIME) IIN2=0
@@ -335,6 +335,21 @@ Stock behaviour (source + `O:` transcript from `conformance/stock/probe_dnp3.py`
 
   A write only enqueues the tag (§3.2); the master sees it in the database after the provider echo + the next 1 Hz refresh.
 - Link layer: unconfirmed user data `ctrl 0x44` from the outstation; responses CRC-framed by the library.
+
+#### 4.2.0 v2026.11.03 (ww-270, 2026-11-19; `O:` from `ffc-stock-2026.11.03:22.04`, `B:` sceptre-bennu tag v2026.11.03 `Server.cpp`)
+
+The outstation follows this release; the goldens `conformance/dnp3/stock-*.{golden,trace,logs}` were re-recorded from it. Against 4.2.1 below:
+- **Output status.** `<binary-output>` / `<analog-output>` go into their own tables: class 0 answers g1v2, g30v6, then **g10v2 and g40v1** (flags `0x01`, value from the
+  tag; class 0 order is inputs then outputs, binary before analog). `READ g10 v0-2` / `g40 v0-4` answer them (g40: 1 i32, 2 i16, 3 float, 4 double, with flag); g1 and g30
+  no longer list them. A CROB or g41 control on an index that is only an input is OUT_OF_RANGE (12).
+- **Class 0 by default.** An input has no event class unless the master assigns one: no events, no IIN1.1, until ASSIGN_CLASS (below). The `class` setting of the sample XML
+  (also on outputs) stays refused by our parser (ww-3oa follow-up bead), so only ASSIGN_CLASS sets it.
+- **ASSIGN_CLASS** (function 22) works: a g60 v1-4 header gives the class of the next header, g1/g10/g30/g40 v0 with all objects or a start-stop range. A range wider than the
+  points is PARAM_ERROR but the points inside are assigned; a header without a class header before it is PARAM_ERROR; other variations NO_FUNC (`B:` AssignClassHandler.cpp).
+  Events carry their class: class 2 and 3 polls return their own, IIN1.2 and IIN1.3 mark them.
+- **Log** at start: `Binary Size is N and Analog Size is M.` (inputs), `Binary Output Size is ...`, `Event buffer size (per type) is 100.`
+- Not replicated (listed in conformance/README.md): `event-buffer-size`, `sgvar`, `egvar`, `deadband`, `class` in the config; events of output points; the commanded value
+  reaching the output status before the next refresh, and the refresh that skips a tag with a write pending.
 
 #### 4.2.1 F3 findings (2026-11-10, from `conformance/dnp3/stock-*.{golden,trace,logs}`, ww-otj.44; `O:`)
 

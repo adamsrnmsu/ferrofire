@@ -88,10 +88,13 @@ left out with a WARN (an error under `--strict`). In `fep` mode `<min-value>` eq
 - **Modbus** polls each connection every `<scan-rate>`, inputs and outputs. Contiguous addresses of a table are one request, up to 125
   registers or 2,000 bits. A merged read the device refuses with exception 2 is read address by address from the next poll on. A register
   is unscaled through its own range; a write is scaled and clamped to it.
-- **DNP3** scans as in `bennu` mode and reads the output status (groups 10 and 40) after each scan. An input value goes into the
-  input's tag and an output status into the output's; an outstation that reports its outputs as inputs (ferrofire's own does) is
-  understood too: an input value at an index that only an output has goes to that output. (In `bennu` mode the cache is stock's:
-  one address space per kind, where an input and an output cannot share an address.)
+- **DNP3** scans as in `bennu` mode and, after each scan, reads the output status (groups 10 and 40, the analog outputs as float32,
+  g40v3). An input value goes into the input's tag and an output status into the output's, and **only the status read feeds the
+  outputs**: a class scan of stock v2026.11.03 carries them too (as g10v2 and an integer g40v1), and a second poll in one scan would use
+  up the grace after a write. An outstation that never answers the status read is not asked again on that connection (a warning, once).
+  An outstation that reports its outputs as inputs (ferrofire's own before ww-270, stock's 2026-11-07 image) is understood too: an input
+  value at an index that only an output has goes to that output. (In `bennu` mode the cache is stock's: one address space per kind,
+  where an input and an output cannot share an address.)
 - **Writes down.** Once per `<cycle-time>` each connection looks at its output tags (coils, holding registers, DNP3 outputs) and sends
   the ones that changed locally: a `<logic>` assignment, a write to one of the device's servers, a command-interface `WRITE`.
   Modbus changes found in the same pass go down as one FC15 (coils) or FC16 (holding registers) per run of contiguous addresses, merged
@@ -101,9 +104,11 @@ left out with a WARN (an error under `--strict`). In `fep` mode `<min-value>` eq
 - **The echo rule.** A value is sent only when it differs both from the last value sent and from the last value polled in for that point,
   so what a poll brought is never written back. Values are compared as the wire carries them (a register after scaling, a DNP3 analog
   output as a float32): a setpoint a register or a float32 cannot hold exactly is sent once, and the tag keeps the value that was
-  asked for. What the device reports back in another form is a different value: an outstation that reports an analog output's status
-  as an integer (stock's and ferrofire's do) shows 42 for a setpoint of 42.5, the tag takes the 42, and logic that keeps assigning 42.5
-  sends it again after each scan. Use whole numbers there, or do not hold such a setpoint from logic. A local change wins over a poll that arrives at the same time; the poll result for that
+  asked for. What the device reports back in another form is a different value, and a form that cannot hold the setpoint shows it
+  changed: an outstation that reports an analog output's status only as an integer (the older stock and ferrofire, as inputs, g30v1)
+  shows 42 for a setpoint of 42.5, the tag takes the 42, and logic that keeps assigning 42.5 sends it again after each scan. DNP3
+  outputs read as g10/g40 are not affected (the read asks for a float32); for the others use whole numbers, or do not hold such a
+  setpoint from logic. A local change wins over a poll that arrives at the same time; the poll result for that
   point is ignored until the write is answered. The value a tag starts with (0 or false) counts as sent, so a FEP does not open by
   zeroing every output.
 - **A device that is away.** A request has 1000 ms. A failed poll leaves the tags at their last values and turns `<status-tag>` false; the

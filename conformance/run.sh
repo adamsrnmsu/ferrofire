@@ -3,7 +3,7 @@
 # blue team would (tshark expert info, decoded fields, Zeek logs). Usage: conformance/run.sh PROTO   (or: make conformance PROTO=dnp3)
 # Two containers, both named ff-conf-*: the DUT, and the testpeers image sharing its network namespace (so peers talk to 127.0.0.1
 # and the capture on lo sees everything). Only these two are ever removed. Layout of conformance/<PROTO>/ : proto.env, peer.sh, check.sh.
-# env: DUT=stock (default, bennu:arm64 oracle) | rust (our binary, FF_BIN) | DUT_IMAGE + DUT_CMD (anything else: the config is at /tmp/cfg.xml)
+# env: DUT=stock (default, the ffc-stock-2026.11.03:22.04 oracle) | rust (our binary, FF_BIN) | DUT_IMAGE + DUT_CMD (anything else: the config is at /tmp/cfg.xml)
 #      TESTPEERS=ferrofire-testpeers  OUT=target/conformance/PROTO  ZEEK_REQUIRED=1 (a missing Zeek parser fails instead of skipping)
 #      BENNU_DATA=dir holding the stock sample configs (default ~/git/sceptre-bennu/data/configs/ep)
 set -eu
@@ -15,10 +15,10 @@ BENNU_DATA=${BENNU_DATA:-$HOME/git/sceptre-bennu/data/configs/ep}
 # shellcheck source=/dev/null
 . "$here/$proto/proto.env"   # sets CFG (path), STOCK_CMD, WARMUP; optional DUT_DEFAULT (rust where bennu has no such server), DUT_CAPS
 DUT=${DUT:-${DUT_DEFAULT:-stock}}
-# STOCK_IMAGE: the stock oracle image when it is not called bennu:arm64 on this daemon. CONF_NAME: the container name prefix.
-STOCK_IMAGE=${STOCK_IMAGE:-bennu:arm64}; N=${CONF_NAME:-ff-conf}
+# STOCK_IMAGE: the stock oracle image (default ffc-stock-2026.11.03:22.04, bennu v2026.11.03). CONF_NAME: the container name prefix.
+STOCK_IMAGE=${STOCK_IMAGE:-ffc-stock-2026.11.03:22.04}; N=${CONF_NAME:-ff-conf}
 if [ "$DUT" = stock ]; then DUT_IMAGE=$STOCK_IMAGE; DUT_CMD=$STOCK_CMD; fi
-# DUT=rust: our binary (FF_BIN, default target-linux/debug/ferrofire from make test/linux) is copied into a bennu:arm64 container, or into
+# DUT=rust: our binary (FF_BIN, default target-linux/debug/ferrofire from make test/linux) is copied into a stock-image container, or into
 # RUST_DUT_IMAGE (the binary needs only glibc; a protocol bennu has no part in can name the testpeers image there)
 if [ "$DUT" = rust ]; then
   DUT_IMAGE=${RUST_DUT_IMAGE:-$STOCK_IMAGE}; DUT_BIN=${FF_BIN:-$here/../target-linux/debug/ferrofire}

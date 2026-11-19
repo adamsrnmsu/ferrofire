@@ -606,7 +606,6 @@ mod dnp3 {
         let r = rig("").await;
         until("up", S(6), || r.fep.store.get_bool("rtu-up") == Some(true)).await;
         r.fep.store.write("pump", Binary(true)).unwrap();
-        // whole numbers: our outstation reports an analog output back as a 32-bit integer (g30v1)
         r.fep.store.write("setpoint", Analog(43.0)).unwrap();
         let rtu = &r.rtu.store;
         until("the commands on the RTU", S(3), || {
@@ -633,6 +632,27 @@ mod dnp3 {
         .await;
         tokio::time::sleep(Duration::from_millis(1500)).await;
         assert_eq!(controls(&r.tap).len(), 3);
+    }
+
+    /// ww-d67. Our outstation answers like stock v2026.11.03: an analog output comes twice per scan, as a 32-bit integer in the
+    /// class 0 response and again in the output-status read. Logic that assigns 42.5 every cycle must command it once.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dnp3_a_setpoint_that_logic_keeps_assigning_is_commanded_once() {
+        let r = rig("").await;
+        until("up", S(6), || r.fep.store.get_bool("rtu-up") == Some(true)).await;
+        for _ in 0..50 {
+            r.fep.store.write("setpoint", Analog(42.5)).unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        let ao = master::ao_f32(1, 42.5);
+        let want = vec![[&[3u8][..], &ao].concat(), [&[4u8][..], &ao].concat()];
+        assert_eq!(
+            controls(&r.tap),
+            want,
+            "one select and one operate in five scans"
+        );
+        assert_eq!(r.rtu.store.get_f64("setpoint"), Some(42.5));
+        assert_eq!(r.fep.store.get_f64("setpoint"), Some(42.5));
     }
 
     #[tokio::test(flavor = "multi_thread")]

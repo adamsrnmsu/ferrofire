@@ -30,6 +30,8 @@ pub mod func {
 pub mod iin {
     pub const BROADCAST: u16 = 0x0001;
     pub const CLASS1: u16 = 0x0002;
+    pub const CLASS2: u16 = 0x0004;
+    pub const CLASS3: u16 = 0x0008;
     pub const NEED_TIME: u16 = 0x0010;
     pub const RESTART: u16 = 0x0080;
     pub const NO_FUNC: u16 = 0x0100;

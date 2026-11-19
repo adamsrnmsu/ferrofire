@@ -3,7 +3,7 @@
 Judges a field-device protocol the way a blue team sees it: capture the wire, then ask tshark and Zeek what they decoded.
 
     make testpeers                  # once: build the ferrofire-testpeers image (about 10 min; docker/testpeers/Dockerfile)
-    make conformance PROTO=dnp3     # peers vs the stock oracle (bennu:arm64); exit 0 = PASS
+    make conformance PROTO=dnp3     # peers vs the stock oracle (ffc-stock-2026.11.03:22.04); exit 0 = PASS
     DUT=rust make conformance PROTO=dnp3   # the same peers and judgement against our binary (FF_BIN, default target-linux/debug/ferrofire)
     make conformance-selftest       # negative control: a damaged and an empty capture must be rejected
 
@@ -35,12 +35,13 @@ SCORCH `providerdata` check. See [../docs/ground-truth-elastic.md](../docs/groun
 ## Pointing it at another device
 `DUT_IMAGE=<image> DUT_CMD='<command reading /tmp/cfg.xml>' conformance/run.sh dnp3` (the config is `CFG`, default the stock sample from
 `BENNU_DATA`, default `~/git/sceptre-bennu/data/configs/ep`; for DNP3 it is `conformance/dnp3/server.xml`, because the stock parser exits silently on an XML comment before the root element). The binary must be in `DUT_IMAGE`. With `DUT` unset the oracle is
-`bennu:arm64` (SPEC section 8), so run on the daemon that has it: the Makefile defaults `TP_DOCKER_HOST` to the Lima socket.
+`ffc-stock-2026.11.03:22.04` (bennu v2026.11.03, `STOCK_IMAGE` overrides), so run on the daemon that has it and `ferrofire-testpeers`: the Makefile defaults
+`TP_DOCKER_HOST` to the Docker Desktop socket (`differential.sh` and `run-stock.sh` default `DOCKER_HOST` to it too).
 
 ## Differential and golden replay (DNP3)
 The acceptance harness above judges what a blue team sees. The differential proves the device answers like the stock one, byte for byte.
 
-    make differential PROTO=dnp3 WHO=stock SET=diff   # the transcript of probe_diff.py against bennu:arm64
+    make differential PROTO=dnp3 WHO=stock SET=diff   # the transcript of probe_diff.py against the stock image
     make diff-dnp3                                    # our binary vs the recorded stock transcripts, live (rebuilds target-linux/debug/ferrofire first)
 
 `conformance/dnp3/`: `probe_diff.py` (about 230 requests: link layer, reads by group and variation, events and their order, IIN, every
@@ -124,7 +125,7 @@ the client is the DUT, the **stock** server runs beside it in the same container
     DUT=rust make conformance PROTO=dnp3-client      # our master vs the stock outstation
     conformance/stock/run-stock.sh modbus-client     # re-record stock/client-modbus.golden and .pcap from the stock client (also: dnp3-client)
 
-The goldens were recorded from `ffc-stock-2026.11.03:22.04` (bennu v2026.11.03); `STOCK_IMAGE` names the stock image when it is not `bennu:arm64`,
+The goldens were recorded from `ffc-stock-2026.11.03:22.04` (bennu v2026.11.03); `STOCK_IMAGE` (default that image) names the stock image,
 `CONF_NAME` the container prefix, `TP_DOCKER_HOST` the daemon that has the image and `ferrofire-testpeers`.
 
 **The transcript** (`stock/client-<proto>.golden`): per command `request<TAB>reply`, then what the capture saw until the next command, `>` from the client
@@ -153,8 +154,8 @@ too (it has, frame for frame). `tests/modbus_client.rs` and `tests/dnp3_master.r
 | a command-interface bind failure exits the device | logged; the client runs without it | the rest of the device keeps running, as for every module |
 | DNP3: a connection lost is reopened at once, also when it never carried a response (a tight loop through a relay in front of a dead outstation) | at once only after a session that was answered; otherwise the 1, 2, 4 ... 60 s pauses | no connection storm |
 | DNP3: after a clear-restart that leaves IIN1.7 set, opendnp3 stops clearing but polls class 0 again on every response that carries the bit | the class 0 poll is not re-demanded either | no poll loop against an outstation that never clears the bit |
-| DNP3: link-layer requests from the outstation (link status, reset) are answered by opendnp3 | not answered | the stock outstation and ours send none; `ponytail:` in `master.rs` |
-| DNP3: a response in several fragments advances the master's sequence as opendnp3 counts | each fragment is taken; the next request is the last request's sequence plus one | untested against stock (its responses are single fragments here) |
+| DNP3: commands wait in opendnp3's master queue, which has no size, only a 10 s start timeout (the callback result goes to stdout); WRITE is answered at once | the queue holds 1000 commands per connection (`COMMAND_QUEUE`); one more is dropped with a warning, and WRITE is answered the same | a WRITE flood while an outstation is silent cannot grow memory; the reply is stock's |
+| DNP3 server: `class`, `sgvar`, `egvar`, `deadband`, `event-buffer-size` in the config are refused or ignored; a control's value reaches the output status only with the next refresh; outputs raise no events | stock v2026.11.03 takes them (default class 0, output status updated at once, skipped while a write is pending) | the generator never emits them; ASSIGN_CLASS is replicated (field-device-spec 4.2.0) |
 | an out-of-range Modbus write is converted from double to `uint16_t`, which C++ leaves undefined: the arm64 build wraps it (`2000` over 0..1000 leaves as `fffe`), another build may not | the arm64 bytes, on every architecture | the capture is from arm64 |
 
 `fep` mode has no stock counterpart; its rules are in [docs/field-device-clients.md](../docs/field-device-clients.md) and its tests in `tests/fd_fep.rs`.

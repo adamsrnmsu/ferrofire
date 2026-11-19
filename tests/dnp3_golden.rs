@@ -46,15 +46,7 @@ fn rig(xml: &str) -> Rig {
     let (out, store) = common::load(xml);
     let log = EventLog::to("dnp3-server", Box::new(logged.clone()));
     let dev = out.device();
-    log.log(
-        "info",
-        "dnp3 server init",
-        format!(
-            "Binary Size is {} and Analog Size is {}.",
-            dev.bin.len(),
-            dev.ana.len()
-        ),
-    );
+    ferrofire::fd::proto::dnp3::log_init(&log, &dev.bin, &dev.ana);
     let mut r = Rig {
         dev,
         store,

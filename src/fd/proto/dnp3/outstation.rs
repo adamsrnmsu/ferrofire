@@ -2,9 +2,9 @@
 //! `Conn` is one master's connection (link and transport state, the fragment waiting for a CONFIRM). Bytes in, bytes out, and
 //! the clock is an argument, so the golden replay and the fuzz target drive it exactly as the socket does.
 
-use super::app::{self, iin, Request, CON, FIN, FIR, MAX_APDU, RESPONSE_HEADER};
+use super::app::{self, iin, Range, Request, CON, FIN, FIR, MAX_APDU, RESPONSE_HEADER};
 use super::command::{self, Mode, Selection, TIME_SYNC_VALID};
-use super::db::{AnaPoint, BinPoint, Data, Events, Typ};
+use super::db::{AnaPoint, BinPoint, Data, Events, Point, Table, Typ};
 use super::link::{self, Frame, Parse};
 use super::read::{self, Block};
 use super::transport::{self, Reassembler};
@@ -71,14 +71,15 @@ impl Device {
         for (idx, p) in self.bin.iter_mut() {
             if let Some(v) = src.binary(&p.tag) {
                 if p.update(v) {
-                    self.events.push(*idx, Data::Bin { flags: p.flags });
+                    self.events
+                        .push(*idx, p.class, Data::Bin { flags: p.flags });
                 }
             }
         }
         for (idx, p) in self.ana.iter_mut() {
             if let Some((v, ts)) = src.analog(&p.tag) {
                 if p.update(v) {
-                    self.events.push(*idx, Data::Ana { value: v, ts });
+                    self.events.push(*idx, p.class, Data::Ana { value: v, ts });
                 }
             }
         }
@@ -90,11 +91,23 @@ impl Device {
         self.synced = Some(now);
     }
 
-    /// The highest index of a type's points (0 when it has none).
-    pub fn max_index(&self, typ: Typ) -> u16 {
-        match typ {
-            Typ::Binary => self.bin.keys().next_back().copied().unwrap_or(0),
-            Typ::Analog => self.ana.keys().next_back().copied().unwrap_or(0),
+    /// The highest index of a table's points (0 when it has none).
+    pub fn max_index(&self, t: Table) -> u16 {
+        let top = |m: &mut dyn Iterator<Item = u16>| m.max().unwrap_or(0);
+        match t.typ {
+            Typ::Binary => top(&mut self.bin.iter().filter(|p| p.1.input != t.out).map(|p| *p.0)),
+            Typ::Analog => top(&mut self.ana.iter().filter(|p| p.1.input != t.out).map(|p| *p.0)),
+        }
+    }
+
+    /// ASSIGN_CLASS for one table (`group` 1, 10, 30 or 40): the points in `range` change class. PARAM_ERROR unless the range lies
+    /// within the table's first and last index.
+    pub fn assign(&mut self, group: u8, class: u8, range: &Range) -> u16 {
+        let out = group == 10 || group == 40;
+        if group < 30 {
+            assign_in(&mut self.bin, out, class, range)
+        } else {
+            assign_in(&mut self.ana, out, class, range)
         }
     }
 
@@ -110,10 +123,38 @@ impl Device {
             (self.restart, iin::RESTART),
             (self.need_time, iin::NEED_TIME),
             (self.broadcast, iin::BROADCAST),
-            (self.events.unselected(), iin::CLASS1),
+            (self.events.unselected(1), iin::CLASS1),
+            (self.events.unselected(2), iin::CLASS2),
+            (self.events.unselected(3), iin::CLASS3),
             (self.events.overflowed(), iin::OVERFLOW),
         ];
         flags.iter().filter(|f| f.0).fold(0, |a, f| a | f.1)
+    }
+}
+
+fn assign_in<V>(m: &mut BTreeMap<u16, Point<V>>, out: bool, class: u8, range: &Range) -> u16 {
+    let keys: Vec<u16> = m
+        .iter()
+        .filter(|p| p.1.input != out)
+        .map(|p| *p.0)
+        .collect();
+    let (Some(&lo), Some(&hi)) = (keys.first(), keys.last()) else {
+        return iin::PARAM_ERROR;
+    };
+    let (a, b) = match range {
+        Range::StartStop(a, b) => (*a, *b),
+        _ => (u32::from(lo), u32::from(hi)),
+    };
+    for k in keys
+        .into_iter()
+        .filter(|k| (a..=b).contains(&u32::from(*k)))
+    {
+        m.entry(k).and_modify(|p| p.class = class);
+    }
+    if a >= u32::from(lo) && a <= b && b <= u32::from(hi) {
+        0
+    } else {
+        iin::PARAM_ERROR
     }
 }
 
@@ -358,7 +399,7 @@ impl Conn {
         use app::func::*;
         match func {
             DELAY_MEASURE => Reply::Simple(vec![52, 2, 7, 1, 0, 0], 0),
-            IMMED_FREEZE | ASSIGN_CLASS | RECORD_CURRENT_TIME => Reply::Simple(vec![], 0),
+            IMMED_FREEZE | RECORD_CURRENT_TIME => Reply::Simple(vec![], 0),
             _ => Reply::Simple(vec![], iin::NO_FUNC),
         }
     }
@@ -381,6 +422,7 @@ impl Conn {
             SELECT | OPERATE | DIRECT_OPERATE | DIRECT_OPERATE_NO_ACK => {
                 Self::control(dev, sink, req, now)
             }
+            ASSIGN_CLASS => Reply::Simple(vec![], command::assign_class(dev, req.objects)),
             f => Self::plain(f),
         }
     }
@@ -449,7 +491,12 @@ mod tests {
             (0, AnaPoint::new("ai", false, true)),
             (1, AnaPoint::new("ao", true, false)),
         ];
-        Device::new(10, 1, bin.into_iter().collect(), ana.into_iter().collect())
+        let mut d = Device::new(10, 1, bin.into_iter().collect(), ana.into_iter().collect());
+        (
+            d.bin.get_mut(&2).unwrap().class,
+            d.ana.get_mut(&0).unwrap().class,
+        ) = (1, 1);
+        d
     }
 
     #[derive(Default)]
@@ -702,6 +749,26 @@ mod tests {
     }
 
     #[test]
+    fn assign_class_follows_opendnp3() {
+        let mut d = device();
+        assert_eq!(command::assign_class(&mut d, &[60, 3, 6, 1, 0, 0, 2, 2]), 0);
+        assert_eq!(d.bin[&2].class, 2);
+        assert_eq!(command::assign_class(&mut d, &[60, 2, 6, 40, 0, 6]), 0);
+        assert_eq!(d.ana[&1].class, 1);
+        let wide = [60, 2, 6, 1, 0, 0, 0, 9];
+        assert_eq!(command::assign_class(&mut d, &wide), iin::PARAM_ERROR);
+        assert_eq!(
+            d.bin[&2].class, 1,
+            "the points inside the range are assigned"
+        );
+        assert_eq!(command::assign_class(&mut d, &[1, 0, 6]), iin::PARAM_ERROR);
+        assert_eq!(
+            command::assign_class(&mut d, &[60, 2, 6, 1, 1, 6]),
+            iin::NO_FUNC
+        );
+    }
+
+    #[test]
     fn direct_operate_checks_sbo_and_the_point_map() {
         let mut r = Rig::new();
         assert_eq!(
@@ -712,21 +779,22 @@ mod tests {
         assert_eq!(*r.ask(&req(1, 5, &crob(5, 3))).last().unwrap(), 0);
         assert_eq!(
             *r.ask(&req(2, 5, &crob(2, 3))).last().unwrap(),
-            0,
-            "an input is reached through the same map"
+            12,
+            "an input is not a control point (v2026.11.03)"
         );
         assert_eq!(*r.ask(&req(3, 5, &crob(9, 3))).last().unwrap(), 12);
         assert_eq!(*r.ask(&req(4, 5, &crob(5, 4))).last().unwrap(), 0);
         assert_eq!(*r.ask(&req(5, 5, &crob(5, 0x43))).last().unwrap(), 0);
-        assert_eq!(
-            r.rec.0,
-            vec!["bo@5=true", "bi@2=true", "bo@5=false", "bo@5=true"]
-        );
+        assert_eq!(r.rec.0, vec!["bo@5=true", "bo@5=false", "bo@5=true"]);
         let ao = |idx: u8, v: f32| [&[41u8, 3, 0x17, 1, idx][..], &v.to_le_bytes(), &[0]].concat();
         assert_eq!(*r.ask(&req(6, 5, &ao(1, 1.5))).last().unwrap(), 2);
-        assert_eq!(*r.ask(&req(7, 5, &ao(0, 2.5))).last().unwrap(), 0);
+        assert_eq!(
+            *r.ask(&req(7, 5, &ao(0, 2.5))).last().unwrap(),
+            12,
+            "an analog input is not a control point"
+        );
         assert_eq!(*r.ask(&req(8, 5, &ao(4, 2.5))).last().unwrap(), 12);
-        assert_eq!(r.rec.0.last().unwrap(), "ai@0=2.5");
+        assert_eq!(r.rec.0.last().unwrap(), "bo@5=true", "nothing written");
         // select / operate of an analog output
         assert_eq!(*r.ask(&req(9, 3, &ao(1, 3.5))).last().unwrap(), 0);
         assert_eq!(*r.ask(&req(10, 4, &ao(1, 3.5))).last().unwrap(), 0);
@@ -910,7 +978,7 @@ mod tests {
     fn the_refresh_makes_events_for_inputs_only_and_carries_the_provider_time() {
         let mut d = device();
         d.refresh(&Vals(1.0, 1_794_324_000));
-        let events = d.events.select(None, 0, usize::MAX);
+        let events = d.events.select(None, None, 0, usize::MAX);
         assert_eq!(
             events, 2,
             "bi and ai raised one each; the outputs raised none"
@@ -926,14 +994,17 @@ mod tests {
         d.events.clear_written();
         d.refresh(&Vals(1.0, 1_794_324_001));
         assert_eq!(
-            d.events.select(None, 0, usize::MAX),
+            d.events.select(None, None, 0, usize::MAX),
             0,
             "no change, no event"
         );
-        assert_eq!(d.max_index(Typ::Binary), 7);
-        assert_eq!(d.max_index(Typ::Analog), 1);
+        let t = |typ, out| Table { typ, out };
+        assert_eq!(d.max_index(t(Typ::Binary, false)), 2);
+        assert_eq!(d.max_index(t(Typ::Binary, true)), 7);
+        assert_eq!(d.max_index(t(Typ::Analog, true)), 1);
         assert_eq!(
-            Device::new(1, 2, Default::default(), Default::default()).max_index(Typ::Binary),
+            Device::new(1, 2, Default::default(), Default::default())
+                .max_index(t(Typ::Binary, false)),
             0
         );
     }
