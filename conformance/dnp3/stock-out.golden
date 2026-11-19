@@ -1,0 +1,165 @@
+== start
+integrity link ctrl=44 1<-10 tp=c0 frames=1 app: c0 81 80 00 01 02 00 00 03 01 01 01 01 01 02 00 0a 0a 01 1e 06 00 00 02 01 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00 1e 06 00 07 07 01 00 00 00 00 00 00 00 00 0a 02 00 04 05 01 01 28 01 00 03 03 01 00 00 00 00 28 01 00 08 08 01 00 00 00 00
+confirm integrity -- no reply
+== reads of the output groups by variation
+g10v0 link ctrl=44 1<-10 tp=c1 frames=1 app: c1 81 80 00 0a 02 00 04 05 01 01
+g10v1 link ctrl=44 1<-10 tp=c2 frames=1 app: c2 81 80 01
+g10v2 link ctrl=44 1<-10 tp=c3 frames=1 app: c3 81 80 00 0a 02 00 04 05 01 01
+g10v3 link ctrl=44 1<-10 tp=c4 frames=1 app: c4 81 80 02
+g10v4 link ctrl=44 1<-10 tp=c5 frames=1 app: c5 81 80 02
+g40v0 link ctrl=44 1<-10 tp=c6 frames=1 app: c6 81 80 00 28 01 00 03 03 01 00 00 00 00 28 01 00 08 08 01 00 00 00 00
+g40v1 link ctrl=44 1<-10 tp=c7 frames=1 app: c7 81 80 00 28 01 00 03 03 01 00 00 00 00 28 01 00 08 08 01 00 00 00 00
+g40v2 link ctrl=44 1<-10 tp=c8 frames=1 app: c8 81 80 00 28 02 00 03 03 01 00 00 28 02 00 08 08 01 00 00
+g40v3 link ctrl=44 1<-10 tp=c9 frames=1 app: c9 81 80 00 28 03 00 03 03 01 00 00 00 00 28 03 00 08 08 01 00 00 00 00
+g40v4 link ctrl=44 1<-10 tp=ca frames=1 app: ca 81 80 00 28 04 00 03 03 01 00 00 00 00 00 00 00 00 28 04 00 08 08 01 00 00 00 00 00 00 00 00
+g40v5 link ctrl=44 1<-10 tp=cb frames=1 app: cb 81 80 02
+g40v6 link ctrl=44 1<-10 tp=cc frames=1 app: cc 81 80 02
+g40v7 link ctrl=44 1<-10 tp=cd frames=1 app: cd 81 80 02
+g40v8 link ctrl=44 1<-10 tp=ce frames=1 app: ce 81 80 02
+g40v9 link ctrl=44 1<-10 tp=cf frames=1 app: cf 81 80 02
+g40v10 link ctrl=44 1<-10 tp=d0 frames=1 app: c0 81 80 02
+g40v11 link ctrl=44 1<-10 tp=d1 frames=1 app: c1 81 80 02
+g11v0 link ctrl=44 1<-10 tp=d2 frames=1 app: c2 81 80 00
+g11v1 link ctrl=44 1<-10 tp=d3 frames=1 app: c3 81 80 00
+g11v2 link ctrl=44 1<-10 tp=d4 frames=1 app: c4 81 80 00
+g11v3 link ctrl=44 1<-10 tp=d5 frames=1 app: c5 81 80 02
+g13v0 link ctrl=44 1<-10 tp=d6 frames=1 app: c6 81 80 02
+g13v1 link ctrl=44 1<-10 tp=d7 frames=1 app: c7 81 80 01
+g13v2 link ctrl=44 1<-10 tp=d8 frames=1 app: c8 81 80 01
+g13v3 link ctrl=44 1<-10 tp=d9 frames=1 app: c9 81 80 02
+g13v4 link ctrl=44 1<-10 tp=da frames=1 app: ca 81 80 02
+g13v5 link ctrl=44 1<-10 tp=db frames=1 app: cb 81 80 02
+g12v1 link ctrl=44 1<-10 tp=dc frames=1 app: cc 81 80 01
+g12v2 link ctrl=44 1<-10 tp=dd frames=1 app: cd 81 80 02
+g41v1 link ctrl=44 1<-10 tp=de frames=1 app: ce 81 80 01
+g41v5 link ctrl=44 1<-10 tp=df frames=1 app: cf 81 80 02
+g42v9 link ctrl=44 1<-10 tp=e0 frames=1 app: c0 81 80 02
+g42v10 link ctrl=44 1<-10 tp=e1 frames=1 app: c1 81 80 02
+g10v3 range 4-5 link ctrl=44 1<-10 tp=e2 frames=1 app: c2 81 80 02
+g40v5 range 3-8 link ctrl=44 1<-10 tp=e3 frames=1 app: c3 81 80 02
+g10v2 + g10v3 link ctrl=44 1<-10 tp=e4 frames=1 app: c4 81 80 02
+== assign class on the output groups
+assign g10 4-5 class1 link ctrl=44 1<-10 tp=e5 frames=1 app: c5 81 80 00
+assign g40 3-8 class2 link ctrl=44 1<-10 tp=e6 frames=1 app: c6 81 80 00
+assign g10 bad range link ctrl=44 1<-10 tp=e7 frames=1 app: c7 81 80 04
+class1 after assign link ctrl=44 1<-10 tp=e8 frames=1 app: c8 81 80 00
+class0 after assign link ctrl=44 1<-10 tp=e9 frames=1 app: c9 81 80 00 01 02 00 00 03 01 01 01 01 01 02 00 0a 0a 01 1e 06 00 00 02 01 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00 1e 06 00 07 07 01 00 00 00 00 00 00 00 00 0a 02 00 04 05 01 01 28 01 00 03 03 01 00 00 00 00 28 01 00 08 08 01 00 00 00 00
+== output changes
+direct crob 5 latch-on link ctrl=44 1<-10 tp=ea frames=1 app: ca 81 80 00 0c 01 17 01 05 03 01 64 00 00 00 00 00 00 00 00
+class1 after crob link ctrl=44 1<-10 tp=eb frames=1 app: eb 81 80 00 0b 01 28 01 00 05 00 81
+confirm crob event -- no reply
+class1 after confirm link ctrl=44 1<-10 tp=ec frames=1 app: cc 81 80 00
+direct crob 5 latch-on again (no change) link ctrl=44 1<-10 tp=ed frames=1 app: cd 81 80 00 0c 01 17 01 05 03 01 64 00 00 00 00 00 00 00 00
+class1 no change link ctrl=44 1<-10 tp=ee frames=1 app: ce 81 80 00
+direct crob 5 latch-off link ctrl=44 1<-10 tp=ef frames=1 app: cf 81 80 00 0c 01 17 01 05 04 01 64 00 00 00 00 00 00 00 00
+g2v0 after crob (not an input) link ctrl=44 1<-10 tp=f0 frames=1 app: c0 81 82 00
+g11v0 after crob link ctrl=44 1<-10 tp=f1 frames=1 app: e1 81 80 00 0b 01 28 01 00 05 00 01
+confirm g11v0 -- no reply
+direct crob 5 code 3 link ctrl=44 1<-10 tp=f2 frames=1 app: c2 81 80 00 0c 01 17 01 05 03 01 64 00 00 00 00 00 00 00 00
+g11v1 events link ctrl=44 1<-10 tp=f3 frames=1 app: e3 81 80 00 0b 01 28 01 00 05 00 81
+confirm g11v1 -- no reply
+direct crob 5 code 4 link ctrl=44 1<-10 tp=f4 frames=1 app: c4 81 80 00 0c 01 17 01 05 04 01 64 00 00 00 00 00 00 00 00
+g11v2 events link ctrl=44 1<-10 tp=f5 frames=1 app: e5 81 80 00 0b 02 28 01 00 05 00 01 00 00 00 00 00 00
+confirm g11v2 -- no reply
+direct crob 5 code 3 link ctrl=44 1<-10 tp=f6 frames=1 app: c6 81 80 00 0c 01 17 01 05 03 01 64 00 00 00 00 00 00 00 00
+g11v3 events link ctrl=44 1<-10 tp=f7 frames=1 app: c7 81 82 02
+confirm g11v3 -- no reply
+direct crob 5 code 4 link ctrl=44 1<-10 tp=f8 frames=1 app: c8 81 82 00 0c 01 17 01 05 04 01 64 00 00 00 00 00 00 00 00
+g11v0 events link ctrl=44 1<-10 tp=f9 frames=1 app: e9 81 80 00 0b 01 28 02 00 05 00 81 05 00 01
+confirm g11v0 -- no reply
+direct crob 5 code 3 link ctrl=44 1<-10 tp=fa frames=1 app: ca 81 80 00 0c 01 17 01 05 03 01 64 00 00 00 00 00 00 00 00
+g11v2 events link ctrl=44 1<-10 tp=fb frames=1 app: eb 81 80 00 0b 02 28 01 00 05 00 81 00 00 00 00 00 00
+confirm g11v2 -- no reply
+g42v0 empty link ctrl=44 1<-10 tp=fc frames=1 app: cc 81 80 00
+direct aof 8 link ctrl=44 1<-10 tp=fd frames=1 app: cd 81 80 00 29 03 17 01 08 00 00 c0 3f 00
+class2 after aof link ctrl=44 1<-10 tp=fe frames=1 app: ee 81 80 00 2a 01 28 01 00 08 00 01 01 00 00 00
+confirm aof event -- no reply
+direct aof 8 2.5 link ctrl=44 1<-10 tp=ff frames=1 app: cf 81 80 00 29 03 17 01 08 00 00 20 40 00
+g42v0 events link ctrl=44 1<-10 tp=c0 frames=1 app: e0 81 80 00 2a 01 28 01 00 08 00 01 02 00 00 00
+confirm g42v0 -- no reply
+direct aof 8 3.5 link ctrl=44 1<-10 tp=c1 frames=1 app: c1 81 80 00 29 03 17 01 08 00 00 60 40 00
+g42v1 events link ctrl=44 1<-10 tp=c2 frames=1 app: e2 81 80 00 2a 01 28 01 00 08 00 01 03 00 00 00
+confirm g42v1 -- no reply
+direct aof 8 4.5 link ctrl=44 1<-10 tp=c3 frames=1 app: c3 81 80 00 29 03 17 01 08 00 00 90 40 00
+g42v2 events link ctrl=44 1<-10 tp=c4 frames=1 app: e4 81 80 00 2a 02 28 01 00 08 00 01 04 00
+confirm g42v2 -- no reply
+direct aof 8 5.5 link ctrl=44 1<-10 tp=c5 frames=1 app: c5 81 80 00 29 03 17 01 08 00 00 b0 40 00
+g42v3 events link ctrl=44 1<-10 tp=c6 frames=1 app: e6 81 80 00 2a 03 28 01 00 08 00 01 05 00 00 00 00 00 00 00 00 00
+confirm g42v3 -- no reply
+direct aof 8 6.5 link ctrl=44 1<-10 tp=c7 frames=1 app: c7 81 80 00 29 03 17 01 08 00 00 d0 40 00
+g42v4 events link ctrl=44 1<-10 tp=c8 frames=1 app: e8 81 80 00 2a 04 28 01 00 08 00 01 06 00 00 00 00 00 00 00
+confirm g42v4 -- no reply
+direct aof 8 7.5 link ctrl=44 1<-10 tp=c9 frames=1 app: c9 81 80 00 29 03 17 01 08 00 00 f0 40 00
+g42v5 events link ctrl=44 1<-10 tp=ca frames=1 app: ea 81 80 00 2a 05 28 01 00 08 00 01 00 00 f0 40
+confirm g42v5 -- no reply
+direct aof 8 8.5 link ctrl=44 1<-10 tp=cb frames=1 app: cb 81 80 00 29 03 17 01 08 00 00 08 41 00
+g42v6 events link ctrl=44 1<-10 tp=cc frames=1 app: ec 81 80 00 2a 06 28 01 00 08 00 01 00 00 00 00 00 00 21 40
+confirm g42v6 -- no reply
+direct aof 8 9.5 link ctrl=44 1<-10 tp=cd frames=1 app: cd 81 80 00 29 03 17 01 08 00 00 18 41 00
+g42v7 events link ctrl=44 1<-10 tp=ce frames=1 app: ee 81 80 00 2a 07 28 01 00 08 00 01 00 00 18 41 00 00 00 00 00 00
+confirm g42v7 -- no reply
+direct aof 8 10.5 link ctrl=44 1<-10 tp=cf frames=1 app: cf 81 80 00 29 03 17 01 08 00 00 28 41 00
+g42v8 events link ctrl=44 1<-10 tp=d0 frames=1 app: e0 81 80 00 2a 08 28 01 00 08 00 01 00 00 00 00 00 00 25 40 00 00 00 00 00 00
+confirm g42v8 -- no reply
+direct aof 8 11.5 link ctrl=44 1<-10 tp=d1 frames=1 app: c1 81 80 00 29 03 17 01 08 00 00 38 41 00
+g32v0 not an input event link ctrl=44 1<-10 tp=d2 frames=1 app: c2 81 84 00
+g13v0..2 link ctrl=44 1<-10 tp=d3 frames=1 app: c3 81 84 02
+class123 after changes link ctrl=44 1<-10 tp=d4 frames=1 app: e4 81 80 00 2a 01 28 01 00 08 00 01 0b 00 00 00
+confirm changes -- no reply
+direct crob 5 latch-off link ctrl=44 1<-10 tp=d5 frames=1 app: c5 81 80 00 0c 01 17 01 05 04 01 64 00 00 00 00 00 00 00 00
+direct aof 8 7 link ctrl=44 1<-10 tp=d6 frames=1 app: c6 81 82 00 29 03 17 01 08 00 00 e0 40 00
+class0 events pending link ctrl=44 1<-10 tp=d7 frames=1 app: c7 81 86 00 01 02 00 00 03 01 01 01 01 01 02 00 0a 0a 01 1e 06 00 00 02 01 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00 1e 06 00 07 07 01 00 00 00 00 00 00 00 00 0a 02 00 04 05 01 01 28 01 00 03 03 01 00 00 00 00 28 01 00 08 08 01 07 00 00 00
+integrity events pending link ctrl=44 1<-10 tp=d8 frames=1 app: e8 81 80 00 0b 01 28 01 00 05 00 01 2a 01 28 01 00 08 00 01 07 00 00 00 01 02 00 00 03 01 01 01 01 01 02 00 0a 0a 01 1e 06 00 00 02 01 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00 1e 06 00 07 07 01 00 00 00 00 00 00 00 00 0a 02 00 04 05 01 01 28 01 00 03 03 01 00 00 00 00 28 01 00 08 08 01 07 00 00 00
+confirm integrity -- no reply
+class123 after integrity link ctrl=44 1<-10 tp=d9 frames=1 app: c9 81 80 00
+== assigned back to class 0
+assign g10 4-5 class0 link ctrl=44 1<-10 tp=da frames=1 app: ca 81 80 00
+direct crob 5 latch-on link ctrl=44 1<-10 tp=db frames=1 app: cb 81 80 00 0c 01 17 01 05 03 01 64 00 00 00 00 00 00 00 00
+class1 after class0 assign link ctrl=44 1<-10 tp=dc frames=1 app: cc 81 80 00
+== several refused headers in one READ
+g13v1 + g13v0 link ctrl=44 1<-10 tp=dd frames=1 app: cd 81 80 02
+g13v1 + g12v1 link ctrl=44 1<-10 tp=de frames=1 app: ce 81 80 01
+g13v1 + g1v2 link ctrl=44 1<-10 tp=df frames=1 app: cf 81 80 01 01 02 00 00 03 01 01 01 01 01 02 00 0a 0a 01
+g1v2 + g13v1 link ctrl=44 1<-10 tp=e0 frames=1 app: c0 81 80 01 01 02 00 00 03 01 01 01 01 01 02 00 0a 0a 01
+g13v0 + g1v2 link ctrl=44 1<-10 tp=e1 frames=1 app: c1 81 80 02
+g10v1 + g40v5 link ctrl=44 1<-10 tp=e2 frames=1 app: c2 81 80 02
+g40v5 + g10v1 link ctrl=44 1<-10 tp=e3 frames=1 app: c3 81 80 02
+g13v1 + g60v2 link ctrl=44 1<-10 tp=e4 frames=1 app: c4 81 80 01
+== a control reaches the output status at once, after its own response
+assign g10 4-5 class1 link ctrl=44 1<-10 tp=e5 frames=1 app: c5 81 80 00
+assign g40 3-8 class2 link ctrl=44 1<-10 tp=e6 frames=1 app: c6 81 80 00
+drain link ctrl=44 1<-10 tp=e7 frames=1 app: c7 81 80 00
+confirm drain -- no reply
+crob on link ctrl=44 1<-10 tp=e8 frames=1 app: c8 81 80 00 0c 01 17 01 05 03 01 64 00 00 00 00 00 00 00 00
+g10 20 ms later link ctrl=44 1<-10 tp=e9 frames=1 app: c9 81 80 00 0a 02 00 04 05 01 81
+class1 20 ms later link ctrl=44 1<-10 tp=ea frames=1 app: ca 81 80 00
+confirm -- no reply
+aof link ctrl=44 1<-10 tp=eb frames=1 app: cb 81 80 00 29 03 17 01 08 00 00 00 3f 00
+g40 20 ms later link ctrl=44 1<-10 tp=ec frames=1 app: cc 81 84 00 28 01 00 03 03 01 00 00 00 00 28 01 00 08 08 01 00 00 00 00
+class2 20 ms later link ctrl=44 1<-10 tp=ed frames=1 app: ed 81 80 00 2a 01 28 01 00 08 00 01 00 00 00 00
+confirm -- no reply
+crob off link ctrl=44 1<-10 tp=ee frames=1 app: ce 81 80 00 0c 01 17 01 05 04 01 64 00 00 00 00 00 00 00 00
+class1 20 ms later link ctrl=44 1<-10 tp=ef frames=1 app: ef 81 80 00 0b 01 28 01 00 05 00 01
+confirm -- no reply
+crob on link ctrl=44 1<-10 tp=f0 frames=1 app: c0 81 80 00 0c 01 17 01 05 03 01 64 00 00 00 00 00 00 00 00
+g10 20 ms later link ctrl=44 1<-10 tp=f1 frames=1 app: c1 81 82 00 0a 02 00 04 05 01 81
+class1 20 ms later link ctrl=44 1<-10 tp=f2 frames=1 app: e2 81 80 00 0b 01 28 01 00 05 00 81
+confirm -- no reply
+aof link ctrl=44 1<-10 tp=f3 frames=1 app: c3 81 80 00 29 03 17 01 08 00 00 c0 3f 00
+g40 20 ms later link ctrl=44 1<-10 tp=f4 frames=1 app: c4 81 84 00 28 01 00 03 03 01 00 00 00 00 28 01 00 08 08 01 01 00 00 00
+class2 20 ms later link ctrl=44 1<-10 tp=f5 frames=1 app: e5 81 80 00 2a 01 28 01 00 08 00 01 01 00 00 00
+confirm -- no reply
+crob off link ctrl=44 1<-10 tp=f6 frames=1 app: c6 81 80 00 0c 01 17 01 05 04 01 64 00 00 00 00 00 00 00 00
+class1 20 ms later link ctrl=44 1<-10 tp=f7 frames=1 app: e7 81 80 00 0b 01 28 01 00 05 00 01
+confirm -- no reply
+crob on link ctrl=44 1<-10 tp=f8 frames=1 app: c8 81 80 00 0c 01 17 01 05 03 01 64 00 00 00 00 00 00 00 00
+g10 20 ms later link ctrl=44 1<-10 tp=f9 frames=1 app: c9 81 82 00 0a 02 00 04 05 01 81
+class1 20 ms later link ctrl=44 1<-10 tp=fa frames=1 app: ea 81 80 00 0b 01 28 01 00 05 00 81
+confirm -- no reply
+aof link ctrl=44 1<-10 tp=fb frames=1 app: cb 81 80 00 29 03 17 01 08 00 00 20 40 00
+g40 20 ms later link ctrl=44 1<-10 tp=fc frames=1 app: cc 81 84 00 28 01 00 03 03 01 00 00 00 00 28 01 00 08 08 01 02 00 00 00
+class2 20 ms later link ctrl=44 1<-10 tp=fd frames=1 app: ed 81 80 00 2a 01 28 01 00 08 00 01 02 00 00 00
+confirm -- no reply
+crob off link ctrl=44 1<-10 tp=fe frames=1 app: ce 81 80 00 0c 01 17 01 05 04 01 64 00 00 00 00 00 00 00 00
+class1 20 ms later link ctrl=44 1<-10 tp=ff frames=1 app: ef 81 80 00 0b 01 28 01 00 05 00 01
+confirm -- no reply

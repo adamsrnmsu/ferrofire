@@ -1,0 +1,65 @@
+0,2026-Nov-19-14:18:44,info,dnp3-server,dnp3 server init,Binary Size is 5 and Analog Size is 4.
+1,2026-Nov-19-14:18:44,info,dnp3-server,dnp3 server init,Binary Output Size is 2 and Analog Output Size is 2.
+2,2026-Nov-19-14:18:44,info,dnp3-server,dnp3 server init,Event buffer size (per type) is 100.
+3,2026-Nov-19-14:19:33,info,dnp3-server,dnp3 Server writeBinary,Binary point command at address 5 with value 1.
+4,2026-Nov-19-14:19:33,info,dnp3-server,write binary,Data successfully written.
+5,2026-Nov-19-14:19:37,info,dnp3-server,dnp3 Server writeBinary,Binary point command at address 5 with value 1.
+6,2026-Nov-19-14:19:37,info,dnp3-server,write binary,Data successfully written.
+7,2026-Nov-19-14:19:39,info,dnp3-server,dnp3 Server writeBinary,Binary point command at address 5 with value 0.
+8,2026-Nov-19-14:19:39,info,dnp3-server,write binary,Data successfully written.
+9,2026-Nov-19-14:19:43,info,dnp3-server,dnp3 Server writeBinary,Binary point command at address 5 with value 1.
+10,2026-Nov-19-14:19:43,info,dnp3-server,write binary,Data successfully written.
+11,2026-Nov-19-14:19:46,info,dnp3-server,dnp3 Server writeBinary,Binary point command at address 5 with value 0.
+12,2026-Nov-19-14:19:46,info,dnp3-server,write binary,Data successfully written.
+13,2026-Nov-19-14:19:49,info,dnp3-server,dnp3 Server writeBinary,Binary point command at address 5 with value 1.
+14,2026-Nov-19-14:19:49,info,dnp3-server,write binary,Data successfully written.
+15,2026-Nov-19-14:19:51,info,dnp3-server,dnp3 Server writeBinary,Binary point command at address 5 with value 0.
+16,2026-Nov-19-14:19:51,info,dnp3-server,write binary,Data successfully written.
+17,2026-Nov-19-14:19:54,info,dnp3-server,dnp3 Server writeBinary,Binary point command at address 5 with value 1.
+18,2026-Nov-19-14:19:54,info,dnp3-server,write binary,Data successfully written.
+19,2026-Nov-19-14:19:58,info,dnp3-server,dnp3 Server writeAnalog,Analog point command at address 8 with value 1.5.
+20,2026-Nov-19-14:19:58,info,dnp3-server,write analog,Data successfully written.
+21,2026-Nov-19-14:20:01,info,dnp3-server,dnp3 Server writeAnalog,Analog point command at address 8 with value 2.5.
+22,2026-Nov-19-14:20:01,info,dnp3-server,write analog,Data successfully written.
+23,2026-Nov-19-14:20:04,info,dnp3-server,dnp3 Server writeAnalog,Analog point command at address 8 with value 3.5.
+24,2026-Nov-19-14:20:04,info,dnp3-server,write analog,Data successfully written.
+25,2026-Nov-19-14:20:07,info,dnp3-server,dnp3 Server writeAnalog,Analog point command at address 8 with value 4.5.
+26,2026-Nov-19-14:20:07,info,dnp3-server,write analog,Data successfully written.
+27,2026-Nov-19-14:20:09,info,dnp3-server,dnp3 Server writeAnalog,Analog point command at address 8 with value 5.5.
+28,2026-Nov-19-14:20:09,info,dnp3-server,write analog,Data successfully written.
+29,2026-Nov-19-14:20:12,info,dnp3-server,dnp3 Server writeAnalog,Analog point command at address 8 with value 6.5.
+30,2026-Nov-19-14:20:12,info,dnp3-server,write analog,Data successfully written.
+31,2026-Nov-19-14:20:15,info,dnp3-server,dnp3 Server writeAnalog,Analog point command at address 8 with value 7.5.
+32,2026-Nov-19-14:20:15,info,dnp3-server,write analog,Data successfully written.
+33,2026-Nov-19-14:20:18,info,dnp3-server,dnp3 Server writeAnalog,Analog point command at address 8 with value 8.5.
+34,2026-Nov-19-14:20:18,info,dnp3-server,write analog,Data successfully written.
+35,2026-Nov-19-14:20:21,info,dnp3-server,dnp3 Server writeAnalog,Analog point command at address 8 with value 9.5.
+36,2026-Nov-19-14:20:21,info,dnp3-server,write analog,Data successfully written.
+37,2026-Nov-19-14:20:24,info,dnp3-server,dnp3 Server writeAnalog,Analog point command at address 8 with value 10.5.
+38,2026-Nov-19-14:20:24,info,dnp3-server,write analog,Data successfully written.
+39,2026-Nov-19-14:20:26,info,dnp3-server,dnp3 Server writeAnalog,Analog point command at address 8 with value 11.5.
+40,2026-Nov-19-14:20:26,info,dnp3-server,write analog,Data successfully written.
+41,2026-Nov-19-14:20:31,info,dnp3-server,dnp3 Server writeBinary,Binary point command at address 5 with value 0.
+42,2026-Nov-19-14:20:31,info,dnp3-server,write binary,Data successfully written.
+43,2026-Nov-19-14:20:32,info,dnp3-server,dnp3 Server writeAnalog,Analog point command at address 8 with value 7.
+44,2026-Nov-19-14:20:32,info,dnp3-server,write analog,Data successfully written.
+45,2026-Nov-19-14:20:38,info,dnp3-server,dnp3 Server writeBinary,Binary point command at address 5 with value 1.
+46,2026-Nov-19-14:20:38,info,dnp3-server,write binary,Data successfully written.
+47,2026-Nov-19-14:20:52,info,dnp3-server,dnp3 Server writeBinary,Binary point command at address 5 with value 1.
+48,2026-Nov-19-14:20:52,info,dnp3-server,write binary,Data successfully written.
+49,2026-Nov-19-14:20:54,info,dnp3-server,dnp3 Server writeAnalog,Analog point command at address 8 with value 0.5.
+50,2026-Nov-19-14:20:54,info,dnp3-server,write analog,Data successfully written.
+51,2026-Nov-19-14:20:56,info,dnp3-server,dnp3 Server writeBinary,Binary point command at address 5 with value 0.
+52,2026-Nov-19-14:20:56,info,dnp3-server,write binary,Data successfully written.
+53,2026-Nov-19-14:20:58,info,dnp3-server,dnp3 Server writeBinary,Binary point command at address 5 with value 1.
+54,2026-Nov-19-14:20:58,info,dnp3-server,write binary,Data successfully written.
+55,2026-Nov-19-14:21:00,info,dnp3-server,dnp3 Server writeAnalog,Analog point command at address 8 with value 1.5.
+56,2026-Nov-19-14:21:00,info,dnp3-server,write analog,Data successfully written.
+57,2026-Nov-19-14:21:02,info,dnp3-server,dnp3 Server writeBinary,Binary point command at address 5 with value 0.
+58,2026-Nov-19-14:21:02,info,dnp3-server,write binary,Data successfully written.
+59,2026-Nov-19-14:21:04,info,dnp3-server,dnp3 Server writeBinary,Binary point command at address 5 with value 1.
+60,2026-Nov-19-14:21:04,info,dnp3-server,write binary,Data successfully written.
+61,2026-Nov-19-14:21:06,info,dnp3-server,dnp3 Server writeAnalog,Analog point command at address 8 with value 2.5.
+62,2026-Nov-19-14:21:06,info,dnp3-server,write analog,Data successfully written.
+63,2026-Nov-19-14:21:08,info,dnp3-server,dnp3 Server writeBinary,Binary point command at address 5 with value 0.
+64,2026-Nov-19-14:21:08,info,dnp3-server,write binary,Data successfully written.

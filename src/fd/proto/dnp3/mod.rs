@@ -228,6 +228,9 @@ impl Source for Store {
     fn analog(&self, tag: &str) -> Option<(f64, u64)> {
         Some((self.get_f64(tag)?, self.timestamp(tag).unwrap_or(0)))
     }
+    fn pending(&self, tag: &str) -> bool {
+        self.is_queued(tag)
+    }
 }
 
 /// One refresh task for the whole outstation, whatever the connections do.

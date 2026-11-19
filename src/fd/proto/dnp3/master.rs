@@ -549,6 +549,21 @@ struct Command {
     nan: bool,
 }
 
+/// Commands dropped on a full queue since it last drained: one log line when the episode starts, one with the count when it ends.
+#[derive(Default)]
+struct Overflow(std::sync::atomic::AtomicU64);
+
+impl Overflow {
+    /// A command was dropped; `true` for the first of an episode, the one to log.
+    fn dropped(&self) -> bool {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0
+    }
+    /// The queue drained: how many commands the episode dropped (0: there was none).
+    fn drained(&self) -> u64 {
+        self.0.swap(0, std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
 /// What a connection's session and the command interface share.
 struct Shared {
     store: Store,
@@ -561,6 +576,7 @@ struct Shared {
     /// `fep` mode: (binary, output, index) -> tag. An input and an output at one index are two points.
     by_index: BTreeMap<(bool, bool, u16), String>,
     tx: mpsc::Sender<Command>,
+    overflow: Overflow,
 }
 
 /// An analog as the wire carries it down: a float32. The form the echo rule compares in `fep` mode.
@@ -592,6 +608,7 @@ impl Shared {
                 .collect(),
             points: points.iter().map(|p| (p.tag.clone(), p.clone())).collect(),
             tx,
+            overflow: Overflow::default(),
         }
     }
 
@@ -678,8 +695,8 @@ impl Points for Bennu {
             objects,
             nan,
         });
-        if sent.is_err() {
-            tracing::warn!("dnp3-client: command queue full ({COMMAND_QUEUE}); dropped the command for `{tag}`");
+        if sent.is_err() && link.overflow.dropped() {
+            tracing::warn!("dnp3-client: command queue full ({COMMAND_QUEUE}); dropping commands, the first is for `{tag}`");
         }
         Ok(())
     }
@@ -700,6 +717,9 @@ struct Wire {
     expect_fcb: bool,
     /// The last frame from the outstation to us: opendnp3 asks for the link status after `KEEP_ALIVE` without one.
     heard: Instant,
+    /// Octets of a secondary-station frame the socket did not take yet: they go out before anything else, so a partial write
+    /// cannot be followed by another frame in the middle of it.
+    pending: Vec<u8>,
 }
 
 impl Wire {
@@ -707,6 +727,14 @@ impl Wire {
         let mut out = vec![];
         for seg in transport::segment(fragment, tseq) {
             out.extend(link::encode(MASTER_DATA, self.remote, self.local, &seg));
+        }
+        self.write(out).await
+    }
+
+    /// Write `out` after whatever a link reply left unsent.
+    async fn write(&mut self, mut out: Vec<u8>) -> Result<(), Lost> {
+        if !self.pending.is_empty() {
+            out.splice(0..0, std::mem::take(&mut self.pending));
         }
         self.stream.write_all(&out).await.map_err(|_| Lost)
     }
@@ -730,7 +758,7 @@ impl Wire {
     async fn keep_alive(&mut self) -> Result<(), Lost> {
         self.heard = Instant::now();
         let ask = link::encode(link::DIR | link::PRM | 9, self.remote, self.local, &[]);
-        self.stream.write_all(&ask).await.map_err(|_| Lost)
+        self.write(ask).await
     }
 
     /// The next fragment the frames already in the buffer complete; `None`: more bytes are needed.
@@ -800,15 +828,19 @@ impl Wire {
         Some(fresh)
     }
 
-    /// A secondary-station frame to the outstation. Sent without waiting: a few octets, and a full socket buffer means the
-    /// outstation is not reading anyway.
+    /// A secondary-station frame to the outstation. Sent without waiting; what the socket does not take stays in `pending`
+    /// and goes out first with the next write (a full socket buffer means the outstation is not reading anyway).
     fn reply(&mut self, func: u8) {
-        let _ = self.stream.try_write(&link::encode(
-            link::DIR | func,
-            self.remote,
-            self.local,
-            &[],
-        ));
+        let frame = link::encode(link::DIR | func, self.remote, self.local, &[]);
+        self.pending.extend_from_slice(&frame);
+        while !self.pending.is_empty() {
+            match self.stream.try_write(&self.pending) {
+                Ok(n @ 1..) => {
+                    self.pending.drain(..n);
+                }
+                _ => break,
+            }
+        }
     }
 }
 
@@ -875,9 +907,20 @@ impl Session {
         }
     }
 
+    /// A command left the queue: when that emptied it, an overflow episode is over.
+    fn drained(&self) {
+        if self.rx.is_empty() {
+            let n = self.shared.overflow.drained();
+            if n > 0 {
+                tracing::warn!("dnp3-client: {}: command queue drained; {n} command(s) were dropped while it was full", self.name);
+            }
+        }
+    }
+
     /// The next thing to send, by stock's priorities.
     fn next(&mut self) -> Option<Task> {
         if let Ok(c) = self.rx.try_recv() {
+            self.drained();
             return Some(Task::Command(c));
         }
         let now = Instant::now();
@@ -913,10 +956,12 @@ impl Session {
             reset: false,
             expect_fcb: true,
             heard: Instant::now(),
+            pending: vec![],
         };
         let mut seq = 0u8;
         // what was asked for while the outstation was away is not sent late
         while self.rx.try_recv().is_ok() {}
+        self.drained();
         if let Some(fep) = &mut self.fep {
             fep.status_read = true;
             fep.next_tick = Instant::now(); // what changed while the outstation was away goes down before anything is read
@@ -929,7 +974,10 @@ impl Session {
                 let (wake, ka) = (self.wake(), wire.heard + KEEP_ALIVE);
                 tokio::select! {
                     c = self.rx.recv() => match c {
-                        Some(c) => if self.run_task(&mut wire, &mut seq, Task::Command(c)).await.is_err() { return },
+                        Some(c) => {
+                            self.drained();
+                            if self.run_task(&mut wire, &mut seq, Task::Command(c)).await.is_err() { return }
+                        }
                         None => return,
                     },
                     _ = tokio::time::sleep_until(wake) => {}
@@ -1211,12 +1259,14 @@ impl Session {
         objects: &[u8],
     ) -> Result<Option<Response>, Lost> {
         let mut want = *seq;
-        *seq = (*seq + 1) & 0x0F;
         wire.send(&mut self.tseq, &app::request(want, func, objects))
             .await?;
         let deadline = Instant::now() + self.timeout;
         loop {
             let Ok(fragment) = tokio::time::timeout_at(deadline, wire.recv()).await else {
+                // opendnp3 counts the timeout as one more response: after k accepted fragments the next request carries
+                // request + k + 1, so a fragment that turns up late with an old number is not taken for the next answer
+                *seq = (want + 1) & 0x0F;
                 tracing::warn!(
                     "dnp3-client: {}: no response to function {func} (sequence {want})",
                     self.name
@@ -1239,6 +1289,60 @@ impl Session {
 
 #[cfg(test)]
 mod tests {
+    /// ww-a12: a link reply the socket does not take whole is kept, and goes out ahead of the next frame, not in the middle of it.
+    #[tokio::test]
+    async fn a_link_reply_the_socket_cannot_take_is_sent_first_with_the_next_write() {
+        use tokio::io::AsyncReadExt;
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (a, b) = tokio::join!(
+            tokio::net::TcpStream::connect(l.local_addr().unwrap()),
+            l.accept()
+        );
+        let mut w = Wire {
+            stream: net::Conn::Tcp(a.unwrap()),
+            local: 1,
+            remote: 10,
+            buf: vec![],
+            asm: Reassembler::new(app::MAX_APDU),
+            reset: false,
+            expect_fcb: true,
+            heard: Instant::now(),
+            pending: vec![],
+        };
+        let mut filled = 0;
+        while let Ok(n @ 1..) = w.stream.try_write(&[0xAA; 65536]) {
+            filled += n;
+        }
+        w.reply(0x00); // ACK, into a full socket
+        let ack = link::encode(link::DIR, 10, 1, &[]);
+        assert_eq!(w.pending, ack, "kept, not lost");
+        let mut tseq = 0;
+        let seg = transport::segment(b"x", &mut tseq.clone());
+        let data = link::encode(MASTER_DATA, 10, 1, &seg[0]);
+        let mut got = vec![0u8; filled + ack.len() + data.len()];
+        let mut peer = b.unwrap().0;
+        let (sent, read) = tokio::join!(w.send(&mut tseq, b"x"), peer.read_exact(&mut got));
+        assert!(sent.is_ok() && read.is_ok());
+        assert!(w.pending.is_empty());
+        assert!(got[..filled].iter().all(|b| *b == 0xAA));
+        assert_eq!(got[filled..], [ack, data].concat());
+    }
+
+    /// ww-a12: one log line when the command queue starts to overflow and one with the count when it drains, not one per command.
+    #[test]
+    fn an_overflow_episode_is_logged_once_and_counted() {
+        let o = Overflow::default();
+        assert_eq!(o.drained(), 0, "no episode, nothing to report");
+        assert!(
+            o.dropped(),
+            "the first drop of an episode is the one logged"
+        );
+        assert!(!o.dropped() && !o.dropped());
+        assert_eq!(o.drained(), 3);
+        assert_eq!(o.drained(), 0, "reported once");
+        assert!(o.dropped(), "the next episode logs again");
+    }
+
     /// ww-3oa 5: after `KEEP_ALIVE` without a frame the master sends REQUEST LINK STATUS, as opendnp3's link layer does.
     #[tokio::test]
     async fn the_keep_alive_is_a_request_link_status_from_the_master() {
@@ -1257,6 +1361,7 @@ mod tests {
             reset: false,
             expect_fcb: true,
             heard: Instant::now() - KEEP_ALIVE,
+            pending: vec![],
         };
         assert!(w.keep_alive().await.is_ok());
         assert!(w.heard.elapsed() < KEEP_ALIVE, "the clock starts again");

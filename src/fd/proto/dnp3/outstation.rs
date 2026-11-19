@@ -26,6 +26,9 @@ pub trait Sink {
 pub trait Source {
     fn binary(&self, tag: &str) -> Option<bool>;
     fn analog(&self, tag: &str) -> Option<(f64, u64)>;
+    /// A write to `tag` waits for the provider's acknowledgement: the sweep leaves an output point alone until it comes, as stock
+    /// does (the point already holds the value the control wrote).
+    fn pending(&self, tag: &str) -> bool;
 }
 
 /// Everything the connections share.
@@ -41,6 +44,15 @@ pub struct Device {
     synced: Option<Duration>,
     broadcast: bool,
     tx_seq: u8,
+    /// Output values a control wrote, not yet in the output points.
+    pub landed: Vec<Landed>,
+}
+
+/// What a control wrote to an output point: `(index, value)`.
+#[derive(Debug, PartialEq)]
+pub enum Landed {
+    Bin(u16, bool),
+    Ana(u16, f64),
 }
 
 impl Device {
@@ -62,24 +74,61 @@ impl Device {
             synced: None,
             broadcast: false,
             tx_seq: 0,
+            landed: vec![],
         }
     }
 
     /// The 1 Hz sweep (bennu `Server::update`): every mapped point takes the datastore's value, binaries first, each in index
-    /// order; a change on an input raises an event.
+    /// order; a change raises an event (an output the provider has not yet acknowledged is left alone).
     pub fn refresh(&mut self, src: &dyn Source) {
-        for (idx, p) in self.bin.iter_mut() {
+        self.settle();
+        for (idx, p) in self
+            .bin
+            .iter_mut()
+            .filter(|p| p.1.input || !src.pending(&p.1.tag))
+        {
             if let Some(v) = src.binary(&p.tag) {
                 if p.update(v) {
-                    self.events
-                        .push(*idx, p.class, Data::Bin { flags: p.flags });
+                    let data = Data::Bin { flags: p.flags };
+                    self.events.push(*idx, p.class, !p.input, data);
                 }
             }
         }
-        for (idx, p) in self.ana.iter_mut() {
+        for (idx, p) in self
+            .ana
+            .iter_mut()
+            .filter(|p| p.1.input || !src.pending(&p.1.tag))
+        {
             if let Some((v, ts)) = src.analog(&p.tag) {
                 if p.update(v) {
-                    self.events.push(*idx, p.class, Data::Ana { value: v, ts });
+                    self.events
+                        .push(*idx, p.class, !p.input, Data::Ana { value: v, ts });
+                }
+            }
+        }
+    }
+
+    /// The values controls wrote reach their output points, and raise their events (an output's event has no time).
+    pub fn settle(&mut self) {
+        for l in std::mem::take(&mut self.landed) {
+            match l {
+                Landed::Bin(i, on) => {
+                    let Some(p) = self.bin.get_mut(&i) else {
+                        continue;
+                    };
+                    if p.update(on) {
+                        let data = Data::Bin { flags: p.flags };
+                        self.events.push(i, p.class, true, data);
+                    }
+                }
+                Landed::Ana(i, value) => {
+                    let Some(p) = self.ana.get_mut(&i) else {
+                        continue;
+                    };
+                    if p.update(value) {
+                        self.events
+                            .push(i, p.class, true, Data::Ana { value, ts: 0 });
+                    }
                 }
             }
         }
@@ -262,6 +311,7 @@ impl Conn {
         now: Duration,
         out: &mut Vec<u8>,
     ) -> Result<(), Close> {
+        dev.settle();
         if !Self::addressed(&f, dev) {
             return Ok(());
         }
@@ -518,6 +568,9 @@ mod tests {
         fn analog(&self, tag: &str) -> Option<(f64, u64)> {
             (tag == "ai").then_some((self.0, self.1))
         }
+        fn pending(&self, _: &str) -> bool {
+            false
+        }
     }
 
     struct Rig {
@@ -746,6 +799,69 @@ mod tests {
             "statuses per object"
         );
         assert_eq!(*r.ask(&req(1, 4, &two)).last().unwrap(), 2);
+    }
+
+    /// ww-a12: stock applies a control to the output status when it arrives and raises the output event then (g11, g42),
+    /// not with the next sweep; a point left in class 0 raises none.
+    #[test]
+    fn a_control_on_an_output_with_a_class_is_an_event_at_once() {
+        let mut r = Rig::new();
+        let crob = |code| {
+            [
+                vec![0xC0, 5, 12, 1, 0x17, 1, 5, code, 1],
+                vec![100, 0, 0, 0, 0, 0, 0, 0, 0],
+            ]
+            .concat()
+        };
+        let direct = |r: &mut Rig, code| r.ask(&crob(code));
+        direct(&mut r, 3);
+        assert_eq!(r.ask(&[0xC0, 1, 60, 2, 6]).len(), 4, "class 0: no event");
+        assert_eq!(
+            command::assign_class(&mut r.dev, &[60, 2, 6, 10, 0, 0, 5, 7]),
+            0
+        );
+        direct(&mut r, 4);
+        let reply = r.ask(&[0xC0, 1, 60, 2, 6]);
+        assert_eq!(
+            reply[4..],
+            [11, 1, 0x28, 1, 0, 5, 0, 0x01],
+            "g11v1, index 5, off"
+        );
+        assert!(
+            r.ask(&[0xC0, 1, 2, 0, 6]).len() == 4,
+            "g2 does not carry it"
+        );
+    }
+
+    /// ww-a12: while the provider has not acknowledged a control, the sweep still reads the old value from the store and must
+    /// not flip the output status back (and raise a second event).
+    #[test]
+    fn the_sweep_leaves_an_output_alone_while_its_write_is_pending() {
+        struct Held(bool);
+        impl Source for Held {
+            fn binary(&self, tag: &str) -> Option<bool> {
+                (tag == "bo").then_some(false)
+            }
+            fn analog(&self, _: &str) -> Option<(f64, u64)> {
+                None
+            }
+            fn pending(&self, tag: &str) -> bool {
+                self.0 && tag == "bo"
+            }
+        }
+        for (pending, events) in [(true, 1), (false, 2)] {
+            let mut r = Rig::new();
+            assert_eq!(
+                command::assign_class(&mut r.dev, &[60, 2, 6, 10, 0, 0, 5, 7]),
+                0
+            );
+            r.ask(&[
+                0xC0, 5, 12, 1, 0x17, 1, 5, 3, 1, 100, 0, 0, 0, 0, 0, 0, 0, 0,
+            ]);
+            r.dev.refresh(&Held(pending));
+            let n = r.dev.events.select(None, None, 0, usize::MAX);
+            assert_eq!(n, events, "pending: {pending}");
+        }
     }
 
     #[test]
