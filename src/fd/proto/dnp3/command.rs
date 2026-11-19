@@ -1,7 +1,9 @@
 //! Control requests (SELECT, OPERATE, DIRECT OPERATE) and WRITE, answered the way bennu's `ServerCommandHandler` does.
 
-use super::app::{self, iin, status, Control, ControlError, Request};
+use super::app::{self, iin, status, Control, ControlError, Range, Request};
+use super::db::Point;
 use super::outstation::{Device, Sink};
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 /// How long an OPERATE may follow its SELECT (opendnp3 `selectTimeout`).
@@ -39,10 +41,15 @@ fn matches_select(dev: &mut Device, req: &Request, key: &[u8], now: Duration) ->
     })
 }
 
+/// A control reaches output points only (bennu v2026.11.03 keeps them apart from the inputs).
+fn output<V>(m: &BTreeMap<u16, Point<V>>, index: u16) -> Option<&Point<V>> {
+    m.get(&index).filter(|p| !p.input)
+}
+
 fn select_status(dev: &Device, c: &Control) -> u8 {
     let known = match (c.group, c.var) {
-        (12, 1) => dev.bin.contains_key(&c.index),
-        (41, 3) => dev.ana.contains_key(&c.index),
+        (12, 1) => output(&dev.bin, c.index).is_some(),
+        (41, 3) => output(&dev.ana, c.index).is_some(),
         _ => true,
     };
     if known {
@@ -53,7 +60,7 @@ fn select_status(dev: &Device, c: &Control) -> u8 {
 }
 
 fn crob_status(dev: &Device, sink: &mut dyn Sink, c: &Control, selected: bool) -> u8 {
-    match dev.bin.get(&c.index) {
+    match output(&dev.bin, c.index) {
         None => status::OUT_OF_RANGE,
         Some(p) if p.sbo && !selected => status::NO_SELECT,
         Some(p) => {
@@ -64,7 +71,7 @@ fn crob_status(dev: &Device, sink: &mut dyn Sink, c: &Control, selected: bool) -
 }
 
 fn analog_status(dev: &Device, sink: &mut dyn Sink, c: &Control, selected: bool) -> u8 {
-    match dev.ana.get(&c.index) {
+    match output(&dev.ana, c.index) {
         None => status::OUT_OF_RANGE,
         Some(p) if p.sbo && !selected => status::NO_SELECT,
         Some(p) => {
@@ -148,4 +155,30 @@ pub fn write(dev: &mut Device, objects: &[u8], now: Duration) -> Result<(), u16>
         };
     }
     Ok(())
+}
+
+/// ASSIGN_CLASS as opendnp3's `AssignClassHandler` does it: a class header (g60 v1-4, all objects) gives the class of the header
+/// after it, which must be g1, g10, g30 or g40 variation 0 with all objects or a start-stop range. A range wider than the points is
+/// PARAM_ERROR (the points inside it are assigned), and so is a type with no points. Returns the indications.
+pub fn assign_class(dev: &mut Device, objects: &[u8]) -> u16 {
+    let Ok(headers) = app::read_headers(objects) else {
+        return iin::PARAM_ERROR;
+    };
+    let (mut bad, mut class) = (0, None);
+    for h in headers {
+        bad |= match (class.take(), h.group, h.var, &h.range) {
+            (None, 60, 1..=4, Range::All) => {
+                class = Some(h.var - 1);
+                0
+            }
+            (Some(c), 1 | 10 | 30 | 40, 0, Range::All | Range::StartStop(..)) => {
+                dev.assign(h.group, c, &h.range)
+            }
+            (Some(_), 3 | 20 | 21, 0, Range::All | Range::StartStop(..)) | (None, ..) => {
+                iin::PARAM_ERROR
+            }
+            _ => iin::NO_FUNC,
+        };
+    }
+    bad
 }

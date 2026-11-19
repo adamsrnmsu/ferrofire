@@ -190,13 +190,17 @@ async fn a_master_polls_and_operates_over_tcp() {
 async fn provider_values_reach_masters_as_events_within_a_sweep() {
     let d = start();
     let mut m = Master::connect(d.port).await;
-    tokio::time::sleep(Duration::from_millis(300)).await; // first sweep: the start-up events
-    let r = m.request(1, &INTEGRITY).await.unwrap();
-    let con = r[0] & 0x20 != 0;
-    assert!(con, "a response with events asks for a confirm");
+    // stock v2026.11.03 makes events only for points a master put in a class: class 1 for the binary and the analog input
+    let assign = [60, 2, 6, 1, 0, 6, 60, 2, 6, 30, 0, 6];
+    assert!(m.request(22, &assign).await.is_some());
     d.store.publish("pbi", 1.0, 1);
     d.store.publish("pai", 12.5, 1);
     tokio::time::sleep(Duration::from_millis(1300)).await;
+    let r = m.request(1, &INTEGRITY).await.unwrap();
+    assert!(
+        r[0] & 0x20 != 0,
+        "a response with events asks for a confirm"
+    );
     let r = m.request(1, &[60, 1, 6]).await.unwrap();
     let hex: String = r.iter().map(|b| format!("{b:02x}")).collect();
     assert!(

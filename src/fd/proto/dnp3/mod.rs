@@ -121,6 +121,22 @@ impl Outstation {
     }
 }
 
+/// The three lines bennu v2026.11.03 logs at start: input counts, output counts, event buffer size.
+pub fn log_init(log: &EventLog, bin: &BTreeMap<u16, BinPoint>, ana: &BTreeMap<u16, AnaPoint>) {
+    let outs = |m: usize, all: usize| (all - m, m);
+    let (bi, bo) = outs(bin.values().filter(|p| !p.input).count(), bin.len());
+    let (ai, ao) = outs(ana.values().filter(|p| !p.input).count(), ana.len());
+    let say = |m: String| log.log("info", "dnp3 server init", m);
+    say(format!("Binary Size is {bi} and Analog Size is {ai}."));
+    say(format!(
+        "Binary Output Size is {bo} and Analog Output Size is {ao}."
+    ));
+    say(format!(
+        "Event buffer size (per type) is {}.",
+        db::EVENT_CAP
+    ));
+}
+
 impl Module for Outstation {
     fn parse(node: Node, tags: &mut Tags, opts: &Opts) -> Result<Self, ConfigError> {
         let log = Arc::new(EventLog::open(
@@ -131,15 +147,7 @@ impl Module for Outstation {
         let endpoint = require(node, "endpoint")?;
         let local = number::<u16>(node, "address")?
             .ok_or_else(|| ConfigError("<dnp3-server> has no <address>".into()))?;
-        log.log(
-            "info",
-            "dnp3 server init",
-            format!(
-                "Binary Size is {} and Analog Size is {}.",
-                bin.len(),
-                ana.len()
-            ),
-        );
+        log_init(&log, &bin, &ana);
         Ok(Outstation {
             endpoint,
             local,
