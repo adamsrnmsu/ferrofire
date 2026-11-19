@@ -213,8 +213,10 @@ impl Out {
         }
         let held = queued.or_else(|| store.get(tag));
         if !held.is_some_and(|now| same(&key(now), &wire)) {
-            let _ = store.write(tag, v);
-            self.wrote = Some(v);
+            // a protocol write that landed since `queued` was read stays
+            if store.write_if_queued(tag, v, queued) == Ok(true) {
+                self.wrote = Some(v);
+            }
         }
         None
     }
@@ -509,6 +511,24 @@ mod tests {
         assert_eq!(o.polled(&s, "t", Analog(7.0), Analog(7.0), |v| v), None);
         assert_eq!(s.queued("t"), None);
         assert_eq!(o.due(&s, "t", |v| v), None);
+    }
+
+    #[test]
+    fn a_protocol_write_racing_a_poll_always_survives() {
+        for _ in 0..2000 {
+            let s = store(&[("t", Analog(0.0))]);
+            let gate = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let (s2, g2) = (s.clone(), gate.clone());
+            let poll = std::thread::spawn(move || {
+                let mut o = Out::new(Analog(0.0));
+                g2.wait();
+                o.polled(&s2, "t", Analog(5.0), Analog(5.0), |v| v);
+            });
+            gate.wait();
+            s.write("t", Analog(9.0)).unwrap();
+            poll.join().unwrap();
+            assert_eq!(s.queued("t"), Some(Analog(9.0)));
+        }
     }
 
     #[test]
