@@ -831,3 +831,78 @@ async fn two_outputs_with_a_gap_between_them_are_two_single_writes() {
     .await;
     assert_eq!(requests(&r.tap, 16).len() + requests(&r.tap, 15).len(), 0);
 }
+
+/// ww-a12: a device that refuses a FC16 of more than 16 registers with exception 3 (illegal data value) is written run by run,
+/// not left holding the old values.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_merged_write_refused_with_exception_03_falls_back_to_single_writes() {
+    use std::sync::{Arc, Mutex};
+    let regs: Arc<Mutex<std::collections::BTreeMap<u16, u16>>> = Default::default();
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = l.local_addr().unwrap().port();
+    let held = regs.clone();
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = l.accept().await {
+            let held = held.clone();
+            tokio::spawn(async move {
+                let mut head = [0u8; 7];
+                while s.read_exact(&mut head).await.is_ok() {
+                    let mut p = vec![0u8; usize::from(head[5]) - 1];
+                    s.read_exact(&mut p).await.unwrap();
+                    let (addr, qty) = (
+                        u16::from_be_bytes([p[1], p[2]]),
+                        u16::from_be_bytes([p[3], p[4]]),
+                    );
+                    let reply = match p[0] {
+                        3 => {
+                            let h = held.lock().unwrap();
+                            let mut r = vec![3, qty as u8 * 2];
+                            for a in addr..addr + qty {
+                                r.extend(h.get(&a).copied().unwrap_or(0).to_be_bytes());
+                            }
+                            r
+                        }
+                        6 => {
+                            held.lock().unwrap().insert(addr, qty);
+                            p.clone()
+                        }
+                        16 if qty > 16 => vec![0x90, 3],
+                        16 => {
+                            for k in 0..qty {
+                                let at = 6 + usize::from(k) * 2;
+                                held.lock()
+                                    .unwrap()
+                                    .insert(addr + k, u16::from_be_bytes([p[at], p[at + 1]]));
+                            }
+                            p[..5].to_vec()
+                        }
+                        f => vec![f | 0x80, 1],
+                    };
+                    let mut f = head[..4].to_vec();
+                    f.extend((reply.len() as u16 + 1).to_be_bytes());
+                    f.push(head[6]);
+                    f.extend(reply);
+                    s.write_all(&f).await.unwrap();
+                }
+            });
+        }
+    });
+    let points: String = (0..30)
+        .map(|k| format!("<holding-register><address>{}</address><max-value>65535</max-value><min-value>0</min-value><tag>r{k}</tag></holding-register>", 40000 + k))
+        .collect();
+    let fep = device(&format!(
+        r#"<SCEPTRE><field-device><name>fep</name><cycle-time>40</cycle-time><comms><modbus-client><mode>fep</mode>
+<modbus-connection><endpoint>tcp://127.0.0.1:{port}</endpoint><unit-id>1</unit-id><scan-rate>0.1</scan-rate>{points}</modbus-connection>
+</modbus-client></comms></field-device></SCEPTRE>"#
+    ));
+    until("the first poll", S(3), || fep.store.get_f64("r0").is_some()).await;
+    for k in 0..30u16 {
+        fep.store
+            .write(&format!("r{k}"), Analog(f64::from(k) + 1.0))
+            .unwrap();
+    }
+    until("every value on the device", S(5), || {
+        (0..30u16).all(|k| regs.lock().unwrap().get(&(40000 + k)) == Some(&(k + 1)))
+    })
+    .await;
+}
