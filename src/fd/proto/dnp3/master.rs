@@ -65,9 +65,10 @@ pub fn ao_f32(idx: u16, v: f64) -> Vec<u8> {
     o
 }
 
-/// The object headers of an output-status read (`fep` mode only): every binary and analog output, default variation.
+/// The object headers of an output-status read (`fep` mode only): every binary output in its default variation and every analog
+/// output as a float32 (g40v3), the form the echo rule compares and the setpoint was sent in; an integer would show 42 for 42.5.
 pub fn output_status() -> Vec<u8> {
-    vec![10, 0, 0x06, 40, 0, 0x06]
+    vec![10, 0, 0x06, 40, 3, 0x06]
 }
 
 /// The confirmation of a response that asked for one.
@@ -338,6 +339,12 @@ pub fn decode(fragment: &[u8]) -> Result<Response, Bad> {
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 /// `fep` mode: an outstation that has not answered within this long is taken for gone and the connection is made anew.
 const FEP_TIMEOUT: Duration = Duration::from_millis(1000);
+/// Commands waiting for a connection that is silent or away, per connection. opendnp3's queue has no size, only a 10 s start
+/// timeout; a command past this many is dropped, so a WRITE flood cannot grow memory.
+const COMMAND_QUEUE: usize = 1000;
+/// opendnp3's `LinkConfig` default (bennu does not change it): after this long without a frame from the outstation the master asks
+/// for its link status. An answer is not awaited: opendnp3 only tells a listener bennu does not have.
+const KEEP_ALIVE: Duration = Duration::from_secs(60);
 const TASK_RETRY: Duration = Duration::from_secs(5);
 const RETRY_MIN: Duration = Duration::from_secs(1);
 const RETRY_MAX: Duration = Duration::from_secs(60);
@@ -468,7 +475,7 @@ impl Module for Client {
     async fn run(self, store: Store, stop: CancellationToken) {
         let (mut by_tag, mut outputs) = (BTreeMap::new(), vec![]);
         for (i, c) in self.conns.into_iter().enumerate() {
-            let (tx, rx) = mpsc::unbounded_channel();
+            let (tx, rx) = mpsc::channel(COMMAND_QUEUE);
             let link = Arc::new(Shared::new(&c.points, store.clone(), tx));
             by_tag.extend(c.points.iter().map(|p| (p.tag.clone(), link.clone())));
             outputs.extend(c.points.iter().map(|p| (p.tag.clone(), p.output)));
@@ -481,6 +488,8 @@ impl Module for Client {
                 todo: vec![],
                 next_tick: Instant::now(),
                 up: false,
+                status_read: true,
+                reading_status: false,
             });
             let session = Session {
                 shared: link,
@@ -526,6 +535,10 @@ struct FepState {
     todo: Vec<(String, Value)>,
     next_tick: Instant,
     up: bool,
+    /// The output-status read goes on: an outstation that does not answer it is left alone for the rest of the session.
+    status_read: bool,
+    /// The output-status read is under way: its timeout is not the outstation gone, and only its output values are taken.
+    reading_status: bool,
 }
 
 /// A command for a session to send.
@@ -548,7 +561,7 @@ struct Shared {
     cache: std::sync::Mutex<BTreeMap<String, Value>>,
     /// `fep` mode: (binary, output, index) -> tag. An input and an output at one index are two points.
     by_index: BTreeMap<(bool, bool, u16), String>,
-    tx: mpsc::UnboundedSender<Command>,
+    tx: mpsc::Sender<Command>,
 }
 
 /// An analog as the wire carries it down: a float32. The form the echo rule compares in `fep` mode.
@@ -560,7 +573,7 @@ fn float32(v: Value) -> Value {
 }
 
 impl Shared {
-    fn new(points: &[Point], store: Store, tx: mpsc::UnboundedSender<Command>) -> Shared {
+    fn new(points: &[Point], store: Store, tx: mpsc::Sender<Command>) -> Shared {
         let map = |kind| -> BTreeMap<u16, String> {
             let of_kind = points.iter().filter(|p| p.kind == kind);
             of_kind.map(|p| (p.addr, p.tag.clone())).collect()
@@ -659,11 +672,16 @@ impl Points for Bennu {
                 (ao_f32(p.addr, x), x.is_nan())
             }
         };
-        let _ = link.tx.send(Command {
+        // stock's WRITE is answered at once whatever becomes of the command (its master drops one that has waited 10 s to start,
+        // which only reaches its stdout): a full queue drops this one and says so in the log
+        let sent = link.tx.try_send(Command {
             sbo: p.sbo,
             objects,
             nan,
         });
+        if sent.is_err() {
+            tracing::warn!("dnp3-client: command queue full ({COMMAND_QUEUE}); dropped the command for `{tag}`");
+        }
         Ok(())
     }
 }
@@ -678,6 +696,11 @@ struct Wire {
     remote: u16,
     buf: Vec<u8>,
     asm: Reassembler,
+    /// The secondary-station link state opendnp3 keeps for the outstation's own requests: reset, and the next expected FCB.
+    reset: bool,
+    expect_fcb: bool,
+    /// The last frame from the outstation to us: opendnp3 asks for the link status after `KEEP_ALIVE` without one.
+    heard: Instant,
 }
 
 impl Wire {
@@ -689,9 +712,8 @@ impl Wire {
         self.stream.write_all(&out).await.map_err(|_| Lost)
     }
 
-    /// The next application fragment the outstation sent to this master. Other frames (another address, link-layer requests)
-    /// are stepped over. Cancel-safe: bytes read stay in the buffer.
-    /// ponytail: link-layer requests (link status, reset) are not answered; opendnp3 answers them. Add when an outstation needs it.
+    /// The next application fragment the outstation sent to this master. Other frames (another address) are stepped over;
+    /// its link-layer requests are answered. Cancel-safe: bytes read stay in the buffer.
     async fn recv(&mut self) -> Result<Vec<u8>, Lost> {
         loop {
             if let Some(r) = self.buffered() {
@@ -703,6 +725,13 @@ impl Wire {
                 _ => return Err(Lost),
             }
         }
+    }
+
+    /// REQUEST LINK STATUS to the outstation, and the keep-alive clock starts again.
+    async fn keep_alive(&mut self) -> Result<(), Lost> {
+        self.heard = Instant::now();
+        let ask = link::encode(link::DIR | link::PRM | 9, self.remote, self.local, &[]);
+        self.stream.write_all(&ask).await.map_err(|_| Lost)
     }
 
     /// The next fragment the frames already in the buffer complete; `None`: more bytes are needed.
@@ -717,12 +746,70 @@ impl Wire {
                 }
             };
             self.buf.drain(..used);
-            // unconfirmed user data from our outstation to us
-            let ours = f.primary() && f.func() == 4 && f.dst == self.local && f.src == self.remote;
-            if let (true, Ok(Some(fragment))) = (ours, self.asm.push(&f.user)) {
-                return Some(Ok(fragment));
+            if self.heard_from_outstation(&f) && self.secondary(&f) {
+                if let Ok(Some(fragment)) = self.asm.push(&f.user) {
+                    return Some(Ok(fragment));
+                }
             }
         }
+    }
+
+    /// A frame from our outstation to us: it starts the keep-alive clock again.
+    fn heard_from_outstation(&mut self, f: &link::Frame) -> bool {
+        let ours = f.ctrl & link::DIR == 0 && f.dst == self.local && f.src == self.remote;
+        if ours {
+            self.heard = Instant::now();
+        }
+        ours
+    }
+
+    /// The secondary side of opendnp3's link layer (`SecLinkLayerStates`): RESET LINK STATES is acknowledged and starts the
+    /// frame count over, REQUEST LINK STATUS answered with LINK STATUS, TEST LINK STATES acknowledged once the link is reset and
+    /// the frame count bit is the expected one. Confirmed data is acknowledged whenever the link is reset, and delivered when new.
+    /// `true`: the frame carries user data for the application.
+    fn secondary(&mut self, f: &link::Frame) -> bool {
+        match (f.primary(), f.func()) {
+            (true, 4) => true,
+            (true, 3) => self.fresh(f).is_some_and(|new| {
+                self.reply(0x00);
+                new
+            }),
+            (true, 0) => {
+                (self.reset, self.expect_fcb) = (true, true);
+                self.reply(0x00);
+                false
+            }
+            (true, 2) if self.fresh(f) == Some(true) => {
+                self.reply(0x00);
+                false
+            }
+            (true, 9) => {
+                self.reply(0x0B);
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// The frame count of a frame that has one: `None` to ignore it (link not reset, no FCV), `Some(true)` for the expected bit.
+    fn fresh(&mut self, f: &link::Frame) -> Option<bool> {
+        if !self.reset || f.ctrl & link::FCV == 0 {
+            return None;
+        }
+        let fresh = (f.ctrl & link::FCB != 0) == self.expect_fcb;
+        self.expect_fcb ^= fresh;
+        Some(fresh)
+    }
+
+    /// A secondary-station frame to the outstation. Sent without waiting: a few octets, and a full socket buffer means the
+    /// outstation is not reading anyway.
+    fn reply(&self, func: u8) {
+        let _ = self.stream.try_write(&link::encode(
+            link::DIR | func,
+            self.remote,
+            self.local,
+            &[],
+        ));
     }
 }
 
@@ -737,7 +824,7 @@ struct Session {
     endpoint: String,
     local: u16,
     remote: u16,
-    rx: mpsc::UnboundedReceiver<Command>,
+    rx: mpsc::Receiver<Command>,
     /// The transport sequence: it runs on across reconnects (stock); the application sequence restarts at 0.
     tseq: u8,
     /// The class 0 poll: wanted at start, and again whenever a response says the outstation restarted.
@@ -824,11 +911,15 @@ impl Session {
             remote: self.remote,
             buf: vec![],
             asm: Reassembler::new(app::MAX_APDU),
+            reset: false,
+            expect_fcb: true,
+            heard: Instant::now(),
         };
         let mut seq = 0u8;
         // what was asked for while the outstation was away is not sent late
         while self.rx.try_recv().is_ok() {}
         if let Some(fep) = &mut self.fep {
+            fep.status_read = true;
             fep.next_tick = Instant::now(); // what changed while the outstation was away goes down before anything is read
         }
         loop {
@@ -836,13 +927,14 @@ impl Session {
                 return;
             }
             let Some(task) = self.next() else {
-                let wake = self.wake();
+                let (wake, ka) = (self.wake(), wire.heard + KEEP_ALIVE);
                 tokio::select! {
                     c = self.rx.recv() => match c {
                         Some(c) => if self.run_task(&mut wire, &mut seq, Task::Command(c)).await.is_err() { return },
                         None => return,
                     },
                     _ = tokio::time::sleep_until(wake) => {}
+                    _ = tokio::time::sleep_until(ka) => if wire.keep_alive().await.is_err() { return },
                     // nothing is awaited: an unsolicited response is taken, anything else discarded
                     r = wire.recv() => match r {
                         Ok(fragment) => if self.answer(&mut wire, &fragment, &mut { NOTHING_AWAITED }, 0).await.is_err() { return },
@@ -932,11 +1024,19 @@ impl Session {
     /// has a polled value (an outstation that reports outputs only as output status, like stock v2026.11.03, gives none in
     /// a class scan).
     async fn polled(&mut self, wire: &mut Wire, seq: &mut u8) -> Result<(), Lost> {
-        if self.fep.is_none() {
+        let Some(fep) = &mut self.fep else {
             return Ok(());
+        };
+        if fep.status_read {
+            fep.reading_status = true;
+            let answered = self.exchange(wire, seq, func::READ, &output_status()).await;
+            let fep = self.fep.as_mut().ok_or(Lost)?;
+            fep.reading_status = false;
+            fep.status_read = answered?.is_some();
+            if !fep.status_read {
+                tracing::warn!("dnp3-client: {}: no answer to the output-status read; not asking again on this connection", self.name);
+            }
         }
-        self.exchange(wire, seq, func::READ, &output_status())
-            .await?;
         self.set_up(true);
         Ok(())
     }
@@ -1028,6 +1128,14 @@ impl Session {
         };
         let store = &self.shared.store;
         for s in &r.seen {
+            // an output's status comes once per scan, from the read made for it (while that read goes on): a class scan carries
+            // it too, as an integer in stock's, and a second poll in the same scan would use up the grace that follows a write
+            if matches!(s, Seen::BinaryOutput(..) | Seen::AnalogOutput(..))
+                && fep.status_read
+                && !fep.reading_status
+            {
+                continue;
+            }
             let Some((tag, v)) = self.shared.fep_tag(s) else {
                 continue;
             };
@@ -1057,8 +1165,7 @@ impl Session {
     /// One fragment that arrived while the response with sequence `want` is awaited: `Some` when it is that response's last
     /// fragment. An unsolicited response is taken; a response with another sequence number, or a fragment that does not
     /// parse, is discarded and changes nothing.
-    /// ponytail: a response in several fragments is taken fragment by fragment and the last one returned; the next request's
-    /// sequence number is this request's plus one whatever the outstation counted to.
+    /// A response in several fragments is taken fragment by fragment and the last one returned.
     async fn answer(
         &mut self,
         wire: &mut Wire,
@@ -1116,11 +1223,15 @@ impl Session {
                     self.name
                 );
                 return match self.fep {
-                    Some(_) => Err(Lost),
-                    None => Ok(None),
+                    Some(FepState {
+                        reading_status: false,
+                        ..
+                    }) => Err(Lost),
+                    _ => Ok(None),
                 };
             };
             if let Some(r) = self.answer(wire, &fragment?, &mut want, func).await? {
+                *seq = want; // every fragment of the response counted, as opendnp3 does
                 return Ok(Some(r));
             }
         }
@@ -1129,6 +1240,29 @@ impl Session {
 
 #[cfg(test)]
 mod tests {
+    /// ww-3oa 5: after `KEEP_ALIVE` without a frame the master sends REQUEST LINK STATUS, as opendnp3's link layer does.
+    #[tokio::test]
+    async fn the_keep_alive_is_a_request_link_status_from_the_master() {
+        use tokio::io::AsyncReadExt;
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (a, b) = tokio::join!(TcpStream::connect(l.local_addr().unwrap()), l.accept());
+        let mut w = Wire {
+            stream: a.unwrap(),
+            local: 1,
+            remote: 10,
+            buf: vec![],
+            asm: Reassembler::new(app::MAX_APDU),
+            reset: false,
+            expect_fcb: true,
+            heard: Instant::now() - KEEP_ALIVE,
+        };
+        assert!(w.keep_alive().await.is_ok());
+        assert!(w.heard.elapsed() < KEEP_ALIVE, "the clock starts again");
+        let mut got = vec![0u8; link::wire_len(0)];
+        b.unwrap().0.read_exact(&mut got).await.unwrap();
+        assert_eq!(got, link::encode(0xC9, 10, 1, &[]));
+    }
+
     use super::*;
 
     fn unhex(s: &str) -> Vec<u8> {
@@ -1205,7 +1339,7 @@ mod tests {
         assert_eq!(ao_f32(1, 0.1), unhex("29032801000100cdcccc3d00"));
         assert_eq!(ao_f32(1, f64::NAN), unhex("290328010001000100807f00"));
         assert_eq!(ao_f32(1, -2.5), unhex("29032801000100000020c000"));
-        assert_eq!(output_status(), unhex("0a00062800 06"));
+        assert_eq!(output_status(), unhex("0a00062803 06"));
         assert_eq!(app::request(5, app::func::CONFIRM, &[]), [0xc5, 0]);
         assert_eq!(confirm(5, true), [0xd5, 0]);
         assert_eq!(confirm(21, false), [0xc5, 0]);
@@ -1551,7 +1685,7 @@ mod tests {
                 .collect(),
             ..Default::default()
         });
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = mpsc::channel(1);
         let s = Shared::new(&points, store, tx);
         assert_eq!(
             s.bin[&5], "bo",
@@ -1598,7 +1732,7 @@ mod tests {
             pt("ao0", 0, Kind::Analog, true),
         ];
         let store = Store::new(crate::fd::store::Layout::default());
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = mpsc::channel(1);
         let s = Shared::new(&points, store, tx);
         let tag = |seen| s.fep_tag(&seen).map(|(t, v)| (t.as_str(), v));
         assert_eq!(
