@@ -83,8 +83,7 @@ pub fn response(fc: u8, qty: u16, pdu: &[u8]) -> Result<Vec<u16>, Reply> {
                 .map(|c| u16::from_be_bytes([c[0], c[1]]))
                 .collect())
         }
-        ([_, _, _, hi, lo], 5 | 6) => Ok(vec![u16::from_be_bytes([*hi, *lo])]),
-        ([_, _, _, _, _], 15 | 16) => Ok(vec![]),
+        ([_, _, _, hi, lo], 5 | 6 | 15 | 16) => Ok(vec![u16::from_be_bytes([*hi, *lo])]),
         _ => Err(Reply::Bad("the response does not fit the request")),
     }
 }
@@ -512,21 +511,9 @@ impl Live {
     /// checks the function only, which `bennu` mode keeps).
     async fn ask_pdu(&self, i: usize, req: &[u8], exact: bool) -> Result<Vec<u16>, Fail> {
         let mut link = self.links[i].lock().await;
-        let (fc, addr, n) = (
-            req[0],
-            u16::from_be_bytes([req[1], req[2]]),
-            u16::from_be_bytes([req[3], req[4]]),
-        );
-        let qty = if fc > 4 { 1 } else { n };
         let r = match link.request(req).await {
             Err(why) => Err((Fail::Link, why)),
-            Ok(pdu) => match response(fc, qty, &pdu) {
-                Ok(_) if exact && fc > 4 && pdu.get(..5) != Some(&req[..5]) => Err(Reply::Bad(
-                    "the write was echoed with another address or value",
-                )),
-                r => r,
-            }
-            .map_err(|e| match e {
+            Ok(pdu) => checked(req, &pdu, exact).map_err(|e| match e {
                 Reply::Exception(code) => (Fail::Exception(code), format!("exception {code}")),
                 Reply::Bad(why) => {
                     link.stream = None;
@@ -540,10 +527,30 @@ impl Live {
         };
         self.log.log(
             level,
-            format_args!("function {fc}"),
-            format_args!("address {addr}, {n}: {said}"),
+            format_args!("function {}", req[0]),
+            format_args!(
+                "address {}, {}: {said}",
+                u16::from_be_bytes([req[1], req[2]]),
+                u16::from_be_bytes([req[3], req[4]])
+            ),
         );
         r.map_err(|(fail, _)| fail)
+    }
+}
+
+/// The values in `pdu`, the response to `req`; with `exact`, a write's echo that is not its request is `Bad`.
+fn checked(req: &[u8], pdu: &[u8], exact: bool) -> Result<Vec<u16>, Reply> {
+    let qty = if req[0] > 4 {
+        1
+    } else {
+        u16::from_be_bytes([req[3], req[4]])
+    };
+    let got = response(req[0], qty, pdu)?;
+    match exact && req[0] > 4 && pdu.get(..5) != Some(&req[..5]) {
+        true => Err(Reply::Bad(
+            "the write was echoed with another address or value",
+        )),
+        false => Ok(got),
     }
 }
 
@@ -603,6 +610,50 @@ struct Session {
     /// Addresses a merged write was refused for (exception 1 or 2): written alone from then on.
     unmerged: BTreeSet<(u8, u16)>,
     up: bool,
+}
+
+/// One write of a pass: the points of `raws.len()` addresses from `start` in the table `fc` is the read function of.
+struct Run {
+    fc: u8,
+    start: u16,
+    points: Vec<(Point, Value)>,
+    raws: Vec<u16>,
+}
+
+/// The changes `todo` (point, value, wire value) as runs by `plan_writes`; a second change to an address already in a run is
+/// returned apart, to be written after the runs.
+fn group(
+    todo: &[(Point, Value, u16)],
+    unmerged: &BTreeSet<(u8, u16)>,
+) -> (Vec<Run>, Vec<(Point, Value)>) {
+    let addrs = todo
+        .iter()
+        .map(|(p, ..)| (p.table.read_fc(), p.addr))
+        .collect();
+    let (mut seen, mut again) = (BTreeSet::new(), vec![]);
+    let runs = plan_writes(addrs, unmerged)
+        .into_iter()
+        .map(|(fc, start, qty)| {
+            let mut run = Run {
+                fc,
+                start,
+                points: vec![],
+                raws: vec![0; usize::from(qty)],
+            };
+            let inside =
+                |p: &Point| p.table.read_fc() == fc && (start..start + qty).contains(&p.addr);
+            for (p, v, raw) in todo.iter().filter(|(p, ..)| inside(p)) {
+                if seen.insert((fc, p.addr)) {
+                    run.raws[usize::from(p.addr - start)] = *raw;
+                    run.points.push((p.clone(), *v));
+                } else {
+                    again.push((p.clone(), *v));
+                }
+            }
+            run
+        })
+        .collect();
+    (runs, again)
 }
 
 impl Session {
@@ -773,84 +824,67 @@ impl Session {
     /// for a lone one. A second change to one address goes after the runs. `false`: the connection failed, and the ones not
     /// sent are due again.
     async fn send_all(&mut self, local: Vec<(Point, Value)>) -> bool {
-        let mut todo: Vec<(Point, Value, u8, u16)> = vec![];
+        let mut todo = vec![];
         for (p, v) in local {
             match wire(&p, v) {
-                Some((fc, raw)) => todo.push((p, v, fc, raw)),
+                Some((_, raw)) => todo.push((p, v, raw)),
                 None => {
                     self.send(&p, v).await; // says why nothing goes
                 }
             }
         }
-        let addrs = todo
-            .iter()
-            .map(|(p, ..)| (p.table.read_fc(), p.addr))
-            .collect();
-        let mut seen = BTreeSet::new();
-        let (mut runs, mut again) = (vec![], vec![]);
-        for (fc, start, qty) in plan_writes(addrs, &self.unmerged) {
-            let (mut run, mut raws) = (vec![], vec![0; usize::from(qty)]);
-            let inside =
-                |p: &Point| p.table.read_fc() == fc && (start..start + qty).contains(&p.addr);
-            for (p, v, _, raw) in todo.iter().filter(|(p, ..)| inside(p)) {
-                if seen.insert((fc, p.addr)) {
-                    raws[usize::from(p.addr - start)] = *raw;
-                    run.push((p.clone(), *v));
-                } else {
-                    again.push((p.clone(), *v));
-                }
-            }
-            runs.push((fc, start, qty, run, raws));
-        }
+        let (runs, again) = group(&todo, &self.unmerged);
         let mut sent = BTreeSet::new();
-        for (fc, start, qty, run, raws) in runs {
-            let ok = match run.as_slice() {
-                [(p, v)] => self.send(p, *v).await,
-                _ => self.send_run(fc, start, qty, &run, &raws).await,
-            };
-            sent.extend(run.iter().map(|(p, _)| p.tag.clone()).filter(|_| ok));
+        for run in runs {
+            let ok = self.send_run(&run).await;
+            sent.extend(run.points.iter().map(|(p, _)| p.tag.clone()).filter(|_| ok));
             if !ok {
-                return self.abandon(todo, &sent);
+                return self.abandon(&todo, &sent);
             }
         }
         for (p, v) in again {
             if !self.send(&p, v).await {
-                sent.insert(p.tag);
-                return self.abandon(todo, &sent);
+                return self.abandon(&todo, &sent);
             }
         }
         true
     }
 
     /// The connection failed: every change not sent is due again. Always `false`.
-    fn abandon(&mut self, todo: Vec<(Point, Value, u8, u16)>, sent: &BTreeSet<String>) -> bool {
+    fn abandon(&mut self, todo: &[(Point, Value, u16)], sent: &BTreeSet<String>) -> bool {
         for (p, ..) in todo.iter().filter(|(p, ..)| !sent.contains(&p.tag)) {
             self.settle(p, None);
         }
         false
     }
 
-    /// One FC15 or FC16 for `run`, a run of `qty` addresses from `start` whose wire values are `raws`. `false`: the connection failed.
-    async fn send_run(
-        &mut self,
-        fc: u8,
-        start: u16,
-        qty: u16,
-        run: &[(Point, Value)],
-        raws: &[u16],
-    ) -> bool {
-        let req = write_multi_req(if fc == 1 { 15 } else { 16 }, start, raws);
+    /// One write for `run`: FC5 or FC6 for a lone point, else one FC15 or FC16. `false`: the connection failed.
+    async fn send_run(&mut self, run: &Run) -> bool {
+        if let [(p, v)] = run.points.as_slice() {
+            return self.send(p, *v).await;
+        }
+        let Run {
+            fc,
+            start,
+            points,
+            raws,
+        } = run;
+        let req = write_multi_req(if *fc == 1 { 15 } else { 16 }, *start, raws);
         match self.live.ask_pdu(self.i, &req, true).await {
-            Ok(_) => run.iter().for_each(|(p, v)| self.settle(p, Some(*v))),
+            Ok(_) => points.iter().for_each(|(p, v)| self.settle(p, Some(*v))),
             // a merged write over a hole, or to a device without FC15/16: alone from the next cycle on, the changes still due
             Err(Fail::Exception(1 | 2)) => {
-                self.unmerged.extend((0..qty).map(|k| (fc, start + k)));
-                run.iter().for_each(|(p, _)| self.settle(p, None));
+                self.unmerged
+                    .extend((0..raws.len() as u16).map(|k| (*fc, start + k)));
+                points.iter().for_each(|(p, _)| self.settle(p, None));
             }
             // a refused write is not repeated: the next poll shows what the device holds
             Err(Fail::Exception(code)) => {
-                tracing::warn!("modbus-client: write of {qty} points from {start} refused with exception {code}");
-                run.iter().for_each(|(p, v)| self.settle(p, Some(*v)));
+                tracing::warn!(
+                    "modbus-client: write of {} points from {start} refused with exception {code}",
+                    points.len()
+                );
+                points.iter().for_each(|(p, v)| self.settle(p, Some(*v)));
             }
             Err(Fail::Link) => return false,
         }
@@ -911,7 +945,7 @@ mod tests {
             response(6, 1, &[6, 0x9c, 0x40, 0x40, 0x20]),
             Ok(vec![0x4020])
         );
-        assert_eq!(response(16, 3, &[16, 0, 9, 0, 3]), Ok(vec![]));
+        assert_eq!(response(16, 3, &[16, 0, 9, 0, 3]), Ok(vec![3]));
         assert_eq!(response(3, 1, &[0x83, 2]), Err(Exception(2)));
         assert_eq!(response(1, 1, &[0x81, 3]), Err(Exception(3)));
         // a byte count that disagrees with the quantity, a short or long frame, another function
