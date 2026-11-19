@@ -154,3 +154,17 @@ async fn a_server_that_never_answers_costs_one_second_and_the_next_request_recon
         "the id counts the request that failed"
     );
 }
+
+/// Stock checks only the function code of a write's echo (sceptre-bennu application-layer.cpp write_register), so bennu mode
+/// ACKs a write whose echo has another address and value; only `fep` mode refuses one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_write_echoed_with_another_address_or_value_is_acked_as_stock_does() {
+    let (port, _seen) =
+        scripted(|_, req| Some([&req[..2], &[0, 0, 0, 6, 1, 6, 0, 9, 0, 1][..]].concat())).await;
+    let cmdif = free_port();
+    let _client = modules(&client_xml(port, cmdif));
+    assert_eq!(
+        shown(&command(cmdif, "WRITE=load-mw-setpoint:500").await),
+        "ACK=Wrote tag load-mw-setpoint -- 500\\x00"
+    );
+}

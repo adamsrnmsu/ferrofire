@@ -94,6 +94,10 @@ left out with a WARN (an error under `--strict`). In `fep` mode `<min-value>` eq
   one address space per kind, where an input and an output cannot share an address.)
 - **Writes down.** Once per `<cycle-time>` each connection looks at its output tags (coils, holding registers, DNP3 outputs) and sends
   the ones that changed locally: a `<logic>` assignment, a write to one of the device's servers, a command-interface `WRITE`.
+  Modbus changes found in the same pass go down as one FC15 (coils) or FC16 (holding registers) per run of contiguous addresses, merged
+  as the reads are (up to 1,968 coils or 123 registers); a lone change is FC5 or FC6. A run the device refuses with exception 1 or 2 is
+  written address by address from the next cycle on. The echo of any write (function, address, quantity or value) must match the request,
+  or the connection is dropped and the change is sent again; `bennu` mode checks the function only, as stock does.
 - **The echo rule.** A value is sent only when it differs both from the last value sent and from the last value polled in for that point,
   so what a poll brought is never written back. Values are compared as the wire carries them (a register after scaling, a DNP3 analog
   output as a float32): a setpoint a register or a float32 cannot hold exactly is sent once, and the tag keeps the value that was

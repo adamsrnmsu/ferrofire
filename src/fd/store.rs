@@ -166,6 +166,32 @@ impl Store {
         Ok(())
     }
 
+    /// `write`, but only while the queue still holds `seen` for `tag` (`None`: nothing queued): a protocol write that landed since
+    /// the caller read the queue is not overwritten. `Ok(false)`: it had, and nothing was queued.
+    pub fn write_if_queued(
+        &self,
+        tag: &str,
+        v: Value,
+        seen: Option<Value>,
+    ) -> Result<bool, WriteError> {
+        let mut s = lock(&self.0);
+        let now = s.queue.get(tag);
+        let unchanged = match (now, seen.as_ref()) {
+            (None, None) => true,
+            (Some(a), Some(b)) => same(a, b),
+            _ => false,
+        };
+        if !unchanged {
+            return Ok(false);
+        }
+        let cur = s.get(tag).ok_or(WriteError::UnknownTag)?;
+        if kind_of(cur) != kind_of(v) {
+            return Err(WriteError::WrongKind);
+        }
+        s.queue.insert(tag.to_string(), v);
+        Ok(true)
+    }
+
     pub fn is_queued(&self, tag: &str) -> bool {
         lock(&self.0).queue.contains_key(tag)
     }
@@ -384,6 +410,20 @@ mod tests {
         s.write("ta", Value::Analog(3.0)).unwrap();
         assert!(s.is_queued("ta"));
         assert_eq!(s.get_f64("ta"), Some(0.0));
+    }
+
+    #[test]
+    fn write_if_queued_loses_to_a_write_that_landed_first() {
+        let s = store();
+        assert_eq!(s.write_if_queued("to", Value::Analog(1.0), None), Ok(true));
+        // a second caller still believes nothing is queued
+        assert_eq!(s.write_if_queued("to", Value::Analog(2.0), None), Ok(false));
+        assert_eq!(s.queued("to"), Some(Value::Analog(1.0)));
+        assert_eq!(
+            s.write_if_queued("to", Value::Analog(3.0), Some(Value::Analog(1.0))),
+            Ok(true)
+        );
+        assert_eq!(s.queued("to"), Some(Value::Analog(3.0)));
     }
 
     #[test]

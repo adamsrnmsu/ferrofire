@@ -41,6 +41,21 @@ pub fn write_req(fc: u8, addr: u16, value: u16) -> [u8; 5] {
     read_req(fc, addr, value)
 }
 
+/// A write-multiple request PDU: FC15 (`raws` are 0 or not, one bit each) or FC16, from address `addr`.
+pub fn write_multi_req(fc: u8, addr: u16, raws: &[u16]) -> Vec<u8> {
+    let data: Vec<u8> = match fc {
+        15 => raws
+            .chunks(8)
+            .map(|c| (c.iter().enumerate()).fold(0, |b, (i, r)| b | u8::from(*r != 0) << i))
+            .collect(),
+        _ => raws.iter().flat_map(|r| r.to_be_bytes()).collect(),
+    };
+    let mut pdu = read_req(fc, addr, raws.len() as u16).to_vec();
+    pdu.push(data.len() as u8);
+    pdu.extend(data);
+    pdu
+}
+
 /// Why a response PDU gave no values.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Reply {
@@ -68,7 +83,7 @@ pub fn response(fc: u8, qty: u16, pdu: &[u8]) -> Result<Vec<u16>, Reply> {
                 .map(|c| u16::from_be_bytes([c[0], c[1]]))
                 .collect())
         }
-        ([_, _, _, hi, lo], 5 | 6) => Ok(vec![u16::from_be_bytes([*hi, *lo])]),
+        ([_, _, _, hi, lo], 5 | 6 | 15 | 16) => Ok(vec![u16::from_be_bytes([*hi, *lo])]),
         _ => Err(Reply::Bad("the response does not fit the request")),
     }
 }
@@ -102,10 +117,25 @@ pub fn wrap(range: &Range, v: f64) -> u16 {
 /// The read requests of one poll, as `(function, start, quantity)`: each table's addresses in order, contiguous ones merged up
 /// to 2,000 bits or 125 registers. An address in `split` (function, address) is read alone: a merged read there was refused.
 pub fn plan_reads(points: &[Point], split: &BTreeSet<(u8, u16)>) -> Vec<(u8, u16, u16)> {
-    let addrs: BTreeSet<(u8, u16)> = points.iter().map(|p| (p.table.read_fc(), p.addr)).collect();
+    let addrs = points.iter().map(|p| (p.table.read_fc(), p.addr)).collect();
+    runs(addrs, (2000, 125), split)
+}
+
+/// The same for the writes of one cycle: `addrs` are (read function of the table, address), and a run is at most 1,968 coils or
+/// 123 registers. An address in `split` is written alone.
+pub fn plan_writes(addrs: BTreeSet<(u8, u16)>, split: &BTreeSet<(u8, u16)>) -> Vec<(u8, u16, u16)> {
+    runs(addrs, (1968, 123), split)
+}
+
+/// Contiguous addresses of one table in runs of at most `limits` (bits, registers).
+fn runs(
+    addrs: BTreeSet<(u8, u16)>,
+    limits: (u16, u16),
+    split: &BTreeSet<(u8, u16)>,
+) -> Vec<(u8, u16, u16)> {
     let mut out: Vec<(u8, u16, u16)> = vec![];
     for (fc, addr) in addrs {
-        let limit = if fc <= 2 { 2000 } else { 125 };
+        let limit = if fc <= 2 { limits.0 } else { limits.1 };
         match out.last_mut() {
             Some((f, start, qty))
                 if *f == fc
@@ -471,14 +501,19 @@ struct Live {
 }
 
 impl Live {
-    /// One request on connection `i`; the values, or why there are none (logged). A response that does not fit the request
-    /// closes the connection like a lost one: the stream cannot be trusted after it.
+    /// One read or single write on connection `i`; the values, or why there are none (logged).
     async fn ask(&self, i: usize, fc: u8, addr: u16, n: u16) -> Result<Vec<u16>, Fail> {
+        self.ask_pdu(i, &read_req(fc, addr, n), false).await
+    }
+
+    /// One request `req` on connection `i`. A response that does not fit the request closes the connection like a lost one: the
+    /// stream cannot be trusted after it. `exact`: a write's echo must repeat function, address and quantity or value (stock
+    /// checks the function only, which `bennu` mode keeps).
+    async fn ask_pdu(&self, i: usize, req: &[u8], exact: bool) -> Result<Vec<u16>, Fail> {
         let mut link = self.links[i].lock().await;
-        let qty = if fc > 4 { 1 } else { n };
-        let r = match link.request(&read_req(fc, addr, n)).await {
+        let r = match link.request(req).await {
             Err(why) => Err((Fail::Link, why)),
-            Ok(pdu) => response(fc, qty, &pdu).map_err(|e| match e {
+            Ok(pdu) => checked(req, &pdu, exact).map_err(|e| match e {
                 Reply::Exception(code) => (Fail::Exception(code), format!("exception {code}")),
                 Reply::Bad(why) => {
                     link.stream = None;
@@ -492,10 +527,30 @@ impl Live {
         };
         self.log.log(
             level,
-            format_args!("function {fc}"),
-            format_args!("address {addr}, {n}: {said}"),
+            format_args!("function {}", req[0]),
+            format_args!(
+                "address {}, {}: {said}",
+                u16::from_be_bytes([req[1], req[2]]),
+                u16::from_be_bytes([req[3], req[4]])
+            ),
         );
         r.map_err(|(fail, _)| fail)
+    }
+}
+
+/// The values in `pdu`, the response to `req`; with `exact`, a write's echo that is not its request is `Bad`.
+fn checked(req: &[u8], pdu: &[u8], exact: bool) -> Result<Vec<u16>, Reply> {
+    let qty = if req[0] > 4 {
+        1
+    } else {
+        u16::from_be_bytes([req[3], req[4]])
+    };
+    let got = response(req[0], qty, pdu)?;
+    match exact && req[0] > 4 && pdu.get(..5) != Some(&req[..5]) {
+        true => Err(Reply::Bad(
+            "the write was echoed with another address or value",
+        )),
+        false => Ok(got),
     }
 }
 
@@ -552,7 +607,53 @@ struct Session {
     split: BTreeSet<(u8, u16)>,
     /// Points whose own read the device refuses, so that it is said once.
     refused: BTreeSet<(u8, u16)>,
+    /// Addresses a merged write was refused for (exception 1 or 2): written alone from then on.
+    unmerged: BTreeSet<(u8, u16)>,
     up: bool,
+}
+
+/// One write of a pass: the points of `raws.len()` addresses from `start` in the table `fc` is the read function of.
+struct Run {
+    fc: u8,
+    start: u16,
+    points: Vec<(Point, Value)>,
+    raws: Vec<u16>,
+}
+
+/// The changes `todo` (point, value, wire value) as runs by `plan_writes`; a second change to an address already in a run is
+/// returned apart, to be written after the runs.
+fn group(
+    todo: &[(Point, Value, u16)],
+    unmerged: &BTreeSet<(u8, u16)>,
+) -> (Vec<Run>, Vec<(Point, Value)>) {
+    let addrs = todo
+        .iter()
+        .map(|(p, ..)| (p.table.read_fc(), p.addr))
+        .collect();
+    let (mut seen, mut again) = (BTreeSet::new(), vec![]);
+    let runs = plan_writes(addrs, unmerged)
+        .into_iter()
+        .map(|(fc, start, qty)| {
+            let mut run = Run {
+                fc,
+                start,
+                points: vec![],
+                raws: vec![0; usize::from(qty)],
+            };
+            let inside =
+                |p: &Point| p.table.read_fc() == fc && (start..start + qty).contains(&p.addr);
+            for (p, v, raw) in todo.iter().filter(|(p, ..)| inside(p)) {
+                if seen.insert((fc, p.addr)) {
+                    run.raws[usize::from(p.addr - start)] = *raw;
+                    run.points.push((p.clone(), *v));
+                } else {
+                    again.push((p.clone(), *v));
+                }
+            }
+            run
+        })
+        .collect();
+    (runs, again)
 }
 
 impl Session {
@@ -576,6 +677,7 @@ impl Session {
             outs,
             split: BTreeSet::new(),
             refused: BTreeSet::new(),
+            unmerged: BTreeSet::new(),
             up: false,
         }
     }
@@ -630,7 +732,11 @@ impl Session {
             self.settle(p, Some(v));
             return true;
         };
-        match self.live.ask(self.i, fc, p.addr, raw).await {
+        match self
+            .live
+            .ask_pdu(self.i, &write_req(fc, p.addr, raw), true)
+            .await
+        {
             Ok(_) => self.settle(p, Some(v)),
             // a refused write is not repeated: the next poll shows what the device holds
             Err(Fail::Exception(code)) => {
@@ -661,16 +767,13 @@ impl Session {
     /// Send every output tag's local change. `false`: the connection failed (the changes stay due).
     async fn write_down(&mut self) -> bool {
         let store = self.live.store.clone();
-        for p in self.points.clone().iter().filter(|p| p.table.output()) {
+        let mut local = vec![];
+        for p in self.points.iter().filter(|p| p.table.output()) {
             let out = self.outs.get_mut(&p.tag);
             let due = out.and_then(|o| o.due(&store, &p.tag, |v| key(p, v)));
-            if let Some(v) = due {
-                if !self.send(p, v).await {
-                    return false;
-                }
-            }
+            local.extend(due.map(|v| (p.clone(), v)));
         }
-        true
+        self.send_all(local).await
     }
 
     /// One poll: local changes go down first (they win over what the poll reads), then every table is read. `false`: the
@@ -717,16 +820,73 @@ impl Session {
         true
     }
 
-    /// Send local changes down, in order. `false`: the connection failed, and the ones not sent are due again.
+    /// Send local changes down: one FC15 or FC16 per run of contiguous addresses (as `plan_reads` merges), a single write
+    /// for a lone one. A second change to one address goes after the runs. `false`: the connection failed, and the ones not
+    /// sent are due again.
     async fn send_all(&mut self, local: Vec<(Point, Value)>) -> bool {
-        let mut local = local.into_iter();
-        while let Some((p, v)) = local.next() {
-            if !self.send(&p, v).await {
-                for (rest, _) in local {
-                    self.settle(&rest, None);
+        let mut todo = vec![];
+        for (p, v) in local {
+            match wire(&p, v) {
+                Some((_, raw)) => todo.push((p, v, raw)),
+                None => {
+                    self.send(&p, v).await; // says why nothing goes
                 }
-                return false;
             }
+        }
+        let (runs, again) = group(&todo, &self.unmerged);
+        let mut sent = BTreeSet::new();
+        for run in runs {
+            let ok = self.send_run(&run).await;
+            sent.extend(run.points.iter().map(|(p, _)| p.tag.clone()).filter(|_| ok));
+            if !ok {
+                return self.abandon(&todo, &sent);
+            }
+        }
+        for (p, v) in again {
+            if !self.send(&p, v).await {
+                return self.abandon(&todo, &sent);
+            }
+        }
+        true
+    }
+
+    /// The connection failed: every change not sent is due again. Always `false`.
+    fn abandon(&mut self, todo: &[(Point, Value, u16)], sent: &BTreeSet<String>) -> bool {
+        for (p, ..) in todo.iter().filter(|(p, ..)| !sent.contains(&p.tag)) {
+            self.settle(p, None);
+        }
+        false
+    }
+
+    /// One write for `run`: FC5 or FC6 for a lone point, else one FC15 or FC16. `false`: the connection failed.
+    async fn send_run(&mut self, run: &Run) -> bool {
+        if let [(p, v)] = run.points.as_slice() {
+            return self.send(p, *v).await;
+        }
+        let Run {
+            fc,
+            start,
+            points,
+            raws,
+        } = run;
+        let req = write_multi_req(if *fc == 1 { 15 } else { 16 }, *start, raws);
+        match self.live.ask_pdu(self.i, &req, true).await {
+            Ok(_) => points.iter().for_each(|(p, v)| self.settle(p, Some(*v))),
+            // a merged write over a hole, or to a device without FC15/16: alone from the next cycle on, the changes still due
+            Err(Fail::Exception(1 | 2)) => {
+                self.unmerged
+                    .extend((0..raws.len() as u16).map(|k| (*fc, start + k)));
+                points.iter().for_each(|(p, _)| self.settle(p, None));
+            }
+            // a refused write is not repeated: the next poll shows what the device holds
+            Err(Fail::Exception(code)) => {
+                tracing::warn!(
+                    "modbus-client: write of {} points from {start} refused with exception {code}",
+                    points.len()
+                );
+                points.iter().for_each(|(p, v)| self.settle(p, Some(*v)));
+            }
+            Err(Fail::Link) => return false,
         }
         true
     }
@@ -785,6 +945,7 @@ mod tests {
             response(6, 1, &[6, 0x9c, 0x40, 0x40, 0x20]),
             Ok(vec![0x4020])
         );
+        assert_eq!(response(16, 3, &[16, 0, 9, 0, 3]), Ok(vec![3]));
         assert_eq!(response(3, 1, &[0x83, 2]), Err(Exception(2)));
         assert_eq!(response(1, 1, &[0x81, 3]), Err(Exception(3)));
         // a byte count that disagrees with the quantity, a short or long frame, another function
@@ -802,11 +963,93 @@ mod tests {
             (3, 1, &[3]),
             (6, 1, &[6, 0, 0, 1]),
             (5, 1, &[5, 0, 0, 0xff, 0, 0]),
-            (16, 1, &[16, 0, 0, 0, 1]),
+            (16, 1, &[16, 0, 0, 0]),
+            (15, 1, &[15, 0, 0, 0, 1, 0]),
         ] {
             assert!(
                 matches!(response(fc, qty, pdu), Err(Bad(_))),
                 "{fc} {qty} {pdu:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_multiple_write_carries_bits_lsb_first_or_registers_big_endian() {
+        assert_eq!(
+            write_multi_req(15, 0x10, &[0xff00, 0, 0xff00, 0, 0, 0, 0, 0, 0xff00]),
+            [15, 0, 0x10, 0, 9, 2, 0b101, 1]
+        );
+        assert_eq!(
+            write_multi_req(16, 3, &[1, 0x4020]),
+            [16, 0, 3, 0, 2, 4, 0, 1, 0x40, 0x20]
+        );
+    }
+
+    #[test]
+    fn writes_merge_up_to_1968_coils_or_123_registers_and_an_unmerged_address_goes_alone() {
+        let set = |fc: u8, n: u16| (0..n).map(|a| (fc, a)).collect::<BTreeSet<_>>();
+        let none = BTreeSet::new();
+        assert_eq!(
+            plan_writes(set(1, 1969), &none),
+            [(1, 0, 1968), (1, 1968, 1)]
+        );
+        assert_eq!(plan_writes(set(3, 124), &none), [(3, 0, 123), (3, 123, 1)]);
+        let gap: BTreeSet<_> = [(3, 5), (3, 6), (3, 8), (1, 7)].into();
+        assert_eq!(
+            plan_writes(gap.clone(), &none),
+            [(1, 7, 1), (3, 5, 2), (3, 8, 1)]
+        );
+        let alone: BTreeSet<_> = [(3, 6)].into();
+        assert_eq!(
+            plan_writes(gap, &alone),
+            [(1, 7, 1), (3, 5, 1), (3, 6, 1), (3, 8, 1)]
+        );
+    }
+
+    /// ww-3oa: in `fep` mode a write echoed with another address or value is a failure (the link is dropped); `bennu` mode
+    /// keeps stock's check of the function only.
+    #[tokio::test]
+    async fn a_write_echoed_with_another_address_or_value_fails_in_fep_mode_only() {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("tcp://{}", l.local_addr().unwrap());
+        tokio::spawn(async move {
+            loop {
+                let (mut s, _) = l.accept().await.unwrap();
+                tokio::spawn(async move {
+                    let mut b = [0u8; 64];
+                    while let Ok(n @ 1..) = s.read(&mut b).await {
+                        // FC6 at address 5 with the value 7, echoed as address 5, value 8 (or as asked, for FC5 at 9)
+                        let echo = if b[7] == 6 {
+                            [6, 0, 5, 0, 8]
+                        } else {
+                            [5, 0, 9, 0xff, 0]
+                        };
+                        let mut r = b[..2].to_vec();
+                        r.extend([0, 0, 0, 6, 1]);
+                        r.extend(echo);
+                        let _ = n;
+                        let _ = s.write_all(&r).await;
+                    }
+                });
+            }
+        });
+        let live = Live {
+            links: vec![Mutex::new(Link::new(endpoint, 1))],
+            ranges: vec![BTreeMap::new()],
+            points: BTreeMap::new(),
+            store: Store::new(Default::default()),
+            log: Arc::new(EventLog::to("modbus-client", Box::new(std::io::sink()))),
+        };
+        for (req, same_as_asked) in [
+            (write_req(6, 5, 7), false),
+            (write_req(5, 8, 0xff00), false),
+            (write_req(6, 5, 8), true),
+        ] {
+            let exact = live.ask_pdu(0, &req, true).await;
+            assert_eq!(exact.is_ok(), same_as_asked, "{req:?}");
+            assert!(
+                live.ask_pdu(0, &req, false).await.is_ok(),
+                "stock takes any echo of the function"
             );
         }
     }
