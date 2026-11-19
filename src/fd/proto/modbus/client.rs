@@ -606,7 +606,7 @@ struct Session {
     split: BTreeSet<(u8, u16)>,
     /// Points whose own read the device refuses, so that it is said once.
     refused: BTreeSet<(u8, u16)>,
-    /// Addresses a merged write was refused for (exception 1 or 2): written alone from then on.
+    /// Addresses a merged write was refused for (exception 1, 2 or 3): written alone from then on.
     unmerged: BTreeSet<(u8, u16)>,
     up: bool,
 }
@@ -639,8 +639,9 @@ fn group(
                 points: vec![],
                 raws: vec![0; usize::from(qty)],
             };
-            let inside =
-                |p: &Point| p.table.read_fc() == fc && (start..start + qty).contains(&p.addr);
+            let inside = |p: &Point| {
+                p.table.read_fc() == fc && (start..=start + (qty - 1)).contains(&p.addr)
+            };
             for (p, v, raw) in todo.iter().filter(|(p, ..)| inside(p)) {
                 if seen.insert((fc, p.addr)) {
                     run.raws[usize::from(p.addr - start)] = *raw;
@@ -871,8 +872,9 @@ impl Session {
         let req = write_multi_req(if *fc == 1 { 15 } else { 16 }, *start, raws);
         match self.live.ask_pdu(self.i, &req, true).await {
             Ok(_) => points.iter().for_each(|(p, v)| self.settle(p, Some(*v))),
-            // a merged write over a hole, or to a device without FC15/16: alone from the next cycle on, the changes still due
-            Err(Fail::Exception(1 | 2)) => {
+            // a merged write over a hole, to a device without FC15/16, or past its own quantity limit: alone from the next
+            // cycle on, the changes still due
+            Err(Fail::Exception(1..=3)) => {
                 self.unmerged
                     .extend((0..raws.len() as u16).map(|k| (*fc, start + k)));
                 points.iter().for_each(|(p, _)| self.settle(p, None));
@@ -982,6 +984,24 @@ mod tests {
             write_multi_req(16, 3, &[1, 0x4020]),
             [16, 0, 3, 0, 2, 4, 0, 1, 0x40, 0x20]
         );
+    }
+
+    #[test]
+    fn a_run_ending_at_the_last_address_groups_without_overflow() {
+        for p in [Table::Coil, Table::Holding] {
+            let mut p = pt(p, 65535);
+            p.kind = if p.table.bits() {
+                Kind::Binary
+            } else {
+                Kind::Analog
+            };
+            let todo = [(p.clone(), Value::Binary(true), 1)];
+            let (runs, again) = group(&todo, &BTreeSet::new());
+            assert_eq!((runs.len(), again.len()), (1, 0));
+            assert_eq!((runs[0].start, runs[0].points.len()), (65535, 1));
+        }
+        let top = [pt(Table::Holding, 65534), pt(Table::Holding, 65535)];
+        assert_eq!(plan_reads(&top, &BTreeSet::new()), [(3, 65534, 2)]);
     }
 
     #[test]

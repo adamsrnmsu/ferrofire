@@ -152,6 +152,8 @@ impl Echo {
     /// The write under way was answered: `v` is what the device now has from us.
     pub fn sent_ok(&mut self, v: Value) {
         self.last_sent = Some(v);
+        // what a poll showed before this write is stale: the tag going back to it must be sent
+        self.last_polled = None;
         self.sent_failed();
         self.fresh = true;
     }
@@ -451,9 +453,18 @@ mod tests {
         );
         e.sent_ok(Analog(6.0));
         assert_eq!(e.due(Analog(6.0)), None);
-        assert_eq!(e.due(Analog(5.0)), None, "still the last value polled");
         assert!(e.polled(Analog(6.0)), "the device shows what was sent");
         assert_eq!(e.due(Analog(6.0)), None);
+    }
+
+    #[test]
+    fn a_value_written_back_to_the_polled_one_after_a_send_is_sent_again() {
+        let mut e = Echo::new(Analog(0.0));
+        assert!(e.polled(Analog(5.0)));
+        assert_eq!(e.due(Analog(6.0)), Some(Analog(6.0)));
+        e.sent_ok(Analog(6.0));
+        // the tag is back at the value the device last showed, before a poll has shown the device at 6
+        assert_eq!(e.due(Analog(5.0)), Some(Analog(5.0)));
     }
 
     #[test]
