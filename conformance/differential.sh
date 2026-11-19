@@ -1,7 +1,7 @@
 #!/bin/sh
-# SPEC 8 differential: one probe against the stock oracle (bennu:arm64) or ours, transcript to stdout.
+# SPEC 8 differential: one probe against the stock oracle (ffc-stock-2026.11.03:22.04) or ours, transcript to stdout.
 # usage: conformance/differential.sh PROTO stock|rust [diff|big]     (conformance/<PROTO>/probe_diff.py, diff-server.xml)
-#   rust: FF_BIN=path to a linux ferrofire binary (default target-linux/debug/ferrofire); it is docker-cp'd into a bennu:arm64 container.
+#   rust: FF_BIN=path to a linux ferrofire binary (default target-linux/debug/ferrofire); it is docker-cp'd into a stock-image container.
 # TRACE=file also saves the probe trace. Compare: differential.sh dnp3 stock > stock.txt; differential.sh dnp3 rust > rust.txt; diff stock.txt rust.txt  (or: make diff-dnp3)
 # Containers ff-diff-$set-dut and ff-diff-$set-peers only; they are the only ones removed.
 set -eu
@@ -11,10 +11,11 @@ here=$(cd "$(dirname "$0")" && pwd)
 [ -f "$here/$proto/$cfg" ] || cfg=diff-server.xml   # a set without a config of its own uses the protocol default
 [ "$proto/$set" != modbus/q4 ] || cfg=diff-edges-server.xml
 root=$(cd "$here/.." && pwd)
-DOCKER_HOST=${DOCKER_HOST:-unix://$HOME/.lima/phenix/sock/docker.sock}; export DOCKER_HOST
+DOCKER_HOST=${DOCKER_HOST:-unix://$HOME/.docker/run/docker.sock}; export DOCKER_HOST
+STOCK_IMAGE=${STOCK_IMAGE:-ffc-stock-2026.11.03:22.04}
 cleanup() { docker rm -f ff-diff-$set-dut ff-diff-$set-peers >/dev/null 2>&1 || true; }
 cleanup; trap cleanup EXIT
-docker run -d --name ff-diff-$set-dut bennu:arm64 sleep 300 >/dev/null
+docker run -d --name ff-diff-$set-dut $STOCK_IMAGE sleep 300 >/dev/null
 docker cp "$here/$proto/$cfg" ff-diff-$set-dut:/tmp/cfg.xml
 case $who in
   stock) docker exec -d ff-diff-$set-dut sh -c 'cd /tmp && LD_LIBRARY_PATH=/usr/local/lib bennu-field-device --f /tmp/cfg.xml > /tmp/dut.out 2>&1' ;;

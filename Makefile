@@ -78,9 +78,9 @@ fuzz-smoke: image   # every fuzz target for $(FUZZ_SECS)s each (CI); crashes lan
 fuzz: image   # one target until it finds something: make fuzz T=expr (T defaults to request); Ctrl-C to stop
 	$(IN) bash -c 'cd fuzz && cargo +nightly fuzz run $(or $(T),request)'
 check: fmt-check lint test crap dry deny   # every gate except mutate
-# The stock oracle image bennu:arm64 lives in the Lima VM's docker (not Docker Desktop's), so the conformance targets use that daemon.
-# Override with TP_DOCKER_HOST=unix:///var/run/docker.sock (any daemon that has the DUT image).
-TP_DOCKER_HOST ?= unix://$(HOME)/.lima/phenix/sock/docker.sock
+# The stock oracle image ffc-stock-2026.11.03:22.04 (bennu v2026.11.03) and ferrofire-testpeers live on Docker Desktop's daemon, so the
+# conformance targets use it. Override with TP_DOCKER_HOST=unix:///var/run/docker.sock (any daemon that has both images).
+TP_DOCKER_HOST ?= unix://$(HOME)/.docker/run/docker.sock
 # Set per command, not as a target-specific export: that would leak into prerequisites (dut, image) and build on the wrong daemon.
 TP := DOCKER_HOST=$(TP_DOCKER_HOST)
 testpeers:   # build the ferrofire-testpeers image (opendnp3, libiec61850, tshark, Zeek+ICSNPP, nmap); PLATFORM=linux/amd64 also works
