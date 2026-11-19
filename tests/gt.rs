@@ -2,7 +2,7 @@
 use ferrofire::gt;
 use ferrofire::model::Value;
 use ferrofire::top;
-use std::io::{Read, Write};
+use std::io::{BufRead, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::time::{Duration, Instant};
 
@@ -141,36 +141,35 @@ fn a_bad_address_is_an_error_naming_the_flag() {
 const BIN: &str = env!("CARGO_BIN_EXE_ferrofire");
 const MODEL: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/models/waterway.yaml");
 
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
-
 #[test]
 fn run_serves_its_own_tags_on_the_page_only_when_asked() {
-    let (server, gt) = (
-        format!("tcp://127.0.0.1:{}", free_port()),
-        format!("127.0.0.1:{}", free_port()),
-    );
+    // port 0 for both: a port picked up front and released is free to be taken before the child binds it, and the child then exits
+    // under the test's open connection (ConnectionReset); the page's real address is in the child's own Info line
+    let server = "tcp://127.0.0.1:0";
     let publish = "udp://*;127.0.0.1:9"; // discard port: nobody listens, the page does not care
     let mut c = std::process::Command::new(BIN)
         .args([
             "run",
             MODEL,
             "--server",
-            &server,
+            server,
             "--publish",
             publish,
             "--rate",
             "0.05",
         ])
-        .args(["--gt-addr", &gt])
+        .args(["--gt-addr", "127.0.0.1:0"])
         .stdout(std::process::Stdio::piped())
         .spawn()
         .unwrap();
+    let mut out = std::io::BufReader::new(c.stdout.take().unwrap());
+    let mut info = String::new();
+    out.read_line(&mut info).unwrap();
+    let gt = info
+        .split("http://")
+        .nth(1)
+        .and_then(|r| r.split('/').next())
+        .unwrap_or_else(|| panic!("no page address in {info:?}"));
     let addr: SocketAddr = gt.parse().unwrap();
     let mut got = String::new();
     for _ in 0..50 {
@@ -185,16 +184,15 @@ fn run_serves_its_own_tags_on_the_page_only_when_asked() {
         std::thread::sleep(Duration::from_millis(100));
     }
     unsafe { libc::kill(c.id() as i32, libc::SIGTERM) };
-    let mut out = String::new();
-    c.stdout.take().unwrap().read_to_string(&mut out).unwrap();
+    out.read_to_string(&mut info).unwrap();
     assert!(c.wait().unwrap().success());
     assert!(
         got.contains("\"tag\":\"lowerwater.height\"") && got.contains("\"stale\":false"),
         "{got}"
     );
     assert!(
-        out.contains(&format!("Info: ground truth page on http://{gt}/")),
-        "{out}"
+        info.starts_with("Info: ground truth page on http://127.0.0.1:"),
+        "{info}"
     );
 }
 
