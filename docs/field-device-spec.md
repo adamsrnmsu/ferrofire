@@ -142,7 +142,7 @@ Config generation (`A:templates/fd_server.mako`): tag names are `var_<host>_I<ad
 (`fd_server.mako:23-28,78-84,111-170`). The `<logic>` block is built by textual substitution of `<device>.<field>` names to `var_*` tags
 (`fd_server.mako:179-190`). Endpoints: `modbus` → `tcp://<ip>:502`, `dnp3` → `tcp://<ip>:20000` + link address 10, `iec60870-5-104` →
 `tcp://<ip>:2404` + `rpoll-rate` 2 + `subtype` (`fd_server.mako:44-71`). The generator **never** emits DNP3 `sgvar/egvar/class/deadband`
-or `sbo`, so v1 supports exactly the defaults in §4.2 and rejects the rest with a clear error.
+or `sbo`, so the defaults of §4.2 are what a generated config gets; the keys themselves load (4.2.0).
 
 ### 3.2 Datastore
 
@@ -298,8 +298,8 @@ Event log events: `read coils|discrete inputs|holding registers|input registers`
 
 ### 4.2 DNP3 outstation (`<dnp3-server>`)
 
-Config: `endpoint`, `address` (outstation link address, required), `event-logging`, `binary-input{address,tag,[sgvar,egvar,class]}`, `binary-output{address,tag,[sbo]}`,
-`analog-input{address,tag,[sgvar,egvar,class,deadband]}`, `analog-output{address,tag,[sbo]}` (`MOD:comms/dnp3/module/DataHandler.cpp:41-110`). The stock stack is opendnp3 3.1.1
+Config: `endpoint`, `address` (outstation link address, required), `event-logging`, `binary-input{address,tag,[sgvar,egvar,class]}`, `binary-output{address,tag,[sbo,class]}`, `event-buffer-size`,
+`analog-input{address,tag,[sgvar,egvar,class,deadband]}`, `analog-output{address,tag,[sbo,class]}` (`MOD:comms/dnp3/module/DataHandler.cpp:41-110`). The stock stack is opendnp3 3.1.1
 (Apache-2.0; `B:.../dnp3/protocol/CMakeLists.txt:10-13`).
 
 Stock behaviour (source + `O:` transcript from `conformance/stock/probe_dnp3.py`, master 1 → outstation 10):
@@ -342,14 +342,24 @@ The outstation follows this release; the goldens `conformance/dnp3/stock-*.{gold
 - **Output status.** `<binary-output>` / `<analog-output>` go into their own tables: class 0 answers g1v2, g30v6, then **g10v2 and g40v1** (flags `0x01`, value from the
   tag; class 0 order is inputs then outputs, binary before analog). `READ g10 v0-2` / `g40 v0-4` answer them (g40: 1 i32, 2 i16, 3 float, 4 double, with flag); g1 and g30
   no longer list them. A CROB or g41 control on an index that is only an input is OUT_OF_RANGE (12).
-- **Class 0 by default.** An input has no event class unless the master assigns one: no events, no IIN1.1, until ASSIGN_CLASS (below). The `class` setting of the sample XML
-  (also on outputs) stays refused by our parser (ww-3oa follow-up bead), so only ASSIGN_CLASS sets it.
+- **Class 0 by default.** A point has no event class unless the config's `class` or a master's ASSIGN_CLASS gives it one: no events, no IIN1.1 until then.
+- **Config keys (ww-ke0, probed: `conformance/dnp3/stock-cfg.golden`).** An input takes `class` (`Class0`..`Class3`, case matters), `sgvar` (`Group1Var1|2`, `Group30Var1..6`:
+  what READ v0 and a class 0 poll answer for that point), `egvar` (`Group2Var1..3`, `Group32Var1..8`: what a class poll or a READ of variation 0 answers; a variation the master names
+  wins) and, analog only, `deadband`; an output takes `class` and `sbo`. A value opendnp3 does not know leaves the point out without a word, and the Size lines do not count it.
+  An empty value is the default. `deadband`: an event when the value is more than the deadband away from the value of the last event (strictly; the reference moves on every
+  such change, also for a class 0 point), or when the flags change. `event-buffer-size`: a `uint16` read as `lexical_cast` does (default 100 when it does not read; `-5` is 65531),
+  the events kept per type; 0 keeps none and sets no overflow. The Size lines are `Binary Size`, `Binary Output Size`, `Event buffer size (per type) is N.`
+  Inputs and outputs are four tables, so one index may hold an input and an output (a control and ASSIGN_CLASS touch the table of their group); a later element replaces an
+  earlier one in the same table only.
 - **ASSIGN_CLASS** (function 22) works: a g60 v1-4 header gives the class of the next header, g1/g10/g30/g40 v0 with all objects or a start-stop range. A range wider than the
   points is PARAM_ERROR but the points inside are assigned; a header without a class header before it is PARAM_ERROR; other variations NO_FUNC (`B:` AssignClassHandler.cpp).
   Events carry their class: class 2 and 3 polls return their own, IIN1.2 and IIN1.3 mark them.
 - **Log** at start: `Binary Size is N and Analog Size is M.` (inputs), `Binary Output Size is ...`, `Event buffer size (per type) is 100.`
-- Not replicated (listed in conformance/README.md): `event-buffer-size`, `sgvar`, `egvar`, `deadband`, `class` in the config; events of output points; the commanded value
-  reaching the output status before the next refresh, and the refresh that skips a tag with a write pending.
+- Not replicated (listed in conformance/README.md): a `<deadband>` that is not a number (stock logs an ERROR to stdout and runs without a DNP3 outstation; we refuse the
+  config), and the provider-down application of a never-acknowledged write.
+- **Provider and the output status (ww-a7r; `stock-nack`, `stock-nopv`).** A control reaches the output status at once. The sweep leaves an output alone while its write
+  is pending; with a provider that answers `ERR=` the datastore takes the written value all the same (an input on the same tag reads it, the status keeps it), with none
+  the datastore keeps the old value and the status the new one for at least a minute. **Output event buffers** are 100 per type like the inputs (`stock-ovf`): the oldest events go, IIN2.3 is set until a CONFIRM leaves room.
 
 #### 4.2.1 F3 findings (2026-11-10, from `conformance/dnp3/stock-*.{golden,trace,logs}`, ww-otj.44; `O:`)
 
@@ -383,8 +393,8 @@ Recorded from the stock `bennu:arm64` outstation with `probe_diff.py` and `probe
   OPERATE NO ACK acts and stays silent; CROB code is `code & 0x0F == 3` (LATCH_ON), so `0x43` (close+latch on) is true; an
   analog-output index is looked up in the analog map only, a CROB index in the binary map only; g41 variations other than 3 (float)
   are acknowledged and written nowhere (Q6), even for an unknown index.
-- **Config**: binary-input, binary-output, analog-input, analog-output in that order into one map per kind, a later element at
-  the same address replacing the earlier; `sgvar`, `egvar`, `class`, `deadband` are refused (the generator never emits them).
+- **Config**: binary-input, binary-output, analog-input, analog-output in that order into four tables (inputs and outputs apart, 4.2.0 "Config keys"), a later element at
+  the same index of a table replacing the earlier; `sgvar`, `egvar`, `class`, `deadband`, `event-buffer-size` are read as stock reads them (ww-ke0); `fd_server.mako` never emits them.
 - **Differential method**: a stand-in provider REP socket is required, otherwise stock applies queued writes only after its client
   gives up (about 15-20 s) and the transcript cannot be pinned; devices share the multicast group, so probe runs must not overlap.
 

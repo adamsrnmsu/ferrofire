@@ -63,7 +63,7 @@ def _zmtp_rep(port=5555):
                     parts.append(body)
                     if not fl & 1: break
                 if parts[-1].startswith(b"WRITE=") or parts[-1].startswith(b"READ=") or parts[-1].startswith(b"QUERY="):
-                    reply = b"ACK=ok\0"
+                    reply = b"ERR=refused\0" if os.environ.get("NACK") == "1" and parts[-1].startswith(b"WRITE=") else b"ACK=ok\0"
                 else:
                     reply = b"ERR=unknown\0"
                 c.sendall(bytes([1, 0, 0, len(reply)]) + reply)

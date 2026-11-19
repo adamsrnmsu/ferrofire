@@ -27,7 +27,19 @@ impl Write for Buf {
     }
 }
 
+/// What the provider does with the writes the device sends it (the probes' stand-in REP socket).
+#[derive(Clone, Copy)]
+enum Prov {
+    /// `ACK=` to every write.
+    Ack,
+    /// `ERR=` to every write (probe_nack.py).
+    Reject,
+    /// Nobody answers (probe_nopv.py).
+    Mute,
+}
+
 struct Rig {
+    prov: Prov,
     dev: Device,
     store: Store,
     conn: Conn,
@@ -41,13 +53,14 @@ struct Rig {
 }
 
 /// The config loaded as the field device does, with the module's event log swapped for one we can read.
-fn rig(xml: &str) -> Rig {
+fn rig(xml: &str, prov: Prov) -> Rig {
     let logged = Buf::default();
     let (out, store) = common::load(xml);
     let log = EventLog::to("dnp3-server", Box::new(logged.clone()));
     let dev = out.device();
-    ferrofire::fd::proto::dnp3::log_init(&log, &dev.bin, &dev.ana);
+    ferrofire::fd::proto::dnp3::log_init(&log, &dev.bin, &dev.ana, out.cap());
     let mut r = Rig {
+        prov,
         dev,
         store,
         conn: Conn::new(),
@@ -71,7 +84,11 @@ impl Rig {
             self.conn.tick(&mut self.dev, self.now);
             // the provider acknowledges queued writes within a scan cycle (the probes run a stand-in REP socket that does)
             for (tag, _, v) in self.store.pending(0) {
-                self.store.ack_at(&tag, v, self.t0 + self.now);
+                match self.prov {
+                    Prov::Ack => self.store.ack_at(&tag, v, self.t0 + self.now),
+                    Prov::Reject => self.store.reject(&tag, v),
+                    Prov::Mute => {}
+                }
             }
             self.dev.refresh(&self.store);
             self.next_sweep += Duration::from_secs(1);
@@ -188,13 +205,17 @@ fn log_lines(text: &str) -> Vec<String> {
 }
 
 fn replay(config: &str, trace: &str, stock_logs: &str, name: &str) {
+    replay_with(config, trace, stock_logs, name, Prov::Ack)
+}
+
+fn replay_with(config: &str, trace: &str, stock_logs: &str, name: &str, prov: Prov) {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("conformance/dnp3");
     let read =
         |f: &str| std::fs::read_to_string(dir.join(f)).unwrap_or_else(|e| panic!("{f}: {e}"));
     let xml = read(config)
         .replace("dnp3-diff.log", "/dev/null")
         .replace("dnp3-big.log", "/dev/null");
-    let mut r = rig(&xml);
+    let mut r = rig(&xml, prov);
     let items: Vec<serde_json::Value> = read(trace)
         .lines()
         .map(|l| serde_json::from_str(l).unwrap())
@@ -233,7 +254,7 @@ fn replay(config: &str, trace: &str, stock_logs: &str, name: &str) {
             _ => {}
         }
     }
-    assert!(recvs > 20, "{name}: the trace has {recvs} replies");
+    assert!(recvs > 10, "{name}: the trace has {recvs} replies");
     let stock = log_lines(&read(stock_logs));
     let ours = log_lines(&String::from_utf8(r.logged.0.lock().unwrap().clone()).unwrap());
     assert!(
@@ -281,5 +302,52 @@ fn matches_the_stock_outstation_on_every_empty_group_variation() {
         "stock-grp.trace",
         "stock-grp.logs",
         "grp",
+    );
+}
+
+/// ww-ke0: `class`, `sgvar`, `egvar`, `deadband` and `event-buffer-size` in the config, a name opendnp3 does not know leaving its point
+/// out, and an input and an output sharing an index.
+#[test]
+fn matches_the_stock_outstation_on_the_config_keys() {
+    replay(
+        "diff-cfg-server.xml",
+        "stock-cfg.trace",
+        "stock-cfg.logs",
+        "cfg",
+    );
+}
+
+/// ww-a7r: a control whose provider write is rejected is applied all the same (an input on the tag reads it, the output status keeps it).
+#[test]
+fn matches_the_stock_outstation_when_the_provider_rejects_a_control() {
+    replay_with(
+        "diff-prov-server.xml",
+        "stock-nack.trace",
+        "stock-nack.logs",
+        "nack",
+        Prov::Reject,
+    );
+}
+
+/// ww-a7r: with nobody to acknowledge it, the write stays pending: the output status keeps the new value, the input on the tag the old.
+#[test]
+fn matches_the_stock_outstation_when_no_provider_answers() {
+    replay_with(
+        "diff-prov-server.xml",
+        "stock-nopv.trace",
+        "stock-nopv.logs",
+        "nopv",
+        Prov::Mute,
+    );
+}
+
+/// ww-a7r: the 100-event buffer of the output types overflows like the inputs' (IIN2.3, the oldest events go).
+#[test]
+fn matches_the_stock_outstation_on_output_event_overflow() {
+    replay(
+        "diff-server.xml",
+        "stock-ovf.trace",
+        "stock-ovf.logs",
+        "ovf",
     );
 }

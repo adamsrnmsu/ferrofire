@@ -3,23 +3,27 @@
 
 use std::collections::VecDeque;
 
-/// Events kept per type (opendnp3 `EventBufferConfig::AllTypes(100)`, as bennu configures it).
-pub const EVENT_CAP: usize = 100;
+/// Events kept per type when the config has no (or an unreadable) `<event-buffer-size>`: opendnp3 `EventBufferConfig::AllTypes(n)`.
+pub const EVENT_CAP: u16 = 100;
 
 pub const ONLINE: u8 = 0x01;
 pub const RESTART: u8 = 0x02;
 pub const OVER_RANGE: u8 = 0x20;
 pub const STATE: u8 = 0x80;
 
-/// A point. Only a point in Class 1-3 raises events: bennu v2026.11.03 defaults every point to Class 0 (static data only), and a
-/// master moves it with ASSIGN_CLASS.
+/// A point. Only a point in Class 1-3 raises events: bennu v2026.11.03 defaults every point to Class 0 (static data only); the
+/// config's `<class>` or a master's ASSIGN_CLASS moves it. `svar` and `evar` are the point's static and event variations (the ones
+/// a READ of variation 0 and a class poll use), `deadband` the analog change an event needs and `last` the value of the last event.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Point<V> {
     pub tag: String,
     pub sbo: bool,
     pub input: bool,
-    /// ponytail: the config refuses `class`, so only ASSIGN_CLASS sets it.
     pub class: u8,
+    pub svar: u8,
+    pub evar: u8,
+    pub deadband: f64,
+    pub last: V,
     pub value: V,
     pub flags: u8,
 }
@@ -29,19 +33,26 @@ pub type AnaPoint = Point<f64>;
 
 /// The static variations a point answers `READ g?v0` with: inputs g1v2 / g30v6 (flags; double), outputs g10v2 / g40v1 (flags;
 /// 32-bit integer and flags).
-pub trait Static: Default {
+pub trait Static: Default + Copy {
     const INPUT_VAR: u8;
     const OUTPUT_VAR: u8;
+    /// The event variations of an input and of an output.
+    const INPUT_EVENT: u8;
+    const OUTPUT_EVENT: u8;
 }
 
 impl Static for bool {
     const INPUT_VAR: u8 = 2;
     const OUTPUT_VAR: u8 = 2;
+    const INPUT_EVENT: u8 = 2;
+    const OUTPUT_EVENT: u8 = 1;
 }
 
 impl Static for f64 {
     const INPUT_VAR: u8 = 6;
     const OUTPUT_VAR: u8 = 1;
+    const INPUT_EVENT: u8 = 6;
+    const OUTPUT_EVENT: u8 = 1;
 }
 
 impl<V: Static> Point<V> {
@@ -52,15 +63,16 @@ impl<V: Static> Point<V> {
             sbo,
             input,
             class: 0,
+            svar: if input { V::INPUT_VAR } else { V::OUTPUT_VAR },
+            evar: if input {
+                V::INPUT_EVENT
+            } else {
+                V::OUTPUT_EVENT
+            },
+            deadband: 0.0,
+            last: V::default(),
             value: V::default(),
             flags: RESTART,
-        }
-    }
-    pub fn default_var(&self) -> u8 {
-        if self.input {
-            V::INPUT_VAR
-        } else {
-            V::OUTPUT_VAR
         }
     }
 }
@@ -76,10 +88,14 @@ impl BinPoint {
 }
 
 impl AnaPoint {
-    /// Take the provider's value; `true` when that is an event (flags changed, or any change: the deadband is 0).
+    /// Take the provider's value; `true` when that is an event: the flags changed, or the value is more than the deadband away from
+    /// the value of the last event.
     pub fn update(&mut self, value: f64) -> bool {
-        let changed = self.flags != ONLINE || (value - self.value).abs() > 0.0;
+        let changed = self.flags != ONLINE || (value - self.last).abs() > self.deadband;
         (self.value, self.flags) = (value, ONLINE);
+        if changed {
+            self.last = value;
+        }
         changed && self.class > 0
     }
 }
@@ -170,10 +186,6 @@ impl Table {
     pub fn event_group(self) -> u8 {
         [2, 11, 32, 42][self.slot()]
     }
-    /// The variation of this table's events when the master does not name one: g2v2, g11v1, g32v6, g42v1.
-    pub fn event_default_var(self) -> u8 {
-        [2, 1, 6, 1][self.slot()]
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -198,6 +210,8 @@ pub struct Event {
     pub class: u8,
     /// An output point's event (g11, g42), not an input's.
     pub out: bool,
+    /// The variation the point's config gives its events (what a READ of variation 0 and a class poll answer).
+    pub var: u8,
     pub data: Data,
     pub state: State,
 }
@@ -230,26 +244,47 @@ impl Event {
     }
 }
 
-/// The event buffer: one queue in the order events happened, at most `EVENT_CAP` of each type (the oldest is dropped).
-#[derive(Debug, Default)]
+/// The event buffer: one queue in the order events happened, at most `cap` of each type (the oldest is dropped; a type with
+/// room for none keeps none and flags no overflow).
+#[derive(Debug)]
 pub struct Events {
     q: VecDeque<Event>,
     next: u64,
     overflow: [bool; 4],
+    cap: usize,
+}
+
+impl Default for Events {
+    fn default() -> Self {
+        Events::new(EVENT_CAP)
+    }
 }
 
 impl Events {
-    pub fn push(&mut self, idx: u16, class: u8, out: bool, data: Data) {
+    pub fn new(cap: u16) -> Events {
+        Events {
+            q: VecDeque::new(),
+            next: 0,
+            overflow: [false; 4],
+            cap: usize::from(cap),
+        }
+    }
+
+    pub fn push(&mut self, idx: u16, class: u8, out: bool, var: u8, data: Data) {
+        if self.cap == 0 {
+            return;
+        }
         let ev = Event {
             id: self.next,
             idx,
             class,
             out,
+            var,
             data,
             state: State::Unselected,
         };
         let t = ev.table();
-        if self.count(t) >= EVENT_CAP {
+        if self.count(t) >= self.cap {
             if let Some(at) = self.q.iter().position(|e| e.table() == t) {
                 self.q.remove(at);
             }
@@ -290,11 +325,7 @@ impl Events {
             {
                 continue;
             }
-            let v = if var == 0 {
-                e.table().event_default_var()
-            } else {
-                var
-            };
+            let v = if var == 0 { e.var } else { var };
             e.state = State::Selected(v);
             n += 1;
         }
@@ -321,7 +352,7 @@ impl Events {
         for typ in [Typ::Binary, Typ::Analog] {
             for out in [false, true] {
                 let t = Table { typ, out };
-                let full = self.count(t) >= EVENT_CAP;
+                let full = self.count(t) >= self.cap;
                 self.overflow[t.slot()] &= full;
             }
         }
@@ -383,14 +414,77 @@ mod tests {
         assert!(!p.update(f64::INFINITY)); // inf - inf is NaN: no event, no flood
         let mut o = AnaPoint::new("t", true, false);
         assert!(!o.update(3.0));
-        assert_eq!((o.value, o.flags, o.default_var()), (3.0, ONLINE, 1));
-        assert_eq!(p.default_var(), 6);
+        assert_eq!((o.value, o.flags, o.svar), (3.0, ONLINE, 1));
+        assert_eq!(p.svar, 6);
+    }
+
+    /// Stock (stock-cfg.golden): the reference is the value of the last event, a change of more than the deadband is an event (not
+    /// equal to it), and the reference moves also while the point is in class 0.
+    #[test]
+    fn a_deadband_measures_from_the_last_event() {
+        let mut p = AnaPoint::new("t", false, true);
+        (p.class, p.deadband) = (1, 5.0);
+        assert!(p.update(0.0)); // the flags change from RESTART
+        let seq = [
+            (3.0, false),
+            (6.0, true),
+            (11.0, false),
+            (12.0, true),
+            (7.0, false),
+            (6.5, true),
+        ];
+        for (v, event) in seq {
+            assert_eq!(p.update(v), event, "{v}");
+        }
+        let mut z = AnaPoint::new("t", false, true);
+        z.deadband = 5.0;
+        assert!(!z.update(0.0) && !z.update(8.0), "class 0: no event");
+        z.class = 1;
+        assert!(!z.update(9.0), "the reference moved to 8 while in class 0");
+        assert!(z.update(14.0));
+        let mut n = AnaPoint::new("t", false, true);
+        (n.class, n.deadband) = (1, -1.0);
+        assert!(
+            n.update(0.0) && n.update(0.0),
+            "a negative deadband makes every update an event"
+        );
+    }
+
+    #[test]
+    fn an_event_buffer_of_the_configured_size_and_one_of_none() {
+        let mut ev = Events::new(3);
+        for i in 0..5 {
+            ev.push(i, 1, false, 2, Data::Bin { flags: ONLINE });
+        }
+        ev.select(None, None, 0, usize::MAX);
+        let idx: Vec<u16> = ev.selected().map(|(e, _)| e.idx).collect();
+        assert_eq!(idx, [2, 3, 4]);
+        assert!(ev.overflowed());
+        let mut none = Events::new(0);
+        none.push(0, 1, false, 2, Data::Bin { flags: ONLINE });
+        assert!(
+            !none.overflowed() && !none.unselected(0),
+            "no room, no event, no IIN2.3"
+        );
+    }
+
+    #[test]
+    fn a_point_event_carries_its_own_variation_unless_the_master_names_one() {
+        let mut ev = Events::new(10);
+        ev.push(0, 1, false, 3, Data::Bin { flags: ONLINE });
+        ev.push(1, 1, false, 1, Data::Bin { flags: ONLINE });
+        ev.select(None, None, 0, usize::MAX);
+        let vars: Vec<u8> = ev.selected().map(|(_, v)| v).collect();
+        assert_eq!(vars, [3, 1]);
+        ev.reset();
+        ev.select(None, None, 2, usize::MAX);
+        assert!(ev.selected().all(|(_, v)| v == 2));
     }
 
     #[test]
     fn default_variations_follow_the_point_kind() {
-        assert_eq!(BinPoint::new("t", false, true).default_var(), 2);
-        assert_eq!(BinPoint::new("t", false, false).default_var(), 2);
+        assert_eq!(BinPoint::new("t", false, true).svar, 2);
+        assert_eq!(BinPoint::new("t", false, false).svar, 2);
     }
 
     #[test]
@@ -430,6 +524,7 @@ mod tests {
             idx: 0x0102,
             class: 1,
             out: false,
+            var: 2,
             data: Data::Bin { flags: 0x81 },
             state: State::Unselected,
         };
@@ -441,6 +536,7 @@ mod tests {
             idx: 3,
             class: 1,
             out: false,
+            var: 6,
             data: Data::Ana {
                 value: 33.5,
                 ts: 0x0000_6AF3_3692,
@@ -465,10 +561,10 @@ mod tests {
 
     fn fill(ev: &mut Events, bin: u16, ana: u16) {
         for i in 0..bin {
-            ev.push(i, 1, false, Data::Bin { flags: ONLINE });
+            ev.push(i, 1, false, 2, Data::Bin { flags: ONLINE });
         }
         for i in 0..ana {
-            ev.push(i, 1, false, Data::Ana { value: 0.0, ts: 0 });
+            ev.push(i, 1, false, 2, Data::Ana { value: 0.0, ts: 0 });
         }
     }
 
@@ -494,7 +590,7 @@ mod tests {
         ev.clear_written();
         assert!(!ev.overflowed());
         // analog was never overflowed, but fill it past the cap now and clear one
-        ev.push(0, 1, false, Data::Ana { value: 1.0, ts: 0 });
+        ev.push(0, 1, false, 6, Data::Ana { value: 1.0, ts: 0 });
         assert!(ev.overflowed());
         ev.select(Some(IN_BIN), None, 0, 1);
         let ids: Vec<u64> = ev.selected().map(|(e, _)| e.id).collect();
@@ -506,9 +602,9 @@ mod tests {
     #[test]
     fn select_honours_type_limit_variation_and_state() {
         let mut ev = Events::default();
-        ev.push(1, 1, false, Data::Ana { value: 1.0, ts: 0 });
-        ev.push(2, 1, false, Data::Bin { flags: ONLINE });
-        ev.push(3, 1, false, Data::Bin { flags: ONLINE });
+        ev.push(1, 1, false, 6, Data::Ana { value: 1.0, ts: 0 });
+        ev.push(2, 1, false, 2, Data::Bin { flags: ONLINE });
+        ev.push(3, 1, false, 2, Data::Bin { flags: ONLINE });
         assert_eq!(ev.select(Some(IN_BIN), None, 3, 1), 1);
         let sel: Vec<_> = ev.selected().map(|(e, v)| (e.idx, v)).collect();
         assert_eq!(sel, vec![(2, 3)]);
@@ -546,14 +642,13 @@ mod tests {
             t(Typ::Analog, true),
         ];
         assert_eq!(all.map(Table::event_group), [2, 11, 32, 42]);
-        assert_eq!(all.map(Table::event_default_var), [2, 1, 6, 1]);
     }
 
     /// Input and output events are separate buffers: a full input buffer does not push out an output event.
     #[test]
     fn output_events_are_a_type_of_their_own() {
         let mut ev = Events::default();
-        ev.push(5, 1, true, Data::Bin { flags: ONLINE });
+        ev.push(5, 1, true, 1, Data::Bin { flags: ONLINE });
         fill(&mut ev, 101, 0);
         assert!(ev.overflowed());
         assert_eq!(ev.count(OUT_BIN), 1);

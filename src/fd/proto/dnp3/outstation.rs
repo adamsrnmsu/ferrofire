@@ -31,12 +31,16 @@ pub trait Source {
     fn pending(&self, tag: &str) -> bool;
 }
 
+/// A point's place in its table: `(is an output, index)`. Inputs and outputs are four tables (g1, g10, g30, g40) that share
+/// indices, as bennu v2026.11.03 keeps them; sorted by this key a map lists its inputs first.
+pub type Slot = (bool, u16);
+
 /// Everything the connections share.
 pub struct Device {
     pub local: u16,
     pub master: u16,
-    pub bin: BTreeMap<u16, BinPoint>,
-    pub ana: BTreeMap<u16, AnaPoint>,
+    pub bin: BTreeMap<Slot, BinPoint>,
+    pub ana: BTreeMap<Slot, AnaPoint>,
     pub events: Events,
     pub selection: Option<Selection>,
     pub restart: bool,
@@ -59,15 +63,16 @@ impl Device {
     pub fn new(
         local: u16,
         master: u16,
-        bin: BTreeMap<u16, BinPoint>,
-        ana: BTreeMap<u16, AnaPoint>,
+        bin: BTreeMap<Slot, BinPoint>,
+        ana: BTreeMap<Slot, AnaPoint>,
+        event_cap: u16,
     ) -> Device {
         Device {
             local,
             master,
             bin,
             ana,
-            events: Events::default(),
+            events: Events::new(event_cap),
             selection: None,
             restart: true,
             need_time: true,
@@ -78,32 +83,37 @@ impl Device {
         }
     }
 
-    /// The 1 Hz sweep (bennu `Server::update`): every mapped point takes the datastore's value, binaries first, each in index
-    /// order; a change raises an event (an output the provider has not yet acknowledged is left alone).
+    /// The 1 Hz sweep (bennu `Server::update`): every mapped point takes the datastore's value, the four tables in the order binary
+    /// inputs, analog inputs, binary outputs, analog outputs (what an integrity poll right after start shows), each in index order;
+    /// a change raises an event (an output the provider has not yet acknowledged is left alone).
     pub fn refresh(&mut self, src: &dyn Source) {
         self.settle();
-        for (idx, p) in self
-            .bin
-            .iter_mut()
-            .filter(|p| p.1.input || !src.pending(&p.1.tag))
-        {
-            if let Some(v) = src.binary(&p.tag) {
-                if p.update(v) {
-                    let data = Data::Bin { flags: p.flags };
-                    self.events.push(*idx, p.class, !p.input, data);
-                }
+        for out in [false, true] {
+            self.sweep_binary(out, src);
+            self.sweep_analog(out, src);
+        }
+    }
+
+    fn sweep_binary(&mut self, out: bool, src: &dyn Source) {
+        for (idx, p) in self.bin.iter_mut().filter(|(k, _)| k.0 == out) {
+            if out && src.pending(&p.tag) {
+                continue;
+            }
+            if src.binary(&p.tag).is_some_and(|v| p.update(v)) {
+                let data = Data::Bin { flags: p.flags };
+                self.events.push(idx.1, p.class, out, p.evar, data);
             }
         }
-        for (idx, p) in self
-            .ana
-            .iter_mut()
-            .filter(|p| p.1.input || !src.pending(&p.1.tag))
-        {
-            if let Some((v, ts)) = src.analog(&p.tag) {
-                if p.update(v) {
-                    self.events
-                        .push(*idx, p.class, !p.input, Data::Ana { value: v, ts });
-                }
+    }
+
+    fn sweep_analog(&mut self, out: bool, src: &dyn Source) {
+        for (idx, p) in self.ana.iter_mut().filter(|(k, _)| k.0 == out) {
+            if out && src.pending(&p.tag) {
+                continue;
+            }
+            if let Some((value, ts)) = src.analog(&p.tag).filter(|(v, _)| p.update(*v)) {
+                let data = Data::Ana { value, ts };
+                self.events.push(idx.1, p.class, out, p.evar, data);
             }
         }
     }
@@ -113,21 +123,21 @@ impl Device {
         for l in std::mem::take(&mut self.landed) {
             match l {
                 Landed::Bin(i, on) => {
-                    let Some(p) = self.bin.get_mut(&i) else {
+                    let Some(p) = self.bin.get_mut(&(true, i)) else {
                         continue;
                     };
                     if p.update(on) {
                         let data = Data::Bin { flags: p.flags };
-                        self.events.push(i, p.class, true, data);
+                        self.events.push(i, p.class, true, p.evar, data);
                     }
                 }
                 Landed::Ana(i, value) => {
-                    let Some(p) = self.ana.get_mut(&i) else {
+                    let Some(p) = self.ana.get_mut(&(true, i)) else {
                         continue;
                     };
                     if p.update(value) {
-                        self.events
-                            .push(i, p.class, true, Data::Ana { value, ts: 0 });
+                        let data = Data::Ana { value, ts: 0 };
+                        self.events.push(i, p.class, true, p.evar, data);
                     }
                 }
             }
@@ -144,8 +154,16 @@ impl Device {
     pub fn max_index(&self, t: Table) -> u16 {
         let top = |m: &mut dyn Iterator<Item = u16>| m.max().unwrap_or(0);
         match t.typ {
-            Typ::Binary => top(&mut self.bin.iter().filter(|p| p.1.input != t.out).map(|p| *p.0)),
-            Typ::Analog => top(&mut self.ana.iter().filter(|p| p.1.input != t.out).map(|p| *p.0)),
+            Typ::Binary => top(&mut self
+                .bin
+                .iter()
+                .filter(|p| p.1.input != t.out)
+                .map(|p| p.0 .1)),
+            Typ::Analog => top(&mut self
+                .ana
+                .iter()
+                .filter(|p| p.1.input != t.out)
+                .map(|p| p.0 .1)),
         }
     }
 
@@ -181,12 +199,8 @@ impl Device {
     }
 }
 
-fn assign_in<V>(m: &mut BTreeMap<u16, Point<V>>, out: bool, class: u8, range: &Range) -> u16 {
-    let keys: Vec<u16> = m
-        .iter()
-        .filter(|p| p.1.input != out)
-        .map(|p| *p.0)
-        .collect();
+fn assign_in<V>(m: &mut BTreeMap<Slot, Point<V>>, out: bool, class: u8, range: &Range) -> u16 {
+    let keys: Vec<u16> = m.keys().filter(|k| k.0 == out).map(|k| k.1).collect();
     let (Some(&lo), Some(&hi)) = (keys.first(), keys.last()) else {
         return iin::PARAM_ERROR;
     };
@@ -198,7 +212,7 @@ fn assign_in<V>(m: &mut BTreeMap<u16, Point<V>>, out: bool, class: u8, range: &R
         .into_iter()
         .filter(|k| (a..=b).contains(&u32::from(*k)))
     {
-        m.entry(k).and_modify(|p| p.class = class);
+        m.entry((out, k)).and_modify(|p| p.class = class);
     }
     if a >= u32::from(lo) && a <= b && b <= u32::from(hi) {
         0
@@ -533,18 +547,24 @@ mod tests {
     /// bi[2] input, bo[5] output (sbo), bs[7] output; ai[0] input, ao[1] output (sbo).
     fn device() -> Device {
         let bin = [
-            (2, BinPoint::new("bi", false, true)),
-            (5, BinPoint::new("bo", false, false)),
-            (7, BinPoint::new("bs", true, false)),
+            ((false, 2), BinPoint::new("bi", false, true)),
+            ((true, 5), BinPoint::new("bo", false, false)),
+            ((true, 7), BinPoint::new("bs", true, false)),
         ];
         let ana = [
-            (0, AnaPoint::new("ai", false, true)),
-            (1, AnaPoint::new("ao", true, false)),
+            ((false, 0), AnaPoint::new("ai", false, true)),
+            ((true, 1), AnaPoint::new("ao", true, false)),
         ];
-        let mut d = Device::new(10, 1, bin.into_iter().collect(), ana.into_iter().collect());
+        let mut d = Device::new(
+            10,
+            1,
+            bin.into_iter().collect(),
+            ana.into_iter().collect(),
+            100,
+        );
         (
-            d.bin.get_mut(&2).unwrap().class,
-            d.ana.get_mut(&0).unwrap().class,
+            d.bin.get_mut(&(false, 2)).unwrap().class,
+            d.ana.get_mut(&(false, 0)).unwrap().class,
         ) = (1, 1);
         d
     }
@@ -868,13 +888,14 @@ mod tests {
     fn assign_class_follows_opendnp3() {
         let mut d = device();
         assert_eq!(command::assign_class(&mut d, &[60, 3, 6, 1, 0, 0, 2, 2]), 0);
-        assert_eq!(d.bin[&2].class, 2);
+        assert_eq!(d.bin[&(false, 2)].class, 2);
         assert_eq!(command::assign_class(&mut d, &[60, 2, 6, 40, 0, 6]), 0);
-        assert_eq!(d.ana[&1].class, 1);
+        assert_eq!(d.ana[&(true, 1)].class, 1);
         let wide = [60, 2, 6, 1, 0, 0, 0, 9];
         assert_eq!(command::assign_class(&mut d, &wide), iin::PARAM_ERROR);
         assert_eq!(
-            d.bin[&2].class, 1,
+            d.bin[&(false, 2)].class,
+            1,
             "the points inside the range are assigned"
         );
         assert_eq!(command::assign_class(&mut d, &[1, 0, 6]), iin::PARAM_ERROR);
@@ -1119,7 +1140,7 @@ mod tests {
         assert_eq!(d.max_index(t(Typ::Binary, true)), 7);
         assert_eq!(d.max_index(t(Typ::Analog, true)), 1);
         assert_eq!(
-            Device::new(1, 2, Default::default(), Default::default())
+            Device::new(1, 2, Default::default(), Default::default(), 100)
                 .max_index(t(Typ::Binary, false)),
             0
         );

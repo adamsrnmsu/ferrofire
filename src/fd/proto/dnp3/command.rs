@@ -2,7 +2,7 @@
 
 use super::app::{self, iin, status, Control, ControlError, Range, Request};
 use super::db::Point;
-use super::outstation::{Device, Landed, Sink};
+use super::outstation::{Device, Landed, Sink, Slot};
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -42,8 +42,8 @@ fn matches_select(dev: &mut Device, req: &Request, key: &[u8], now: Duration) ->
 }
 
 /// A control reaches output points only (bennu v2026.11.03 keeps them apart from the inputs).
-fn output<V>(m: &BTreeMap<u16, Point<V>>, index: u16) -> Option<&Point<V>> {
-    m.get(&index).filter(|p| !p.input)
+fn output<V>(m: &BTreeMap<Slot, Point<V>>, index: u16) -> Option<&Point<V>> {
+    m.get(&(true, index))
 }
 
 fn select_status(dev: &Device, c: &Control) -> u8 {

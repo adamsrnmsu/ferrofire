@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPEC 8 differential: one probe against the stock oracle (ffc-stock-2026.11.03:22.04) or ours, transcript to stdout.
-# usage: conformance/differential.sh PROTO stock|rust [diff|big]     (conformance/<PROTO>/probe_diff.py, diff-server.xml)
+# usage: conformance/differential.sh PROTO stock|rust [diff|big|...]     (conformance/<PROTO>/probe_diff.py, diff-server.xml)
 #   rust: FF_BIN=path to a linux ferrofire binary (default target-linux/debug/ferrofire); it is docker-cp'd into a stock-image container.
 # TRACE=file also saves the probe trace. Compare: differential.sh dnp3 stock > stock.txt; differential.sh dnp3 rust > rust.txt; diff stock.txt rust.txt  (or: make diff-dnp3)
 # Containers ff-diff-$set-dut and ff-diff-$set-peers only; they are the only ones removed.
@@ -10,6 +10,7 @@ cfg=diff-server.xml; [ "$set" = diff ] || cfg=diff-$set-server.xml
 here=$(cd "$(dirname "$0")" && pwd)
 [ -f "$here/$proto/$cfg" ] || cfg=diff-server.xml   # a set without a config of its own uses the protocol default
 [ "$proto/$set" != modbus/q4 ] || cfg=diff-edges-server.xml
+case $proto/$set in dnp3/nack|dnp3/nopv) cfg=diff-prov-server.xml ;; esac
 root=$(cd "$here/.." && pwd)
 DOCKER_HOST=${DOCKER_HOST:-unix://$HOME/.docker/run/docker.sock}; export DOCKER_HOST
 STOCK_IMAGE=${STOCK_IMAGE:-ffc-stock-2026.11.03:22.04}

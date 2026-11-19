@@ -41,7 +41,7 @@ SCORCH `providerdata` check. See [../docs/ground-truth-elastic.md](../docs/groun
 ## Differential and golden replay (DNP3)
 The acceptance harness above judges what a blue team sees. The differential proves the device answers like the stock one, byte for byte.
 
-    make differential PROTO=dnp3 WHO=stock SET=diff   # the transcript of probe_diff.py against the stock image
+    make differential PROTO=dnp3 WHO=stock SET=diff   # the transcript of probe_diff.py against the stock image (SET: diff big out grp cfg ovf nack nopv)
     make diff-dnp3                                    # our binary vs the recorded stock transcripts, live (rebuilds target-linux/debug/ferrofire first)
 
 `conformance/dnp3/`: `probe_diff.py` (about 230 requests: link layer, reads by group and variation, events and their order, IIN, every
@@ -54,12 +54,16 @@ datastore as they do with a live provider), `diff-server.xml` / `diff-big-server
 - Once ASSIGN_CLASS gives g10 or g40 a class, a change of an output point is an event with IIN1.1 to 1.3, as for an input, but in
   its own groups: g11 for a binary output (v1 flags, v2 flags and a zero time; default v1) and g42 for an analog output (v1 to v8 as g32; default v1; the time
   is zero in the raw bytes of `stock-out.trace`; the golden masks provider times, so that was read from the trace, and an output tag is not in the provider's stream). A control reaches the output status and raises its event at once (a READ 20 ms later shows both), but after its own response, whose IIN has no class bit
-  for it (`Device::settle`). g2 and g32 reads never select them and g11 and g42 reads never select input events. Each of the four types has its own 100-event buffer (opendnp3 `AllTypes(100)`, as for inputs; not probed for outputs). A point left in
+  for it (`Device::settle`). g2 and g32 reads never select them and g11 and g42 reads never select input events. Each of the four types has its own event buffer, 100 events unless `<event-buffer-size>` says otherwise (`probe_ovf.py`, below). A point left in
   class 0 raises none.
 - g10 reads in v0 and v2 only (v0 answers as v2); g10v1 is IIN2.0 (NO_FUNC_CODE_SUPPORT); g10v3 and v4 are IIN2.1 (UNKNOWN_OBJECT), and so are g40v5 and
   above, with no objects. (The READ of g10v3 and g40v5 to v10 that answers IIN2.1 is what stock does, not a regression.)
 - `stock-grp.golden` lists, for g3, g4, g11 to g13, g20 to g23, g41, g42, g50 to g52 and g80, v0 to v12, which are empty, NO_FUNC or unknown; `read.rs` has the tables.
   A NO_FUNC object (g13v1, g12v1, g50v1 ...) sets IIN2.0 and the other objects of the READ are still answered; an unknown object refuses the whole READ with IIN2.1 alone.
+`probe_cfg.py` (`cfg`, `diff-cfg-server.xml`) pins the config keys of v2026.11.03: `class` on every point, `sgvar`, `egvar` and `deadband` on inputs, `event-buffer-size`, a
+name opendnp3 does not know (the point is left out, silently), and an input and an output on one index. The probes behind it are in `docs/field-device-spec.md` 4.2.0.
+`probe_ovf.py` (`ovf`) overflows the output event buffers (g11, g42) at the default 100. `probe_nack.py` (`nack`) and `probe_nopv.py` (`nopv`), on `diff-prov-server.xml` (an
+output and an input on one tag), run a control against a provider that answers `ERR=` and against none: `tests/dnp3_golden.rs` replays them with the same provider.
  The transcripts mask two things a wall clock decides: the provider time inside time-bearing objects
 and IIN1.4 NEED_TIME.
 
@@ -166,7 +170,7 @@ too (it has, frame for frame). `tests/modbus_client.rs` and `tests/dnp3_master.r
 | DNP3: a connection lost is reopened at once, also when it never carried a response (a tight loop through a relay in front of a dead outstation) | at once only after a session that was answered; otherwise the 1, 2, 4 ... 60 s pauses | no connection storm |
 | DNP3: after a clear-restart that leaves IIN1.7 set, opendnp3 stops clearing but polls class 0 again on every response that carries the bit | the class 0 poll is not re-demanded either | no poll loop against an outstation that never clears the bit |
 | DNP3: commands wait in opendnp3's master queue, which has no size, only a 10 s start timeout (the callback result goes to stdout); WRITE is answered at once | the queue holds 1000 commands per connection (`COMMAND_QUEUE`); one more is dropped and WRITE is answered the same; the warning is logged once per overflow episode (the first drop), and a second line with the count when the queue drains | a WRITE flood while an outstation is silent cannot grow memory; the reply is stock's |
-| DNP3 server: stock v2026.11.03 takes `class`, `sgvar`, `egvar`, `deadband`, `event-buffer-size` in the config (default class 0; a control reaches the output status at once, and the sweep skips an output while its write is pending) | `class`, `sgvar`, `egvar`, `deadband`, `event-buffer-size` are refused or ignored; the rest is replicated, ASSIGN_CLASS and output events included | the generator never emits them |
+| DNP3 server: a `<deadband>` that is not a number (`abc`, empty, `inf`) makes stock log `ERROR: There was a problem parsing dnp3 server setup: conversion of data to type "d" failed` to stdout and carry on with no DNP3 outstation at all (nothing listens on the port, no Size lines) | the config is refused with an error naming `<deadband>` | the generator never emits it |
 | an out-of-range Modbus write is converted from double to `uint16_t`, which C++ leaves undefined: the arm64 build wraps it (`2000` over 0..1000 leaves as `fffe`), another build may not | the arm64 bytes, on every architecture | the capture is from arm64 |
 
 **Serial endpoints** (plan F6, bead ww-y5q): an `<endpoint>` that is a device path is opened at 9600 8N1, no flow control, raw. Modbus puts MBAP on the port (no slave byte, no CRC);
