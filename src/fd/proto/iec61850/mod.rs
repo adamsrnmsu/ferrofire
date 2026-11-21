@@ -524,7 +524,14 @@ mod tests {
     fn unknown_tags_are_skipped_wrong_kinds_refused_and_other_elements_ignored() {
         let skip = "<binary-input><tag>nope</tag></binary-input><junk/>";
         assert_eq!(parse(skip, &Opts::default()).unwrap().model.points.len(), 0);
-        assert!(parse(skip, &Opts { strict: true }).is_err());
+        assert!(parse(
+            skip,
+            &Opts {
+                strict: true,
+                ..Opts::default()
+            }
+        )
+        .is_err());
         assert!(err("<binary-input><tag>an</tag></binary-input>")
             .contains("is Analog but its mapping needs Binary"));
     }

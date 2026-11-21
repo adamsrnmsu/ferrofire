@@ -312,7 +312,15 @@ mod tests {
             let mut tags = Tags::default();
             assert_eq!(mode(c), Ok(Mode::Bennu));
             assert_eq!(
-                fep_keys(conn, Mode::Bennu, &mut tags, &Opts { strict: true }),
+                fep_keys(
+                    conn,
+                    Mode::Bennu,
+                    &mut tags,
+                    &Opts {
+                        strict: true,
+                        ..Opts::default()
+                    }
+                ),
                 Ok(None)
             );
         }
@@ -329,7 +337,15 @@ mod tests {
         let xml = format!("<conn>{inner}</conn>");
         let mut tags = Tags::default();
         tags.add_internal("taken", Kind::Analog).unwrap();
-        let r = fep_keys(doc(&xml).root_element(), mode, &mut tags, &Opts { strict });
+        let r = fep_keys(
+            doc(&xml).root_element(),
+            mode,
+            &mut tags,
+            &Opts {
+                strict,
+                ..Opts::default()
+            },
+        );
         (r, tags)
     }
 
@@ -429,7 +445,16 @@ mod tests {
         assert_eq!(tags.kind("p"), Some(Kind::Analog));
         assert_eq!(point_tag(&mut tags, "p", Kind::Binary, &lax), Ok(false));
         assert_eq!(tags.kind("p"), Some(Kind::Analog));
-        let e = point_tag(&mut tags, "p", Kind::Analog, &Opts { strict: true }).unwrap_err();
+        let e = point_tag(
+            &mut tags,
+            "p",
+            Kind::Analog,
+            &Opts {
+                strict: true,
+                ..Opts::default()
+            },
+        )
+        .unwrap_err();
         assert!(e.0.contains("`p`") && e.0.contains("already"), "{e}");
     }
 

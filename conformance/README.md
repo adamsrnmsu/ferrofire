@@ -94,7 +94,8 @@ Judged three ways, all against the same server: byte for byte against stock, by 
 | `q4` | the `edges` config, no provider | 23 values outside every range (SPEC Q4); not byte-equal by design, see below | `stock-q4.*` |
 | `divergent` | the `diff` config | frames that we refuse and stock does not (below); a record, not a golden | `stock-divergent.golden` |
 
-`make diff-modbus` runs `diff`, `waterway` and `edges`; `q4` and `divergent` are asserted in `tests/modbus_golden.rs` instead.
+`make diff-modbus` runs `diff`, `waterway` and `edges`; `q4` and `divergent` are asserted in `tests/modbus_golden.rs` instead. `q4` is asserted twice: the clamp by default, and with `--compat-wrap` byte-equal to the stock transcript.
+`--strict` (Q1 and Q2) is not recorded against stock, which has no such mode: `src/fd/proto/modbus/device.rs` unit-tests it. A strict server answers an unserved function (stock: the header-only frame, `80 04` for a short body) with exception 1, and a unit id other than its `<unit-id>` (stock ignores the key and serves every id) with silence.
 Runs of `differential.sh` must not overlap, for the reason given under DNP3. Stock applies a write the provider never acknowledged about
 15 s after the REQ client gives up, which changes what a read returns: the provider-down probes read before they write and finish within 15 s.
 
@@ -118,7 +119,7 @@ Runs of `differential.sh` must not overlap, for the reason given under DNP3. Sto
 | protocol id other than 0 is echoed and served | close | not Modbus/TCP |
 | a frame cut short and the client half-closes: answered `80 04` from the previous request's buffer (bennu #81) | no answer, close | a frame is answered only when whole |
 | FC15/16 whose data is shorter than the byte count says: writes what its buffer holds | exception 3 | never act on bytes the client did not send |
-| value outside the range: `(u32)(slope*v + intercept)`, low 16 bits kept on arm64 (1000.5 over `[0,1000]` reads 31, 1e10 reads 0xFFFF) | clamp to 0 / 65535, NaN reads 0 (SPEC Q4) | a wrapped reading is noise; the rule is tested against stock's words |
+| value outside the range: `(u32)(slope*v + intercept)`, low 16 bits kept on arm64 (1000.5 over `[0,1000]` reads 31, 1e10 reads 0xFFFF) | clamp to 0 / 65535, NaN reads 0 (SPEC Q4); `--compat-wrap` wraps like stock | a wrapped reading is noise; the rule is tested against stock's words. A negative value reads 0 in both: -1 reaches a register only through a range whose `<min-value>` is below it (ww-4d7) |
 | FC5/FC6 at address 65535: exception 2 *after* queueing the write and garbage writes to the wrapped addresses 0.. | exception 2, nothing queued | stock writes out of bounds |
 | with the provider down, a write (and a logic-driven output) the provider never acknowledged is applied to the datastore about 15 s later (a coil or a discrete input sharing its name then flips; seen with `diff-server.xml`, no write sent) | never applied: with no provider the read-back never changes (SPEC 3.2) | the abandoned-write apply is a side effect of stock's retry timeout; with a provider that answers the two agree |
 | a second write to a tag during the first one's round trip with the provider can be lost (the ACK erases it) | compare-and-erase: the newer write survives | a race, not a behaviour |

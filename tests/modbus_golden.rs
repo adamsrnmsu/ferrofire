@@ -6,6 +6,7 @@
 
 mod common;
 
+use ferrofire::fd::config::Opts;
 use ferrofire::fd::eventlog::EventLog;
 use ferrofire::fd::proto::modbus::device::{Close, Conn, Device};
 use ferrofire::fd::proto::modbus::Server;
@@ -41,9 +42,9 @@ struct Rig {
     request: Vec<u8>,
 }
 
-fn rig(xml: &str) -> Rig {
+fn rig(xml: &str, opts: &Opts) -> Rig {
     let logged = Buf::default();
-    let (server, store) = common::load_as::<Server>(xml, "modbus-server");
+    let (server, store) = common::load_with::<Server>(xml, "modbus-server", opts);
     Rig {
         dev: server.device(),
         store,
@@ -145,7 +146,8 @@ fn log_lines(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn replay(config: &str, set: &str) {
+/// With `compat_wrap` there is no divergence to allow: every reply must be stock's.
+fn replay(config: &str, set: &str, compat_wrap: bool) {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("conformance/modbus");
     let read =
         |f: &str| std::fs::read_to_string(dir.join(f)).unwrap_or_else(|e| panic!("{f}: {e}"));
@@ -153,7 +155,13 @@ fn replay(config: &str, set: &str) {
         .replace("rtu-1-modbus-server.log", "/dev/null")
         .replace("rtu-1-modbus-tcp-server.log", "/dev/null")
         .replace("edges-modbus-server.log", "/dev/null");
-    let mut r = rig(&xml);
+    let mut r = rig(
+        &xml,
+        &Opts {
+            compat_wrap,
+            ..Opts::default()
+        },
+    );
     let items: Vec<serde_json::Value> = read(&format!("stock-{set}.trace"))
         .lines()
         .map(|l| serde_json::from_str(l).unwrap())
@@ -189,7 +197,7 @@ fn replay(config: &str, set: &str) {
                 let eof = it[2].as_bool().unwrap();
                 if r.out != stock {
                     assert!(
-                        q4(&r.dev, &r.request, &r.store, &r.out, &stock),
+                        !compat_wrap && q4(&r.dev, &r.request, &r.store, &r.out, &stock),
                         "{set}: reply to `{label}`\n ours : {}\n stock: {}",
                         hex(&r.out),
                         hex(&stock)
@@ -233,22 +241,28 @@ fn first_diff(a: &[String], b: &[String]) -> String {
 
 #[test]
 fn matches_stock_on_the_spec_transcript_and_the_function_code_sweep() {
-    replay("diff-server.xml", "diff");
+    replay("diff-server.xml", "diff", false);
 }
 
 #[test]
 fn matches_stock_on_the_waterway_rtu() {
-    replay("diff-waterway-server.xml", "waterway");
+    replay("diff-waterway-server.xml", "waterway", false);
 }
 
 #[test]
 fn matches_stock_on_scaling_bit_packing_address_corners_and_writes() {
-    replay("diff-edges-server.xml", "edges");
+    replay("diff-edges-server.xml", "edges", false);
 }
 
 #[test]
 fn out_of_range_values_differ_from_stock_only_by_the_clamp_of_spec_q4() {
-    replay("diff-edges-server.xml", "q4");
+    replay("diff-edges-server.xml", "q4", false);
+}
+
+/// `--compat-wrap` is SPEC Q4's stock side: the same trace, byte-equal, with no allowed divergence.
+#[test]
+fn compat_wrap_reproduces_the_stock_q4_transcript_byte_for_byte() {
+    replay("diff-edges-server.xml", "q4", true);
 }
 
 /// `conformance/modbus/stock-divergent.golden` is what stock did with these; this is what we do instead (SPEC 3.6 Q9 and the notes in
@@ -267,7 +281,7 @@ fn frames_that_stock_answers_with_exception_4_or_garbage_or_dies_on_are_refused(
     ))
     .unwrap()
     .replace("rtu-1-modbus-server.log", "/dev/null");
-    let r = rig(&xml);
+    let r = rig(&xml, &Opts::default());
     let head = |pid: u16, len: u16| {
         let mut h = vec![0, 1];
         h.extend(pid.to_be_bytes());

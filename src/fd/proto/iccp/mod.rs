@@ -1350,7 +1350,14 @@ mod tests {
             s.objects.is_empty(),
             "skipped, and the table may still name it"
         );
-        assert!(parse(inner, &Opts { strict: true }).is_err());
+        assert!(parse(
+            inner,
+            &Opts {
+                strict: true,
+                ..Opts::default()
+            }
+        )
+        .is_err());
     }
 
     fn device(peers: &str) -> Device {

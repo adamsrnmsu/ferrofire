@@ -35,6 +35,12 @@ impl Range {
         slope.mul_add(v, self.intercept(slope)) as u16
     }
 
+    /// Stock arm64: `(u32)(slope * v + intercept)` saturates at 0 and `u32::MAX` (NaN is 0), and the register keeps the low 16 bits.
+    pub fn scale_wrap(&self, v: f64) -> u16 {
+        let slope = self.slope();
+        (slope.mul_add(v, self.intercept(slope)) as u32) as u16
+    }
+
     pub fn unscale(&self, raw: u16) -> f64 {
         let slope = self.slope();
         (f64::from(raw) - self.intercept(slope)) / slope
@@ -58,6 +64,12 @@ pub struct Device {
     pub discretes: BTreeMap<u16, String>,
     pub holding: BTreeMap<u16, Reg>,
     pub input: BTreeMap<u16, Reg>,
+    /// `--strict`: an unserved function is exception 1, and a unit id other than `unit` is not answered (SPEC Q1, Q2).
+    pub strict: bool,
+    /// The `<unit-id>` of the server, kept only under `--strict`; `None` serves every unit id, as stock does.
+    pub unit: Option<u8>,
+    /// `--compat-wrap` (SPEC Q4): registers wrap like stock arm64 instead of clamping.
+    pub wrap: bool,
 }
 
 /// The connection must be closed.
@@ -132,6 +144,9 @@ impl Device {
         let Some((&fc, body)) = pdu.split_first() else {
             return vec![]; // the framing never hands over an empty PDU
         };
+        if self.strict && !matches!(fc, 1..=6 | 15 | 16) {
+            return exception(fc, 1); // SPEC Q2, checked first: stock's `80 04` for a short body is a quirk of the same kind
+        }
         if body.len() < 4 {
             return vec![0x80, 4]; // stock reads address and quantity first, whatever the function
         }
@@ -152,10 +167,10 @@ impl Device {
                 bits(store, &self.discretes, addr, n)
             }),
             3 => read(log, &HOLDING, &self.holding, fc, addr, n, || {
-                words(store, &self.holding, addr, n)
+                words(store, &self.holding, addr, n, self.wrap)
             }),
             _ => read(log, &INPUT, &self.input, fc, addr, n, || {
-                words(store, &self.input, addr, n)
+                words(store, &self.input, addr, n, self.wrap)
             }),
         }
     }
@@ -338,13 +353,16 @@ fn bits(store: &Store, table: &BTreeMap<u16, String>, addr: u16, n: u16) -> Vec<
 }
 
 /// `n` registers from `addr`, scaled, big-endian.
-fn words(store: &Store, table: &BTreeMap<u16, Reg>, addr: u16, n: u16) -> Vec<u8> {
+fn words(store: &Store, table: &BTreeMap<u16, Reg>, addr: u16, n: u16, wrap: bool) -> Vec<u8> {
     (addr..addr + n)
         .filter_map(|a| table.get(&a))
         .flat_map(|r| {
-            r.range
-                .scale(store.get_f64(&r.tag).unwrap_or(0.0))
-                .to_be_bytes()
+            let v = store.get_f64(&r.tag).unwrap_or(0.0);
+            match wrap {
+                true => r.range.scale_wrap(v),
+                false => r.range.scale(v),
+            }
+            .to_be_bytes()
         })
         .collect()
 }
@@ -382,7 +400,16 @@ impl Conn {
                     pdu,
                     used,
                 } => {
-                    out.extend(codec::frame(tid, uid, &dev.handle(store, log, pdu)));
+                    if dev.unit.is_some_and(|u| u != uid) {
+                        // SPEC Q1 under `--strict`: not for this device, so no reply (the connection stays up)
+                        log.log(
+                            "error",
+                            "modbus request",
+                            format!("ignoring a request for unit id {uid}"),
+                        );
+                    } else {
+                        out.extend(codec::frame(tid, uid, &dev.handle(store, log, pdu)));
+                    }
                     self.rx.drain(..used);
                 }
             }
@@ -821,5 +848,69 @@ mod tests {
             assert_eq!(conn.rx.len(), if i == 259 { 0 } else { i + 1 });
             assert_eq!(out.is_empty(), i != 259, "answered at the last byte only");
         }
+    }
+
+    #[test]
+    fn compat_wrap_keeps_the_low_16_bits_of_a_saturating_32_bit_conversion_like_stock_arm64() {
+        let r = Range {
+            min: 0.0,
+            max: 1000.0,
+        };
+        // the values of conformance/modbus/stock-q4.golden for this range
+        assert_eq!(r.scale_wrap(1000.5), 31);
+        assert_eq!(r.scale_wrap(1e10), 0xFFFF);
+        assert_eq!(r.scale_wrap(f64::INFINITY), 0xFFFF);
+        assert_eq!((r.scale_wrap(-1.0), r.scale_wrap(f64::NAN)), (0, 0));
+        assert_eq!(
+            r.scale_wrap(250.5),
+            r.scale(250.5),
+            "in range, the two agree"
+        );
+        assert_eq!(r.scale(1000.5), 65535, "the default stays a clamp");
+    }
+
+    #[test]
+    fn strict_answers_an_unserved_function_with_exception_1_and_stock_with_the_empty_frame() {
+        let mut rig = rig(4);
+        for fc in [0u8, 7, 8, 23, 43, 255] {
+            assert_eq!(rig.aq(fc, 0, 1), Vec::<u8>::new(), "stock, FC{fc}");
+        }
+        rig.dev.strict = true;
+        for fc in [0u8, 7, 8, 23, 43, 255] {
+            assert_eq!(rig.aq(fc, 0, 1), [fc | 0x80, 1], "strict, FC{fc}");
+            assert_eq!(rig.ask(&[fc]), [fc | 0x80, 1], "strict, FC{fc}, no body");
+        }
+        assert_eq!(
+            rig.aq(3, 0, 1),
+            [3, 2, 0, 0],
+            "a served function is as before"
+        );
+        assert_eq!(rig.ask(&[3, 0]), [0x80, 4], "so is its short body");
+    }
+
+    #[test]
+    fn a_configured_unit_id_gets_no_reply_for_any_other_and_the_connection_stays_up() {
+        let mut rig = rig(4);
+        let req = |uid: u8| [0, 1, 0, 0, 0, 6, uid, 3, 0, 0, 0, 1];
+        let ask = |rig: &Rig, bytes: &[u8]| {
+            Conn::new()
+                .feed(&rig.dev, &rig.store, &rig.log, bytes)
+                .unwrap()
+        };
+        for uid in [0u8, 7, 255] {
+            assert_eq!(ask(&rig, &req(uid)).len(), 11, "stock serves unit id {uid}");
+        }
+        rig.dev.unit = Some(7);
+        assert_eq!(ask(&rig, &req(7))[6], 7);
+        assert!(ask(&rig, &req(0)).is_empty());
+        let mut conn = Conn::new();
+        let two = [req(0), req(7)].concat();
+        let out = conn.feed(&rig.dev, &rig.store, &rig.log, &two).unwrap();
+        assert_eq!(
+            (out.len(), out[6]),
+            (11, 7),
+            "only the matching frame is answered"
+        );
+        assert!(rig.lines().iter().any(|l| l.contains("unit id 0")));
     }
 }

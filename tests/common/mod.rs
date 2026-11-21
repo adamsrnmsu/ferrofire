@@ -29,6 +29,11 @@ pub fn load(xml: &str) -> (Outstation, Store) {
 
 /// The same for any module: its `<comms>` child is the element called `tag`.
 pub fn load_as<M: Module>(xml: &str, tag: &str) -> (M, Store) {
+    load_with::<M>(xml, tag, &Opts::default())
+}
+
+/// The same with command-line switches.
+pub fn load_with<M: Module>(xml: &str, tag: &str, opts: &Opts) -> (M, Store) {
     let doc = roxmltree::Document::parse(xml).unwrap();
     let fd = doc
         .descendants()
@@ -65,7 +70,7 @@ pub fn load_as<M: Module>(xml: &str, tag: &str) -> (M, Store) {
         tags.add_internal(&name, k).unwrap();
     }
     let node = fd.descendants().find(|c| c.has_tag_name(tag)).unwrap();
-    let out = M::parse(node, &mut tags, &Opts::default()).unwrap();
+    let out = M::parse(node, &mut tags, opts).unwrap();
     (out, Store::new(layout))
 }
 

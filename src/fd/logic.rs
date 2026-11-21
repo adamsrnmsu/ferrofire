@@ -542,13 +542,28 @@ mod tests {
     }
 
     fn compile(text: &str, strict: bool) -> Result<Logic, ConfigError> {
-        Logic::parse(text, &world().1, &Opts { strict })
+        Logic::parse(
+            text,
+            &world().1,
+            &Opts {
+                strict,
+                ..Opts::default()
+            },
+        )
     }
 
     /// Run `text` for one cycle on a fresh world; `out` afterwards.
     fn run(text: &str, strict: bool) -> (f64, Vec<String>) {
         let (store, kinds) = world();
-        let mut l = Logic::parse(text, &kinds, &Opts { strict }).unwrap();
+        let mut l = Logic::parse(
+            text,
+            &kinds,
+            &Opts {
+                strict,
+                ..Opts::default()
+            },
+        )
+        .unwrap();
         let notes = l.scan(&store, 100);
         store.apply_internal();
         (store.get_f64("out").unwrap(), notes)

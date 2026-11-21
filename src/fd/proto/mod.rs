@@ -247,7 +247,15 @@ mod tests {
             "{e}"
         );
         assert_eq!(run("whatever-server", fake::REGISTRY, &o), Ok(None));
-        let e = run("whatever-server", fake::REGISTRY, &Opts { strict: true }).unwrap_err();
+        let e = run(
+            "whatever-server",
+            fake::REGISTRY,
+            &Opts {
+                strict: true,
+                ..Opts::default()
+            },
+        )
+        .unwrap_err();
         assert!(
             e.0.contains("unknown <comms> element <whatever-server>"),
             "{e}"

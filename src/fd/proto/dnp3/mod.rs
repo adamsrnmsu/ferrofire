@@ -715,7 +715,14 @@ mod tests {
             parse(&skip, &Opts::default()).unwrap().device().bin.len(),
             0
         );
-        assert!(parse(&skip, &Opts { strict: true }).is_err());
+        assert!(parse(
+            &skip,
+            &Opts {
+                strict: true,
+                ..Opts::default()
+            }
+        )
+        .is_err());
         let kind = format!("{HEAD}<binary-input><address>2</address><tag>an</tag></binary-input>");
         assert!(err(&kind).contains("is Analog but its mapping needs Binary"));
         let both = format!(
