@@ -98,6 +98,8 @@ pub static REGISTRY: &[(&str, Start)] = &[
     ("modbus-client", start::<modbus::client::Client>),
     #[cfg(feature = "proto-iec61850")]
     ("iec61850-server", start::<iec61850::Server>),
+    #[cfg(feature = "proto-iec61850")]
+    ("iec61850-rtu", start::<iec61850::subscriber::Rtu>),
     #[cfg(feature = "proto-iccp")]
     ("iccp-server", start::<iccp::Server>),
     #[cfg(feature = "proto-mqtt")]
@@ -119,6 +121,7 @@ pub const KNOWN: &[(&str, &str)] = &[
     ("bacnet-server", "proto-bacnet"),
     ("bacnet-client", "proto-bacnet"),
     ("iec61850-server", "proto-iec61850"),
+    ("iec61850-rtu", "proto-iec61850"),
     ("iccp-server", "proto-iccp"),
     ("mqtt-client", "proto-mqtt"),
     ("scpi-server", "proto-scpi"),

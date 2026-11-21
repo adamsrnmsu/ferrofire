@@ -8,9 +8,10 @@
 //! publisher logs why and the MMS server runs on.
 //! The default GOOSE group address is 01-0C-CD-01-00-01 like libiec61850's examples: its subscriber (v1.6, observed) never
 //! delivers frames sent to 01-0C-CD-01-00-00 although both are in the GOOSE range.
-//! GOOSE subscriber: not built (no consumer for the values in a field device).
+//! The GOOSE subscriber is its own module, `<iec61850-rtu>` (`subscriber`): bennu's element, SEL or standard SCL subscriptions.
 
 pub mod scl;
+pub mod subscriber;
 
 use super::super::config::{number, require, text, ConfigError, Opts, Tags};
 use super::super::eventlog::EventLog;

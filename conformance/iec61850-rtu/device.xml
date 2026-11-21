@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SCEPTRE>
+    <field-device>
+        <name>rtu-1</name>
+        <cycle-time>200</cycle-time>
+        <tags>
+            <external-tag><name>brkr</name><io>I0</io><type>binary</type></external-tag>
+            <external-tag><name>mirror</name><io>O0</io><type>binary</type></external-tag>
+            <external-tag><name>trip</name><io>O1</io><type>binary</type></external-tag>
+        </tags>
+        <comms>
+            <iec61850-rtu>
+                <name>standard</name>
+                <configuration-file>/tmp/substation.scd</configuration-file>
+                <interface>lo</interface>
+                <ied-name>RTU1</ied-name>
+                <event-logging>rtu-1-standard.log</event-logging>
+            </iec61850-rtu>
+            <iec61850-rtu>
+                <name>sel</name>
+                <configuration-file>/tmp/sub.cid</configuration-file>
+                <interface>lo</interface>
+                <event-logging>rtu-1-sel.log</event-logging>
+                <entry><register-address>0</register-address><tag>trip</tag></entry>
+            </iec61850-rtu>
+        </comms>
+        <input>
+            <endpoint>udp://239.0.0.1:40000</endpoint>
+            <binary><id>I0</id><name>bus-1.active</name></binary>
+        </input>
+        <output>
+            <endpoint>tcp://127.0.0.1:5555</endpoint>
+            <binary><id>O0</id><name>pub.trip-mirror</name></binary>
+            <binary><id>O1</id><name>bus-1.breaker</name></binary>
+        </output>
+    </field-device>
+</SCEPTRE>

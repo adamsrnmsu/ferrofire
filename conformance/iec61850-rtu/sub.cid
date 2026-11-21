@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<SCL xmlns="http://www.iec.ch/61850/2003/SCL" xmlns:esel="http://www.selinc.com/2006/61850">
+  <IED name="RTU2">
+    <Private type="SEL_GooseSubscription">
+      <esel:GooseSubscription iedName="PUB" ldInst="LD0" cbName="gcbTrip" datSet="dsTrip" datSetRef="PUBLD0/LLN0$dsTrip" confRev="1"
+          mAddr="01-0C-CD-01-00-07" APPID="7" goCbRef="PUBLD0/LLN0$GO$gcbTrip">
+        <esel:GooseRxEntry tdlString="VB001"/>
+      </esel:GooseSubscription>
+    </Private>
+  </IED>
+</SCL>
