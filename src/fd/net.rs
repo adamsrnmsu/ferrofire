@@ -38,7 +38,7 @@ fn tcp(ep: &str) -> Result<SocketAddr, String> {
     match parse(ep)? {
         Endpoint::Tcp(a) => Ok(a),
         Endpoint::Serial(p) => Err(format!(
-            "serial endpoint {p}: not supported yet (bead ww-z5w)"
+            "serial endpoint {p}: this server takes tcp:// only"
         )),
     }
 }
@@ -49,6 +49,56 @@ pub async fn listen(ep: &str) -> Result<TcpListener, String> {
     TcpListener::bind(addr)
         .await
         .map_err(|e| format!("bind {addr}: {e}"))
+}
+
+/// A bound server endpoint: a TCP listener, or a serial port, which is one connection for the life of the device.
+pub enum Bound {
+    Tcp(TcpListener),
+    #[cfg(feature = "proto-serial")]
+    Serial(String, tokio_serial::SerialStream),
+}
+
+/// Bind a server endpoint that may be a serial device path (`<modbus-server>`, `<dnp3-server>`). A failure is the caller's to log.
+pub async fn bind(ep: &str) -> Result<Bound, String> {
+    match parse(ep)? {
+        Endpoint::Tcp(_) => listen(ep).await.map(Bound::Tcp),
+        #[cfg(feature = "proto-serial")]
+        Endpoint::Serial(p) => open_serial(&p).map(|s| Bound::Serial(p, s)),
+        #[cfg(not(feature = "proto-serial"))]
+        Endpoint::Serial(p) => Err(format!("serial endpoint {p}: built without proto-serial")),
+    }
+}
+
+/// Serve a serial port until `stop`. The port is one connection that never ends on its own: when `serve` returns (a read error,
+/// such as EIO after a pty's other side closed, or a protocol close), the port is opened again after the accept pause. A failed
+/// reopen goes to `report` once per run of failures and is retried.
+#[cfg(feature = "proto-serial")]
+pub async fn serial_loop<F: std::future::Future<Output = ()>>(
+    path: &str,
+    port: tokio_serial::SerialStream,
+    stop: &CancellationToken,
+    mut serve: impl FnMut(Conn) -> F,
+    report: impl Fn(&str),
+) {
+    const FIRST: Duration = Duration::from_millis(100);
+    let (mut port, mut pause) = (Some(port), None);
+    loop {
+        if let Some(p) = port.take() {
+            pause = None;
+            tokio::select! { _ = stop.cancelled() => return, _ = serve(Conn::Serial(p)) => {} }
+        }
+        let p = pause.map_or(FIRST, backoff);
+        tokio::select! { _ = stop.cancelled() => return, _ = tokio::time::sleep(p) => {} }
+        match open_serial(path) {
+            Ok(s) => port = Some(s),
+            Err(e) => {
+                if pause.is_none() {
+                    report(&e);
+                }
+                pause = Some(p);
+            }
+        }
+    }
 }
 
 /// Probe an idle client after 30 s, every 10 s: a peer that vanished without a FIN does not hold its descriptor for ever.
@@ -124,6 +174,13 @@ impl Conn {
             }
             #[cfg(feature = "proto-serial")]
             Conn::Serial(_) => {}
+        }
+    }
+
+    /// TCP keepalive (see `keepalive`); a serial port has no peer to probe.
+    pub fn keepalive(&self) {
+        if let Conn::Tcp(t) = self {
+            keepalive(t);
         }
     }
 
@@ -206,6 +263,31 @@ mod tests {
         assert_eq!(parse(""), Err("endpoint is empty".into()));
     }
 
+    #[cfg(feature = "proto-serial")]
+    #[tokio::test]
+    async fn a_serial_port_is_opened_again_after_its_session_ends() {
+        let (_master, slave) = tokio_serial::SerialStream::pair().unwrap();
+        let path = tokio_serial::SerialPort::name(&slave).unwrap();
+        let Ok(Bound::Serial(p, port)) = bind(&path).await else {
+            panic!("{path} should open as a serial endpoint")
+        };
+        let (stop, n) = (CancellationToken::new(), std::cell::Cell::new(0));
+        let session = |_c: Conn| {
+            n.set(n.get() + 1);
+            if n.get() == 3 {
+                stop.cancel();
+            }
+            async {}
+        };
+        serial_loop(&p, port, &stop, session, |e| panic!("{e}")).await;
+        assert_eq!(n.get(), 3);
+        assert!(bind("/dev/no-such-tty")
+            .await
+            .err()
+            .unwrap()
+            .starts_with("open /dev/no-such-tty"));
+    }
+
     #[test]
     fn the_accept_pause_doubles_up_to_one_second() {
         let ms = |n| Duration::from_millis(n);
@@ -252,7 +334,7 @@ mod tests {
         assert!(listen("/dev/ttyS0")
             .await
             .unwrap_err()
-            .contains("not supported yet"));
+            .contains("tcp:// only"));
         assert!(listen("tcp://nope").await.is_err());
     }
 }

@@ -26,7 +26,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 use tokio_util::sync::CancellationToken;
 
 /// Master link address the stock outstation answers (opendnp3 `LinkConfig` default for an outstation).
@@ -257,8 +256,8 @@ impl Module for Outstation {
     }
 
     async fn run(self, store: Store, stop: CancellationToken) {
-        let listener = match net::listen(&self.endpoint).await {
-            Ok(l) => l,
+        let bound = match net::bind(&self.endpoint).await {
+            Ok(b) => b,
             Err(e) => {
                 self.log.log(
                     "error",
@@ -271,44 +270,64 @@ impl Module for Outstation {
         };
         let dev = Arc::new(Mutex::new(self.device()));
         tokio::spawn(refresh(dev.clone(), store.clone(), stop.clone()));
-        let busy = Arc::new(AtomicBool::new(false));
-        let mut failing = false;
-        loop {
-            let accepted =
-                tokio::select! { _ = stop.cancelled() => return, r = listener.accept() => r };
-            match accepted {
-                Ok((stream, _)) => {
-                    failing = false;
-                    if busy.swap(true, Ordering::SeqCst) {
-                        continue; // ServerAcceptMode::CloseNew: a second master is closed, the first is served on
-                    }
-                    let ctx = Ctx {
-                        dev: dev.clone(),
-                        store: store.clone(),
-                        log: self.log.clone(),
-                        stop: stop.clone(),
-                    };
-                    let free = Release(busy.clone());
-                    tokio::spawn(async move {
-                        serve(stream, ctx).await;
-                        drop(free);
-                    });
+        let ctx = Ctx {
+            dev,
+            store,
+            log: self.log,
+            stop,
+        };
+        match bound {
+            net::Bound::Tcp(l) => accept(l, ctx).await,
+            #[cfg(feature = "proto-serial")]
+            net::Bound::Serial(path, port) => serial(&path, port, ctx).await,
+        }
+    }
+}
+
+/// Serve masters from a TCP listener until `stop`, one at a time.
+async fn accept(listener: tokio::net::TcpListener, ctx: Ctx) {
+    let busy = Arc::new(AtomicBool::new(false));
+    let mut failing = false;
+    loop {
+        let accepted =
+            tokio::select! { _ = ctx.stop.cancelled() => return, r = listener.accept() => r };
+        match accepted {
+            Ok((stream, _)) => {
+                failing = false;
+                if busy.swap(true, Ordering::SeqCst) {
+                    continue; // ServerAcceptMode::CloseNew: a second master is closed, the first is served on
                 }
-                Err(e) => {
-                    // out of descriptors or memory: say so once, wait, and keep accepting
-                    if !failing {
-                        self.log.log(
-                            "error",
-                            "dnp3 accept",
-                            format!("accept failed: {e}; retrying"),
-                        );
-                    }
-                    failing = true;
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                let (ctx, free) = (ctx.clone(), Release(busy.clone()));
+                tokio::spawn(async move {
+                    serve(net::Conn::Tcp(stream), ctx).await;
+                    drop(free);
+                });
+            }
+            Err(e) => {
+                // out of descriptors or memory: say so once, wait, and keep accepting
+                if !failing {
+                    ctx.log.log(
+                        "error",
+                        "dnp3 accept",
+                        format!("accept failed: {e}; retrying"),
+                    );
                 }
+                failing = true;
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }
     }
+}
+
+/// Serve the one master on a serial port until `stop` (no CloseNew slot: the port is one connection).
+#[cfg(feature = "proto-serial")]
+async fn serial(path: &str, port: tokio_serial::SerialStream, ctx: Ctx) {
+    let session = |c| serve(c, ctx.clone());
+    let report = |e: &str| {
+        ctx.log
+            .log("error", "dnp3 serial", format!("{e}; retrying"))
+    };
+    net::serial_loop(path, port, &ctx.stop, session, report).await;
 }
 
 /// Frees the one master slot when the connection task ends, however it ends.
@@ -341,6 +360,7 @@ async fn refresh(dev: Arc<Mutex<Device>>, store: Store, stop: CancellationToken)
 }
 
 /// What a connection task needs.
+#[derive(Clone)]
 struct Ctx {
     dev: Arc<Mutex<Device>>,
     store: Store,
@@ -419,8 +439,8 @@ impl Sink for Commands<'_> {
 }
 
 /// Serve one master until it goes, misbehaves or the device stops. The socket closes when this returns.
-async fn serve(mut stream: TcpStream, ctx: Ctx) {
-    net::keepalive(&stream);
+async fn serve(mut stream: net::Conn, ctx: Ctx) {
+    stream.keepalive();
     let (mut conn, start) = (Conn::new(), Instant::now());
     let mut buf = [0u8; 2048];
     let mut tick = tokio::time::interval(TICK);

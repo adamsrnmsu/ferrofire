@@ -98,8 +98,8 @@ impl Module for Server {
     }
 
     async fn run(self, store: Store, stop: CancellationToken) {
-        let listener = match net::listen(&self.endpoint).await {
-            Ok(l) => l,
+        let bound = match net::bind(&self.endpoint).await {
+            Ok(b) => b,
             Err(e) => {
                 self.log.log(
                     "error",
@@ -111,9 +111,18 @@ impl Module for Server {
             }
         };
         let (dev, log) = (Arc::new(self.dev), self.log);
+        let listener = match bound {
+            net::Bound::Tcp(l) => l,
+            #[cfg(feature = "proto-serial")]
+            net::Bound::Serial(path, port) => {
+                let session = |c| serve(c, dev.clone(), store.clone(), log.clone(), stop.clone());
+                let report = |e: &str| log.log("error", "modbus serial", format!("{e}; retrying"));
+                return net::serial_loop(&path, port, &stop, session, report).await;
+            }
+        };
         let on_conn = |stream: TcpStream| {
             tokio::spawn(serve(
-                stream,
+                net::Conn::Tcp(stream),
                 dev.clone(),
                 store.clone(),
                 log.clone(),
@@ -133,13 +142,13 @@ impl Module for Server {
 
 /// Serve one client until it goes, misbehaves or the device stops. The socket closes when this returns.
 async fn serve(
-    mut stream: TcpStream,
+    mut stream: net::Conn,
     dev: Arc<Device>,
     store: Store,
     log: Arc<EventLog>,
     stop: CancellationToken,
 ) {
-    net::keepalive(&stream);
+    stream.keepalive();
     let mut conn = Conn::new();
     let mut buf = [0u8; 512];
     loop {
