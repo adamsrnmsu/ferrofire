@@ -106,6 +106,30 @@ fn watcher_shows_changes_age_stale_and_gaps() {
     assert!(late.is_empty());
 }
 
+/// ww-90b: with the stream silent, ages grow by the clock: the tags turn stale without another datagram.
+#[test]
+fn watcher_turns_stale_on_a_timer_when_the_stream_is_silent() {
+    use std::time::{Duration, Instant};
+    let g = group_for("udp://*;239.0.0.1:40000");
+    let dg = |seq: u64, cyc: u64| datagrams_msg(&g, "a:1,", seq, cyc, 1).remove(0);
+    let t0 = Instant::now();
+    let ms = Duration::from_millis;
+    let mut w = Watcher::new(&g, s(&["a"]), 3);
+    assert!(w.tick(t0).is_empty()); // nothing heard yet, nothing to age
+    assert_eq!(w.feed_at(&dg(1, 1), t0).len(), 1);
+    assert!(w.tick(t0 + ms(50)).is_empty()); // one cycle seen: no period to age by yet
+    assert!(w.feed_at(&dg(2, 2), t0 + ms(100)).is_empty()); // period 100 ms, no change
+    assert!(w.tick(t0 + ms(250)).is_empty()); // the next cycle is not even a period late
+    let rows = w.tick(t0 + ms(500)); // 400 ms late: age 3, stale, shown once
+    assert_eq!(
+        (rows.len(), rows[0].tag.as_str(), rows[0].live),
+        (1, "a", Some((3, true, 0)))
+    );
+    assert!(w.tick(t0 + ms(900)).is_empty());
+    let rows = w.feed_at(&dg(3, 3), t0 + ms(1000)); // it is back
+    assert_eq!(rows[0].live, Some((0, false, 0)));
+}
+
 fn free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
@@ -252,6 +276,44 @@ fn watch_prints_value_age_and_stale() {
             && line.contains("\"age\":0,\"stale\":false,\"seq_gaps\":"),
         "{line}"
     );
+}
+
+/// ww-90b end to end: the provider stops publishing (SIGSTOP) and `watch` still prints the tag STALE.
+#[test]
+fn watch_prints_stale_while_the_provider_is_stopped() {
+    let port = free_port();
+    let listen = format!("udp://239.0.0.7:{port}");
+    let (srv, ep) = server(&listen);
+    let mut w = Command::new(BIN)
+        .args([
+            "probe",
+            "--server",
+            &ep,
+            "watch",
+            "--listen",
+            &listen,
+            "--tags",
+            "lowerwater.height",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let out = w.stdout.take().unwrap();
+    std::thread::spawn(move || {
+        for l in BufReader::new(out).lines().map_while(Result::ok) {
+            let _ = tx.send(l);
+        }
+    });
+    let wait = std::time::Duration::from_secs(10);
+    assert!(rx.recv_timeout(wait).unwrap().contains(" ok "));
+    std::thread::sleep(std::time::Duration::from_millis(300)); // a few cycles, so the watcher knows the period
+    unsafe { libc::kill(srv.0.id() as i32, libc::SIGSTOP) };
+    let stale = rx.recv_timeout(wait);
+    unsafe { libc::kill(srv.0.id() as i32, libc::SIGCONT) };
+    unsafe { libc::kill(w.id() as i32, libc::SIGTERM) };
+    let _ = w.wait();
+    assert!(stale.is_ok_and(|l| l.contains("STALE")), "no STALE line");
 }
 
 #[test]

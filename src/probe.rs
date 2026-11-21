@@ -298,6 +298,11 @@ pub struct Watcher {
     tags: Vec<String>,
     last: HashMap<String, f64>,
     shown: HashMap<String, (f64, bool)>,
+    stale_after: u64,
+    /// The newest `_ff.cyc` and when it arrived, and the publish period measured between cycles: what lets `tick` age
+    /// the tags while no datagram comes.
+    clock: Option<(u64, Instant)>,
+    period: Option<Duration>,
 }
 
 impl Watcher {
@@ -309,21 +314,56 @@ impl Watcher {
             tags,
             last: HashMap::new(),
             shown: HashMap::new(),
+            stale_after,
+            clock: None,
+            period: None,
         }
     }
 
     /// A datagram that is rejected shows nothing: the held values stay as shown.
     pub fn feed(&mut self, d: &[u8]) -> Vec<Row> {
+        self.feed_at(d, Instant::now())
+    }
+
+    /// `feed` with the arrival time given.
+    pub fn feed_at(&mut self, d: &[u8], now: Instant) -> Vec<Row> {
         let Ok(points) = self.rx.accept(d) else {
             return vec![];
         };
         self.last.extend(points);
+        let head = self.rx.head();
+        match self.clock {
+            Some((h, at)) if head > h => {
+                self.period = Some((now - at).div_f64((head - h) as f64));
+                self.clock = Some((head, now));
+            }
+            Some((h, _)) if head < h => (self.clock, self.period) = (Some((head, now)), None), // the provider restarted
+            None if head > 0 => self.clock = Some((head, now)),
+            _ => {}
+        }
+        self.rows(0)
+    }
+
+    /// No datagram arrived: age the tags by the publish periods that have gone by since the newest cycle (the next one
+    /// is only due after one period, so that one is not counted) and show the ones that turned stale.
+    /// ponytail: the period is the gap between the last two cycles; nothing until two cycles were seen.
+    pub fn tick(&mut self, now: Instant) -> Vec<Row> {
+        let (Some((_, at)), Some(p)) = (self.clock, self.period) else {
+            return vec![];
+        };
+        let late = (now.saturating_duration_since(at).as_secs_f64() / p.as_secs_f64()) as u64;
+        self.rows(late.saturating_sub(1))
+    }
+
+    /// The tags whose value or stale flag differs from what was last shown, with `extra` periods of silence added to their age.
+    fn rows(&mut self, extra: u64) -> Vec<Row> {
         let mut rows = vec![];
         for tag in &self.tags {
-            let (Some((q, age)), Some(&v)) = (self.rx.quality(tag), self.last.get(tag)) else {
+            let (Some((_, age)), Some(&v)) = (self.rx.quality(tag), self.last.get(tag)) else {
                 continue;
             };
-            let state = (v, q == Quality::Stale);
+            let age = age + extra;
+            let state = (v, age >= self.stale_after);
             if self.shown.insert(tag.clone(), state) != Some(state) {
                 rows.push(Row {
                     tag: tag.clone(),
@@ -463,20 +503,32 @@ pub(crate) fn follow(
     duration: Option<f64>,
     mut on: impl FnMut(&[u8]),
 ) -> Result<(), String> {
+    follow_idle(endpoint, duration, |d| d.iter().for_each(|d| on(d)))
+}
+
+/// `follow` that also calls `on(None)` each time the socket's read timeout passes with no datagram, so a caller can age things.
+pub(crate) fn follow_idle(
+    endpoint: &str,
+    duration: Option<f64>,
+    mut on: impl FnMut(Option<&[u8]>),
+) -> Result<(), String> {
     let sock = listen(endpoint)?;
     install_signals();
     let end = duration.map(|d| Instant::now() + Duration::from_secs_f64(d));
     let mut buf = vec![0u8; 65536];
     while !STOP.load(Ordering::SeqCst) && end.is_none_or(|e| Instant::now() < e) {
         match sock.recv(&mut buf) {
-            Ok(n) => on(&buf[..n]),
+            Ok(n) => on(Some(&buf[..n])),
             Err(e)
                 if matches!(
                     e.kind(),
                     std::io::ErrorKind::WouldBlock
                         | std::io::ErrorKind::TimedOut
                         | std::io::ErrorKind::Interrupted
-                ) => {}
+                ) =>
+            {
+                on(None)
+            }
             Err(e) => return Err(e.to_string()),
         }
     }
@@ -484,7 +536,10 @@ pub(crate) fn follow(
 }
 
 fn watch(endpoint: &str, mut w: Watcher, json: bool) -> Result<(), String> {
-    follow(endpoint, None, |d| print(&w.feed(d), json))
+    follow_idle(endpoint, None, |d| match d {
+        Some(d) => print(&w.feed(d), json),
+        None => print(&w.tick(Instant::now()), json),
+    })
 }
 
 fn record(endpoint: &str, mut r: Recorder, out: &str, duration: Option<f64>) -> Result<(), String> {

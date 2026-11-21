@@ -285,7 +285,7 @@ each value against the model: a binary tag takes `true`/`false`/`0`/`1`, an anal
 `ERR=Tag 'sp' value 11 is above its max 10`, so a probe without `--model` is still safe.
 `watch` decodes datagram v1 and prints a line whenever a tag's value or stale flag changes: `lock.height=4.2 age=0 ok gaps=0`.
 `age` is in publish periods (how far the tag is behind the newest `_ff.cyc`), `STALE` appears after `--stale-after` missed periods
-(the value is held, not live), `gaps` counts datagrams missing from the `_ff.seq` run. With no `--tags` it watches every tag
+(the value is held, not live; a silent stream ages by the clock, one measured publish period at a time, so the line still comes), `gaps` counts datagrams missing from the `_ff.seq` run. With no `--tags` it watches every tag
 the provider has (`QUERY`). Limit: it binds the publish port without `SO_REUSEADDR`, so it cannot run on a host where another
 subscriber already holds that port.
 
