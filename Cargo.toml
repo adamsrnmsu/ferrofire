@@ -1,6 +1,6 @@
 [package]
 name = "ferrofire"
-version = "2026.11.15"
+version = "2026.11.21"
 edition = "2021"
 rust-version = "1.99"
 license = "MIT"
