@@ -9,8 +9,8 @@
 
 use crate::bennu::{install_signals, parse_value, sleep_until, STOP};
 use crate::model::Value;
-use crate::probe::{ask, json_str, read_rows};
-use crate::pull::requests;
+use crate::probe::{json_str, rows_of};
+use crate::pull::{read_chunk, requests};
 use crate::transport::Requester;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -277,7 +277,7 @@ fn truth(req: &mut dyn Requester, rigs: &[Rig]) -> Result<HashMap<String, f64>, 
         .collect();
     let mut out = HashMap::new();
     for r in requests(&tags.into_iter().collect::<Vec<_>>()) {
-        for row in read_rows(&ask(req, &r)?)? {
+        for row in rows_of(&read_chunk(req, &r)?)? {
             let v = parse_value(&row.value).ok_or_else(|| format!("bad value for {}", row.tag))?;
             out.insert(row.tag, number(v));
         }

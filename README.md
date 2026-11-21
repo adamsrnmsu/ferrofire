@@ -149,7 +149,9 @@ slices to separate endpoints, one RADIO group each; a tag may appear in several 
 
 Push sends every tag to every subscriber; without multicast N RTUs would cost N copies of the whole tag list.
 A `READ` may name several tags, `READ=a,b,c`, and is answered with one `ACK=a:1,b:2,c:3,` (the update format, request order;
-an unknown tag fails the whole request with `ERR=Tag 'x' not found`; `READ=tag` is unchanged). `ferrofire pull-bridge` runs next to
+an unknown tag fails the whole request with `ERR=Tag 'x' not found`; `READ=tag` is unchanged). The request has no trailing comma:
+the stock bennu-simulink-provider takes everything after `READ=` as one tag name and answers a single tag with a bare `ACK=value`, never a batch,
+so `probe read`, `diff` and `pull-bridge` read the bare reply and, when a batch gets an `ERR`, ask tag by tag. `ferrofire pull-bridge` runs next to
 a field device, asks for just that device's tags once per tick, and republishes the reply on a local endpoint, so a stock
 (push-subscribing) bennu field device needs no change:
 

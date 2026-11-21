@@ -7,7 +7,7 @@ use crate::bennu::{
 };
 use crate::datagram::{Quality, Receiver};
 use crate::model::{Model, Value};
-use crate::pull::{requests, update_msg, validate_tries};
+use crate::pull::{read_chunk, requests, update_msg, validate_tries};
 use crate::transport::{self, Requester, DEFAULT_PUBLISH};
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
@@ -225,8 +225,12 @@ pub fn tag_list(reply: &[u8]) -> Result<Vec<String>, String> {
 
 /// The `tag:value,...` pairs of a `READ=` reply, in order.
 pub fn read_rows(reply: &[u8]) -> Result<Vec<Row>, String> {
-    update_msg(reply)?
-        .split(',')
+    rows_of(&update_msg(reply)?)
+}
+
+/// The rows of an update message (`a:1,b:2,`).
+pub fn rows_of(msg: &str) -> Result<Vec<Row>, String> {
+    msg.split(',')
         .filter(|p| !p.is_empty())
         .map(|p| {
             let (tag, value) = p
@@ -637,7 +641,7 @@ fn read(req: &mut dyn Requester, tags: Vec<String>, json: bool) -> Result<(), St
         tags
     };
     for r in requests(&tags) {
-        print(&read_rows(&ask(req, &r)?)?, json);
+        print(&rows_of(&read_chunk(req, &r)?)?, json);
     }
     Ok(())
 }
@@ -834,8 +838,8 @@ const WAIT_POLL: Duration = Duration::from_millis(200);
 pub fn wait_for(req: &mut dyn Requester, c: &Cond, limit: Duration) -> Result<(), String> {
     let end = Instant::now() + limit;
     loop {
-        let reply = ask(req, &requests(std::slice::from_ref(&c.tag))[0])?;
-        let row = read_rows(&reply)?.pop().ok_or("empty reply")?;
+        let msg = read_chunk(req, &requests(std::slice::from_ref(&c.tag))[0])?;
+        let row = rows_of(&msg)?.pop().ok_or("empty reply")?;
         let v = number(&row.value)
             .ok_or_else(|| format!("`{}` is `{}`, not a number", row.tag, row.value))?;
         if c.holds(v) {

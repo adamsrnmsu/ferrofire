@@ -579,21 +579,16 @@ impl ferrofire::transport::Requester for Canned {
 #[test]
 fn wait_for_polls_until_met_or_out_of_time() {
     let c = Cond::parse("t >= 3").unwrap();
-    let mut r = Canned(vec!["ACK=t:1,\0", "ACK=t:3,\0"]);
+    let mut r = Canned(vec!["ACK=1\0", "ACK=t:3,\0"]);
     assert_eq!(
         wait_for(&mut r, &c, std::time::Duration::from_secs(5)),
         Ok(())
     );
     assert!(r.0.is_empty());
-    let mut r = Canned(vec!["ACK=t:1,\0"]);
+    let mut r = Canned(vec!["ACK=1\0"]);
     let e = wait_for(&mut r, &c, std::time::Duration::ZERO).unwrap_err();
     assert!(e.contains("t >= 3") && e.contains("not met"), "{e}");
-    let e = wait_for(
-        &mut Canned(vec!["ACK=t:x,\0"]),
-        &c,
-        std::time::Duration::ZERO,
-    )
-    .unwrap_err();
+    let e = wait_for(&mut Canned(vec!["ACK=x\0"]), &c, std::time::Duration::ZERO).unwrap_err();
     assert!(e.contains("not a number"), "{e}");
     let e = wait_for(&mut Canned(vec!["ACK=\0"]), &c, std::time::Duration::ZERO).unwrap_err();
     assert!(e.contains("empty reply"), "{e}");
