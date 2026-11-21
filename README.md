@@ -193,7 +193,8 @@ A value that just changed is bold yellow for a second. Keys: `/` filter (substri
   stale on the viewer's clock.
 
 `--stale-after SECONDS` (default 2) is how long without an update makes a tag stale, the same for every source. `--once` prints the table and exits (`tag=value age=1.2s ok|STALE`,
-or with `--json` one object per line), for scripts; with `--filter` it prints only the matches.
+or with `--json` one object per line), for scripts; with `--filter` it prints only the matches. On `--stream`, `--once` fails with an error rather than printing STALE rows when no value ever arrives (a silent stream has no values to show):
+"provider unreachable" after about 4 s if the provider cannot confirm `--tags`, "no tags within 5s" if the stream stays silent.
 
 ## Ground-truth page
 

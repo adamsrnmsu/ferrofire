@@ -114,8 +114,17 @@ pub fn requests(tags: &[String]) -> Vec<Vec<u8>> {
 
 /// Startup check: every tag must exist at the provider (`QUERY` lists them), else the bridge would never publish.
 pub fn validate(req: &mut dyn Requester, tags: &[String]) -> Result<(), String> {
+    validate_tries(req, tags, STARTUP_TRIES)
+}
+
+/// `validate` with its own number of `QUERY` attempts: an interactive tool wants a dead provider reported in seconds.
+pub fn validate_tries(
+    req: &mut dyn Requester,
+    tags: &[String],
+    tries: usize,
+) -> Result<(), String> {
     let mut last = String::new();
-    for _ in 0..STARTUP_TRIES {
+    for _ in 0..tries {
         match req.call(b"QUERY=") {
             Ok(reply) => {
                 let known: HashSet<String> =

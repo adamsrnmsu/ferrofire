@@ -7,7 +7,7 @@ use crate::bennu::{
 };
 use crate::datagram::{Quality, Receiver};
 use crate::model::{Model, Value};
-use crate::pull::{requests, update_msg, validate};
+use crate::pull::{requests, update_msg, validate_tries};
 use crate::transport::{self, Requester, DEFAULT_PUBLISH};
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
@@ -650,6 +650,10 @@ fn send_write(
     res.map(|_| ())
 }
 
+/// `QUERY` attempts before a watcher gives up on the provider (each waits the request timeout): ww-xzh, a stopped provider
+/// must be an error in a few seconds, not the 10 attempts a pull-bridge startup is allowed.
+const WATCH_TRIES: usize = 2;
+
 /// The tags to watch: those named (checked against the provider) or all it has.
 pub(crate) fn watched(req: &mut dyn Requester, tags: Vec<String>) -> Result<Vec<String>, String> {
     if tags.is_empty() {
@@ -660,7 +664,7 @@ pub(crate) fn watched(req: &mut dyn Requester, tags: Vec<String>) -> Result<Vec<
     } else {
         tags
     };
-    validate(req, &tags)?;
+    validate_tries(req, &tags, WATCH_TRIES)?;
     Ok(tags)
 }
 
