@@ -16,7 +16,7 @@ case "$1" in
     p=${1%-client}${SERIAL:+-serial}; : > "$here/client-$p.golden"   # check.sh compares with the golden: empty while recording
     DUT=stock "$here/../run.sh" "$1" || true
     out=${OUT:-$here/../../target/conformance/$1}
-    cp "$out/transcript.txt" "$here/client-$p.golden"; cp "$out/$1.pcap" "$here/client-$p.pcap"
+    grep -v '^# serial line:' "$out/transcript.txt" > "$here/client-$p.golden"; cp "$out/$1.pcap" "$here/client-$p.pcap"   # run.sh checks the line itself
     [ ! -f "$out/transcript-raw.txt" ] || cp "$out/transcript-raw.txt" "$here/client-$p-raw.golden"; exit ;;
   modbus)   cfg=$bennu/modbus-server.xml;   probe=probe_modbus.py ;;
   overflow) cfg=$bennu/modbus-server.xml;   probe=probe_modbus_overflow.py ;;
