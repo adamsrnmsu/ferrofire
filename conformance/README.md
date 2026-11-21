@@ -25,7 +25,7 @@ Output lands in `target/conformance/<PROTO>/`: the pcap, `peer.out`, `dut.out`, 
 
 Add a protocol: copy `conformance/dnp3/`, change the four files. Only `ff-conf-dut` and `ff-conf-peers` are created or removed (`CONF_NAME` changes the
 prefix). A client DUT gets its stock server through `DUT_EXTRA` and `DUT_PRE` in `proto.env` (see `modbus-client/`).
-Files go in and out with `docker cp` (no bind mounts: the Lima docker daemon cannot see every host path).
+Files go in and out with `docker cp` (no bind mounts: the docker daemon, Docker Desktop by default or a VM, may not see every host path).
 
 ## Elasticsearch / OpenSearch
 `make conformance PROTO=elastic` is not a protocol run: `run.sh` hands over to `conformance/elastic/run.sh`, which starts real Elasticsearch 8, OpenSearch 2 and a
@@ -79,7 +79,7 @@ To re-record the stock side: `TRACE=conformance/dnp3/stock-diff.trace LOGS=confo
 Judged three ways, all against the same server: byte for byte against stock, by independent clients, and by what a blue team sees.
 
     make diff-modbus                    # our binary vs the recorded stock transcripts, live in containers (rebuilds target-linux/debug/ferrofire first)
-    make differential PROTO=modbus WHO=stock SET=edges   # re-record one set from bennu:arm64 (also: diff, waterway, q4, divergent)
+    make differential PROTO=modbus WHO=stock SET=edges   # re-record one set from the stock image (also: diff, waterway, q4, divergent)
     make conformance PROTO=modbus       # pymodbus, mbpoll and nmap modbus-discover vs the stock oracle; DUT=rust for ours
     cargo test --test modbus_golden --test modbus_net --test modbus_clients --test modbus_emfile
 
@@ -318,7 +318,7 @@ and -363 responses, the `;`-joined answer of a compound query), 0 malformed fram
 ## SCPI controller (`<scpi-client>` against an instrument we did not write)
 
     make testpeers                      # first, once: the image needs scpi-parser-tcp, scpi-parser-vxi11 and rpcbind (docker/testpeers/Dockerfile)
-    make conformance PROTO=scpi-client  # DUT=rust; the DUT runs in the testpeers image (RUST_DUT_IMAGE), not bennu:arm64
+    make conformance PROTO=scpi-client  # DUT=rust; the DUT runs in the testpeers image (RUST_DUT_IMAGE), not the stock image
 
 The DUT is a ferrofire controller (`conformance/scpi-client/controller.xml`) with two `<scpi-client>`s, one per transport, polling the same
 independent instrument: the `examples/test-tcp` and `examples/test-vxi11` instruments of [scpi-parser](https://github.com/j123b567/scpi-parser) (Jan Breuer,

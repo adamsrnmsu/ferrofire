@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPEC 8.5 / images/bennu-smoke.sh with our outstation in place of the stock DNP3 server: the STOCK bennu-field-device dnp3-client (startup
-# integrity poll, its own retries) must read brkr:true and load-power:400.5 from it through bennu-probe. Run in bennu:arm64 with the
+# integrity poll, its own retries) must read brkr:true and load-power:400.5 from it through bennu-probe. Run in the stock image (ffc-stock-2026.11.03:22.04) with the
 # repo data/ at /data and our binary on PATH as ferrofire (conformance/dnp3/smoke.sh from the host does that).
 cd /tmp || exit 1; export LD_LIBRARY_PATH=/usr/local/lib
 bennu-test-ep-server --d 1 >ep.out 2>&1 &

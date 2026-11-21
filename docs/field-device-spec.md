@@ -523,18 +523,18 @@ a table-driven test, including each `O:` value, the delay state machine, comma/`
 binary contains `START_SHELL_0` once, `sed`/Python variants hash identically, flipping the byte starts the listener under a fake `socat` on `PATH`).
 
 ### 8.2 Golden transcripts from the stock device (already captured)
-`conformance/stock/` holds the probes used for the `O:` facts, runnable from the Mac in one command each (`run-stock.sh modbus|dnp3|104|overflow|logic`; creates container `ff-fd-stock` from `bennu:arm64`, removes it on exit):
+`conformance/stock/` holds the probes used for the `O:` facts, runnable from the Mac in one command each (`run-stock.sh modbus|dnp3|104|overflow|logic`; creates container `ff-fd-stock` from `ffc-stock-2026.11.03:22.04` on Docker Desktop, `STOCK_IMAGE` overrides, removes it on exit):
 `probe_modbus.py` (24 requests), `probe_dnp3.py` (integrity/class poll, CROB select/direct, AO f32 direct/select/operate, unknown index, Int16), `probe_104.py` (STARTDT, GI, single command, float setpoint),
 `probe_modbus_overflow.py` (Q9), `logic_corpus.xml`. Each feeds inputs by sending a hand-built RADIO datagram, so no provider is needed. Transcripts are normalised (mask timestamps, transport sequence numbers) and
 checked in as `*.golden`.
 
-### 8.3 Differential run in the Lima VM (when free)
-Two containers per protocol, names `ff-fd-stock` (image `bennu:arm64`) and `ff-fd-rust` (same image or `ubuntu:22.04` plus the Rust binary), identical config and probe; compare transcripts byte for byte after normalisation. Then:
+### 8.3 Differential run on Docker Desktop (`make differential`, `make conformance`)
+Two containers per protocol, names `ff-fd-stock` (image `ffc-stock-2026.11.03:22.04`, `STOCK_IMAGE` overrides) and `ff-fd-rust` (same image or `ubuntu:22.04` plus the Rust binary), identical config and probe; compare transcripts byte for byte after normalisation. Then:
 1. **Provider link**: stock `bennu-test-ep-server` (or the `ferrofire` native provider once it lands) feeds both devices; `bennu-probe --c query/read/write` against a *client-mode* stock device reads the Rust server (the smoke test pair).
 2. **Output path**: write a coil/holding register via Modbus on each device, capture the `WRITE=` the device sends to a netcat-style REP, compare payload bytes (batching, `%f` formatting).
 3. **Firmware flow** in a container with `watcherd`: upload a valid and an invalid firmware, observe accepted/rejected, port 1337 opens only for the shell hash.
 4. **Waterway end-to-end**: swap the overlay binary for `rtu-1`/`rtu-2` in an `rb-` phenix experiment (name prefix `rb-`; never touch the running experiments); the lock cycles to the same trace as with stock RTUs (`R:tests` golden, `provider/waterway-sim` trace) and the OPC/HMI values match.
-The stock baseline is the deployed `bennu:arm64` image, **not** the uncommitted tree (Decision 9): the image build predates the tree's logic/output fixes (`--log-level` missing, counter stuck at 2 `O:`).
+The stock baseline is the `ffc-stock-2026.11.03:22.04` image (bennu v2026.11.03; the 2026-11-07 `bennu:arm64` build it replaced is the one the original `O:` facts were observed on), **not** the uncommitted tree (Decision 9): the image build predates the tree's logic/output fixes (`--log-level` missing, counter stuck at 2 `O:`).
 
 ### 8.4 Hostile input
 `cargo fuzz` / `proptest` targets: MBAP stream, DNP3 link+transport+application frames, 104 APCI/ASDU stream, the RADIO datagram parser, the logic parser, the XML loader. Invariant: no panic, bounded memory, connection closed on violation.
