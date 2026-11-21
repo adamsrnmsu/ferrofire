@@ -11,7 +11,7 @@ use crate::pull::{requests, update_msg, validate_tries};
 use crate::transport::{self, Requester, DEFAULT_PUBLISH};
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
-use std::net::{IpAddr, Ipv4Addr, UdpSocket};
+use std::net::{Ipv4Addr, UdpSocket};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -475,23 +475,13 @@ pub fn nic(iface: Option<String>) -> Result<Ipv4Addr, String> {
     })
 }
 
-/// The socket `watch` listens on: joined to the group for a multicast endpoint, plainly bound otherwise.
-fn listen(endpoint: &str) -> Result<UdpSocket, String> {
-    let (iface, addr) = parse_udp(endpoint)?;
-    let IpAddr::V4(ip) = addr.ip() else {
+/// The socket `watch` listens on: joined to the group for a multicast endpoint, plainly bound otherwise. Bound with
+/// SO_REUSEADDR/SO_REUSEPORT like a field device's input (ww-21o), so it also runs on a host where a device holds the port.
+pub fn listen(endpoint: &str) -> Result<UdpSocket, String> {
+    if !parse_udp(endpoint)?.1.is_ipv4() {
         return Err("only IPv4 endpoints are supported".into());
-    };
-    // ponytail: no SO_REUSEADDR, so a second subscriber on this host and port cannot bind; add a sys wrapper if probing next to a field device is needed
-    let bind = if ip.is_multicast() {
-        Ipv4Addr::UNSPECIFIED
-    } else {
-        ip
-    };
-    let s = UdpSocket::bind((bind, addr.port())).map_err(|e| format!("{addr}: {e}"))?;
-    if ip.is_multicast() {
-        s.join_multicast_v4(&ip, &nic(iface)?)
-            .map_err(|e| e.to_string())?;
     }
+    let s = crate::fd::input::bind(endpoint)?;
     s.set_read_timeout(Some(Duration::from_millis(200)))
         .map_err(|e| e.to_string())?;
     Ok(s)

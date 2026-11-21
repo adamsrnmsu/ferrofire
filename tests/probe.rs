@@ -244,6 +244,21 @@ fn interface_for_a_group() {
     assert!(nic(Some("eth0".into())).unwrap_err().contains("eth0"));
 }
 
+/// ww-21o: a stock device holds the group's port; the tools must bind it too, and both must hear the same datagrams.
+#[test]
+fn two_listeners_on_one_group_and_port_both_receive() {
+    let ep = format!("udp://239.0.0.7:{}", free_port());
+    let (a, b) = (listen(&ep).unwrap(), listen(&ep).unwrap());
+    let to = ep.trim_start_matches("udp://");
+    let tx = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
+    tx.send_to(b"hello", to).unwrap();
+    let mut buf = [0u8; 16];
+    for l in [&a, &b] {
+        let n = l.recv(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"hello");
+    }
+}
+
 #[test]
 fn watch_prints_value_age_and_stale() {
     let port = free_port();
