@@ -166,7 +166,7 @@ The core is the config loader, datastore, logic, provider link and module regist
 **Checked.** `tests/fielddevice.rs`, `tests/fd_robust.rs` (hostile configs and inputs), `tests/fd_flap.rs` (a stale datagram after the provider's ACK must not flap the Modbus read-back, ww-1df.32), fuzz targets `fd_config` and `fd_datagram`,
 and the gates below. Semantics come from [field-device-spec.md](field-device-spec.md), which records what the stock bennu field
 device does, with probes in `conformance/stock/` (`probe_modbus.py`, `probe_modbus_overflow.py`, `probe_dnp3.py`, `probe_104.py`,
-`logic_corpus.xml`) run against `bennu:arm64` by `conformance/stock/run-stock.sh`.
+`logic_corpus.xml`) run against `ffc-stock-2026.11.03:22.04` (`STOCK_IMAGE` overrides) on Docker Desktop by `conformance/stock/run-stock.sh`.
 
 **Gaps.** The core has no byte-level differential of its own; its stock comparison is through the DNP3 transcripts. There is no
 Rust Modbus or IEC 104 server in ferrofire yet, so the Modbus and 104 probes record stock behaviour and are not run against ours.
@@ -567,7 +567,7 @@ What it is: [ground-truth-elastic.md](ground-truth-elastic.md). Beads: ww-1df.19
   as refused), a dead server with 20 000 items pushed in well under 2 s and the oldest dropped, and the binaries end to end: `ferrofire run --config` with
   the pybennu fields on every document, no export without `enabled = true`, `ferrofire groundtruth` with a filter and the stock document shape, the
   alert limit skipping only alert points, and bad invocations.
-- `make conformance PROTO=elastic` (`conformance/elastic/`): real servers, brought up by `run.sh` on the Lima docker daemon, `ff-conf-*` names, no bind mounts.
+- `make conformance PROTO=elastic` (`conformance/elastic/`): real servers, brought up by `run.sh` on Docker Desktop (`DOCKER_HOST` defaults to its socket), `ff-conf-*` names, no bind mounts.
   - Per server (Elasticsearch 8.19.3 with security off, OpenSearch 2, Elasticsearch 8.19.3 with TLS and basic auth, the same with an API key): the
     provider export (template installed, daily index mapping, fields, `measurement.frequency` on every document, `time_drift` in range, every tag, a
     binary tag typed bool) and `ferrofire groundtruth` on the same stream (fields, no trailer, UTC `@timestamp`, `bennu-<UTC day>`), both
@@ -586,12 +586,12 @@ What it is: [ground-truth-elastic.md](ground-truth-elastic.md). Beads: ww-1df.19
 **Oracle.** The stock script and `elastic.py` for behaviour and field names; Elasticsearch and OpenSearch for what a bulk request means (their answers, not our reading);
 the SCORCH component's own code for the queries.
 
-**Run.** `make test` (units, fake server); `make conformance PROTO=elastic` (needs the Lima VM, the images `opensearchproject/opensearch:2` and
-`docker.elastic.co/elasticsearch/elasticsearch:8.19.3`, `bennu:arm64`, `target-linux/debug/ferrofire` from `make test`, and `SCORCH_SRC`, default
+**Run.** `make test` (units, fake server); `make conformance PROTO=elastic` (needs Docker Desktop, the images `opensearchproject/opensearch:2` and
+`docker.elastic.co/elasticsearch/elasticsearch:8.19.3`, `ffc-stock-2026.11.03:22.04` (`STOCK_IMAGE`), `target-linux/debug/ferrofire` from `make test`, and `SCORCH_SRC`, default
 `~/git/sceptre-phenix-apps/src/python/phenix_apps`; about 6 minutes). Artefacts in `target/conformance/elastic/`: the differential report and sample documents.
 `KEEP=1` leaves the containers up between runs.
 
-**Shims on the stock side, and why.** The `bennu:arm64` image has a `_Endpoint.so` for the wrong architecture (it cannot be loaded) and a pyzmq built without
+**Shims on the stock side, and why.** The stock image (recorded against the old `bennu:arm64`; not re-checked on `ffc-stock-2026.11.03:22.04`) has a `_Endpoint.so` for the wrong architecture (it cannot be loaded) and a pyzmq built without
 draft support (no DISH socket). `conformance/elastic/stock_monitor.py` therefore stands in Python for the three-function Endpoint wrapper (libstdc++'s `std::hash`
 for the group, the same hash ferrofire implements) and for the `Subscriber` base class (a DISH socket on the wire is a UDP socket and RADIO framing). It also adds the
 `scheme` and an integer port to the node dict the stock script gives the `elasticsearch-py` 8 client. The stock handler, filter, rate limit, document building and

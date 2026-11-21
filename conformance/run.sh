@@ -53,7 +53,7 @@ fi
 docker exec -d $N-dut sh -c "$DUT_CMD > /tmp/dut.out 2>&1"
 sleep "${WARMUP:-4}"
 rc=0
-# No bind mounts: the docker daemon (a Lima VM on the Mac) cannot see every host path, so files go in and out with docker cp.
+# No bind mounts: the docker daemon (TP_DOCKER_HOST, Docker Desktop by default, or a VM) may not see every host path, so files go in and out with docker cp.
 # shellcheck disable=SC2086
 docker create --name $N-peers --network container:$N-dut ${PEER_FLAGS:-} --cap-add NET_RAW --cap-add NET_ADMIN \
   -e ZEEK_REQUIRED="${ZEEK_REQUIRED:-0}" -e SELFTEST="${SELFTEST:-0}" -e SERIAL="${SERIAL:-}" "$TESTPEERS" /conformance/inside.sh "$proto" >/dev/null

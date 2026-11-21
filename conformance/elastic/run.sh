@@ -1,16 +1,18 @@
 #!/bin/sh
-# Elasticsearch/OpenSearch conformance (make conformance PROTO=elastic; called by conformance/run.sh). Brings up, on the Lima docker
-# daemon, an Elasticsearch 8, an OpenSearch 2 and an Elasticsearch 8 with security on (TLS, basic auth, API key), then runs
-#   check.py        in a bennu:arm64 container next to stock pybennu: provider export, `ferrofire groundtruth`, the differential
+# Elasticsearch/OpenSearch conformance (make conformance PROTO=elastic; called by conformance/run.sh). Brings up, on Docker Desktop,
+# an Elasticsearch 8, an OpenSearch 2 and an Elasticsearch 8 with security on (TLS, basic auth, API key), then runs
+#   check.py        in a stock-image container ($STOCK_IMAGE) next to stock pybennu: provider export, `ferrofire groundtruth`, the differential
 #                   against the stock groundtruth_monitor.py, the intended differences, TLS/auth enforcement
 #   scorch_check.py in a Python 3.12 container: the SCORCH providerdata component's own check against the provider export
 # All containers are named ff-conf-*, are only ever created and removed here, and share the network ff-conf-es-net. No bind mounts
-# (the daemon is a VM): files go in with docker cp. The binary is FF_BIN (default target-linux/debug/ferrofire from `make test`).
+# (the daemon is a VM; DOCKER_HOST defaults to Docker Desktop): files go in with docker cp. The binary is FF_BIN (default target-linux/debug/ferrofire from `make test`).
 # Needs the phenix_apps source: SCORCH_SRC (default ~/git/sceptre-phenix-apps/src/python/phenix_apps). Images used, not built from
 # source: opensearchproject/opensearch:2 (Apache-2.0), docker.elastic.co/elasticsearch/elasticsearch:8.19.3 (test peer only).
 # env: KEEP=1 leaves the containers up (rerun with the same env to reuse them), OUT=dir for the artefacts (default target/conformance/elastic).
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
+DOCKER_HOST=${DOCKER_HOST:-unix://$HOME/.docker/run/docker.sock}; export DOCKER_HOST
+STOCK_IMAGE=${STOCK_IMAGE:-ffc-stock-2026.11.03:22.04}
 FF_BIN=${FF_BIN:-$here/../../target-linux/debug/ferrofire}
 SCORCH_SRC=${SCORCH_SRC:-$HOME/git/sceptre-phenix-apps/src/python/phenix_apps}
 OUT=${OUT:-$here/../../target/conformance/elastic}
@@ -34,7 +36,7 @@ up ff-conf-essec --hostname essec --network $NET --network-alias essec -e discov
   -e cluster.routing.allocation.disk.threshold_enabled=false -e ES_JAVA_OPTS="$JAVA" "$ES_IMAGE"
 docker image inspect ff-conf-scorch-env >/dev/null 2>&1 || docker build -q -f "$here/Dockerfile.scorch" -t ff-conf-scorch-env "$here" >/dev/null
 docker rm -f ff-conf-dut ff-conf-scorch >/dev/null 2>&1 || true
-docker run -d --name ff-conf-dut --network $NET bennu:arm64 sleep 3600 >/dev/null
+docker run -d --name ff-conf-dut --network $NET "$STOCK_IMAGE" sleep 3600 >/dev/null
 docker run -d --name ff-conf-scorch --network $NET ff-conf-scorch-env sleep 3600 >/dev/null
 # the TLS CA of the secured server appears once it has started (poll; it is created on first boot)
 for _ in $(seq 1 90); do
@@ -48,7 +50,7 @@ for c in ff-conf-dut ff-conf-scorch; do
 done
 docker cp "$SCORCH_SRC" ff-conf-scorch:/phenix_apps
 rc=0
-echo "== bennu:arm64: provider export, groundtruth, differential vs stock pybennu"
+echo "== $STOCK_IMAGE: provider export, groundtruth, differential vs stock pybennu"
 docker exec ff-conf-dut python3 /conf/check.py || rc=1
 docker cp ff-conf-dut:/out/. "$OUT" 2>/dev/null || true
 echo "== SCORCH providerdata check against the provider export"
