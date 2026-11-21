@@ -7,6 +7,9 @@ export PCAP=/out/dnp3-client.pcap SETTLE=0.2
 p() { python3 /conformance/stock/probe_cmdif.py "$@"; }
 p --mark "master started with no outstation"
 p QUERY= READ=brkr READ=load-power WRITE=gen-mw-setpoint:3 READ=gen-mw-setpoint
+# on a serial port the master's session is up while the outstation is away, so a queued command could land on an outstation that
+# is just starting, by a few ms either way; past 11 s it is gone in both masters (opendnp3's 10 s start timeout, ours: ww-8k4)
+[ -z "${SERIAL:-}" ] || sleep 11
 p --ctl start 14
 p --sync 20000
 p READ=brkr READ=load-power READ=load-breaker-toggle READ=load-mw-setpoint READ=gen-mw-setpoint READ=no-such-input

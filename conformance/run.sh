@@ -38,14 +38,23 @@ docker run -d --name $N-dut ${DUT_CAPS:-} "$DUT_IMAGE" sleep 900 >/dev/null
 # (DUT_PRE: the stock device a client DUT talks to)
 for pair in ${DUT_EXTRA:-}; do docker cp "$here/../${pair%%:*}" "$N-dut:${pair#*:}"; done
 [ -z "${DUT_PRE:-}" ] || docker exec -d $N-dut sh -c "$DUT_PRE"
-docker exec -i $N-dut sh -c 'cat > /tmp/cfg.xml' < "$CFG"
+# SERIAL=listen:PORT (a server DUT) or connect:PORT (a client DUT): the DUT's <endpoint> tcp://127.0.0.1:PORT becomes the serial port
+# /tmp/ttyFF, a pty that stock/ptyrelay.py joins to TCP PORT, so the peers and the capture are those of the TCP run (ww-8k4).
+if [ -n "${SERIAL:-}" ]; then
+  docker cp "$here/stock/ptyrelay.py" $N-dut:/tmp/ptyrelay.py
+  docker exec -d $N-dut sh -c "python3 /tmp/ptyrelay.py ${SERIAL%%:*} ${SERIAL#*:} /tmp/ttyFF > /tmp/ptyrelay.out 2>&1"
+  docker exec $N-dut sh -c 'for i in $(seq 50); do [ -e /tmp/ttyFF ] && exit 0; sleep 0.1; done; echo "no /tmp/ttyFF" >&2; exit 1'
+  sed "s|tcp://127.0.0.1:${SERIAL#*:}<|/tmp/ttyFF<|" "$CFG" | docker exec -i $N-dut sh -c 'cat > /tmp/cfg.xml'
+else
+  docker exec -i $N-dut sh -c 'cat > /tmp/cfg.xml' < "$CFG"
+fi
 docker exec -d $N-dut sh -c "$DUT_CMD > /tmp/dut.out 2>&1"
 sleep "${WARMUP:-4}"
 rc=0
 # No bind mounts: the docker daemon (a Lima VM on the Mac) cannot see every host path, so files go in and out with docker cp.
 # shellcheck disable=SC2086
 docker create --name $N-peers --network container:$N-dut ${PEER_FLAGS:-} --cap-add NET_RAW --cap-add NET_ADMIN \
-  -e ZEEK_REQUIRED="${ZEEK_REQUIRED:-0}" -e SELFTEST="${SELFTEST:-0}" "$TESTPEERS" /conformance/inside.sh "$proto" >/dev/null
+  -e ZEEK_REQUIRED="${ZEEK_REQUIRED:-0}" -e SELFTEST="${SELFTEST:-0}" -e SERIAL="${SERIAL:-}" "$TESTPEERS" /conformance/inside.sh "$proto" >/dev/null
 docker cp "$here/." $N-peers:/conformance
 # proto.env may name a repo-relative binary the peers need (PEER_BIN: our own thin test client, for protocols with no open peer)
 [ -z "${PEER_BIN:-}" ] || docker cp "$here/../$PEER_BIN" "$N-peers:/usr/local/bin/$(basename "$PEER_BIN")"

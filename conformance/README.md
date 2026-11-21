@@ -169,16 +169,33 @@ too (it has, frame for frame). `tests/modbus_client.rs` and `tests/dnp3_master.r
 | a command-interface bind failure exits the device | logged; the client runs without it | the rest of the device keeps running, as for every module |
 | DNP3: a connection lost is reopened at once, also when it never carried a response (a tight loop through a relay in front of a dead outstation) | at once only after a session that was answered; otherwise the 1, 2, 4 ... 60 s pauses | no connection storm |
 | DNP3: after a clear-restart that leaves IIN1.7 set, opendnp3 stops clearing but polls class 0 again on every response that carries the bit | the class 0 poll is not re-demanded either | no poll loop against an outstation that never clears the bit |
-| DNP3: commands wait in opendnp3's master queue, which has no size, only a 10 s start timeout (the callback result goes to stdout); WRITE is answered at once | the queue holds 1000 commands per connection (`COMMAND_QUEUE`); one more is dropped and WRITE is answered the same; the warning is logged once per overflow episode (the first drop), and a second line with the count when the queue drains | a WRITE flood while an outstation is silent cannot grow memory; the reply is stock's |
+| DNP3: commands wait in opendnp3's master queue, which has no size, only a 10 s start timeout (the callback result goes to stdout); WRITE is answered at once | the same 10 s start timeout (`START_TIMEOUT`, logged), and the queue holds 1000 commands per connection (`COMMAND_QUEUE`); one more is dropped and WRITE is answered the same; the warning is logged once per overflow episode (the first drop), and a second line with the count when the queue drains | a WRITE flood while an outstation is silent cannot grow memory; the reply is stock's |
 | DNP3 server: a `<deadband>` that is not a number (`abc`, empty, `inf`) makes stock log `ERROR: There was a problem parsing dnp3 server setup: conversion of data to type "d" failed` to stdout and carry on with no DNP3 outstation at all (nothing listens on the port, no Size lines) | the config is refused with an error naming `<deadband>` | the generator never emits it |
 | an out-of-range Modbus write is converted from double to `uint16_t`, which C++ leaves undefined: the arm64 build wraps it (`2000` over 0..1000 leaves as `fffe`), another build may not | the arm64 bytes, on every architecture | the capture is from arm64 |
 
-**Serial endpoints** (plan F6, bead ww-y5q): an `<endpoint>` that is a device path is opened at 9600 8N1, no flow control, raw. Modbus puts MBAP on the port (no slave byte, no CRC);
-DNP3 uses the same link frames as on TCP. Recorded from the source, not from the stock image, because neither `ffc-stock-2026.11.03:22.04` nor `ferrofire-testpeers`
-has `socat` and our servers have no serial path yet (ww-z5w): opendnp3's `asyncOpenDelay` (500 ms) is never read, so there is no delay after open; stock Modbus never
-applies its stored 9600 8N1 (our port is 9600 8N1 raw, so a peer at the OS default of 9600 is unaffected). `tests/serial_clients.rs` runs both clients over a pty pair
-into our TCP server (the first DNP3 frame equals the TCP one, every Modbus request is 12 octets for one register); a conformance run of the stock server behind a
-pty (a `python3` `pty.openpty` relay would do, the image has python3) is the open item in ww-z5w.
+**Serial endpoints** (plan F6, beads ww-y5q, ww-z5w, ww-8k4): an `<endpoint>` that is a device path is opened at 9600 8N1, no flow control, raw. Modbus puts
+MBAP on the port (no slave byte, no CRC); DNP3 uses the same link frames as on TCP. Neither image has `socat`, so `stock/ptyrelay.py` (python3 only) stands in:
+in the DUT container it makes a pty, links its slave to `/tmp/ttyFF`, and joins its master side to the TCP port the TCP run uses. `SERIAL=listen:PORT` (a server
+DUT: one TCP client at a time is joined to the port) or `SERIAL=connect:PORT` (a client DUT: what it writes goes to the TCP server on PORT, dropped while that
+refuses) turns that `<endpoint>` into `/tmp/ttyFF`, so the peers, captures and transcripts are the TCP run's. The relay passes on what the device wrote after
+20 ms of silence on the port, as a line reader frames it: a line carries bytes, not writes.
+
+    make diff-serial                                                    # both servers, every differential set, ours on a serial port vs stock
+    SERIAL=connect:5502 DUT=rust make conformance PROTO=modbus-client   # our client on a serial port vs stock/client-modbus-serial.golden
+    SERIAL=connect:20000 DUT=rust make conformance PROTO=dnp3-client    # our master; stock's serial transcript is its TCP one, so client-dnp3.golden
+    SERIAL=connect:5502 conformance/stock/run-stock.sh modbus-client    # re-record the stock client's serial golden
+
+What the stock image does on a serial port (recorded 2026-11-20, `ffc-stock-2026.11.03:22.04`):
+- DNP3 outstation: every differential set (diff, big, out, grp, cfg, ovf, nack, nopv) gives the TCP golden byte for byte. DNP3 master: the TCP transcript.
+- Modbus server: the TCP goldens, except that it answers **one frame per read**: a second request in the same write waits in its buffer for the next bytes,
+  and from then on every reply comes one request late. The two cases that put two frames in one write (`pipelined FC4+FC3` in `diff`, `two writes ... in one
+  segment` in `edges`) are skipped when `SERIAL` is set; `stock-serial-diff.golden` (recorded) and `stock-serial-edges.golden` (`stock-edges.golden` without that
+  case; stock's run differs from it only in how often the NaN write is re-sent, ww-tqx) are the serial goldens, `waterway` needs none.
+- Modbus client: a request to a server that is away waits out its 1000 ms timeout (`~1s` in `client-modbus-serial.golden`) instead of a refused connection.
+
+Ours equals all of these. Where we differ on a serial port: we answer both frames of a write at once, as stock does on TCP (a master that pipelines gets
+its replies in order, not one late). Our DNP3 master has opendnp3's 10 s start timeout too (`START_TIMEOUT`): a session on a serial port stays up while the
+outstation is away, so a queued command could otherwise be sent long after it was given. The pty ignores baud and parity, so a real port is not covered.
 
 `fep` mode has no stock counterpart; its rules are in [docs/field-device-clients.md](../docs/field-device-clients.md) and its tests in `tests/fd_fep.rs`.
 

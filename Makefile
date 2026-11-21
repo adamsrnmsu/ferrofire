@@ -10,7 +10,7 @@ DRY_MIN := 0.8
 # ponytail: pid lock; a kill -9 of make leaves a stale file that src-free ignores because the pid is gone.
 MUTATE_LOCK := .mutate.lock
 
-.PHONY: dut netns differential diff-dnp3 diff-modbus testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report bench-control bench-fdmicro bench-maxrate bench-maxrate-control charts image rtu-image rtu-image-smoke fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
+.PHONY: dut netns differential diff-dnp3 diff-modbus diff-serial testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report bench-control bench-fdmicro bench-maxrate bench-maxrate-control charts image rtu-image rtu-image-smoke fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
 help:    # list targets
 	@grep -E '^[a-z-]+:.*#' $(MAKEFILE_LIST) | sed -E 's/^([a-z-]+):[^#]*#/\1\t/'
 src-free:   # fail fast while make mutate is rewriting src/
@@ -98,6 +98,11 @@ diff-dnp3: dut   # our DNP3 outstation vs the recorded stock transcripts, live i
 	@for s in diff big out grp cfg ovf nack nopv; do $(TP) conformance/differential.sh dnp3 rust $$s | diff conformance/dnp3/stock-$$s.golden - && echo "dnp3 $$s: byte-equal to stock" || exit 1; done
 diff-modbus: dut   # our Modbus server vs the recorded stock transcripts, live in containers
 	@for s in diff waterway edges; do $(TP) conformance/differential.sh modbus rust $$s | diff conformance/modbus/stock-$$s.golden - && echo "modbus $$s: byte-equal to stock" || exit 1; done
+diff-serial: dut   # both servers on a serial port (a pty relayed to the TCP port, ww-8k4) vs the stock transcripts; stock-serial-SET.golden where a set differs on serial
+	@for s in diff waterway edges; do g=conformance/modbus/stock-serial-$$s.golden; [ -f $$g ] || g=conformance/modbus/stock-$$s.golden; \
+	  SERIAL=listen:5502 $(TP) conformance/differential.sh modbus rust $$s 2>/dev/null | diff $$g - && echo "modbus $$s on serial: byte-equal to stock" || exit 1; done
+	@for s in diff big out grp cfg ovf nack nopv; do g=conformance/dnp3/stock-serial-$$s.golden; [ -f $$g ] || g=conformance/dnp3/stock-$$s.golden; \
+	  SERIAL=listen:20000 $(TP) conformance/differential.sh dnp3 rust $$s 2>/dev/null | diff $$g - && echo "dnp3 $$s on serial: byte-equal to stock" || exit 1; done
 
 clean:   # remove build output and metrics
 	rm -rf target target-linux dist .metrics

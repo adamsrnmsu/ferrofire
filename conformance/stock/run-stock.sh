@@ -12,7 +12,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 bennu=${BENNU_DATA:-$HOME/git/sceptre-bennu/data/configs/ep}
 case "$1" in
   modbus-client|dnp3-client)
-    p=${1%-client}; : > "$here/client-$p.golden"   # check.sh compares with the golden: empty while recording
+    # SERIAL=connect:PORT records the serial goldens instead (client-<proto>-serial*, run.sh SERIAL)
+    p=${1%-client}${SERIAL:+-serial}; : > "$here/client-$p.golden"   # check.sh compares with the golden: empty while recording
     DUT=stock "$here/../run.sh" "$1" || true
     out=${OUT:-$here/../../target/conformance/$1}
     cp "$out/transcript.txt" "$here/client-$p.golden"; cp "$out/$1.pcap" "$here/client-$p.pcap"

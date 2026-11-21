@@ -1,0 +1,158 @@
+# client started with no server
+READ=load-power	ERR=Failed reading tag 'load-power': <text>\x00	~1s
+> SYN
+< RST
+# server started
+READ=load-power	ACK=load-power:-1000.000000\x00
+> SYN
+< SYN
+> 000400000006010475300001
+< 0004000000050104020000
+READ=gen-status	ACK=gen-status:false\x00
+> 000500000006010227110001
+< 00050000000401020100
+# inputs published
+QUERY=	ACK=default-range,gen-power,gen-status,load-breaker-status,load-breaker-toggle,load-mw-setpoint,load-power,no-such-coil,no-such-register,\x00
+query=	ACK=default-range,gen-power,gen-status,load-breaker-status,load-breaker-toggle,load-mw-setpoint,load-power,no-such-coil,no-such-register,\x00
+Query=	ERR=Unknown command type (must be QUERY|READ|WRITE)\x00
+QUERY=zzz	ACK=default-range,gen-power,gen-status,load-breaker-status,load-breaker-toggle,load-mw-setpoint,load-power,no-such-coil,no-such-register,\x00
+READ=load-power	ACK=load-power:-248.523697\x00
+> 000600000006010475300001
+< 0006000000050104024020
+read=load-power	ACK=load-power:-248.523697\x00
+> 000700000006010475300001
+< 0007000000050104024020
+READ=default-range	ACK=default-range:-248.523697\x00
+> 000800000006010475300001
+< 0008000000050104024020
+READ=load-breaker-status	ACK=load-breaker-status:false\x00
+> 000900000006010227100001
+< 00090000000401020100
+READ=gen-status	ACK=gen-status:true\x00
+> 000a00000006010227110001
+< 000a0000000401020101
+READ=load-breaker-toggle	ACK=load-breaker-toggle:false\x00
+> 000b00000006010100000001
+< 000b0000000401010100
+READ=gen-power	ACK=gen-power:true\x00
+> 000c00000006010100010001
+< 000c0000000401010101
+READ=load-mw-setpoint	ACK=load-mw-setpoint:250.492096\x00
+> 000d0000000601039c400001
+< 000d000000050103024020
+WRITE=load-breaker-toggle:true	ACK=Wrote tag load-breaker-toggle -- true\x00
+> 000e0000000601050000ff00
+< 000e0000000601050000ff00
+READ=load-breaker-toggle	ACK=load-breaker-toggle:false\x00
+> 000f00000006010100000001
+< 000f0000000401010100
+write=load-breaker-toggle:false	ACK=Wrote tag load-breaker-toggle -- false\x00
+> 001000000006010500000000
+< 001000000006010500000000
+WRITE=load-mw-setpoint:500	ACK=Wrote tag load-mw-setpoint -- 500\x00
+> 00110000000601069c407fff
+< 00110000000601069c407fff
+READ=load-mw-setpoint	ACK=load-mw-setpoint:250.492096\x00
+> 00120000000601039c400001
+< 0012000000050103024020
+WRITE=load-mw-setpoint:250.5	ACK=Wrote tag load-mw-setpoint -- 250.5\x00
+> 00130000000601069c404020
+< 00130000000601069c404020
+WRITE=load-mw-setpoint:-5	ACK=Wrote tag load-mw-setpoint -- -5\x00
+> 00140000000601069c400000
+< 00140000000601069c400000
+WRITE=load-mw-setpoint:2000	ACK=Wrote tag load-mw-setpoint -- 2000\x00
+> 00150000000601069c40fffe
+< 00150000000601069c40fffe
+WRITE=load-mw-setpoint:1e3	ACK=Wrote tag load-mw-setpoint -- 1e3\x00
+> 00160000000601069c40ffff
+< 00160000000601069c40ffff
+WRITE=load-mw-setpoint:0.007	ACK=Wrote tag load-mw-setpoint -- 0.007\x00
+> 00170000000601069c400000
+< 00170000000601069c400000
+WRITE=load-mw-setpoint:5:6	ACK=Wrote tag load-mw-setpoint -- 5\x00
+> 00180000000601069c400147
+< 00180000000601069c400147
+WRITE=load-mw-setpoint: 7	ACK=Wrote tag load-mw-setpoint --  7\x00
+> 00190000000601069c4001ca
+< 00190000000601069c4001ca
+WRITE=load-mw-setpoint:7x	ACK=Wrote tag load-mw-setpoint -- 7x\x00
+> 001a0000000601069c4001ca
+< 001a0000000601069c4001ca
+WRITE=load-mw-setpoint:nan	ACK=Wrote tag load-mw-setpoint -- nan\x00
+> 001b0000000601069c400000
+< 001b0000000601069c400000
+WRITE=load-mw-setpoint:inf	ACK=Wrote tag load-mw-setpoint -- inf\x00
+> 001c0000000601069c40ffff
+< 001c0000000601069c40ffff
+WRITE=load-mw-setpoint:0x10	ACK=Wrote tag load-mw-setpoint -- 0x10\x00
+> 001d0000000601069c400418
+< 001d0000000601069c400418
+# errors
+READ=no-such-register	ERR=Failed reading tag 'no-such-register': <text>\x00
+> 001e0000000601039c450001
+< 001e00000003018302
+READ=no-such-register	ERR=Failed reading tag 'no-such-register': <text>\x00
+> 001f0000000601039c450001
+< 001f00000003018302
+READ=no-such-coil	ERR=Failed reading tag 'no-such-coil': <text>\x00
+> 002000000006010100070001
+< 002000000003018103
+READ=nope	ERR=Client does not have a mapping for tag 'nope'\x00
+READ=load-power 	ERR=Client does not have a mapping for tag 'load-power '\x00
+ READ=load-power	ERR=Unknown command type (must be QUERY|READ|WRITE)\x00
+READ=	ERR=Client does not have a mapping for tag ''\x00
+READ=load-power=x	ACK=load-power:-248.523697\x00
+> 002100000006010475300001
+< 0021000000050104024020
+READ=load-power:3	ERR=Client does not have a mapping for tag 'load-power:3'\x00
+FOO=x	ERR=Unknown command type (must be QUERY|READ|WRITE)\x00
+=	ERR=Unknown command type (must be QUERY|READ|WRITE)\x00
+WRITE=load-breaker-toggle:1	ERR=Failed writing tag 'load-breaker-toggle': <text>\x00
+> 002200000006010600000000
+< 002200000003018602
+WRITE=load-mw-setpoint:true	ERR=Failed writing tag 'load-mw-setpoint': <text>\x00
+> 00230000000601059c40ff00
+< 002300000003018502
+WRITE=load-mw-setpoint:true:x	ERR=Failed writing tag 'load-mw-setpoint': <text>\x00
+> 00240000000601059c40ff00
+< 002400000003018502
+WRITE=load-power:5	ERR=Failed writing tag 'load-power': <text>\x00
+> 0025000000060106753055c2
+< 002500000003018602
+WRITE=load-breaker-status:true	ERR=Failed writing tag 'load-breaker-status': <text>\x00
+> 00260000000601052710ff00
+< 002600000003018502
+WRITE=no-such-register:5	ERR=Failed writing tag 'no-such-register': <text>\x00
+> 00270000000601069c4555c2
+< 002700000003018602
+WRITE=no-such-coil:true	ERR=Failed writing tag 'no-such-coil': <text>\x00
+> 00280000000601050007ff00
+< 002800000003018502
+WRITE=nope:1	ERR=Client does not have a mapping for tag 'nope'\x00
+WRITE=:	ERR=Client does not have a mapping for tag ''\x00
+# server stopped
+< FIN
+> FIN
+READ=load-power	ERR=Failed reading tag 'load-power': <text>\x00	~1s
+> SYN
+< RST
+READ=load-power	ERR=Failed reading tag 'load-power': <text>\x00	~1s
+> SYN
+< RST
+WRITE=load-mw-setpoint:5	ERR=Failed writing tag 'load-mw-setpoint': <text>\x00	~1s
+> SYN
+< RST
+WRITE=load-breaker-toggle:true	ERR=Failed writing tag 'load-breaker-toggle': <text>\x00	~1s
+> SYN
+< RST
+QUERY=	ACK=default-range,gen-power,gen-status,load-breaker-status,load-breaker-toggle,load-mw-setpoint,load-power,no-such-coil,no-such-register,\x00
+# server started
+READ=load-power	ACK=load-power:-1000.000000\x00
+> SYN
+< SYN
+> 002d00000006010475300001
+< 002d000000050104020000
+READ=load-power	ACK=load-power:-1000.000000\x00
+> 002e00000006010475300001
+< 002e000000050104020000
