@@ -73,7 +73,9 @@ for _iv, _n in STOCK_FAST + NEW_FAST:
 CROSS = sorted(d.name for d in CTL.glob("cross-*") if d.is_dir())
 for _n in CROSS:
     _k = parse_dir(_n)
-    assert _k and _k[0] == "cross", _n
+    if not _k:   # a directory with a free-form suffix (cross-ferrofire-stock-ackhold, ww-ieb): not part of the 2x2 matrix, read by name where needed
+        continue
+    assert _k[0] == "cross", _n
     DIRS["docker", _n] = CTL / _n
     PUBLISH_S[_n] = 0.05 if _k[1] == "ferrofire" else _k[4] or 1.0
 
