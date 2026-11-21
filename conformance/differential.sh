@@ -28,6 +28,11 @@ if [ -n "${SERIAL:-}" ]; then
   docker exec ff-diff-$set-dut sh -c 'for i in $(seq 50); do [ -e /tmp/ttyFF ] && exit 0; sleep 0.1; done; echo "no /tmp/ttyFF" >&2; exit 1'
   docker exec ff-diff-$set-dut sed -i "s|tcp://127.0.0.1:${SERIAL#*:}<|/tmp/ttyFF<|" /tmp/cfg.xml
 fi
+# UDP=PORT (DNP3, ww-8l7): the DUT's <endpoint> tcp://127.0.0.1:PORT becomes udp://127.0.0.1:PORT and the probe sends datagrams.
+# Ours only: stock bennu has no UDP endpoint, so the comparison is with the stock TCP transcript.
+if [ -n "${UDP:-}" ]; then
+  docker exec ff-diff-$set-dut sed -i "s|tcp://127.0.0.1:${UDP}<|udp://127.0.0.1:${UDP}<|" /tmp/cfg.xml
+fi
 case $who in
   stock) docker exec -d ff-diff-$set-dut sh -c 'cd /tmp && LD_LIBRARY_PATH=/usr/local/lib bennu-field-device --f /tmp/cfg.xml > /tmp/dut.out 2>&1' ;;
   rust)  docker cp "${FF_BIN:-$root/target-linux/debug/ferrofire}" ff-diff-$set-dut:/usr/local/bin/ferrofire
@@ -35,7 +40,7 @@ case $who in
   *) echo "stock|rust" >&2; exit 2 ;;
 esac
 sleep 6
-docker create --name ff-diff-$set-peers --network container:ff-diff-$set-dut -e SERIAL="${SERIAL:-}" -e SERIAL_LINE="${SERIAL_LINE:-}" ferrofire-testpeers python3 /conformance/probe_$set.py >/dev/null
+docker create --name ff-diff-$set-peers --network container:ff-diff-$set-dut -e SERIAL="${SERIAL:-}" -e SERIAL_LINE="${SERIAL_LINE:-}" -e UDP="${UDP:-}" ferrofire-testpeers python3 /conformance/probe_$set.py >/dev/null
 docker cp "$here/$proto" ff-diff-$set-peers:/conformance
 # probe lines starting "#T " are the machine-readable trace (replayed by the Rust golden test); the rest is the transcript
 docker start -a ff-diff-$set-peers | awk -v t="${TRACE:-/dev/null}" '/^#T /{print substr($0,4) > t; next} {print}'

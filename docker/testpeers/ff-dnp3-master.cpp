@@ -1,5 +1,6 @@
 // One-shot DNP3 TCP master on opendnp3 (Apache-2.0). Not interactive, unlike the stock example, so a harness can script it.
 // usage: ff-dnp3-master HOST PORT LOCAL_ADDR REMOTE_ADDR [wait_s] [crob IDX CODE | ao IDX VALUE | select-crob IDX CODE]...
+// FF_DNP3_UDP=1: a UDP channel instead (opendnp3's AddUDPChannel, from an ephemeral local port to HOST:PORT; conformance/dnp3-udp).
 // It does an integrity poll (class 3/2/1/0) and then each command in order, printing decoded values and results to stdout.
 #include <opendnp3/ConsoleLogger.h>
 #include <opendnp3/DNP3Manager.h>
@@ -33,8 +34,13 @@ int main(int argc, char* argv[])
     if (i < argc && std::isdigit(static_cast<unsigned char>(argv[i][0]))) wait_s = std::atoi(argv[i++]);
 
     DNP3Manager manager(1, ConsoleLogger::Create());
-    auto channel = manager.AddTCPClient("ff", levels::NORMAL | levels::ALL_APP_COMMS, ChannelRetry::Default(),
-                                        {IPEndpoint(host, port)}, "0.0.0.0", PrintingChannelListener::Create());
+    const auto lv = levels::NORMAL | levels::ALL_APP_COMMS;
+    const char* udp = std::getenv("FF_DNP3_UDP");
+    auto channel = (udp && std::string(udp) == "1")
+        ? manager.AddUDPChannel("ff", lv, ChannelRetry::Default(), IPEndpoint("0.0.0.0", 0), IPEndpoint(host, port),
+                                PrintingChannelListener::Create())
+        : manager.AddTCPClient("ff", lv, ChannelRetry::Default(), {IPEndpoint(host, port)}, "0.0.0.0",
+                               PrintingChannelListener::Create());
     MasterStackConfig cfg;
     cfg.master.responseTimeout = TimeDuration::Seconds(3);
     cfg.master.disableUnsolOnStartup = true;

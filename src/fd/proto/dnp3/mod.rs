@@ -278,6 +278,7 @@ impl Module for Outstation {
         };
         match bound {
             net::Bound::Tcp(l) => accept(l, ctx).await,
+            net::Bound::Udp(s) => udp(s, ctx).await,
             #[cfg(feature = "proto-serial")]
             net::Bound::Serial(path, port) => serial(&path, port, ctx).await,
         }
@@ -317,6 +318,41 @@ async fn accept(listener: tokio::net::TcpListener, ctx: Ctx) {
             }
         }
     }
+}
+
+/// Serve masters on a UDP socket until `stop`: each datagram is fed as a TCP read is, and the reply goes back to its sender as one
+/// datagram. There is no master slot: whoever sends is answered. A datagram that breaks the session (a bad CRC, a fragment too
+/// long) starts a fresh one, as a new TCP connection would; the event buffer is kept, since no connection was lost.
+// ponytail: one session for every sender (application sequence, a select waiting for its operate); key sessions by sender if two
+// masters ever poll one UDP outstation
+async fn udp(sock: tokio::net::UdpSocket, ctx: Ctx) {
+    let (mut conn, start) = (Conn::new(), Instant::now());
+    let mut buf = vec![0u8; 65536];
+    let mut tick = tokio::time::interval(TICK);
+    loop {
+        let (n, from) = tokio::select! {
+            _ = ctx.stop.cancelled() => break,
+            _ = tick.tick() => { conn.tick(&mut lock(&ctx.dev), start.elapsed()); continue }
+            r = sock.recv_from(&mut buf) => match r { Ok(r) => r, Err(_) => continue },
+        };
+        let mut sink = Commands::new(&ctx.store, &ctx.log);
+        let reply = conn.feed(&mut lock(&ctx.dev), &mut sink, &buf[..n], start.elapsed());
+        match reply {
+            Err(Close(why)) => {
+                ctx.log.log(
+                    "error",
+                    "dnp3 connection",
+                    format!("dropping the session with {from}: {why}"),
+                );
+                conn = Conn::new();
+            }
+            Ok(bytes) if bytes.is_empty() => {}
+            Ok(bytes) => {
+                let _ = sock.send_to(&bytes, from).await;
+            }
+        }
+    }
+    conn.cancel(&mut lock(&ctx.dev));
 }
 
 /// Serve the one master on a serial port until `stop` (no CloseNew slot: the port is one connection).

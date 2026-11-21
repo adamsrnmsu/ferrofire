@@ -120,6 +120,14 @@ impl Module for Server {
         let (dev, log) = (Arc::new(self.dev), self.log);
         let listener = match bound {
             net::Bound::Tcp(l) => l,
+            net::Bound::Udp(_) => {
+                log.log(
+                    "error",
+                    "modbus TCP server init",
+                    "failed to start the server: udp:// is DNP3 only",
+                );
+                return tracing::error!("modbus-server: udp:// is DNP3 only");
+            }
             #[cfg(feature = "proto-serial")]
             net::Bound::Serial(path, port) => {
                 let session = |c| serve(c, dev.clone(), store.clone(), log.clone(), stop.clone());

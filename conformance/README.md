@@ -174,6 +174,13 @@ too (it has, frame for frame). `tests/modbus_client.rs` and `tests/dnp3_master.r
 | DNP3 server: a `<deadband>` that is not a number (`abc`, empty, `inf`) makes stock log `ERROR: There was a problem parsing dnp3 server setup: conversion of data to type "d" failed` to stdout and carry on with no DNP3 outstation at all (nothing listens on the port, no Size lines) | the config is refused with an error naming `<deadband>` | the generator never emits it |
 | an out-of-range Modbus write is converted from double to `uint16_t`, which C++ leaves undefined: the arm64 build wraps it (`2000` over 0..1000 leaves as `fffe`), another build may not | the arm64 bytes, on every architecture | the capture is from arm64 |
 
+**UDP endpoints** (DNP3, ww-8l7): `UDP=PORT conformance/differential.sh dnp3 rust SET` turns the DUT's `tcp://127.0.0.1:PORT` into `udp://127.0.0.1:PORT`
+and the probe (`dnp3/dnp3probe.py`) sends the same requests as datagrams, a new socket standing for a new connection. Stock has no UDP endpoint, so `make
+diff-udp` compares ours with the stock TCP goldens of all eight sets. One step differs by design and is skipped on UDP: probe_diff's second master, refused
+by stock's one-master slot (CloseNew) and answered on UDP; the golden's `second connection: closed` becomes `second connection: skipped on udp`.
+`make conformance PROTO=dnp3-udp` (DUT ours) runs opendnp3 3.1.2's own UDP channel (`FF_DNP3_UDP=1 ff-dnp3-master`, the same polls and commands
+as `dnp3/peer.sh`) against our outstation on `udp://127.0.0.1:20000` and judges the capture with tshark and Zeek's DNP3 UDP analyzer.
+
 **Serial endpoints** (plan F6, beads ww-y5q, ww-z5w, ww-8k4): an `<endpoint>` that is a device path is opened at 9600 8N1, no flow control, raw. Modbus puts
 MBAP on the port (no slave byte, no CRC); DNP3 uses the same link frames as on TCP. Neither image has `socat`, so `stock/ptyrelay.py` (python3 only) stands in:
 in the DUT container it makes a pty, links its slave to `/tmp/ttyFF`, and joins its master side to the TCP port the TCP run uses. `SERIAL=listen:PORT` (a server

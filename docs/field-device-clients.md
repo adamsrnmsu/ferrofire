@@ -21,6 +21,12 @@ the library, so there is no delay after open. A port that cannot be opened is re
 client and our TCP server, and `tests/serial_servers.rs` between our TCP client and our server on the pty. Against stock, `conformance/stock/ptyrelay.py` runs
 both clients and both servers on a pty in the stock image (`SERIAL=`, conformance/README.md "Serial endpoints"): ours equals stock there too.
 
+**UDP endpoints (DNP3 master, ww-8l7).** A `<dnp3-connection>` endpoint `udp://ip:port` is a UDP socket on an ephemeral port, connected to the outstation
+(`net::connect`, `Conn::Udp`): one write is one datagram (a request's link frames go out together), one read one whole datagram (the master reads into a 64 KiB
+buffer, so nothing is cut). Connecting always succeeds. A datagram to a port where nothing listens comes back as ICMP port unreachable, which Linux reports on the
+next send, so the master's next request or keep-alive fails and the connection is made anew with the usual backoff. `tests/dnp3_udp.rs` runs our master
+against our outstation over UDP. The Modbus client refuses `udp://`.
+
 ## Config
 
 The bennu schema, unchanged:

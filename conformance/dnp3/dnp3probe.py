@@ -84,8 +84,13 @@ class Sock:
     def sendall(self, b): trace("send", b.hex()); self.real.sendall(b)
     def __getattr__(self, n): return getattr(self.real, n)
 def connect():
+    # UDP= (differential.sh, ww-8l7): the same requests as datagrams to a udp:// outstation; a new socket stands for a new connection
     global s, tpseq
-    trace("connect"); s = Sock(socket.create_connection((host, port), timeout=3)); tpseq = 0
+    if os.environ.get("UDP"):
+        u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); u.connect((host, port)); u.settimeout(3)
+    else:
+        u = socket.create_connection((host, port), timeout=3)
+    trace("connect"); s = Sock(u); tpseq = 0
 connect()
 # on a serial line (differential.sh SERIAL=, ww-y51) a request spends its line time before the device has it
 _line = os.environ.get("SERIAL_LINE") or "9600-8N1"
