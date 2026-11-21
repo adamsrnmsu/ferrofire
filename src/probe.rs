@@ -9,9 +9,9 @@ use crate::datagram::{Quality, Receiver};
 use crate::model::{Model, Value};
 use crate::pull::{read_chunk, requests, update_msg, validate_tries};
 use crate::transport::{self, Requester, DEFAULT_PUBLISH};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, Write};
-use std::net::{Ipv4Addr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -303,11 +303,15 @@ pub struct Watcher {
     last: HashMap<String, f64>,
     shown: HashMap<String, (f64, bool)>,
     stale_after: u64,
-    /// The newest `_ff.cyc` and when it arrived, and the publish period measured between cycles: what lets `tick` age
+    /// The newest `_ff.cyc` and when it arrived, and the last few periods measured between cycles: what lets `tick` age
     /// the tags while no datagram comes.
     clock: Option<(u64, Instant)>,
-    period: Option<Duration>,
+    gaps: VecDeque<Duration>,
 }
+
+/// How many measured periods `Watcher` keeps; their median is the publish period, so one burst or one late cycle does not
+/// move it.
+const GAPS: usize = 5;
 
 impl Watcher {
     pub fn new(group: &str, tags: Vec<String>, stale_after: u64) -> Watcher {
@@ -320,7 +324,7 @@ impl Watcher {
             shown: HashMap::new(),
             stale_after,
             clock: None,
-            period: None,
+            gaps: VecDeque::new(),
         }
     }
 
@@ -338,10 +342,21 @@ impl Watcher {
         let head = self.rx.head();
         match self.clock {
             Some((h, at)) if head > h => {
-                self.period = Some((now - at).div_f64((head - h) as f64));
+                // two cycles at one instant (a burst, a coarse clock) measure nothing: a zero period would make every tag stale
+                let gap = now.saturating_duration_since(at).div_f64((head - h) as f64);
+                if !gap.is_zero() {
+                    if self.gaps.len() == GAPS {
+                        self.gaps.pop_front();
+                    }
+                    self.gaps.push_back(gap);
+                }
                 self.clock = Some((head, now));
             }
-            Some((h, _)) if head < h => (self.clock, self.period) = (Some((head, now)), None), // the provider restarted
+            Some((h, _)) if head < h => {
+                // the provider restarted
+                self.clock = Some((head, now));
+                self.gaps.clear();
+            }
             None if head > 0 => self.clock = Some((head, now)),
             _ => {}
         }
@@ -350,13 +365,20 @@ impl Watcher {
 
     /// No datagram arrived: age the tags by the publish periods that have gone by since the newest cycle (the next one
     /// is only due after one period, so that one is not counted) and show the ones that turned stale.
-    /// ponytail: the period is the gap between the last two cycles; nothing until two cycles were seen.
+    /// Nothing until two cycles a nonzero time apart were seen.
     pub fn tick(&mut self, now: Instant) -> Vec<Row> {
-        let (Some((_, at)), Some(p)) = (self.clock, self.period) else {
+        let (Some((_, at)), Some(p)) = (self.clock, self.period()) else {
             return vec![];
         };
         let late = (now.saturating_duration_since(at).as_secs_f64() / p.as_secs_f64()) as u64;
         self.rows(late.saturating_sub(1))
+    }
+
+    /// The publish period: the median of the periods measured lately.
+    fn period(&self) -> Option<Duration> {
+        let mut g: Vec<Duration> = self.gaps.iter().copied().collect();
+        g.sort();
+        g.get(g.len() / 2).copied()
     }
 
     /// The tags whose value or stale flag differs from what was last shown, with `extra` periods of silence added to their age.
@@ -366,7 +388,7 @@ impl Watcher {
             let (Some((_, age)), Some(&v)) = (self.rx.quality(tag), self.last.get(tag)) else {
                 continue;
             };
-            let age = age + extra;
+            let age = age.saturating_add(extra);
             let state = (v, age >= self.stale_after);
             if self.shown.insert(tag.clone(), state) != Some(state) {
                 rows.push(Row {
@@ -479,13 +501,20 @@ pub fn nic(iface: Option<String>) -> Result<Ipv4Addr, String> {
     })
 }
 
-/// The socket `watch` listens on: joined to the group for a multicast endpoint, plainly bound otherwise. Bound with
-/// SO_REUSEADDR/SO_REUSEPORT like a field device's input (ww-21o), so it also runs on a host where a device holds the port.
+/// The socket `watch` listens on. A multicast group is joined on a socket bound with SO_REUSEADDR/SO_REUSEPORT like a field
+/// device's input (ww-21o), so it runs next to a device in the same group: every member gets every datagram. A unicast port
+/// is bound plainly and fails if a device holds it: sharing one would split the device's datagrams with us (Linux balances
+/// REUSEPORT unicast across the sockets) or take them all (macOS gives them to the newest socket).
 pub fn listen(endpoint: &str) -> Result<UdpSocket, String> {
-    if !parse_udp(endpoint)?.1.is_ipv4() {
+    let (_, addr) = parse_udp(endpoint)?;
+    let IpAddr::V4(ip) = addr.ip() else {
         return Err("only IPv4 endpoints are supported".into());
-    }
-    let s = crate::fd::input::bind(endpoint)?;
+    };
+    let s = if ip.is_multicast() {
+        crate::fd::input::bind(endpoint)?
+    } else {
+        UdpSocket::bind(addr).map_err(|e| format!("{addr}: {e}"))?
+    };
     s.set_read_timeout(Some(Duration::from_millis(200)))
         .map_err(|e| e.to_string())?;
     Ok(s)

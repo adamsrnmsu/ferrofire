@@ -130,6 +130,31 @@ fn watcher_turns_stale_on_a_timer_when_the_stream_is_silent() {
     assert_eq!(rows[0].live, Some((0, false, 0)));
 }
 
+#[test]
+fn a_zero_gap_or_a_burst_does_not_turn_the_tags_stale() {
+    use std::time::{Duration, Instant};
+    let g = group_for("udp://*;239.0.0.1:40000");
+    let dg = |seq: u64, cyc: u64| datagrams_msg(&g, "a:1,", seq, cyc, 1).remove(0);
+    let (t0, ms) = (Instant::now(), Duration::from_millis);
+    let mut w = Watcher::new(&g, s(&["a"]), 3);
+    w.feed_at(&dg(1, 1), t0);
+    w.feed_at(&dg(2, 2), t0); // two cycles at one instant measure no period
+    assert!(
+        w.tick(t0 + ms(1000)).is_empty(),
+        "no period yet, so nothing ages (and nothing overflows)"
+    );
+    // a 1 s publisher, then cycles 5 and 6 delivered 1 ms apart: the median stays 1 s
+    for (cyc, at) in [(3, 1000), (4, 2000), (5, 3000), (6, 3001)] {
+        w.feed_at(&dg(cyc, cyc), t0 + ms(at));
+    }
+    assert!(
+        w.tick(t0 + ms(3300)).is_empty(),
+        "300 ms after a cycle a 1 s publisher is not late"
+    );
+    let rows = w.tick(t0 + ms(7100)); // 4.1 periods late: age 3, stale
+    assert_eq!(rows[0].live.map(|l| l.1), Some(true));
+}
+
 fn free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
@@ -242,6 +267,14 @@ fn interface_for_a_group() {
         Ok("10.1.2.3".parse().unwrap())
     );
     assert!(nic(Some("eth0".into())).unwrap_err().contains("eth0"));
+}
+
+/// A unicast port a device holds is not shared: REUSEPORT would split or take the device's datagrams.
+#[test]
+fn a_unicast_port_in_use_is_refused() {
+    let held = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let ep = format!("udp://{}", held.local_addr().unwrap());
+    assert!(listen(&ep).is_err(), "{ep} is held");
 }
 
 /// ww-21o: a stock device holds the group's port; the tools must bind it too, and both must hear the same datagrams.
