@@ -91,14 +91,13 @@ pub async fn until(what: &str, within: Duration, mut ok: impl FnMut() -> bool) {
     }
 }
 
-/// Wait until something listens on (or, `up == false`, nothing listens on) 127.0.0.1:`port`.
+/// Wait until something listens on (or, `up == false`, nothing listens on) 127.0.0.1:`port`. Read from the kernel's socket table,
+/// not by connecting: a probe connection takes the one master slot of a DNP3 outstation (stock's CloseNew) until the outstation
+/// sees it close, and a tap that connected meanwhile was closed as a second master. A master on a serial port (`pty_to`) keeps
+/// its line up and never retried, so make crap timed out waiting for its first frame (ww-s34).
 pub async fn listening(port: u16, up: bool) {
     for _ in 0..500 {
-        if tokio::net::TcpStream::connect(("127.0.0.1", port))
-            .await
-            .is_ok()
-            == up
-        {
+        if listens(port) == up {
             return;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -107,6 +106,21 @@ pub async fn listening(port: u16, up: bool) {
         "port {port} never became {}",
         if up { "open" } else { "closed" }
     );
+}
+
+/// Whether a TCP socket on this host listens on `port` (any address): a row of /proc/net/tcp or tcp6 in state 0A (LISTEN).
+pub fn listens(port: u16) -> bool {
+    let want = format!(":{port:04X}");
+    ["/proc/net/tcp", "/proc/net/tcp6"].iter().any(|f| {
+        std::fs::read_to_string(f)
+            .unwrap_or_default()
+            .lines()
+            .skip(1)
+            .any(|row| {
+                let cols: Vec<&str> = row.split_whitespace().collect();
+                cols.len() > 3 && cols[1].ends_with(&want) && cols[3] == "0A"
+            })
+    })
 }
 
 /// A command-interface client, as bennu-probe: one REQ socket per request, the text plus a NUL.

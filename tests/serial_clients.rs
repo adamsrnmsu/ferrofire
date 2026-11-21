@@ -93,3 +93,15 @@ async fn the_dnp3_master_talks_the_same_frames_over_a_serial_port() {
     }
     panic!("the outstation's value never reached the master over the pty");
 }
+
+/// ww-s34: `listening` must not connect, or it takes a DNP3 outstation's one master slot from the tap that connects next.
+#[tokio::test]
+async fn listening_makes_no_connection() {
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = l.local_addr().unwrap().port();
+    listening(port, true).await;
+    let accepted = tokio::time::timeout(Duration::from_millis(300), l.accept()).await;
+    assert!(accepted.is_err(), "listening() connected to {port}");
+    drop(l);
+    listening(port, false).await;
+}
