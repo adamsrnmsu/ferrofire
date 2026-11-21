@@ -2,5 +2,5 @@
 source: tests/snapshots.rs
 expression: "json.join(\"\\n\")"
 ---
-{"t":12.500,"rtu":"rtu1","tag":"a","modbus":1,"provider":0.5,"delta":0.5}
-{"t":12.500,"rtu":"rtu1","tag":"*","error":"connection refused"}
+{"t":12.500,"rtu":"rtu1","tag":"a","reg":"input-register:3","modbus":1,"provider":0.5,"delta":0.5}
+{"t":12.500,"rtu":"rtu1","tag":"*","reg":"input-register:3","error":"connection refused"}

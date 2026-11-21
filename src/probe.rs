@@ -7,9 +7,9 @@ use crate::bennu::{
 };
 use crate::datagram::{Quality, Receiver};
 use crate::model::{Model, Value};
-use crate::pull::{requests, update_msg, validate};
+use crate::pull::{read_chunk, requests, update_msg, validate_tries};
 use crate::transport::{self, Requester, DEFAULT_PUBLISH};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, Write};
 use std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use std::sync::atomic::Ordering;
@@ -225,8 +225,12 @@ pub fn tag_list(reply: &[u8]) -> Result<Vec<String>, String> {
 
 /// The `tag:value,...` pairs of a `READ=` reply, in order.
 pub fn read_rows(reply: &[u8]) -> Result<Vec<Row>, String> {
-    update_msg(reply)?
-        .split(',')
+    rows_of(&update_msg(reply)?)
+}
+
+/// The rows of an update message (`a:1,b:2,`).
+pub fn rows_of(msg: &str) -> Result<Vec<Row>, String> {
+    msg.split(',')
         .filter(|p| !p.is_empty())
         .map(|p| {
             let (tag, value) = p
@@ -298,7 +302,16 @@ pub struct Watcher {
     tags: Vec<String>,
     last: HashMap<String, f64>,
     shown: HashMap<String, (f64, bool)>,
+    stale_after: u64,
+    /// The newest `_ff.cyc` and when it arrived, and the last few periods measured between cycles: what lets `tick` age
+    /// the tags while no datagram comes.
+    clock: Option<(u64, Instant)>,
+    gaps: VecDeque<Duration>,
 }
+
+/// How many measured periods `Watcher` keeps; their median is the publish period, so one burst or one late cycle does not
+/// move it.
+const GAPS: usize = 5;
 
 impl Watcher {
     pub fn new(group: &str, tags: Vec<String>, stale_after: u64) -> Watcher {
@@ -309,21 +322,74 @@ impl Watcher {
             tags,
             last: HashMap::new(),
             shown: HashMap::new(),
+            stale_after,
+            clock: None,
+            gaps: VecDeque::new(),
         }
     }
 
     /// A datagram that is rejected shows nothing: the held values stay as shown.
     pub fn feed(&mut self, d: &[u8]) -> Vec<Row> {
+        self.feed_at(d, Instant::now())
+    }
+
+    /// `feed` with the arrival time given.
+    pub fn feed_at(&mut self, d: &[u8], now: Instant) -> Vec<Row> {
         let Ok(points) = self.rx.accept(d) else {
             return vec![];
         };
         self.last.extend(points);
+        let head = self.rx.head();
+        match self.clock {
+            Some((h, at)) if head > h => {
+                // two cycles at one instant (a burst, a coarse clock) measure nothing: a zero period would make every tag stale
+                let gap = now.saturating_duration_since(at).div_f64((head - h) as f64);
+                if !gap.is_zero() {
+                    if self.gaps.len() == GAPS {
+                        self.gaps.pop_front();
+                    }
+                    self.gaps.push_back(gap);
+                }
+                self.clock = Some((head, now));
+            }
+            Some((h, _)) if head < h => {
+                // the provider restarted
+                self.clock = Some((head, now));
+                self.gaps.clear();
+            }
+            None if head > 0 => self.clock = Some((head, now)),
+            _ => {}
+        }
+        self.rows(0)
+    }
+
+    /// No datagram arrived: age the tags by the publish periods that have gone by since the newest cycle (the next one
+    /// is only due after one period, so that one is not counted) and show the ones that turned stale.
+    /// Nothing until two cycles a nonzero time apart were seen.
+    pub fn tick(&mut self, now: Instant) -> Vec<Row> {
+        let (Some((_, at)), Some(p)) = (self.clock, self.period()) else {
+            return vec![];
+        };
+        let late = (now.saturating_duration_since(at).as_secs_f64() / p.as_secs_f64()) as u64;
+        self.rows(late.saturating_sub(1))
+    }
+
+    /// The publish period: the median of the periods measured lately.
+    fn period(&self) -> Option<Duration> {
+        let mut g: Vec<Duration> = self.gaps.iter().copied().collect();
+        g.sort();
+        g.get(g.len() / 2).copied()
+    }
+
+    /// The tags whose value or stale flag differs from what was last shown, with `extra` periods of silence added to their age.
+    fn rows(&mut self, extra: u64) -> Vec<Row> {
         let mut rows = vec![];
         for tag in &self.tags {
-            let (Some((q, age)), Some(&v)) = (self.rx.quality(tag), self.last.get(tag)) else {
+            let (Some((_, age)), Some(&v)) = (self.rx.quality(tag), self.last.get(tag)) else {
                 continue;
             };
-            let state = (v, q == Quality::Stale);
+            let age = age.saturating_add(extra);
+            let state = (v, age >= self.stale_after);
             if self.shown.insert(tag.clone(), state) != Some(state) {
                 rows.push(Row {
                     tag: tag.clone(),
@@ -435,23 +501,20 @@ pub fn nic(iface: Option<String>) -> Result<Ipv4Addr, String> {
     })
 }
 
-/// The socket `watch` listens on: joined to the group for a multicast endpoint, plainly bound otherwise.
-fn listen(endpoint: &str) -> Result<UdpSocket, String> {
-    let (iface, addr) = parse_udp(endpoint)?;
+/// The socket `watch` listens on. A multicast group is joined on a socket bound with SO_REUSEADDR/SO_REUSEPORT like a field
+/// device's input (ww-21o), so it runs next to a device in the same group: every member gets every datagram. A unicast port
+/// is bound plainly and fails if a device holds it: sharing one would split the device's datagrams with us (Linux balances
+/// REUSEPORT unicast across the sockets) or take them all (macOS gives them to the newest socket).
+pub fn listen(endpoint: &str) -> Result<UdpSocket, String> {
+    let (_, addr) = parse_udp(endpoint)?;
     let IpAddr::V4(ip) = addr.ip() else {
         return Err("only IPv4 endpoints are supported".into());
     };
-    // ponytail: no SO_REUSEADDR, so a second subscriber on this host and port cannot bind; add a sys wrapper if probing next to a field device is needed
-    let bind = if ip.is_multicast() {
-        Ipv4Addr::UNSPECIFIED
+    let s = if ip.is_multicast() {
+        crate::fd::input::bind(endpoint)?
     } else {
-        ip
+        UdpSocket::bind(addr).map_err(|e| format!("{addr}: {e}"))?
     };
-    let s = UdpSocket::bind((bind, addr.port())).map_err(|e| format!("{addr}: {e}"))?;
-    if ip.is_multicast() {
-        s.join_multicast_v4(&ip, &nic(iface)?)
-            .map_err(|e| e.to_string())?;
-    }
     s.set_read_timeout(Some(Duration::from_millis(200)))
         .map_err(|e| e.to_string())?;
     Ok(s)
@@ -463,20 +526,32 @@ pub(crate) fn follow(
     duration: Option<f64>,
     mut on: impl FnMut(&[u8]),
 ) -> Result<(), String> {
+    follow_idle(endpoint, duration, |d| d.iter().for_each(|d| on(d)))
+}
+
+/// `follow` that also calls `on(None)` each time the socket's read timeout passes with no datagram, so a caller can age things.
+pub(crate) fn follow_idle(
+    endpoint: &str,
+    duration: Option<f64>,
+    mut on: impl FnMut(Option<&[u8]>),
+) -> Result<(), String> {
     let sock = listen(endpoint)?;
     install_signals();
     let end = duration.map(|d| Instant::now() + Duration::from_secs_f64(d));
     let mut buf = vec![0u8; 65536];
     while !STOP.load(Ordering::SeqCst) && end.is_none_or(|e| Instant::now() < e) {
         match sock.recv(&mut buf) {
-            Ok(n) => on(&buf[..n]),
+            Ok(n) => on(Some(&buf[..n])),
             Err(e)
                 if matches!(
                     e.kind(),
                     std::io::ErrorKind::WouldBlock
                         | std::io::ErrorKind::TimedOut
                         | std::io::ErrorKind::Interrupted
-                ) => {}
+                ) =>
+            {
+                on(None)
+            }
             Err(e) => return Err(e.to_string()),
         }
     }
@@ -484,7 +559,10 @@ pub(crate) fn follow(
 }
 
 fn watch(endpoint: &str, mut w: Watcher, json: bool) -> Result<(), String> {
-    follow(endpoint, None, |d| print(&w.feed(d), json))
+    follow_idle(endpoint, None, |d| match d {
+        Some(d) => print(&w.feed(d), json),
+        None => print(&w.tick(Instant::now()), json),
+    })
 }
 
 fn record(endpoint: &str, mut r: Recorder, out: &str, duration: Option<f64>) -> Result<(), String> {
@@ -592,7 +670,7 @@ fn read(req: &mut dyn Requester, tags: Vec<String>, json: bool) -> Result<(), St
         tags
     };
     for r in requests(&tags) {
-        print(&read_rows(&ask(req, &r)?)?, json);
+        print(&rows_of(&read_chunk(req, &r)?)?, json);
     }
     Ok(())
 }
@@ -650,6 +728,10 @@ fn send_write(
     res.map(|_| ())
 }
 
+/// `QUERY` attempts before a watcher gives up on the provider (each waits the request timeout): ww-xzh, a stopped provider
+/// must be an error in a few seconds, not the 10 attempts a pull-bridge startup is allowed.
+const WATCH_TRIES: usize = 2;
+
 /// The tags to watch: those named (checked against the provider) or all it has.
 pub(crate) fn watched(req: &mut dyn Requester, tags: Vec<String>) -> Result<Vec<String>, String> {
     if tags.is_empty() {
@@ -660,7 +742,7 @@ pub(crate) fn watched(req: &mut dyn Requester, tags: Vec<String>) -> Result<Vec<
     } else {
         tags
     };
-    validate(req, &tags)?;
+    validate_tries(req, &tags, WATCH_TRIES)?;
     Ok(tags)
 }
 
@@ -785,8 +867,8 @@ const WAIT_POLL: Duration = Duration::from_millis(200);
 pub fn wait_for(req: &mut dyn Requester, c: &Cond, limit: Duration) -> Result<(), String> {
     let end = Instant::now() + limit;
     loop {
-        let reply = ask(req, &requests(std::slice::from_ref(&c.tag))[0])?;
-        let row = read_rows(&reply)?.pop().ok_or("empty reply")?;
+        let msg = read_chunk(req, &requests(std::slice::from_ref(&c.tag))[0])?;
+        let row = rows_of(&msg)?.pop().ok_or("empty reply")?;
         let v = number(&row.value)
             .ok_or_else(|| format!("`{}` is `{}`, not a number", row.tag, row.value))?;
         if c.holds(v) {

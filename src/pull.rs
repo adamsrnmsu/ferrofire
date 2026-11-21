@@ -104,18 +104,64 @@ impl PullCli {
     }
 }
 
-/// `READ=a,b,c,`, one request per `MAX_TAGS_PER_READ` tags. The trailing comma keeps a one-tag request in batch form:
-/// `READ=a` alone is the single-tag form and is answered with a bare value, not `a:value,`.
+/// `READ=a,b,c`, one request per `MAX_TAGS_PER_READ` tags; one tag is the plain `READ=a`. No trailing comma: the stock
+/// provider takes everything after `READ=` as one tag name (ww-1df.25). Read the replies with `read_chunk`.
 pub fn requests(tags: &[String]) -> Vec<Vec<u8>> {
     tags.chunks(MAX_TAGS_PER_READ)
-        .map(|c| format!("READ={},", c.join(",")).into_bytes())
+        .map(|c| format!("READ={}", c.join(",")).into_bytes())
         .collect()
+}
+
+/// The update message (`a:1,b:2,`) a `READ` request got as its reply. A one-tag request is answered without the tag, `ACK=1.5`
+/// (stock provider and ours), or with it, `ACK=a:1.500000` (a field device's REP); a batch is answered `ACK=a:1,b:2,`.
+pub fn read_msg(request: &[u8], reply: &[u8]) -> Result<String, String> {
+    let msg = update_msg(reply)?;
+    let one = String::from_utf8_lossy(request)
+        .strip_prefix("READ=")
+        .filter(|t| !t.contains(','))
+        .map(String::from);
+    Ok(match one {
+        Some(_) if msg.is_empty() => msg,
+        Some(_) if msg.contains(':') => format!("{},", msg.trim_end_matches(',')),
+        Some(tag) => format!("{tag}:{msg},"),
+        None => msg,
+    })
+}
+
+/// Send one `requests()` entry (retrying once on a timeout) and return its update message. A provider that answers a batch
+/// with an `ERR` may simply not batch (the stock bennu-simulink-provider reads one tag per `READ`), so each tag is then
+/// asked for alone; a tag it really lacks still ends in its `ERR`.
+/// ponytail: the batch is tried first on every call; remember a refusing provider if pull-bridge ever runs against stock.
+pub fn read_chunk(req: &mut dyn Requester, request: &[u8]) -> Result<String, String> {
+    let reply = req.call(request).or_else(|_| req.call(request))?;
+    let first = read_msg(request, &reply);
+    let text = String::from_utf8_lossy(request);
+    let Some(tags) = text.strip_prefix("READ=").filter(|t| t.contains(',')) else {
+        return first;
+    };
+    if first.is_ok() {
+        return first;
+    }
+    let mut msg = String::new();
+    for tag in tags.split(',').filter(|t| !t.is_empty()) {
+        msg += &read_chunk(req, format!("READ={tag}").as_bytes())?;
+    }
+    Ok(msg)
 }
 
 /// Startup check: every tag must exist at the provider (`QUERY` lists them), else the bridge would never publish.
 pub fn validate(req: &mut dyn Requester, tags: &[String]) -> Result<(), String> {
+    validate_tries(req, tags, STARTUP_TRIES)
+}
+
+/// `validate` with its own number of `QUERY` attempts: an interactive tool wants a dead provider reported in seconds.
+pub fn validate_tries(
+    req: &mut dyn Requester,
+    tags: &[String],
+    tries: usize,
+) -> Result<(), String> {
     let mut last = String::new();
-    for _ in 0..STARTUP_TRIES {
+    for _ in 0..tries {
         match req.call(b"QUERY=") {
             Ok(reply) => {
                 let known: HashSet<String> =
@@ -154,8 +200,7 @@ pub fn tick(
 ) -> Result<(), String> {
     let mut msg = String::new();
     for r in requests {
-        let reply = req.call(r).or_else(|_| req.call(r))?;
-        msg += &update_msg(&reply)?;
+        msg += &read_chunk(req, r)?;
     }
     out.publish(&msg);
     Ok(())

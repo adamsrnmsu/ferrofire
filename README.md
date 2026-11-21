@@ -149,7 +149,9 @@ slices to separate endpoints, one RADIO group each; a tag may appear in several 
 
 Push sends every tag to every subscriber; without multicast N RTUs would cost N copies of the whole tag list.
 A `READ` may name several tags, `READ=a,b,c`, and is answered with one `ACK=a:1,b:2,c:3,` (the update format, request order;
-an unknown tag fails the whole request with `ERR=Tag 'x' not found`; `READ=tag` is unchanged). `ferrofire pull-bridge` runs next to
+an unknown tag fails the whole request with `ERR=Tag 'x' not found`; `READ=tag` is unchanged). The request has no trailing comma:
+the stock bennu-simulink-provider takes everything after `READ=` as one tag name and answers a single tag with a bare `ACK=value`, never a batch,
+so `probe read`, `diff` and `pull-bridge` read the bare reply and, when a batch gets an `ERR`, ask tag by tag. `ferrofire pull-bridge` runs next to
 a field device, asks for just that device's tags once per tick, and republishes the reply on a local endpoint, so a stock
 (push-subscribing) bennu field device needs no change:
 
@@ -193,7 +195,8 @@ A value that just changed is bold yellow for a second. Keys: `/` filter (substri
   stale on the viewer's clock.
 
 `--stale-after SECONDS` (default 2) is how long without an update makes a tag stale, the same for every source. `--once` prints the table and exits (`tag=value age=1.2s ok|STALE`,
-or with `--json` one object per line), for scripts; with `--filter` it prints only the matches.
+or with `--json` one object per line), for scripts; with `--filter` it prints only the matches. On `--stream`, `--once` fails with an error rather than printing STALE rows when no value ever arrives (a silent stream has no values to show):
+"provider unreachable" after about 4 s if the provider cannot confirm `--tags`, "no tags within 5s" if the stream stays silent.
 
 ## Ground-truth page
 
@@ -239,7 +242,7 @@ rtu-1:
 
 Each RTU gets one TCP connection, opened on its first read and reused for every read of every cycle (stock bennu opens and closes one per
 read and leaks fds, ww-1p6); a failed read closes it and the next one reconnects. A point differs when the two values are more than
-`--tolerance` (a fraction of `max - min`, default 0.01; coils span 1) apart. Only differences are printed, as `t=<unix> rtu=.. tag=.. modbus=..
+`--tolerance` (a fraction of `max - min`, default 0.01; coils span 1) apart. Only differences are printed, as `t=<unix> rtu=.. tag=.. reg=<kind>:<address> modbus=..
 provider=.. delta=..` (or `--json`), and an RTU that cannot be read prints `error=..` for its first failing point that cycle. `--cycles N`
 runs N comparisons `--every` seconds apart (default 1; `0` runs until SIGINT/SIGTERM, the blue-team monitor). It exits 1 if anything was
 printed. Register maps read from `config.xml` or sceptre's `reg_addrs` are not loaded yet; write the YAML.
@@ -282,9 +285,10 @@ provider queried), and `ferrofire completions bash|zsh|fish` completes tag names
 each value against the model: a binary tag takes `true`/`false`/`0`/`1`, an analog tag a number, and an analog input declared with
 `min:`/`max:` must be inside them; the error names the limit. The provider enforces the same rules itself and answers
 `ERR=Tag 'sp' value 11 is above its max 10`, so a probe without `--model` is still safe.
+`watch`, `record`, `doctor` and `top --stream` bind the group's port with SO_REUSEADDR/SO_REUSEPORT, so they run on a host where a stock device already listens on it.
 `watch` decodes datagram v1 and prints a line whenever a tag's value or stale flag changes: `lock.height=4.2 age=0 ok gaps=0`.
 `age` is in publish periods (how far the tag is behind the newest `_ff.cyc`), `STALE` appears after `--stale-after` missed periods
-(the value is held, not live), `gaps` counts datagrams missing from the `_ff.seq` run. With no `--tags` it watches every tag
+(the value is held, not live; a silent stream ages by the clock, one measured publish period at a time, so the line still comes), `gaps` counts datagrams missing from the `_ff.seq` run. With no `--tags` it watches every tag
 the provider has (`QUERY`). Limit: it binds the publish port without `SO_REUSEADDR`, so it cannot run on a host where another
 subscriber already holds that port.
 

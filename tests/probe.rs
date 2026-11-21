@@ -106,6 +106,55 @@ fn watcher_shows_changes_age_stale_and_gaps() {
     assert!(late.is_empty());
 }
 
+/// ww-90b: with the stream silent, ages grow by the clock: the tags turn stale without another datagram.
+#[test]
+fn watcher_turns_stale_on_a_timer_when_the_stream_is_silent() {
+    use std::time::{Duration, Instant};
+    let g = group_for("udp://*;239.0.0.1:40000");
+    let dg = |seq: u64, cyc: u64| datagrams_msg(&g, "a:1,", seq, cyc, 1).remove(0);
+    let t0 = Instant::now();
+    let ms = Duration::from_millis;
+    let mut w = Watcher::new(&g, s(&["a"]), 3);
+    assert!(w.tick(t0).is_empty()); // nothing heard yet, nothing to age
+    assert_eq!(w.feed_at(&dg(1, 1), t0).len(), 1);
+    assert!(w.tick(t0 + ms(50)).is_empty()); // one cycle seen: no period to age by yet
+    assert!(w.feed_at(&dg(2, 2), t0 + ms(100)).is_empty()); // period 100 ms, no change
+    assert!(w.tick(t0 + ms(250)).is_empty()); // the next cycle is not even a period late
+    let rows = w.tick(t0 + ms(500)); // 400 ms late: age 3, stale, shown once
+    assert_eq!(
+        (rows.len(), rows[0].tag.as_str(), rows[0].live),
+        (1, "a", Some((3, true, 0)))
+    );
+    assert!(w.tick(t0 + ms(900)).is_empty());
+    let rows = w.feed_at(&dg(3, 3), t0 + ms(1000)); // it is back
+    assert_eq!(rows[0].live, Some((0, false, 0)));
+}
+
+#[test]
+fn a_zero_gap_or_a_burst_does_not_turn_the_tags_stale() {
+    use std::time::{Duration, Instant};
+    let g = group_for("udp://*;239.0.0.1:40000");
+    let dg = |seq: u64, cyc: u64| datagrams_msg(&g, "a:1,", seq, cyc, 1).remove(0);
+    let (t0, ms) = (Instant::now(), Duration::from_millis);
+    let mut w = Watcher::new(&g, s(&["a"]), 3);
+    w.feed_at(&dg(1, 1), t0);
+    w.feed_at(&dg(2, 2), t0); // two cycles at one instant measure no period
+    assert!(
+        w.tick(t0 + ms(1000)).is_empty(),
+        "no period yet, so nothing ages (and nothing overflows)"
+    );
+    // a 1 s publisher, then cycles 5 and 6 delivered 1 ms apart: the median stays 1 s
+    for (cyc, at) in [(3, 1000), (4, 2000), (5, 3000), (6, 3001)] {
+        w.feed_at(&dg(cyc, cyc), t0 + ms(at));
+    }
+    assert!(
+        w.tick(t0 + ms(3300)).is_empty(),
+        "300 ms after a cycle a 1 s publisher is not late"
+    );
+    let rows = w.tick(t0 + ms(7100)); // 4.1 periods late: age 3, stale
+    assert_eq!(rows[0].live.map(|l| l.1), Some(true));
+}
+
 fn free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
@@ -220,6 +269,29 @@ fn interface_for_a_group() {
     assert!(nic(Some("eth0".into())).unwrap_err().contains("eth0"));
 }
 
+/// A unicast port a device holds is not shared: REUSEPORT would split or take the device's datagrams.
+#[test]
+fn a_unicast_port_in_use_is_refused() {
+    let held = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let ep = format!("udp://{}", held.local_addr().unwrap());
+    assert!(listen(&ep).is_err(), "{ep} is held");
+}
+
+/// ww-21o: a stock device holds the group's port; the tools must bind it too, and both must hear the same datagrams.
+#[test]
+fn two_listeners_on_one_group_and_port_both_receive() {
+    let ep = format!("udp://239.0.0.7:{}", free_port());
+    let (a, b) = (listen(&ep).unwrap(), listen(&ep).unwrap());
+    let to = ep.trim_start_matches("udp://");
+    let tx = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
+    tx.send_to(b"hello", to).unwrap();
+    let mut buf = [0u8; 16];
+    for l in [&a, &b] {
+        let n = l.recv(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"hello");
+    }
+}
+
 #[test]
 fn watch_prints_value_age_and_stale() {
     let port = free_port();
@@ -252,6 +324,44 @@ fn watch_prints_value_age_and_stale() {
             && line.contains("\"age\":0,\"stale\":false,\"seq_gaps\":"),
         "{line}"
     );
+}
+
+/// ww-90b end to end: the provider stops publishing (SIGSTOP) and `watch` still prints the tag STALE.
+#[test]
+fn watch_prints_stale_while_the_provider_is_stopped() {
+    let port = free_port();
+    let listen = format!("udp://239.0.0.7:{port}");
+    let (srv, ep) = server(&listen);
+    let mut w = Command::new(BIN)
+        .args([
+            "probe",
+            "--server",
+            &ep,
+            "watch",
+            "--listen",
+            &listen,
+            "--tags",
+            "lowerwater.height",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let out = w.stdout.take().unwrap();
+    std::thread::spawn(move || {
+        for l in BufReader::new(out).lines().map_while(Result::ok) {
+            let _ = tx.send(l);
+        }
+    });
+    let wait = std::time::Duration::from_secs(10);
+    assert!(rx.recv_timeout(wait).unwrap().contains(" ok "));
+    std::thread::sleep(std::time::Duration::from_millis(300)); // a few cycles, so the watcher knows the period
+    unsafe { libc::kill(srv.0.id() as i32, libc::SIGSTOP) };
+    let stale = rx.recv_timeout(wait);
+    unsafe { libc::kill(srv.0.id() as i32, libc::SIGCONT) };
+    unsafe { libc::kill(w.id() as i32, libc::SIGTERM) };
+    let _ = w.wait();
+    assert!(stale.is_ok_and(|l| l.contains("STALE")), "no STALE line");
 }
 
 #[test]
@@ -502,21 +612,16 @@ impl ferrofire::transport::Requester for Canned {
 #[test]
 fn wait_for_polls_until_met_or_out_of_time() {
     let c = Cond::parse("t >= 3").unwrap();
-    let mut r = Canned(vec!["ACK=t:1,\0", "ACK=t:3,\0"]);
+    let mut r = Canned(vec!["ACK=1\0", "ACK=t:3,\0"]);
     assert_eq!(
         wait_for(&mut r, &c, std::time::Duration::from_secs(5)),
         Ok(())
     );
     assert!(r.0.is_empty());
-    let mut r = Canned(vec!["ACK=t:1,\0"]);
+    let mut r = Canned(vec!["ACK=1\0"]);
     let e = wait_for(&mut r, &c, std::time::Duration::ZERO).unwrap_err();
     assert!(e.contains("t >= 3") && e.contains("not met"), "{e}");
-    let e = wait_for(
-        &mut Canned(vec!["ACK=t:x,\0"]),
-        &c,
-        std::time::Duration::ZERO,
-    )
-    .unwrap_err();
+    let e = wait_for(&mut Canned(vec!["ACK=x\0"]), &c, std::time::Duration::ZERO).unwrap_err();
     assert!(e.contains("not a number"), "{e}");
     let e = wait_for(&mut Canned(vec!["ACK=\0"]), &c, std::time::Duration::ZERO).unwrap_err();
     assert!(e.contains("empty reply"), "{e}");
@@ -662,25 +767,38 @@ fn findings_print_as_text_and_json() {
     let m = Finding {
         rtu: "r\"1".into(),
         tag: "a".into(),
+        reg: (Kind::HoldingRegister, 7),
         what: Ok((1.0, 0.5)),
     };
     assert_eq!(
         m.text(12.5),
-        "t=12.500 rtu=r\"1 tag=a modbus=1 provider=0.5 delta=0.5"
+        "t=12.500 rtu=r\"1 tag=a reg=holding-register:7 modbus=1 provider=0.5 delta=0.5"
     );
     assert_eq!(
         m.json(12.5),
-        r#"{"t":12.500,"rtu":"r\"1","tag":"a","modbus":1,"provider":0.5,"delta":0.5}"#
+        r#"{"t":12.500,"rtu":"r\"1","tag":"a","reg":"holding-register:7","modbus":1,"provider":0.5,"delta":0.5}"#
     );
     let e = Finding {
         rtu: "r".into(),
         tag: "*".into(),
+        reg: (Kind::Coil, 0),
         what: Err("down".into()),
     };
-    assert_eq!(e.text(1.0), "t=1.000 rtu=r tag=* error=down");
+    assert_eq!(e.text(1.0), "t=1.000 rtu=r tag=* reg=coil:0 error=down");
     assert_eq!(
         e.json(1.0),
-        r#"{"t":1.000,"rtu":"r","tag":"*","error":"down"}"#
+        r#"{"t":1.000,"rtu":"r","tag":"*","reg":"coil:0","error":"down"}"#
+    );
+    // one tag forged in two registers: the lines differ by register
+    let twin = |k, a| Finding {
+        rtu: "r".into(),
+        tag: "t".into(),
+        reg: (k, a),
+        what: Ok((1.0, 0.0)),
+    };
+    assert_ne!(
+        twin(Kind::HoldingRegister, 5).text(0.0),
+        twin(Kind::InputRegister, 5).text(0.0)
     );
 }
 
@@ -777,7 +895,9 @@ fn diff_keeps_one_connection_and_reports_only_mismatches() {
     assert!(!ok);
     assert_eq!(out.lines().count(), 1, "{out}");
     assert!(
-        out.contains("rtu=rtu-1 tag=lowervalve.open modbus=1 provider=0 delta=1"),
+        out.contains(
+            "rtu=rtu-1 tag=lowervalve.open reg=holding-register:1 modbus=1 provider=0 delta=1"
+        ),
         "{out}"
     );
     let (_, out, _) = probe(&ep, &["--json", "diff", "--map", &map], "");
@@ -797,14 +917,15 @@ fn diff_reports_rtu_errors_and_reconnects() {
     let (port, _) = rtu(|_, _| None, usize::MAX);
     let (ok, out, _) = probe(&ep, &["diff", "--map", &regmap(port)], "");
     assert!(
-        !ok && out.contains("rtu=rtu-1 tag=lowervalve.open error=") && out.contains("exception 2"),
+        !ok && out.contains("rtu=rtu-1 tag=lowervalve.open reg=coil:0 error=")
+            && out.contains("exception 2"),
         "{out}"
     );
     // nothing listening
     let dead = free_port();
     let (ok, out, _) = probe(&ep, &["diff", "--map", &regmap(dead)], "");
     assert!(
-        !ok && out.contains("rtu=rtu-1 tag=lowervalve.open error="),
+        !ok && out.contains("rtu=rtu-1 tag=lowervalve.open reg=coil:0 error="),
         "{out}"
     );
     // the RTU drops the connection after each request: the next read reconnects, the one in between is reported

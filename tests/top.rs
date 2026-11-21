@@ -126,6 +126,36 @@ fn a_datagram_stream_fills_the_table_from_any_host() {
     assert_eq!(text.lines().count(), 1, "only the tag asked for");
 }
 
+/// ww-xzh: a stopped provider cannot confirm `--tags`; a silent stream has no values to show as STALE, so the answer is a
+/// dead-source error within a few seconds (it was 10 QUERY tries x 2 s = 20 s of nothing).
+#[test]
+fn a_silent_stream_with_a_stopped_provider_fails_fast() {
+    let listen = format!("udp://239.0.0.8:{}", free_port());
+    let r = spawn("silent", &listen);
+    unsafe { libc::kill(r.child.id() as i32, libc::SIGSTOP) };
+    let t = std::time::Instant::now();
+    let out = top(
+        &r.dir,
+        &[
+            "--stream",
+            &listen,
+            "--server",
+            &r.server,
+            "--tags",
+            "lowerwater.height",
+            "--once",
+        ],
+    );
+    unsafe { libc::kill(r.child.id() as i32, libc::SIGCONT) };
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("unreachable"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(t.elapsed() < Duration::from_secs(8), "{:?}", t.elapsed());
+}
+
 #[test]
 fn a_recorded_csv_replays_to_its_last_state() {
     let f = std::env::temp_dir().join(format!("ff-top-replay-{}.csv", std::process::id()));

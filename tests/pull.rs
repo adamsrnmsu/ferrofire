@@ -102,8 +102,9 @@ fn arguments() {
 
 #[test]
 fn request_and_reply_framing() {
-    assert_eq!(requests(&s(&["a", "b.c"])), [b"READ=a,b.c,".to_vec()]);
-    assert_eq!(requests(&s(&["a"])), [b"READ=a,".to_vec()]); // one tag stays a batch: `READ=a` would be answered `ACK=value`
+    assert_eq!(requests(&s(&["a", "b.c"])), [b"READ=a,b.c".to_vec()]);
+    // ww-1df.25: no trailing comma (the stock provider reads `a,` as a tag name); one tag is the plain `READ=a`
+    assert_eq!(requests(&s(&["a"])), [b"READ=a".to_vec()]);
     assert_eq!(update_msg(b"ACK=a:1,b:2,\0"), Ok("a:1,b:2,".into()));
     assert_eq!(update_msg(b"ACK="), Ok(String::new()));
     assert_eq!(
@@ -162,11 +163,11 @@ fn big_tag_lists_split_into_several_reads() {
     assert_eq!(reqs.len(), 3);
     assert!(
         reqs[0].starts_with(b"READ=t0,t1,")
-            && reqs[2] == format!("READ=t{},", MAX_TAGS_PER_READ * 2).as_bytes()
+            && reqs[2] == format!("READ=t{}", MAX_TAGS_PER_READ * 2).as_bytes()
     );
     let all: String = reqs
         .iter()
-        .map(|r| String::from_utf8_lossy(&r[5..]).to_string())
+        .map(|r| String::from_utf8_lossy(&r[5..]).to_string() + ",")
         .collect();
     assert_eq!(
         all,
@@ -181,6 +182,76 @@ fn big_tag_lists_split_into_several_reads() {
     let mut r = Fake(vec![ok, Ok(b"ERR=x\0".to_vec())], 0);
     assert!(tick(&mut r, &two, &out).is_err());
     assert_eq!(out.0.lock().unwrap().len(), 1); // the half answer was not published
+}
+
+/// The stock bennu-simulink-provider's `read()` (sceptre-bennu `bennu-simulink-provider/main.cpp`, `Provider::messageHandler`): the whole
+/// text after `READ=` is compared with ONE tag name; a hit is `ACK=<value>` (bare: `true`, `1.5`), anything else `ERR=Tag not found`.
+struct Stock(Vec<(&'static str, &'static str)>, Vec<String>);
+impl Requester for Stock {
+    fn call(&mut self, req: &[u8]) -> Result<Vec<u8>, String> {
+        let req = String::from_utf8_lossy(req).into_owned();
+        self.1.push(req.clone());
+        let tag = req.strip_prefix("READ=").unwrap();
+        Ok(match self.0.iter().find(|(t, _)| *t == tag) {
+            Some((_, v)) => format!("ACK={v}\0"),
+            None => "ERR=Tag not found\0".to_string(),
+        }
+        .into_bytes())
+    }
+}
+
+#[test]
+fn reads_work_against_the_stock_provider_wire_format() {
+    let stock = || {
+        Stock(
+            vec![("lock.height", "1.5"), ("lowergate.open", "true")],
+            vec![],
+        )
+    };
+    // one tag: `READ=a`, answered with a bare value
+    let mut p = stock();
+    let reqs = requests(&s(&["lowergate.open"]));
+    assert_eq!(
+        read_chunk(&mut p, &reqs[0]),
+        Ok("lowergate.open:true,".into())
+    );
+    assert_eq!(p.1, ["READ=lowergate.open"]);
+    // several tags: the stock provider cannot batch, so the ERR makes the reader ask tag by tag
+    let mut p = stock();
+    let reqs = requests(&s(&["lock.height", "lowergate.open"]));
+    assert_eq!(
+        read_chunk(&mut p, &reqs[0]),
+        Ok("lock.height:1.5,lowergate.open:true,".into())
+    );
+    assert_eq!(
+        p.1,
+        [
+            "READ=lock.height,lowergate.open",
+            "READ=lock.height",
+            "READ=lowergate.open"
+        ]
+    );
+    // a tag it does not have is still an error
+    let mut p = stock();
+    let reqs = requests(&s(&["lock.height", "nope"]));
+    assert!(read_chunk(&mut p, &reqs[0])
+        .unwrap_err()
+        .contains("Tag not found"));
+    // our own provider and the field device's REP: a batch reply, and `ACK=tag:value` for one tag, are taken as they are
+    let ok = Ok(b"ACK=a:1,b:2,\0".to_vec());
+    assert_eq!(
+        read_chunk(&mut Fake(vec![ok], 0), b"READ=a,b"),
+        Ok("a:1,b:2,".into())
+    );
+    let ok = Ok(b"ACK=a:1.500000\0".to_vec());
+    assert_eq!(
+        read_chunk(&mut Fake(vec![ok], 0), b"READ=a"),
+        Ok("a:1.500000,".into())
+    );
+    // a dead provider is one failed call (retried once), not one per tag
+    let mut r = Fake(vec![Err("timeout".into()), Err("timeout".into())], 0);
+    assert!(read_chunk(&mut r, b"READ=a,b").is_err());
+    assert_eq!(r.1, 2);
 }
 
 #[test]
