@@ -1,5 +1,6 @@
 """The SPEC 4.1 transcript (the 24 rows of conformance/stock/probe_modbus.py) against the stock sample config, provider down, then a
 sweep of every function code and the MBAP-level edge cases that stay inside what stock survives (no frame over 1018 bytes: Q9)."""
+import os
 from modbusprobe import *
 
 publish("load-1_bus-1.mw:250.5,generator-1_bus-1.active:true,load-1_bus-1.active:false,bus-1.gen_mw:12.5")
@@ -10,10 +11,15 @@ x("FC43 tid=1234", 43, b"\x0e\x01\x00", tid=0x1234)
 x("FC23 uid=9", 23, bytes(9), uid=9)
 x("FC3 + 4 extra bytes", 3, struct.pack(">HH", 40000, 1) + b"\1\2\3\4")
 x("FC4 + 245 extra bytes (length 254)", 4, struct.pack(">HH", 30000, 1) + bytes(245))
-s = Sess()
-s.send("pipelined FC4+FC3", mbap(1, 4, struct.pack(">HH", 30000, 1), tid=1) + mbap(1, 3, struct.pack(">HH", 40000, 1), tid=2))
-s.send("then a single FC4", mbap(1, 4, struct.pack(">HH", 30000, 1), tid=3))
-s.close()
+if os.environ.get("SERIAL"):
+    # on a serial port stock answers one frame per read: the second frame of a write waits for the next bytes, and every later
+    # reply comes one request late (ww-8k4, conformance/README.md). Ours answers both, as on TCP.
+    print("pipelined FC4+FC3                  (skipped on a serial port)")
+else:
+    s = Sess()
+    s.send("pipelined FC4+FC3", mbap(1, 4, struct.pack(">HH", 30000, 1), tid=1) + mbap(1, 3, struct.pack(">HH", 40000, 1), tid=2))
+    s.send("then a single FC4", mbap(1, 4, struct.pack(">HH", 30000, 1), tid=3))
+    s.close()
 print("== SPEC 4.1 rows")
 rd("FC4 30000 x1", 4, 30000, 1)
 rd("FC4 30000 x2 (gap)", 4, 30000, 2)

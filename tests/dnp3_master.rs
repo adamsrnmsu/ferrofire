@@ -527,3 +527,28 @@ async fn an_outstation_that_never_answers_the_status_read_is_not_asked_again_and
         "and the connection stayed"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_command_that_waits_past_the_start_timeout_is_dropped() {
+    // an outstation that never answers: each request waits out the 5 s response timeout, so the commands' turns come about 5, 10
+    // and 15 s after the first request. Given at 0, 3 and 3 s they have waited 5, 7 and 12 s: the third is past opendnp3's 10 s
+    // start timeout and is not sent (ww-8k4)
+    let o = scripted(|_, _| vec![]).await;
+    let cmdif = free_port();
+    let _client = modules(&client_xml(o.port, cmdif));
+    until("the first request", Duration::from_secs(2), || {
+        !o.got().is_empty()
+    })
+    .await;
+    command(cmdif, "WRITE=load-breaker-toggle:true").await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    command(cmdif, "WRITE=load-breaker-toggle:false").await;
+    command(cmdif, "WRITE=load-breaker-toggle:true").await;
+    tokio::time::sleep(Duration::from_secs(14)).await;
+    let funcs: Vec<u8> = o.got().iter().map(|f| f[1]).collect();
+    assert_eq!(
+        funcs.iter().filter(|f| **f == 5).count(),
+        2,
+        "functions sent: {funcs:?}"
+    );
+}

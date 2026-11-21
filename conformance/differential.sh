@@ -16,8 +16,16 @@ DOCKER_HOST=${DOCKER_HOST:-unix://$HOME/.docker/run/docker.sock}; export DOCKER_
 STOCK_IMAGE=${STOCK_IMAGE:-ffc-stock-2026.11.03:22.04}
 cleanup() { docker rm -f ff-diff-$set-dut ff-diff-$set-peers >/dev/null 2>&1 || true; }
 cleanup; trap cleanup EXIT
-docker run -d --name ff-diff-$set-dut $STOCK_IMAGE sleep 300 >/dev/null
+docker run -d --name ff-diff-$set-dut $STOCK_IMAGE sleep 900 >/dev/null   # removed on exit; a serial run is slower than 300 s
 docker cp "$here/$proto/$cfg" ff-diff-$set-dut:/tmp/cfg.xml
+# SERIAL=listen:PORT (a server DUT) or connect:PORT (a client DUT): the DUT's <endpoint> tcp://127.0.0.1:PORT becomes the serial port
+# /tmp/ttyFF, a pty that stock/ptyrelay.py joins to TCP PORT, so the peers and the capture are those of the TCP run (ww-8k4).
+if [ -n "${SERIAL:-}" ]; then
+  docker cp "$here/stock/ptyrelay.py" ff-diff-$set-dut:/tmp/ptyrelay.py
+  docker exec -d ff-diff-$set-dut sh -c "python3 /tmp/ptyrelay.py ${SERIAL%%:*} ${SERIAL#*:} /tmp/ttyFF > /tmp/ptyrelay.out 2>&1"
+  docker exec ff-diff-$set-dut sh -c 'for i in $(seq 50); do [ -e /tmp/ttyFF ] && exit 0; sleep 0.1; done; echo "no /tmp/ttyFF" >&2; exit 1'
+  docker exec ff-diff-$set-dut sed -i "s|tcp://127.0.0.1:${SERIAL#*:}<|/tmp/ttyFF<|" /tmp/cfg.xml
+fi
 case $who in
   stock) docker exec -d ff-diff-$set-dut sh -c 'cd /tmp && LD_LIBRARY_PATH=/usr/local/lib bennu-field-device --f /tmp/cfg.xml > /tmp/dut.out 2>&1' ;;
   rust)  docker cp "${FF_BIN:-$root/target-linux/debug/ferrofire}" ff-diff-$set-dut:/usr/local/bin/ferrofire
@@ -25,10 +33,12 @@ case $who in
   *) echo "stock|rust" >&2; exit 2 ;;
 esac
 sleep 6
-docker create --name ff-diff-$set-peers --network container:ff-diff-$set-dut ferrofire-testpeers python3 /conformance/probe_$set.py >/dev/null
+docker create --name ff-diff-$set-peers --network container:ff-diff-$set-dut -e SERIAL="${SERIAL:-}" ferrofire-testpeers python3 /conformance/probe_$set.py >/dev/null
 docker cp "$here/$proto" ff-diff-$set-peers:/conformance
 # probe lines starting "#T " are the machine-readable trace (replayed by the Rust golden test); the rest is the transcript
 docker start -a ff-diff-$set-peers | awk -v t="${TRACE:-/dev/null}" '/^#T /{print substr($0,4) > t; next} {print}'
+# a serial run prints what the relay said (nothing, unless it failed)
+[ -z "${SERIAL:-}" ] || docker exec ff-diff-$set-dut cat /tmp/ptyrelay.out >&2
 # LOGS=file also saves the device's event log (the *.log files in its cwd)
 if [ -n "${LOGS:-}" ]; then
   docker exec ff-diff-$set-dut sh -c 'cat /tmp/*.log' >"$LOGS" 2>&1 || true

@@ -341,6 +341,9 @@ const FEP_TIMEOUT: Duration = Duration::from_millis(1000);
 /// Commands waiting for a connection that is silent or away, per connection. opendnp3's queue has no size, only a 10 s start
 /// timeout; a command past this many is dropped, so a WRITE flood cannot grow memory.
 const COMMAND_QUEUE: usize = 1000;
+/// opendnp3's command start timeout: a queued command that has not started within this long is dropped. Over TCP no command waits
+/// that long (the queue is emptied when a connection opens); a serial port stays open while the outstation is away (ww-8k4).
+const START_TIMEOUT: Duration = Duration::from_secs(10);
 /// opendnp3's `LinkConfig` default (bennu does not change it): after this long without a frame from the outstation the master asks
 /// for its link status. An answer is not awaited: opendnp3 only tells a listener bennu does not have.
 const KEEP_ALIVE: Duration = Duration::from_secs(60);
@@ -547,6 +550,8 @@ struct Command {
     objects: Vec<u8>,
     /// The value is a NaN: stock compares the select's echo as numbers, a NaN never equals itself, and the operate is not sent.
     nan: bool,
+    /// When the command was given, for `START_TIMEOUT`.
+    given: Instant,
 }
 
 /// Commands dropped on a full queue since it last drained: one log line when the episode starts, one with the count when it ends.
@@ -694,6 +699,7 @@ impl Points for Bennu {
             sbo: p.sbo,
             objects,
             nan,
+            given: Instant::now(),
         });
         if sent.is_err() && link.overflow.dropped() {
             tracing::warn!("dnp3-client: command queue full ({COMMAND_QUEUE}); dropping commands, the first is for `{tag}`");
@@ -998,6 +1004,10 @@ impl Session {
 
     async fn run_task(&mut self, wire: &mut Wire, seq: &mut u8, task: Task) -> Result<(), Lost> {
         match task {
+            Task::Command(c) if c.given.elapsed() > START_TIMEOUT => {
+                tracing::warn!("dnp3-client: {}: dropped a command that did not start within {START_TIMEOUT:?}", self.name);
+                Ok(())
+            }
             Task::Command(c) => self.command(wire, seq, &c).await.map(|_| ()),
             Task::Clear => self.clear_restart(wire, seq).await,
             Task::Integrity => self.integrity_poll(wire, seq).await,
@@ -1146,6 +1156,7 @@ impl Session {
             sbo: p.sbo,
             objects,
             nan,
+            given: Instant::now(),
         };
         // a NaN is never sent; a command the outstation refuses is not repeated: the next poll shows what it holds
         let sent = match nan {

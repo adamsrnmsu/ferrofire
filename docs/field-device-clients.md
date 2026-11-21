@@ -18,8 +18,8 @@ no flow control, raw. Modbus: MBAP framing on the port, no slave byte, no CRC, a
 its port runs at the OS defaults, ours at 9600 8N1; the request timeout is 1000 ms as on TCP (stock `SerialClient.hpp`). DNP3: opendnp3's `SerialSettings`
 defaults, client address 1, link, transport and application layers as on TCP; its `asyncOpenDelay` (500 ms) is declared in `SerialSettings.h` and never read by
 the library, so there is no delay after open. A port that cannot be opened is retried as a refused connection is. `tests/serial_clients.rs` puts a pty pair between our
-client and our TCP server, and `tests/serial_servers.rs` between our TCP client and our server on the pty; stock-over-pty is not run (the stock and testpeers
-images have no `socat`).
+client and our TCP server, and `tests/serial_servers.rs` between our TCP client and our server on the pty. Against stock, `conformance/stock/ptyrelay.py` runs
+both clients and both servers on a pty in the stock image (`SERIAL=`, conformance/README.md "Serial endpoints"): ours equals stock there too.
 
 ## Config
 

@@ -1,5 +1,6 @@
 """Scaling, bit packing, address-space corners and writes landing, against diff-edges-server.xml (made by gen_edges.py) with a
 stand-in provider that acknowledges every WRITE. Registers 30000+k / 40000+k (k = 0..11) have the ranges listed in gen_edges.py."""
+import os
 from modbusprobe import *
 start_provider()
 N = 12
@@ -62,9 +63,13 @@ rd("FC1 coils 0..3", 1, 0, 4)
 print("== a write to an unmapped address queues nothing")
 wr("FC5 coil 4 (unmapped)", 5, 4, 0xFF00); wr("FC6 40012 (unmapped)", 6, 40012, 5)
 print("== two writes to one tag before the provider answers: sent in one segment the later value wins")
-s = Sess()
-s.send("FC6 40002 = 100 and = 200 in one segment", mbap(1, 6, struct.pack(">HH", 40002, 100), tid=1) + mbap(1, 6, struct.pack(">HH", 40002, 200), tid=2)); s.close(); wrote()
-rd("FC3 40002", 3, 40002, 1)
+if os.environ.get("SERIAL"):
+    # stock answers one frame per read on a serial port (see probe_diff.py), so the second write waits for the next request
+    print("FC6 40002 = 100 and = 200 in one segment (skipped on a serial port)")
+else:
+    s = Sess()
+    s.send("FC6 40002 = 100 and = 200 in one segment", mbap(1, 6, struct.pack(">HH", 40002, 100), tid=1) + mbap(1, 6, struct.pack(">HH", 40002, 200), tid=2)); s.close(); wrote()
+    rd("FC3 40002", 3, 40002, 1)
 # not probed: two writes 0.2 s apart. Stock sometimes keeps the first (a write that arrives while the first is in flight is erased by
 # the ACK); ours keeps the newer one (compare-and-erase). A race in stock, not a behaviour to copy (conformance/README.md).
 wr("FC6 40003 = 300", 6, 40003, 300); rd("FC3 40003", 3, 40003, 1)
