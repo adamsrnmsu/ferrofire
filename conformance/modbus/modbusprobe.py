@@ -1,7 +1,7 @@
 """Shared helpers for the differential Modbus probes (SPEC 8): the same requests go to the stock bennu server and to ours, and the
 transcript must be byte-equal. Every request is one line of transcript and a `#T` trace record (replayed by tests/modbus_golden.rs).
 Usage in a probe: `from modbusprobe import *`. Optional argv: [host] [port]."""
-import json, socket, struct, sys, threading, time
+import json, os, socket, struct, sys, threading, time
 
 host = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
 port = int(sys.argv[2]) if len(sys.argv) > 2 else 5502
@@ -76,6 +76,10 @@ def mbap(uid, fc, data=b"", tid=1, pid=0, length=None):
     pdu = bytes([fc]) + data
     return struct.pack(">HHHB", tid, pid, len(pdu) + 1 if length is None else length, uid) + pdu
 
+# on a serial line (differential.sh SERIAL=, ww-y51) a request spends its line time before the device has it
+_line = os.environ.get("SERIAL_LINE") or "9600-8N1"
+LINE_CHAR = (1 + int(_line[-3]) + (_line[-2] != "N") + int(_line[-1])) / int(_line.split("-")[0]) if os.environ.get("SERIAL") else 0.0
+
 class Sess:
     """One TCP connection; `send` writes bytes, then reads for `wait` seconds (or until the server closes)."""
     def __init__(self):
@@ -85,7 +89,7 @@ class Sess:
         try: self.s.sendall(data)
         except OSError: pass
         buf, eof = b"", False
-        self.s.settimeout(wait)
+        self.s.settimeout(wait + len(data) * LINE_CHAR)
         try:
             while True:
                 d = self.s.recv(65536)

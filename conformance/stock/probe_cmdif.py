@@ -124,6 +124,16 @@ def report(port, dnp3=False):
         what = payload.replace(":", "") or ("SYN" if on(syn) else "FIN" if on(fin) else "RST" if on(rst) else "")
         i = sum(1 for r in recs if r["t0"] <= float(t))
         packets.append((i, "> " if dport == str(port) else "< ", what))
+    if os.environ.get("SERIAL"):
+        # on a serial line the relay passes bytes on in pieces, so one frame can span two segments: join a direction's payloads
+        joined = []
+        for p in packets:
+            data = p[2] not in ("SYN", "FIN", "RST", "")
+            if data and joined and joined[-1][:2] == p[:2] and joined[-1][2] not in ("SYN", "FIN", "RST", ""):
+                joined[-1] = (p[0], p[1], joined[-1][2] + p[2])
+            else:
+                joined.append(p)
+        packets = joined
     for i, text in dnp3_lines(packets) if dnp3 else [(i, d + what) for i, d, what in packets]:
         wire[i].append(text)
     for w in wire[0]:

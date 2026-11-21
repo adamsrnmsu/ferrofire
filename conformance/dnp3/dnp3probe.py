@@ -87,6 +87,10 @@ def connect():
     global s, tpseq
     trace("connect"); s = Sock(socket.create_connection((host, port), timeout=3)); tpseq = 0
 connect()
+# on a serial line (differential.sh SERIAL=, ww-y51) a request spends its line time before the device has it
+_line = os.environ.get("SERIAL_LINE") or "9600-8N1"
+LINE_CHAR = (1 + int(_line[-3]) + (_line[-2] != "N") + int(_line[-1])) / int(_line.split("-")[0]) if os.environ.get("SERIAL") else 0.0
+
 def nap(t): trace("sleep", t); time.sleep(t)
 tpseq = 0
 aseq = 0
@@ -136,8 +140,9 @@ def send(label, app, ctrl=0xC4, wait=0.6, dst=10, src=1, raw_tp=None):
     global tpseq
     user = (bytes([0xC0 | tpseq]) + app) if raw_tp is None else raw_tp
     tpseq = (tpseq + 1) & 63
-    s.sendall(frame(dst, src, ctrl, user))
-    show(label, drain(wait))
+    f = frame(dst, src, ctrl, user)
+    s.sendall(f)
+    show(label, drain(wait + len(f) * LINE_CHAR))
 
 last = 0
 def req(label, fc, objs=b"", ctl=0xC0, wait=0.6, **kw):

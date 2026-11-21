@@ -180,7 +180,15 @@ DUT: one TCP client at a time is joined to the port) or `SERIAL=connect:PORT` (a
 refuses) turns that `<endpoint>` into `/tmp/ttyFF`, so the peers, captures and transcripts are the TCP run's. The relay passes on what the device wrote after
 20 ms of silence on the port, as a line reader frames it: a line carries bytes, not writes.
 
+A pty has no speed or parity, so the relay models the line (ww-y51). The port starts as a real ttyS does before a program sets it,
+9600 8N1, canonical, with echo. The relay reads what the device then sets (termios2, so a speed set as `BOTHER` shows as its number),
+and the transcript ends with it: `# serial line: 9600 8N1 flow=none raw`. Bytes take the time the line needs at `SERIAL_LINE`
+(default `9600-8N1`: 10 bits a byte, about 1.04 ms). When the device's speed, data bits, parity or stop bits differ from the line's,
+every byte arrives corrupted, both ways. That stands in for a mismatched UART's framing and parity errors; which garbage a real one
+makes is not modelled.
+
     make diff-serial                                                    # both servers, every differential set, ours on a serial port vs stock
+    make diff-serial-mismatch                                           # negative control: at 19200-8N1 and 9600-8E1 neither stock nor ours may talk
     SERIAL=connect:5502 DUT=rust make conformance PROTO=modbus-client   # our client on a serial port vs stock/client-modbus-serial.golden
     SERIAL=connect:20000 DUT=rust make conformance PROTO=dnp3-client    # our master; stock's serial transcript is its TCP one, so client-dnp3.golden
     SERIAL=connect:5502 conformance/stock/run-stock.sh modbus-client    # re-record the stock client's serial golden
@@ -191,11 +199,17 @@ What the stock image does on a serial port (recorded 2026-11-20, `ffc-stock-2026
   and from then on every reply comes one request late. The two cases that put two frames in one write (`pipelined FC4+FC3` in `diff`, `two writes ... in one
   segment` in `edges`) are skipped when `SERIAL` is set; `stock-serial-diff.golden` (recorded) and `stock-serial-edges.golden` (`stock-edges.golden` without that
   case; stock's run differs from it only in how often the NaN write is re-sent, ww-tqx) are the serial goldens, `waterway` needs none.
+- Modbus server on the paced line (bytes in 32-octet pieces, as a UART delivers them): a request that arrives in more than one
+  read (the 254-octet `FC4 + 245 extra bytes` in `diff`, the long FC3/FC16 rows in `edges`) is answered, and then stock answers
+  nothing more (ww-bb5.12). Up to that row stock equals the serial goldens; ours equals them through to the end.
 - Modbus client: a request to a server that is away waits out its 1000 ms timeout (`~1s` in `client-modbus-serial.golden`) instead of a refused connection.
 
 Ours equals all of these. Where we differ on a serial port: we answer both frames of a write at once, as stock does on TCP (a master that pipelines gets
 its replies in order, not one late). Our DNP3 master has opendnp3's 10 s start timeout too (`START_TIMEOUT`): a session on a serial port stays up while the
-outstation is away, so a queued command could otherwise be sent long after it was given. The pty ignores baud and parity, so a real port is not covered.
+outstation is away, so a queued command could otherwise be sent long after it was given. Port settings: stock's DNP3 sets 9600 8N1, raw, no flow control, and so do both of ours. Stock's Modbus sets raw and no flow
+control but never the speed, so it runs at whatever the port has (38400 on a bare pty, the relay's 9600 here, the host's default on
+a real port). Ours sets 9600 8N1, a difference we keep on purpose. The model checks the settings and the timing a line imposes; real
+UART hardware, cabling and RS-485 direction control are not covered.
 
 `fep` mode has no stock counterpart; its rules are in [docs/field-device-clients.md](../docs/field-device-clients.md) and its tests in `tests/fd_fep.rs`.
 

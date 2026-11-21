@@ -39,10 +39,12 @@ docker run -d --name $N-dut ${DUT_CAPS:-} "$DUT_IMAGE" sleep 900 >/dev/null
 for pair in ${DUT_EXTRA:-}; do docker cp "$here/../${pair%%:*}" "$N-dut:${pair#*:}"; done
 [ -z "${DUT_PRE:-}" ] || docker exec -d $N-dut sh -c "$DUT_PRE"
 # SERIAL=listen:PORT (a server DUT) or connect:PORT (a client DUT): the DUT's <endpoint> tcp://127.0.0.1:PORT becomes the serial port
-# /tmp/ttyFF, a pty that stock/ptyrelay.py joins to TCP PORT, so the peers and the capture are those of the TCP run (ww-8k4).
+# /tmp/ttyFF, a pty that stock/ptyrelay.py joins to TCP PORT, so the peers and the capture are those of the TCP run (ww-8k4). The relay
+# models a line of SERIAL_LINE (default 9600-8N1): paced, and corrupted when the device's port settings differ; the transcript ends
+# with the device's settings, `# serial line: 9600 8N1 flow=none raw` (ww-y51).
 if [ -n "${SERIAL:-}" ]; then
   docker cp "$here/stock/ptyrelay.py" $N-dut:/tmp/ptyrelay.py
-  docker exec -d $N-dut sh -c "python3 /tmp/ptyrelay.py ${SERIAL%%:*} ${SERIAL#*:} /tmp/ttyFF > /tmp/ptyrelay.out 2>&1"
+  docker exec -d $N-dut sh -c "python3 /tmp/ptyrelay.py ${SERIAL%%:*} ${SERIAL#*:} /tmp/ttyFF ${SERIAL_LINE:-9600-8N1} > /tmp/ptyrelay.out 2>&1"
   docker exec $N-dut sh -c 'for i in $(seq 50); do [ -e /tmp/ttyFF ] && exit 0; sleep 0.1; done; echo "no /tmp/ttyFF" >&2; exit 1'
   sed "s|tcp://127.0.0.1:${SERIAL#*:}<|/tmp/ttyFF<|" "$CFG" | docker exec -i $N-dut sh -c 'cat > /tmp/cfg.xml'
 else
@@ -65,4 +67,12 @@ for pair in ${PEER_EXTRA:-}; do docker cp "$here/../${pair%%:*}" "$N-peers:${pai
 docker start -a $N-peers || rc=$?
 docker cp $N-peers:/out/. "$OUT" 2>/dev/null || true
 docker exec $N-dut cat /tmp/dut.out > "$OUT/dut.out" 2>/dev/null || true
+# a serial run: the device's port settings end the transcript and must be SERIAL_WANT (default 9600 8N1, raw, no flow control)
+if [ -n "${SERIAL:-}" ]; then
+  docker exec $N-dut cat /tmp/ptyrelay.out > "$OUT/ptyrelay.out" 2>/dev/null || true
+  line=$(docker exec $N-dut cat /tmp/ptyrelay.line 2>/dev/null)
+  echo "# serial line: $line" >> "$OUT/transcript.txt"
+  want=${SERIAL_WANT:-9600 8N1 flow=none raw}
+  if [ "$line" = "$want" ]; then echo "ok:   serial line $line"; else echo "FAIL: serial line '$line', want '$want'"; rc=1; fi
+fi
 exit $rc
