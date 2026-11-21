@@ -913,4 +913,29 @@ mod tests {
         );
         assert!(rig.lines().iter().any(|l| l.contains("unit id 0")));
     }
+
+    #[test]
+    fn a_negative_value_reads_0_as_on_stock_and_reaches_a_register_only_through_the_range() {
+        // ww-4d7: -1 over [0,1000] is stock's 0 too (the saturating conversion), so `--compat-wrap` does not carry it either
+        let r = Range {
+            min: 0.0,
+            max: 1000.0,
+        };
+        assert_eq!((r.scale(-1.0), r.scale_wrap(-1.0)), (0, 0));
+        // a range with the minimum below the value does: the register is an offset, `unscale` gives -1 back
+        let wide = Range {
+            min: -1.0,
+            max: 1.0,
+        };
+        let raw = wide.scale(-1.0 + 1e-9);
+        assert_eq!(wide.scale(-1.0), 0);
+        assert!(raw < 2 && (wide.unscale(wide.scale(1.0)) - 1.0).abs() < 1e-9);
+        let (a, b) = (wide.scale(0.0), wide.unscale(wide.scale(0.0)));
+        assert!(a > 0 && b.abs() < 1e-4);
+        let neg = Range {
+            min: -1000.0,
+            max: 2000.0,
+        };
+        assert!((neg.unscale(neg.scale(-1.0)) + 1.0).abs() < 0.05);
+    }
 }
