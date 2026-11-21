@@ -174,6 +174,11 @@ too (it has, frame for frame). `tests/modbus_client.rs` and `tests/dnp3_master.r
 | DNP3 server: a `<deadband>` that is not a number (`abc`, empty, `inf`) makes stock log `ERROR: There was a problem parsing dnp3 server setup: conversion of data to type "d" failed` to stdout and carry on with no DNP3 outstation at all (nothing listens on the port, no Size lines) | the config is refused with an error naming `<deadband>` | the generator never emits it |
 | an out-of-range Modbus write is converted from double to `uint16_t`, which C++ leaves undefined: the arm64 build wraps it (`2000` over 0..1000 leaves as `fffe`), another build may not | the arm64 bytes, on every architecture | the capture is from arm64 |
 
+**GOOSE subscriber** (`<iec61850-rtu>`, ww-n29): `DUT=rust make conformance PROTO=iec61850-rtu`. go-iec61850 (`ffgoiec publish`) publishes
+`PUB/LD0 gcbTrip` from `iec61850-rtu/substation.scd` on lo, Tr.general false then true, false, true. The DUT subscribes twice: from the
+same SCD by `RTU1`'s `ExtRef` (`intAddr` mirror) and from `sub.cid`'s SEL block as bennu does. `provider.py` stands in for the provider
+and prints the writes they cause: the mirror follows both ways, each TRIP writes `false` once. bennu never builds its module, so no oracle.
+
 **UDP endpoints** (DNP3, ww-8l7): `UDP=PORT conformance/differential.sh dnp3 rust SET` turns the DUT's `tcp://127.0.0.1:PORT` into `udp://127.0.0.1:PORT`
 and the probe (`dnp3/dnp3probe.py`) sends the same requests as datagrams, a new socket standing for a new connection. Stock has no UDP endpoint, so `make
 diff-udp` compares ours with the stock TCP goldens of all eight sets. One step differs by design and is skipped on UDP: probe_diff's second master, refused

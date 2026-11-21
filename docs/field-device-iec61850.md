@@ -69,8 +69,51 @@ GOOSE is not IP: it is an Ethernet frame (ethertype 0x88B8) sent to a multicast 
 - Tagged frames: the crate always adds an 802.1Q priority tag; `<vlan-id>` sets the VLAN, otherwise it is VLAN 0 (priority-tagged).
 - libiec61850 v1.6's subscriber does not deliver frames sent to `01-0C-CD-01-00-00` (observed on `lo`); the default is `...-00-01`.
 - The GOOSE data set is the whole point map (value and quality of each point, 2 entries per point), `confRev` 1.
-- **Subscriber: not built.** A field device has no consumer for the values, and the datastore's inputs come from the provider. The crate
-  has a `Subscriber` (IEC 62351-6 replay rule, Edition 2 simulation bit) if a scenario needs one.
+- **Subscriber**: its own element, `<iec61850-rtu>` (below).
+
+## GOOSE subscriber (`<iec61850-rtu>`)
+
+Bead ww-n29. This is bennu's IEC 61850 module (`sceptre-bennu/src/bennu/devices/modules/comms/iec61850`), which the stock image never
+builds (ww-1w6), so again there is no oracle. Same element and keys as bennu; `<tag>` names the tag where bennu's `<entry>` has a
+`<device>` of an older bennu API.
+
+```xml
+<iec61850-rtu>
+  <name>sub</name>                                    <!-- required, as bennu -->
+  <configuration-file>GooseSub.cid</configuration-file>
+  <interface>eth1</interface>
+  <ied-name>RTU1</ied-name>                           <!-- optional: present = standard SCL subscriptions of this IED -->
+  <event-logging>rtu-1-goose.log</event-logging>      <!-- default iec61850-rtu.log -->
+  <entry><register-address>0</register-address><tag>brkr</tag></entry>   <!-- bennu mode -->
+</iec61850-rtu>
+```
+
+**bennu mode** (no `<ied-name>`), as `subscriber.cpp` and `IEC61850RTU.cpp` do it:
+
+- The file is a CID with SEL's vendor block: each `<Private type="SEL_GooseSubscription">` holds an `esel:GooseSubscription` whose
+  `datSetRef` is a subscribed data set. A GOOSE frame is taken when its `datSet` is one of them, whatever its MAC or APPID, and
+  retransmissions are processed like new states.
+- A true boolean at position 0 is a TRIP: while no TRIP is being handled, `false` is written to the tag of `<entry>` register 0, once,
+  with the event-log line `Value at register address 0 was received`. Every other entry is never used.
+- Any false boolean in the data set, at any position, ends the TRIP (bennu's loop). So with a false member after position 0, every
+  frame is a new TRIP, retransmissions included. Members that are not booleans (quality, floats) are ignored.
+- An empty data set logs `There is no data in the iec61850 data set!`.
+
+**Standard mode** (`<ied-name>`): the file is an SCD or CID, and the subscriptions are that IED's `Inputs/ExtRef`s, resolved by
+`iec61850_rs::scl` (by `srcCBName`, or by signal through the publisher's data sets) to the publisher's MAC, APPID, `gocbRef` and
+`confRev`, which every frame must carry.
+
+- Each `ExtRef` with an `intAddr` feeds the tag it names (`intAddr` is the standard's device-internal address). One without `intAddr`,
+  one naming no tag of this device, or one the file cannot resolve is logged at load and left out.
+- On each new state every mapped value is written when it changed: a boolean or a double point (`10` on, `01` off; intermediate and
+  bad states are not written) to a binary tag, a number to an analog tag. A member that is a whole data object gives its first value
+  (`stVal`, `general`).
+- A stream that stops for longer than its time allowed to live, a `confRev` that differs from the file's, and `ndsCom` are logged; the
+  tags keep their last values.
+
+Both modes listen on `<interface>` in promiscuous mode, need `CAP_NET_RAW` (without it the module logs why and the device runs on),
+and write through the datastore's queue like every protocol. bennu mode filters to the GOOSE multicast range (`01-0C-CD-01-..`); bennu's
+raw socket took any destination.
 
 ## The shared MMS layer (for ICCP)
 
@@ -106,6 +149,7 @@ Picked by evidence: the in-process client round trips, libiec61850 clients opera
     cargo test                                  # unit, socket (iec61850-rs client), robustness (mutated transcripts), accept()-failure
     make testpeers                              # once, and again after docker/testpeers/Dockerfile changed
     make conformance PROTO=iec61850             # libiec61850 clients + GOOSE subscriber on lo, tshark mms/goose, DUT=rust by default
+    make conformance PROTO=iec61850-rtu         # go-iec61850 publishes from an SCD; our two subscribers (SCD ExtRef, SEL CID) write
 
 Fuzz: `fuzz/fuzz_targets/fd_iec61850.rs` (`cargo +nightly fuzz run fd_iec61850` in `fuzz/`): arbitrary bytes through the OSI stack and
 the ACSI server via `fd::mms::step`; the property is no panic.
