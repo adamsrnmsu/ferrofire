@@ -40,6 +40,7 @@ fn probe_audit_and_diff() {
     let f = |tag: &str, what| Finding {
         rtu: "rtu1".into(),
         tag: tag.into(),
+        reg: (ferrofire::diff::Kind::InputRegister, 3),
         what,
     };
     let fs = [

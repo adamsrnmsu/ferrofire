@@ -739,25 +739,38 @@ fn findings_print_as_text_and_json() {
     let m = Finding {
         rtu: "r\"1".into(),
         tag: "a".into(),
+        reg: (Kind::HoldingRegister, 7),
         what: Ok((1.0, 0.5)),
     };
     assert_eq!(
         m.text(12.5),
-        "t=12.500 rtu=r\"1 tag=a modbus=1 provider=0.5 delta=0.5"
+        "t=12.500 rtu=r\"1 tag=a reg=holding-register:7 modbus=1 provider=0.5 delta=0.5"
     );
     assert_eq!(
         m.json(12.5),
-        r#"{"t":12.500,"rtu":"r\"1","tag":"a","modbus":1,"provider":0.5,"delta":0.5}"#
+        r#"{"t":12.500,"rtu":"r\"1","tag":"a","reg":"holding-register:7","modbus":1,"provider":0.5,"delta":0.5}"#
     );
     let e = Finding {
         rtu: "r".into(),
         tag: "*".into(),
+        reg: (Kind::Coil, 0),
         what: Err("down".into()),
     };
-    assert_eq!(e.text(1.0), "t=1.000 rtu=r tag=* error=down");
+    assert_eq!(e.text(1.0), "t=1.000 rtu=r tag=* reg=coil:0 error=down");
     assert_eq!(
         e.json(1.0),
-        r#"{"t":1.000,"rtu":"r","tag":"*","error":"down"}"#
+        r#"{"t":1.000,"rtu":"r","tag":"*","reg":"coil:0","error":"down"}"#
+    );
+    // one tag forged in two registers: the lines differ by register
+    let twin = |k, a| Finding {
+        rtu: "r".into(),
+        tag: "t".into(),
+        reg: (k, a),
+        what: Ok((1.0, 0.0)),
+    };
+    assert_ne!(
+        twin(Kind::HoldingRegister, 5).text(0.0),
+        twin(Kind::InputRegister, 5).text(0.0)
     );
 }
 
@@ -854,7 +867,9 @@ fn diff_keeps_one_connection_and_reports_only_mismatches() {
     assert!(!ok);
     assert_eq!(out.lines().count(), 1, "{out}");
     assert!(
-        out.contains("rtu=rtu-1 tag=lowervalve.open modbus=1 provider=0 delta=1"),
+        out.contains(
+            "rtu=rtu-1 tag=lowervalve.open reg=holding-register:1 modbus=1 provider=0 delta=1"
+        ),
         "{out}"
     );
     let (_, out, _) = probe(&ep, &["--json", "diff", "--map", &map], "");
@@ -874,14 +889,15 @@ fn diff_reports_rtu_errors_and_reconnects() {
     let (port, _) = rtu(|_, _| None, usize::MAX);
     let (ok, out, _) = probe(&ep, &["diff", "--map", &regmap(port)], "");
     assert!(
-        !ok && out.contains("rtu=rtu-1 tag=lowervalve.open error=") && out.contains("exception 2"),
+        !ok && out.contains("rtu=rtu-1 tag=lowervalve.open reg=coil:0 error=")
+            && out.contains("exception 2"),
         "{out}"
     );
     // nothing listening
     let dead = free_port();
     let (ok, out, _) = probe(&ep, &["diff", "--map", &regmap(dead)], "");
     assert!(
-        !ok && out.contains("rtu=rtu-1 tag=lowervalve.open error="),
+        !ok && out.contains("rtu=rtu-1 tag=lowervalve.open reg=coil:0 error="),
         "{out}"
     );
     // the RTU drops the connection after each request: the next read reconnects, the one in between is reported

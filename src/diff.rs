@@ -45,6 +45,16 @@ pub enum Kind {
 }
 
 impl Kind {
+    /// The name the register map uses for this kind.
+    pub fn name(self) -> &'static str {
+        match self {
+            Kind::Coil => "coil",
+            Kind::DiscreteInput => "discrete-input",
+            Kind::HoldingRegister => "holding-register",
+            Kind::InputRegister => "input-register",
+        }
+    }
+
     /// The Modbus function code that reads this kind.
     pub fn fc(self) -> u8 {
         match self {
@@ -180,12 +190,20 @@ pub fn differs(modbus: f64, provider: f64, min: f64, max: f64, tol: f64) -> bool
 pub struct Finding {
     pub rtu: String,
     pub tag: String,
+    /// The register read, so two points for one tag (a holding register the device mirrors into an input register) differ.
+    pub reg: (Kind, u16),
     pub what: Result<(f64, f64), String>,
 }
 
 impl Finding {
     pub fn text(&self, t: f64) -> String {
-        let head = format!("t={t:.3} rtu={} tag={}", self.rtu, self.tag);
+        let head = format!(
+            "t={t:.3} rtu={} tag={} reg={}:{}",
+            self.rtu,
+            self.tag,
+            self.reg.0.name(),
+            self.reg.1
+        );
         match &self.what {
             Ok((m, p)) => format!("{head} modbus={m} provider={p} delta={}", (m - p).abs()),
             Err(e) => format!("{head} error={e}"),
@@ -194,9 +212,11 @@ impl Finding {
 
     pub fn json(&self, t: f64) -> String {
         let head = format!(
-            "{{\"t\":{t:.3},\"rtu\":{},\"tag\":{}",
+            "{{\"t\":{t:.3},\"rtu\":{},\"tag\":{},\"reg\":\"{}:{}\"",
             json_str(&self.rtu),
-            json_str(&self.tag)
+            json_str(&self.tag),
+            self.reg.0.name(),
+            self.reg.1
         );
         match &self.what {
             Ok((m, p)) => format!(
@@ -222,6 +242,7 @@ impl Rig {
             let f = |what| Finding {
                 rtu: self.name.clone(),
                 tag: p.tag.clone(),
+                reg: (p.kind, p.address),
                 what,
             };
             match self.link.read(p.kind.fc(), p.address) {

@@ -240,7 +240,7 @@ rtu-1:
 
 Each RTU gets one TCP connection, opened on its first read and reused for every read of every cycle (stock bennu opens and closes one per
 read and leaks fds, ww-1p6); a failed read closes it and the next one reconnects. A point differs when the two values are more than
-`--tolerance` (a fraction of `max - min`, default 0.01; coils span 1) apart. Only differences are printed, as `t=<unix> rtu=.. tag=.. modbus=..
+`--tolerance` (a fraction of `max - min`, default 0.01; coils span 1) apart. Only differences are printed, as `t=<unix> rtu=.. tag=.. reg=<kind>:<address> modbus=..
 provider=.. delta=..` (or `--json`), and an RTU that cannot be read prints `error=..` for its first failing point that cycle. `--cycles N`
 runs N comparisons `--every` seconds apart (default 1; `0` runs until SIGINT/SIGTERM, the blue-team monitor). It exits 1 if anything was
 printed. Register maps read from `config.xml` or sceptre's `reg_addrs` are not loaded yet; write the YAML.
