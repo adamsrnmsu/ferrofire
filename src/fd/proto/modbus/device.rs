@@ -29,16 +29,19 @@ impl Range {
     /// Truncates; a value outside the range clamps to 0 or 65535 (NaN reads as 0). Stock converts through a 32-bit integer and keeps
     /// the low 16 bits, so 1000.5 over `[0,1000]` reads 31 there: SPEC Q4 decided on a clamp, and the golden replay lists the rows.
     pub fn scale(&self, v: f64) -> u16 {
-        let slope = self.slope();
-        // one rounding for `slope * v + intercept`, as the stock build computes it (fused multiply-add): it decides which side of an
-        // integer a value near it lands on
-        slope.mul_add(v, self.intercept(slope)) as u16
+        self.scaled(v) as u16
     }
 
     /// Stock arm64: `(u32)(slope * v + intercept)` saturates at 0 and `u32::MAX` (NaN is 0), and the register keeps the low 16 bits.
     pub fn scale_wrap(&self, v: f64) -> u16 {
+        (self.scaled(v) as u32) as u16
+    }
+
+    /// `slope * v + intercept` with one rounding, as the stock build computes it (fused multiply-add): it decides which side of an
+    /// integer a value near it lands on.
+    fn scaled(&self, v: f64) -> f64 {
         let slope = self.slope();
-        (slope.mul_add(v, self.intercept(slope)) as u32) as u16
+        slope.mul_add(v, self.intercept(slope))
     }
 
     pub fn unscale(&self, raw: u16) -> f64 {
