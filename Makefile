@@ -71,16 +71,16 @@ bench-maxrate-control: image   # grid flip latency at each engine dt (bench/run_
 	for d in 50 20 10 5 2 1; do DT_MS=$$d REPS=3 RS=1,10 CELLS=breaker:seq:100,breaker:sim:100 OUTDIR=docs/bench/results/maxrate/control/dt$$d python3 bench/run_control.py || exit 1; done
 bench-dg-report:   # docs/bench/datagram-v1-bench.md from the datagram v1 raw results
 	python3 bench/dg_report.py
-FUZZ_TARGETS := request datagram expr model fd_datagram fd_config fd_modbus fd_dnp3 fd_iec61850 fd_iccp fd_mqtt fd_scpi fd_hislip fd_vxi11
+FUZZ_TARGETS := request datagram expr model fd_datagram fd_config fd_cmdif fd_modbus fd_modbus_client fd_dnp3 fd_dnp3_master fd_iec61850 fd_iccp fd_mqtt fd_scpi fd_hislip fd_vxi11
 FUZZ_SECS ?= 10
 fuzz-smoke: image   # every fuzz target for $(FUZZ_SECS)s each (CI); crashes land in fuzz/artifacts, turn each into a test
 	$(IN) bash -c 'cd fuzz && for t in $(FUZZ_TARGETS); do cargo +nightly fuzz run $$t -- -max_total_time=$(FUZZ_SECS) -max_len=4096 || exit 1; done'
 fuzz: image   # one target until it finds something: make fuzz T=expr (T defaults to request); Ctrl-C to stop
 	$(IN) bash -c 'cd fuzz && cargo +nightly fuzz run $(or $(T),request)'
 check: fmt-check lint test crap dry deny   # every gate except mutate
-# The stock oracle image bennu:arm64 lives in the Lima VM's docker (not Docker Desktop's), so the conformance targets use that daemon.
-# Override with TP_DOCKER_HOST=unix:///var/run/docker.sock (any daemon that has the DUT image).
-TP_DOCKER_HOST ?= unix://$(HOME)/.lima/phenix/sock/docker.sock
+# The stock oracle image ffc-stock-2026.11.03:22.04 (bennu v2026.11.03) and ferrofire-testpeers live on Docker Desktop's daemon, so the
+# conformance targets use it. Override with TP_DOCKER_HOST=unix:///var/run/docker.sock (any daemon that has both images).
+TP_DOCKER_HOST ?= unix://$(HOME)/.docker/run/docker.sock
 # Set per command, not as a target-specific export: that would leak into prerequisites (dut, image) and build on the wrong daemon.
 TP := DOCKER_HOST=$(TP_DOCKER_HOST)
 testpeers:   # build the ferrofire-testpeers image (opendnp3, libiec61850, tshark, Zeek+ICSNPP, nmap); PLATFORM=linux/amd64 also works
@@ -91,11 +91,11 @@ conformance: dut   # acceptance harness for one protocol vs the stock oracle: ma
 conformance-selftest:   # prove the harness fails on a damaged and on an empty capture (negative control)
 	$(TP) SELFTEST=1 conformance/run.sh dnp3
 
-differential: dut   # one differential probe against the stock oracle or our binary: make differential PROTO=dnp3 WHO=stock|rust SET=diff|big
-	@test -n "$(PROTO)" -a -n "$(WHO)" || { echo "usage: make differential PROTO=dnp3 WHO=stock|rust [SET=diff|big]"; exit 2; }
+differential: dut   # one differential probe against the stock oracle or our binary: make differential PROTO=dnp3 WHO=stock|rust SET=diff|big|out|grp|cfg|ovf|nack|nopv
+	@test -n "$(PROTO)" -a -n "$(WHO)" || { echo "usage: make differential PROTO=dnp3 WHO=stock|rust [SET=diff|big|out|grp|cfg|ovf|nack|nopv]"; exit 2; }
 	$(TP) conformance/differential.sh $(PROTO) $(WHO) $(or $(SET),diff)
 diff-dnp3: dut   # our DNP3 outstation vs the recorded stock transcripts, live in containers
-	@for s in diff big; do $(TP) conformance/differential.sh dnp3 rust $$s | diff conformance/dnp3/stock-$$s.golden - && echo "dnp3 $$s: byte-equal to stock" || exit 1; done
+	@for s in diff big out grp cfg ovf nack nopv; do $(TP) conformance/differential.sh dnp3 rust $$s | diff conformance/dnp3/stock-$$s.golden - && echo "dnp3 $$s: byte-equal to stock" || exit 1; done
 diff-modbus: dut   # our Modbus server vs the recorded stock transcripts, live in containers
 	@for s in diff waterway edges; do $(TP) conformance/differential.sh modbus rust $$s | diff conformance/modbus/stock-$$s.golden - && echo "modbus $$s: byte-equal to stock" || exit 1; done
 

@@ -65,7 +65,8 @@ pub struct Layout {
 #[derive(Clone)]
 pub struct Store(Arc<Mutex<Inner>>);
 
-fn zero(kind: Kind) -> Value {
+/// What a tag of `kind` holds before anything set it.
+pub fn zero(kind: Kind) -> Value {
     match kind {
         Kind::Binary => Value::Binary(false),
         Kind::Analog => Value::Analog(0.0),
@@ -165,8 +166,39 @@ impl Store {
         Ok(())
     }
 
+    /// `write`, but only while the queue still holds `seen` for `tag` (`None`: nothing queued): a protocol write that landed since
+    /// the caller read the queue is not overwritten. `Ok(false)`: it had, and nothing was queued.
+    pub fn write_if_queued(
+        &self,
+        tag: &str,
+        v: Value,
+        seen: Option<Value>,
+    ) -> Result<bool, WriteError> {
+        let mut s = lock(&self.0);
+        let now = s.queue.get(tag);
+        let unchanged = match (now, seen.as_ref()) {
+            (None, None) => true,
+            (Some(a), Some(b)) => same(a, b),
+            _ => false,
+        };
+        if !unchanged {
+            return Ok(false);
+        }
+        let cur = s.get(tag).ok_or(WriteError::UnknownTag)?;
+        if kind_of(cur) != kind_of(v) {
+            return Err(WriteError::WrongKind);
+        }
+        s.queue.insert(tag.to_string(), v);
+        Ok(true)
+    }
+
     pub fn is_queued(&self, tag: &str) -> bool {
         lock(&self.0).queue.contains_key(tag)
+    }
+
+    /// The value queued for `tag`, not yet in the store.
+    pub fn queued(&self, tag: &str) -> Option<Value> {
+        lock(&self.0).queue.get(tag).copied()
     }
 
     /// A number the provider published for `point` (`true`/`false` arrive as 1/0). A number that is not 0 or 1 for a binary
@@ -247,9 +279,17 @@ impl Store {
         s.forget(tag, v);
     }
 
-    /// The provider rejected `v` for `tag`: drop it from the queue unless a newer write replaced it.
+    /// The provider rejected `v` for `tag`: stock drops it from the queue and applies it all the same (ww-a7r: with a provider that
+    /// answers `ERR=` the datastore holds the written value at once, so a DNP3 input on the same tag reads it and an output status
+    /// keeps it). The point takes `v` with no hold; the queue entry goes unless a newer write replaced it.
     pub fn reject(&self, tag: &str, v: Value) {
-        lock(&self.0).forget(tag, v);
+        let mut s = lock(&self.0);
+        if s.queue.get(tag).is_some_and(|q| same(q, &v)) {
+            if let Some(p) = s.alias.get(tag).cloned().and_then(|a| s.points.get_mut(&a)) {
+                p.value = v;
+            }
+        }
+        s.forget(tag, v);
     }
 
     /// End of cycle: queued writes to device-local tags take effect.
@@ -381,6 +421,20 @@ mod tests {
     }
 
     #[test]
+    fn write_if_queued_loses_to_a_write_that_landed_first() {
+        let s = store();
+        assert_eq!(s.write_if_queued("to", Value::Analog(1.0), None), Ok(true));
+        // a second caller still believes nothing is queued
+        assert_eq!(s.write_if_queued("to", Value::Analog(2.0), None), Ok(false));
+        assert_eq!(s.queued("to"), Some(Value::Analog(1.0)));
+        assert_eq!(
+            s.write_if_queued("to", Value::Analog(3.0), Some(Value::Analog(1.0))),
+            Ok(true)
+        );
+        assert_eq!(s.queued("to"), Some(Value::Analog(3.0)));
+    }
+
+    #[test]
     fn ack_sets_the_point_and_erases_only_the_same_value() {
         let s = store();
         s.write("to", Value::Analog(1.0)).unwrap();
@@ -396,14 +450,15 @@ mod tests {
     }
 
     #[test]
-    fn reject_drops_only_the_same_value() {
+    fn reject_drops_only_the_same_value_and_applies_it() {
         let s = store();
         s.write("to", Value::Analog(1.0)).unwrap();
         s.reject("to", Value::Analog(5.0));
         assert!(s.is_queued("to"));
+        assert_eq!(s.get_f64("to"), Some(0.0));
         s.reject("to", Value::Analog(1.0));
         assert!(!s.is_queued("to"));
-        assert_eq!(s.get_f64("to"), Some(0.0));
+        assert_eq!(s.get_f64("to"), Some(1.0), "applied all the same");
     }
 
     #[test]

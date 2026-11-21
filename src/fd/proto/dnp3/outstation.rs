@@ -2,9 +2,9 @@
 //! `Conn` is one master's connection (link and transport state, the fragment waiting for a CONFIRM). Bytes in, bytes out, and
 //! the clock is an argument, so the golden replay and the fuzz target drive it exactly as the socket does.
 
-use super::app::{self, iin, Request, CON, FIN, FIR, MAX_APDU, RESPONSE_HEADER};
+use super::app::{self, iin, Range, Request, CON, FIN, FIR, MAX_APDU, RESPONSE_HEADER};
 use super::command::{self, Mode, Selection, TIME_SYNC_VALID};
-use super::db::{AnaPoint, BinPoint, Data, Events, Typ};
+use super::db::{AnaPoint, BinPoint, Data, Events, Point, Table, Typ};
 use super::link::{self, Frame, Parse};
 use super::read::{self, Block};
 use super::transport::{self, Reassembler};
@@ -26,14 +26,21 @@ pub trait Sink {
 pub trait Source {
     fn binary(&self, tag: &str) -> Option<bool>;
     fn analog(&self, tag: &str) -> Option<(f64, u64)>;
+    /// A write to `tag` waits for the provider's acknowledgement: the sweep leaves an output point alone until it comes, as stock
+    /// does (the point already holds the value the control wrote).
+    fn pending(&self, tag: &str) -> bool;
 }
+
+/// A point's place in its table: `(is an output, index)`. Inputs and outputs are four tables (g1, g10, g30, g40) that share
+/// indices, as bennu v2026.11.03 keeps them; sorted by this key a map lists its inputs first.
+pub type Slot = (bool, u16);
 
 /// Everything the connections share.
 pub struct Device {
     pub local: u16,
     pub master: u16,
-    pub bin: BTreeMap<u16, BinPoint>,
-    pub ana: BTreeMap<u16, AnaPoint>,
+    pub bin: BTreeMap<Slot, BinPoint>,
+    pub ana: BTreeMap<Slot, AnaPoint>,
     pub events: Events,
     pub selection: Option<Selection>,
     pub restart: bool,
@@ -41,44 +48,97 @@ pub struct Device {
     synced: Option<Duration>,
     broadcast: bool,
     tx_seq: u8,
+    /// Output values a control wrote, not yet in the output points.
+    pub landed: Vec<Landed>,
+}
+
+/// What a control wrote to an output point: `(index, value)`.
+#[derive(Debug, PartialEq)]
+pub enum Landed {
+    Bin(u16, bool),
+    Ana(u16, f64),
 }
 
 impl Device {
     pub fn new(
         local: u16,
         master: u16,
-        bin: BTreeMap<u16, BinPoint>,
-        ana: BTreeMap<u16, AnaPoint>,
+        bin: BTreeMap<Slot, BinPoint>,
+        ana: BTreeMap<Slot, AnaPoint>,
+        event_cap: u16,
     ) -> Device {
         Device {
             local,
             master,
             bin,
             ana,
-            events: Events::default(),
+            events: Events::new(event_cap),
             selection: None,
             restart: true,
             need_time: true,
             synced: None,
             broadcast: false,
             tx_seq: 0,
+            landed: vec![],
         }
     }
 
-    /// The 1 Hz sweep (bennu `Server::update`): every mapped point takes the datastore's value, binaries first, each in index
-    /// order; a change on an input raises an event.
+    /// The 1 Hz sweep (bennu `Server::update`): every mapped point takes the datastore's value, the four tables in the order binary
+    /// inputs, analog inputs, binary outputs, analog outputs (what an integrity poll right after start shows), each in index order;
+    /// a change raises an event (an output the provider has not yet acknowledged is left alone).
     pub fn refresh(&mut self, src: &dyn Source) {
-        for (idx, p) in self.bin.iter_mut() {
-            if let Some(v) = src.binary(&p.tag) {
-                if p.update(v) {
-                    self.events.push(*idx, Data::Bin { flags: p.flags });
-                }
+        self.settle();
+        for out in [false, true] {
+            self.sweep_binary(out, src);
+            self.sweep_analog(out, src);
+        }
+    }
+
+    fn sweep_binary(&mut self, out: bool, src: &dyn Source) {
+        for (idx, p) in self.bin.iter_mut().filter(|(k, _)| k.0 == out) {
+            if out && src.pending(&p.tag) {
+                continue;
+            }
+            if src.binary(&p.tag).is_some_and(|v| p.update(v)) {
+                let data = Data::Bin { flags: p.flags };
+                self.events.push(idx.1, p.class, out, p.evar, data);
             }
         }
-        for (idx, p) in self.ana.iter_mut() {
-            if let Some((v, ts)) = src.analog(&p.tag) {
-                if p.update(v) {
-                    self.events.push(*idx, Data::Ana { value: v, ts });
+    }
+
+    fn sweep_analog(&mut self, out: bool, src: &dyn Source) {
+        for (idx, p) in self.ana.iter_mut().filter(|(k, _)| k.0 == out) {
+            if out && src.pending(&p.tag) {
+                continue;
+            }
+            if let Some((value, ts)) = src.analog(&p.tag).filter(|(v, _)| p.update(*v)) {
+                let data = Data::Ana { value, ts };
+                self.events.push(idx.1, p.class, out, p.evar, data);
+            }
+        }
+    }
+
+    /// The values controls wrote reach their output points, and raise their events (an output's event has no time).
+    pub fn settle(&mut self) {
+        for l in std::mem::take(&mut self.landed) {
+            match l {
+                Landed::Bin(i, on) => {
+                    let Some(p) = self.bin.get_mut(&(true, i)) else {
+                        continue;
+                    };
+                    if p.update(on) {
+                        let data = Data::Bin { flags: p.flags };
+                        self.events.push(i, p.class, true, p.evar, data);
+                    }
+                }
+                Landed::Ana(i, value) => {
+                    let Some(p) = self.ana.get_mut(&(true, i)) else {
+                        continue;
+                    };
+                    if p.update(value) {
+                        let data = Data::Ana { value, ts: 0 };
+                        self.events.push(i, p.class, true, p.evar, data);
+                    }
                 }
             }
         }
@@ -90,11 +150,31 @@ impl Device {
         self.synced = Some(now);
     }
 
-    /// The highest index of a type's points (0 when it has none).
-    pub fn max_index(&self, typ: Typ) -> u16 {
-        match typ {
-            Typ::Binary => self.bin.keys().next_back().copied().unwrap_or(0),
-            Typ::Analog => self.ana.keys().next_back().copied().unwrap_or(0),
+    /// The highest index of a table's points (0 when it has none).
+    pub fn max_index(&self, t: Table) -> u16 {
+        let top = |m: &mut dyn Iterator<Item = u16>| m.max().unwrap_or(0);
+        match t.typ {
+            Typ::Binary => top(&mut self
+                .bin
+                .iter()
+                .filter(|p| p.1.input != t.out)
+                .map(|p| p.0 .1)),
+            Typ::Analog => top(&mut self
+                .ana
+                .iter()
+                .filter(|p| p.1.input != t.out)
+                .map(|p| p.0 .1)),
+        }
+    }
+
+    /// ASSIGN_CLASS for one table (`group` 1, 10, 30 or 40): the points in `range` change class. PARAM_ERROR unless the range lies
+    /// within the table's first and last index.
+    pub fn assign(&mut self, group: u8, class: u8, range: &Range) -> u16 {
+        let out = group == 10 || group == 40;
+        if group < 30 {
+            assign_in(&mut self.bin, out, class, range)
+        } else {
+            assign_in(&mut self.ana, out, class, range)
         }
     }
 
@@ -110,10 +190,34 @@ impl Device {
             (self.restart, iin::RESTART),
             (self.need_time, iin::NEED_TIME),
             (self.broadcast, iin::BROADCAST),
-            (self.events.unselected(), iin::CLASS1),
+            (self.events.unselected(1), iin::CLASS1),
+            (self.events.unselected(2), iin::CLASS2),
+            (self.events.unselected(3), iin::CLASS3),
             (self.events.overflowed(), iin::OVERFLOW),
         ];
         flags.iter().filter(|f| f.0).fold(0, |a, f| a | f.1)
+    }
+}
+
+fn assign_in<V>(m: &mut BTreeMap<Slot, Point<V>>, out: bool, class: u8, range: &Range) -> u16 {
+    let keys: Vec<u16> = m.keys().filter(|k| k.0 == out).map(|k| k.1).collect();
+    let (Some(&lo), Some(&hi)) = (keys.first(), keys.last()) else {
+        return iin::PARAM_ERROR;
+    };
+    let (a, b) = match range {
+        Range::StartStop(a, b) => (*a, *b),
+        _ => (u32::from(lo), u32::from(hi)),
+    };
+    for k in keys
+        .into_iter()
+        .filter(|k| (a..=b).contains(&u32::from(*k)))
+    {
+        m.entry((out, k)).and_modify(|p| p.class = class);
+    }
+    if a >= u32::from(lo) && a <= b && b <= u32::from(hi) {
+        0
+    } else {
+        iin::PARAM_ERROR
     }
 }
 
@@ -221,6 +325,7 @@ impl Conn {
         now: Duration,
         out: &mut Vec<u8>,
     ) -> Result<(), Close> {
+        dev.settle();
         if !Self::addressed(&f, dev) {
             return Ok(());
         }
@@ -358,7 +463,7 @@ impl Conn {
         use app::func::*;
         match func {
             DELAY_MEASURE => Reply::Simple(vec![52, 2, 7, 1, 0, 0], 0),
-            IMMED_FREEZE | ASSIGN_CLASS | RECORD_CURRENT_TIME => Reply::Simple(vec![], 0),
+            IMMED_FREEZE | RECORD_CURRENT_TIME => Reply::Simple(vec![], 0),
             _ => Reply::Simple(vec![], iin::NO_FUNC),
         }
     }
@@ -381,6 +486,7 @@ impl Conn {
             SELECT | OPERATE | DIRECT_OPERATE | DIRECT_OPERATE_NO_ACK => {
                 Self::control(dev, sink, req, now)
             }
+            ASSIGN_CLASS => Reply::Simple(vec![], command::assign_class(dev, req.objects)),
             f => Self::plain(f),
         }
     }
@@ -441,15 +547,26 @@ mod tests {
     /// bi[2] input, bo[5] output (sbo), bs[7] output; ai[0] input, ao[1] output (sbo).
     fn device() -> Device {
         let bin = [
-            (2, BinPoint::new("bi", false, true)),
-            (5, BinPoint::new("bo", false, false)),
-            (7, BinPoint::new("bs", true, false)),
+            ((false, 2), BinPoint::new("bi", false, true)),
+            ((true, 5), BinPoint::new("bo", false, false)),
+            ((true, 7), BinPoint::new("bs", true, false)),
         ];
         let ana = [
-            (0, AnaPoint::new("ai", false, true)),
-            (1, AnaPoint::new("ao", true, false)),
+            ((false, 0), AnaPoint::new("ai", false, true)),
+            ((true, 1), AnaPoint::new("ao", true, false)),
         ];
-        Device::new(10, 1, bin.into_iter().collect(), ana.into_iter().collect())
+        let mut d = Device::new(
+            10,
+            1,
+            bin.into_iter().collect(),
+            ana.into_iter().collect(),
+            100,
+        );
+        (
+            d.bin.get_mut(&(false, 2)).unwrap().class,
+            d.ana.get_mut(&(false, 0)).unwrap().class,
+        ) = (1, 1);
+        d
     }
 
     #[derive(Default)]
@@ -470,6 +587,9 @@ mod tests {
         }
         fn analog(&self, tag: &str) -> Option<(f64, u64)> {
             (tag == "ai").then_some((self.0, self.1))
+        }
+        fn pending(&self, _: &str) -> bool {
+            false
         }
     }
 
@@ -701,6 +821,90 @@ mod tests {
         assert_eq!(*r.ask(&req(1, 4, &two)).last().unwrap(), 2);
     }
 
+    /// ww-a12: stock applies a control to the output status when it arrives and raises the output event then (g11, g42),
+    /// not with the next sweep; a point left in class 0 raises none.
+    #[test]
+    fn a_control_on_an_output_with_a_class_is_an_event_at_once() {
+        let mut r = Rig::new();
+        let crob = |code| {
+            [
+                vec![0xC0, 5, 12, 1, 0x17, 1, 5, code, 1],
+                vec![100, 0, 0, 0, 0, 0, 0, 0, 0],
+            ]
+            .concat()
+        };
+        let direct = |r: &mut Rig, code| r.ask(&crob(code));
+        direct(&mut r, 3);
+        assert_eq!(r.ask(&[0xC0, 1, 60, 2, 6]).len(), 4, "class 0: no event");
+        assert_eq!(
+            command::assign_class(&mut r.dev, &[60, 2, 6, 10, 0, 0, 5, 7]),
+            0
+        );
+        direct(&mut r, 4);
+        let reply = r.ask(&[0xC0, 1, 60, 2, 6]);
+        assert_eq!(
+            reply[4..],
+            [11, 1, 0x28, 1, 0, 5, 0, 0x01],
+            "g11v1, index 5, off"
+        );
+        assert!(
+            r.ask(&[0xC0, 1, 2, 0, 6]).len() == 4,
+            "g2 does not carry it"
+        );
+    }
+
+    /// ww-a12: while the provider has not acknowledged a control, the sweep still reads the old value from the store and must
+    /// not flip the output status back (and raise a second event).
+    #[test]
+    fn the_sweep_leaves_an_output_alone_while_its_write_is_pending() {
+        struct Held(bool);
+        impl Source for Held {
+            fn binary(&self, tag: &str) -> Option<bool> {
+                (tag == "bo").then_some(false)
+            }
+            fn analog(&self, _: &str) -> Option<(f64, u64)> {
+                None
+            }
+            fn pending(&self, tag: &str) -> bool {
+                self.0 && tag == "bo"
+            }
+        }
+        for (pending, events) in [(true, 1), (false, 2)] {
+            let mut r = Rig::new();
+            assert_eq!(
+                command::assign_class(&mut r.dev, &[60, 2, 6, 10, 0, 0, 5, 7]),
+                0
+            );
+            r.ask(&[
+                0xC0, 5, 12, 1, 0x17, 1, 5, 3, 1, 100, 0, 0, 0, 0, 0, 0, 0, 0,
+            ]);
+            r.dev.refresh(&Held(pending));
+            let n = r.dev.events.select(None, None, 0, usize::MAX);
+            assert_eq!(n, events, "pending: {pending}");
+        }
+    }
+
+    #[test]
+    fn assign_class_follows_opendnp3() {
+        let mut d = device();
+        assert_eq!(command::assign_class(&mut d, &[60, 3, 6, 1, 0, 0, 2, 2]), 0);
+        assert_eq!(d.bin[&(false, 2)].class, 2);
+        assert_eq!(command::assign_class(&mut d, &[60, 2, 6, 40, 0, 6]), 0);
+        assert_eq!(d.ana[&(true, 1)].class, 1);
+        let wide = [60, 2, 6, 1, 0, 0, 0, 9];
+        assert_eq!(command::assign_class(&mut d, &wide), iin::PARAM_ERROR);
+        assert_eq!(
+            d.bin[&(false, 2)].class,
+            1,
+            "the points inside the range are assigned"
+        );
+        assert_eq!(command::assign_class(&mut d, &[1, 0, 6]), iin::PARAM_ERROR);
+        assert_eq!(
+            command::assign_class(&mut d, &[60, 2, 6, 1, 1, 6]),
+            iin::NO_FUNC
+        );
+    }
+
     #[test]
     fn direct_operate_checks_sbo_and_the_point_map() {
         let mut r = Rig::new();
@@ -712,21 +916,22 @@ mod tests {
         assert_eq!(*r.ask(&req(1, 5, &crob(5, 3))).last().unwrap(), 0);
         assert_eq!(
             *r.ask(&req(2, 5, &crob(2, 3))).last().unwrap(),
-            0,
-            "an input is reached through the same map"
+            12,
+            "an input is not a control point (v2026.11.03)"
         );
         assert_eq!(*r.ask(&req(3, 5, &crob(9, 3))).last().unwrap(), 12);
         assert_eq!(*r.ask(&req(4, 5, &crob(5, 4))).last().unwrap(), 0);
         assert_eq!(*r.ask(&req(5, 5, &crob(5, 0x43))).last().unwrap(), 0);
-        assert_eq!(
-            r.rec.0,
-            vec!["bo@5=true", "bi@2=true", "bo@5=false", "bo@5=true"]
-        );
+        assert_eq!(r.rec.0, vec!["bo@5=true", "bo@5=false", "bo@5=true"]);
         let ao = |idx: u8, v: f32| [&[41u8, 3, 0x17, 1, idx][..], &v.to_le_bytes(), &[0]].concat();
         assert_eq!(*r.ask(&req(6, 5, &ao(1, 1.5))).last().unwrap(), 2);
-        assert_eq!(*r.ask(&req(7, 5, &ao(0, 2.5))).last().unwrap(), 0);
+        assert_eq!(
+            *r.ask(&req(7, 5, &ao(0, 2.5))).last().unwrap(),
+            12,
+            "an analog input is not a control point"
+        );
         assert_eq!(*r.ask(&req(8, 5, &ao(4, 2.5))).last().unwrap(), 12);
-        assert_eq!(r.rec.0.last().unwrap(), "ai@0=2.5");
+        assert_eq!(r.rec.0.last().unwrap(), "bo@5=true", "nothing written");
         // select / operate of an analog output
         assert_eq!(*r.ask(&req(9, 3, &ao(1, 3.5))).last().unwrap(), 0);
         assert_eq!(*r.ask(&req(10, 4, &ao(1, 3.5))).last().unwrap(), 0);
@@ -910,7 +1115,7 @@ mod tests {
     fn the_refresh_makes_events_for_inputs_only_and_carries_the_provider_time() {
         let mut d = device();
         d.refresh(&Vals(1.0, 1_794_324_000));
-        let events = d.events.select(None, 0, usize::MAX);
+        let events = d.events.select(None, None, 0, usize::MAX);
         assert_eq!(
             events, 2,
             "bi and ai raised one each; the outputs raised none"
@@ -926,14 +1131,17 @@ mod tests {
         d.events.clear_written();
         d.refresh(&Vals(1.0, 1_794_324_001));
         assert_eq!(
-            d.events.select(None, 0, usize::MAX),
+            d.events.select(None, None, 0, usize::MAX),
             0,
             "no change, no event"
         );
-        assert_eq!(d.max_index(Typ::Binary), 7);
-        assert_eq!(d.max_index(Typ::Analog), 1);
+        let t = |typ, out| Table { typ, out };
+        assert_eq!(d.max_index(t(Typ::Binary, false)), 2);
+        assert_eq!(d.max_index(t(Typ::Binary, true)), 7);
+        assert_eq!(d.max_index(t(Typ::Analog, true)), 1);
         assert_eq!(
-            Device::new(1, 2, Default::default(), Default::default()).max_index(Typ::Binary),
+            Device::new(1, 2, Default::default(), Default::default(), 100)
+                .max_index(t(Typ::Binary, false)),
             0
         );
     }

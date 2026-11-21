@@ -1,6 +1,7 @@
 //! `ferrofire field-device`: a Rust stand-in for `bennu-field-device` (docs/field-device-spec.md). The config loader,
 //! datastore, provider link, logic engine and scan cycle live here; protocols are modules under `proto`.
 
+pub mod cmdif;
 pub mod config;
 pub mod eventlog;
 pub mod input;

@@ -2,6 +2,7 @@
 //! differential-tested against it (`conformance/modbus/`). `codec` frames, `device` is the I/O-free state machine (tables, scaling,
 //! one connection's buffer); this file is the config and the sockets around them.
 
+pub mod client;
 pub mod codec;
 pub mod device;
 
@@ -30,7 +31,7 @@ pub struct Server {
 }
 
 /// `<max-value>` and `<min-value>` count only together (SPEC 4.1): one alone leaves the stock default.
-fn range(n: Node) -> Result<Range, ConfigError> {
+pub(super) fn range(n: Node) -> Result<Range, ConfigError> {
     Ok(
         match (
             number::<f64>(n, "max-value")?,

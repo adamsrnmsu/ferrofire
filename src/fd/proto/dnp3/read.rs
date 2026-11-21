@@ -2,7 +2,7 @@
 //! fragments of at most `MAX_APDU` bytes. Events come first, then static data, as opendnp3 writes them.
 
 use super::app::{self, iin, Header, Range};
-use super::db::{analog_object, binary_static, Events, Typ};
+use super::db::{analog_object, binary_static, Events, Table, Typ};
 use super::outstation::Device;
 use std::collections::VecDeque;
 
@@ -43,16 +43,55 @@ enum Sel {
 #[derive(Debug, PartialEq)]
 enum Action {
     Nothing,
+    /// A variation that exists but cannot be read: IIN2.0 in the answer, which the other objects of the request still get.
+    Unreadable,
     Class0,
-    /// Select events: type (None = every type), variation (0 = default), most to select.
-    Events(Option<Typ>, u8, usize),
-    Static(Typ, u8, Sel),
+    /// Select events: type and class (None = every one), variation (0 = default), most to select.
+    Events(Option<Table>, Option<u8>, u8, usize),
+    Static(Table, u8, Sel),
 }
 
-/// Groups opendnp3 knows and the outstation answers with nothing (no such points here).
-const EMPTY_GROUPS: &[u8] = &[3, 4, 10, 11, 20, 21, 22, 23, 40, 42];
-/// Groups that exist but cannot be read.
-const UNREADABLE_GROUPS: &[u8] = &[12, 41, 50, 51, 52, 80];
+/// Variations of groups that have no points here and answer a READ with nothing (stock v2026.11.03, conformance/dnp3/stock-grp.golden).
+const EMPTY: &[(u8, &[u8])] = &[
+    (3, &[0, 2]),
+    (4, &[0, 1, 2, 3]),
+    (20, &[0, 1, 2, 5, 6]),
+    (21, &[0, 1, 2, 5, 6, 9, 10]),
+    (22, &[0, 1, 2, 5, 6]),
+    (23, &[0, 1, 2, 5, 6]),
+    (50, &[4]),
+];
+/// Variations that exist but cannot be read (IIN2.0 NO_FUNC_CODE_SUPPORT); every other variation is an unknown object.
+const UNREADABLE: &[(u8, &[u8])] = &[
+    (3, &[1]),
+    (10, &[1]),
+    (12, &[0, 1]),
+    (13, &[1, 2]),
+    (41, &[0, 1, 2, 3, 4]),
+    (50, &[1, 3]),
+    (51, &[1, 2]),
+    (52, &[1, 2]),
+    (80, &[1]),
+];
+
+/// The static groups with points: `(group, type, output status, variations)`. g10v1 (packed) is not readable, see `UNREADABLE`.
+const STATIC_GROUPS: [(u8, Typ, bool, &[u8]); 4] = [
+    (1, Typ::Binary, false, &[0, 1, 2]),
+    (10, Typ::Binary, true, &[0, 2]),
+    (30, Typ::Analog, false, &[0, 1, 2, 3, 4, 5, 6]),
+    (40, Typ::Analog, true, &[0, 1, 2, 3, 4]),
+];
+/// The event groups: `(group, type, output status, highest variation)`.
+const EVENTS: [(u8, Typ, bool, u8); 4] = [
+    (2, Typ::Binary, false, 3),
+    (11, Typ::Binary, true, 2),
+    (32, Typ::Analog, false, 8),
+    (42, Typ::Analog, true, 8),
+];
+
+fn listed(t: &[(u8, &[u8])], group: u8, var: u8) -> bool {
+    t.iter().any(|(g, v)| *g == group && v.contains(&var))
+}
 
 fn limit(range: &Range) -> Result<usize, u16> {
     match range {
@@ -75,40 +114,46 @@ fn static_sel(range: &Range) -> Result<Sel, u16> {
 fn class_action(var: u8, range: &Range) -> Result<Action, u16> {
     match var {
         1 => Ok(Action::Class0),
-        2 => Ok(Action::Events(None, 0, limit(range)?)),
-        3 | 4 => Ok(Action::Nothing),
+        2..=4 => Ok(Action::Events(None, Some(var - 1), 0, limit(range)?)),
         _ => Err(iin::UNKNOWN_OBJECT),
     }
 }
 
 /// Objects that exist in opendnp3 but have no points here, or cannot be read; anything else is unknown.
 fn other_action(group: u8, var: u8) -> Result<Action, u16> {
-    if EMPTY_GROUPS.contains(&group) && var <= 10 {
+    if listed(EMPTY, group, var) {
         Ok(Action::Nothing)
-    } else if UNREADABLE_GROUPS.contains(&group) {
-        Err(iin::NO_FUNC)
+    } else if listed(UNREADABLE, group, var) {
+        Ok(Action::Unreadable)
     } else {
         Err(iin::UNKNOWN_OBJECT)
     }
 }
 
-fn static_action(typ: Typ, var: u8, range: &Range) -> Result<Action, u16> {
-    Ok(Action::Static(typ, var, static_sel(range)?))
+fn static_action(typ: Typ, out: bool, var: u8, range: &Range) -> Result<Action, u16> {
+    Ok(Action::Static(Table { typ, out }, var, static_sel(range)?))
 }
 
-fn event_action(typ: Typ, var: u8, range: &Range) -> Result<Action, u16> {
-    Ok(Action::Events(Some(typ), var, limit(range)?))
+fn event_action(typ: Typ, out: bool, var: u8, range: &Range) -> Result<Action, u16> {
+    Ok(Action::Events(
+        Some(Table { typ, out }),
+        None,
+        var,
+        limit(range)?,
+    ))
 }
 
 fn classify(h: &Header) -> Result<Action, u16> {
     let (g, v) = (h.group, h.var);
-    match (g, v) {
-        (60, _) => class_action(v, &h.range),
-        (1, 0..=2) => static_action(Typ::Binary, v, &h.range),
-        (30, 0..=6) => static_action(Typ::Analog, v, &h.range),
-        (2, 0..=3) => event_action(Typ::Binary, v, &h.range),
-        (32, 0..=8) => event_action(Typ::Analog, v, &h.range),
-        _ => other_action(g, v),
+    if g == 60 {
+        return class_action(v, &h.range);
+    }
+    if let Some(&(_, typ, out, _)) = STATIC_GROUPS.iter().find(|s| s.0 == g && s.3.contains(&v)) {
+        return static_action(typ, out, v, &h.range);
+    }
+    match EVENTS.iter().find(|e| e.0 == g && v <= e.3) {
+        Some(&(_, typ, out, _)) => event_action(typ, out, v, &h.range),
+        None => other_action(g, v),
     }
 }
 
@@ -129,9 +174,15 @@ fn actions(objects: &[u8]) -> Result<Vec<Action>, u16> {
     }
 }
 
-/// Class 0 reads every type: add the ones no loader has yet.
-fn add_class0(out: &mut Vec<(Typ, u8, Sel)>) {
-    for t in [Typ::Binary, Typ::Analog] {
+/// Class 0 reads every table: add the ones no loader has yet.
+fn add_class0(out: &mut Vec<(Table, u8, Sel)>) {
+    for (typ, o) in [
+        (Typ::Binary, false),
+        (Typ::Analog, false),
+        (Typ::Binary, true),
+        (Typ::Analog, true),
+    ] {
+        let t = Table { typ, out: o };
         if !out.iter().any(|l| l.0 == t) {
             out.push((t, 0, Sel::All));
         }
@@ -139,7 +190,7 @@ fn add_class0(out: &mut Vec<(Typ, u8, Sel)>) {
 }
 
 /// An explicit header replaces a whole-type loader of its type (keeping its place), else adds a loader.
-fn add_static(out: &mut Vec<(Typ, u8, Sel)>, typ: Typ, var: u8, sel: &Sel) {
+fn add_static(out: &mut Vec<(Table, u8, Sel)>, typ: Table, var: u8, sel: &Sel) {
     match out
         .iter_mut()
         .find(|l| l.0 == typ && l.2 == Sel::All && *sel == Sel::All)
@@ -149,8 +200,9 @@ fn add_static(out: &mut Vec<(Typ, u8, Sel)>, typ: Typ, var: u8, sel: &Sel) {
     }
 }
 
-/// Static loaders in request order.
-fn loaders(acts: &[Action]) -> Vec<(Typ, u8, Sel)> {
+/// Static loaders in the order stock answers them whatever the request's: g1, g30, g10, g40 (probed, `stock-cfg`/`stock-nack`); the
+/// loaders of one table keep their request order.
+fn loaders(acts: &[Action]) -> Vec<(Table, u8, Sel)> {
     let mut out = vec![];
     for a in acts {
         match a {
@@ -159,33 +211,33 @@ fn loaders(acts: &[Action]) -> Vec<(Typ, u8, Sel)> {
             _ => {}
         }
     }
+    out.sort_by_key(|l| usize::from(l.0.out) * 2 + l.0.typ as usize);
     out
 }
 
-/// Every point of a type as `(index, variation, object bytes)`; `var` 0 means each point's own default.
-fn all_points(dev: &Device, typ: Typ, var: u8) -> Vec<(u16, u8, Vec<u8>)> {
+/// Every point of a table as `(index, variation, object bytes)`; `var` 0 means each point's own default. Group 40 numbers its
+/// variations 1 i32, 2 i16, 3 float, 4 double: group 30's 1, 2, 5, 6.
+fn all_points(dev: &Device, t: Table, var: u8) -> Vec<(u16, u8, Vec<u8>)> {
     let pick = |default: u8| if var == 0 { default } else { var };
-    match typ {
+    match t.typ {
         Typ::Binary => dev
             .bin
             .iter()
-            .map(|(i, p)| {
-                (
-                    *i,
-                    pick(p.default_var()),
-                    binary_static(pick(p.default_var()), p.flags),
-                )
-            })
+            .filter(|(_, p)| p.input != t.out)
+            .map(|(i, p)| (i.1, pick(p.svar), binary_static(pick(p.svar), p.flags)))
             .collect(),
         Typ::Analog => dev
             .ana
             .iter()
+            .filter(|(_, p)| p.input != t.out)
             .map(|(i, p)| {
-                (
-                    *i,
-                    pick(p.default_var()),
-                    analog_object(pick(p.default_var()), p.value, p.flags, None, false),
-                )
+                let v = pick(p.svar);
+                let wire = if t.out {
+                    [0, 1, 2, 5, 6][usize::from(v)]
+                } else {
+                    v
+                };
+                (i.1, v, analog_object(wire, p.value, p.flags, None, false))
             })
             .collect(),
     }
@@ -214,11 +266,11 @@ fn asked(sel: &Sel, found: usize) -> usize {
 }
 
 /// The points a loader addresses, and whether some asked-for index is missing.
-fn gather(dev: &Device, typ: Typ, var: u8, sel: &Sel) -> (Vec<(u16, u8, Vec<u8>)>, bool) {
+fn gather(dev: &Device, t: Table, var: u8, sel: &Sel) -> (Vec<(u16, u8, Vec<u8>)>, bool) {
     if matches!(sel, Sel::Range(a, b) if b < a) {
         return (vec![], true);
     }
-    let found: Vec<_> = all_points(dev, typ, var)
+    let found: Vec<_> = all_points(dev, t, var)
         .into_iter()
         .filter(|(i, _, _)| wanted(sel, *i))
         .collect();
@@ -227,7 +279,7 @@ fn gather(dev: &Device, typ: Typ, var: u8, sel: &Sel) -> (Vec<(u16, u8, Vec<u8>)
 }
 
 /// Group consecutive indices that share a variation into blocks.
-fn runs(typ: Typ, wide: bool, points: Vec<(u16, u8, Vec<u8>)>) -> Vec<Block> {
+fn runs(t: Table, wide: bool, points: Vec<(u16, u8, Vec<u8>)>) -> Vec<Block> {
     let mut out: Vec<Block> = vec![];
     let mut last: Option<(u16, u8)> = None;
     for (idx, var, bytes) in points {
@@ -235,7 +287,7 @@ fn runs(typ: Typ, wide: bool, points: Vec<(u16, u8, Vec<u8>)>) -> Vec<Block> {
         match (extend, out.last_mut()) {
             (true, Some(Block::Static { items, .. })) => items.push(bytes),
             _ => out.push(Block::Static {
-                group: if typ == Typ::Binary { 1 } else { 30 },
+                group: t.group(),
                 var,
                 start: idx,
                 wide,
@@ -251,7 +303,7 @@ fn runs(typ: Typ, wide: bool, points: Vec<(u16, u8, Vec<u8>)>) -> Vec<Block> {
 fn event_blocks(events: &Events) -> Vec<Block> {
     let mut out: Vec<Block> = vec![];
     for (e, var) in events.selected() {
-        let (g, item) = (e.typ().group(), (e.id, e.encode(var)));
+        let (g, item) = (e.table().event_group(), (e.id, e.encode(var)));
         match out.last_mut() {
             Some(Block::Events {
                 group,
@@ -271,19 +323,23 @@ fn event_blocks(events: &Events) -> Vec<Block> {
 /// Plan the answer to a READ and select the events it asks for. A request that is refused as a whole selects nothing.
 pub fn plan(dev: &mut Device, objects: &[u8]) -> Result<Plan, u16> {
     let acts = actions(objects)?;
+    let mut flags = 0;
     for a in &acts {
-        if let Action::Events(typ, var, n) = a {
-            dev.events.select(*typ, *var, *n);
+        match a {
+            Action::Events(typ, class, var, n) => {
+                dev.events.select(*typ, *class, *var, *n);
+            }
+            Action::Unreadable => flags |= iin::NO_FUNC,
+            _ => {}
         }
     }
     let mut blocks: VecDeque<Block> = event_blocks(&dev.events).into();
-    let mut flags = 0;
-    for (typ, var, sel) in loaders(&acts) {
-        let (points, missing) = gather(dev, typ, var, &sel);
+    for (t, var, sel) in loaders(&acts) {
+        let (points, missing) = gather(dev, t, var, &sel);
         if missing {
             flags |= iin::PARAM_ERROR;
         }
-        blocks.extend(runs(typ, dev.max_index(typ) > 255, points));
+        blocks.extend(runs(t, dev.max_index(t) > 255, points));
     }
     Ok(Plan { blocks, iin: flags })
 }
@@ -319,7 +375,7 @@ fn fit(block: &Block, space: usize) -> usize {
     let packed = matches!(
         block,
         Block::Static {
-            group: 1,
+            group: 1 | 10,
             var: 1,
             ..
         }
@@ -383,7 +439,7 @@ fn emit(block: Block, k: usize) -> (Vec<u8>, Vec<u64>, Option<Block>) {
             };
             put(&mut out, usize::from(start));
             put(&mut out, stop);
-            if (group, var) == (1, 1) {
+            if matches!((group, var), (1 | 10, 1)) {
                 let mut bytes = vec![0u8; k.div_ceil(8)];
                 items
                     .iter()

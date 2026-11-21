@@ -17,8 +17,11 @@ async def main():
     async with MasterTcpRunner(master=m, host="127.0.0.1", port=20000, response_timeout=5.0) as r:
         res = await r.integrity_poll()
         want(bool(res) and all(x.function.name == "RESPONSE" for x in res), "dnp3py: integrity poll answered with RESPONSE")
-        want(set(h.binary_inputs) == {2, 5}, f"dnp3py: binary input points {sorted(h.binary_inputs)} == [2, 5]")
-        want(set(h.analog_inputs) == {0, 1, 2}, f"dnp3py: analog input points {sorted(h.analog_inputs)} == [0, 1, 2]")
+        # bennu v2026.11.03 keeps the outputs apart: inputs are g1/g30, control points are output status g10/g40
+        want(set(h.binary_inputs) == {2}, f"dnp3py: binary input points {sorted(h.binary_inputs)} == [2]")
+        want(set(h.analog_inputs) == {0}, f"dnp3py: analog input points {sorted(h.analog_inputs)} == [0]")
+        want(set(h.binary_outputs) == {5}, f"dnp3py: binary output status points {sorted(h.binary_outputs)} == [5]")
+        want(set(h.analog_outputs) == {1, 2}, f"dnp3py: analog output status points {sorted(h.analog_outputs)} == [1, 2]")
         async def direct(build):
             b = CommandBuilder(); build(b)
             return await r.request(m.build_direct_operate(b.build_direct_operate()))

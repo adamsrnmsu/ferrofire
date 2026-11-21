@@ -3,7 +3,7 @@
 Judges a field-device protocol the way a blue team sees it: capture the wire, then ask tshark and Zeek what they decoded.
 
     make testpeers                  # once: build the ferrofire-testpeers image (about 10 min; docker/testpeers/Dockerfile)
-    make conformance PROTO=dnp3     # peers vs the stock oracle (bennu:arm64); exit 0 = PASS
+    make conformance PROTO=dnp3     # peers vs the stock oracle (ffc-stock-2026.11.03:22.04); exit 0 = PASS
     DUT=rust make conformance PROTO=dnp3   # the same peers and judgement against our binary (FF_BIN, default target-linux/debug/ferrofire)
     make conformance-selftest       # negative control: a damaged and an empty capture must be rejected
 
@@ -23,7 +23,8 @@ Output lands in `target/conformance/<PROTO>/`: the pcap, `peer.out`, `dut.out`, 
     conformance/lib.sh        expert_clean, want_field, want_zeek
     conformance/<proto>/      proto.env (DUT config, start command, capture filter), peer.sh, check.sh, zeek.sh
 
-Add a protocol: copy `conformance/dnp3/`, change the four files. Only `ff-conf-dut` and `ff-conf-peers` are created or removed.
+Add a protocol: copy `conformance/dnp3/`, change the four files. Only `ff-conf-dut` and `ff-conf-peers` are created or removed (`CONF_NAME` changes the
+prefix). A client DUT gets its stock server through `DUT_EXTRA` and `DUT_PRE` in `proto.env` (see `modbus-client/`).
 Files go in and out with `docker cp` (no bind mounts: the Lima docker daemon cannot see every host path).
 
 ## Elasticsearch / OpenSearch
@@ -34,12 +35,13 @@ SCORCH `providerdata` check. See [../docs/ground-truth-elastic.md](../docs/groun
 ## Pointing it at another device
 `DUT_IMAGE=<image> DUT_CMD='<command reading /tmp/cfg.xml>' conformance/run.sh dnp3` (the config is `CFG`, default the stock sample from
 `BENNU_DATA`, default `~/git/sceptre-bennu/data/configs/ep`; for DNP3 it is `conformance/dnp3/server.xml`, because the stock parser exits silently on an XML comment before the root element). The binary must be in `DUT_IMAGE`. With `DUT` unset the oracle is
-`bennu:arm64` (SPEC section 8), so run on the daemon that has it: the Makefile defaults `TP_DOCKER_HOST` to the Lima socket.
+`ffc-stock-2026.11.03:22.04` (bennu v2026.11.03, `STOCK_IMAGE` overrides), so run on the daemon that has it and `ferrofire-testpeers`: the Makefile defaults
+`TP_DOCKER_HOST` to the Docker Desktop socket (`differential.sh` and `run-stock.sh` default `DOCKER_HOST` to it too).
 
 ## Differential and golden replay (DNP3)
 The acceptance harness above judges what a blue team sees. The differential proves the device answers like the stock one, byte for byte.
 
-    make differential PROTO=dnp3 WHO=stock SET=diff   # the transcript of probe_diff.py against bennu:arm64
+    make differential PROTO=dnp3 WHO=stock SET=diff   # the transcript of probe_diff.py against the stock image (SET: diff big out grp cfg ovf nack nopv)
     make diff-dnp3                                    # our binary vs the recorded stock transcripts, live (rebuilds target-linux/debug/ferrofire first)
 
 `conformance/dnp3/`: `probe_diff.py` (about 230 requests: link layer, reads by group and variation, events and their order, IIN, every
@@ -47,7 +49,22 @@ control function, routing, CloseNew), `probe_big.py` (130 binary + 130 analog + 
 multi-fragment responses, two-octet ranges), `dnp3probe.py` (helpers, and a stand-in provider REP socket so that commands reach the
 datastore as they do with a live provider), `diff-server.xml` / `diff-big-server.xml` (configs), and what the stock device did:
 `stock-*.golden` (transcript), `stock-*.trace` (the same run as machine-readable `send` / `sleep` / `publish` / `recv` steps) and
-`stock-*.logs` (its event log). The transcripts mask two things a wall clock decides: the provider time inside time-bearing objects
+`stock-*.logs` (its event log).
+`probe_out.py` (`out`) and `probe_grp.py` (`grp`), both on `diff-server.xml`, pin what stock v2026.11.03 does with output points and with the groups that have no points:
+- Once ASSIGN_CLASS gives g10 or g40 a class, a change of an output point is an event with IIN1.1 to 1.3, as for an input, but in
+  its own groups: g11 for a binary output (v1 flags, v2 flags and a zero time; default v1) and g42 for an analog output (v1 to v8 as g32; default v1; the time
+  is zero in the raw bytes of `stock-out.trace`; the golden masks provider times, so that was read from the trace, and an output tag is not in the provider's stream). A control reaches the output status and raises its event at once (a READ 20 ms later shows both), but after its own response, whose IIN has no class bit
+  for it (`Device::settle`). g2 and g32 reads never select them and g11 and g42 reads never select input events. Each of the four types has its own event buffer, 100 events unless `<event-buffer-size>` says otherwise (`probe_ovf.py`, below). A point left in
+  class 0 raises none.
+- g10 reads in v0 and v2 only (v0 answers as v2); g10v1 is IIN2.0 (NO_FUNC_CODE_SUPPORT); g10v3 and v4 are IIN2.1 (UNKNOWN_OBJECT), and so are g40v5 and
+  above, with no objects. (The READ of g10v3 and g40v5 to v10 that answers IIN2.1 is what stock does, not a regression.)
+- `stock-grp.golden` lists, for g3, g4, g11 to g13, g20 to g23, g41, g42, g50 to g52 and g80, v0 to v12, which are empty, NO_FUNC or unknown; `read.rs` has the tables.
+  A NO_FUNC object (g13v1, g12v1, g50v1 ...) sets IIN2.0 and the other objects of the READ are still answered; an unknown object refuses the whole READ with IIN2.1 alone.
+`probe_cfg.py` (`cfg`, `diff-cfg-server.xml`) pins the config keys of v2026.11.03: `class` on every point, `sgvar`, `egvar` and `deadband` on inputs, `event-buffer-size`, a
+name opendnp3 does not know (the point is left out, silently), and an input and an output on one index. The probes behind it are in `docs/field-device-spec.md` 4.2.0.
+`probe_ovf.py` (`ovf`) overflows the output event buffers (g11, g42) at the default 100. `probe_nack.py` (`nack`) and `probe_nopv.py` (`nopv`), on `diff-prov-server.xml` (an
+output and an input on one tag), run a control against a provider that answers `ERR=` and against none: `tests/dnp3_golden.rs` replays them with the same provider.
+ The transcripts mask two things a wall clock decides: the provider time inside time-bearing objects
 and IIN1.4 NEED_TIME.
 
 `tests/dnp3_golden.rs` replays the traces against our state machine with a virtual clock (no docker, runs in `cargo test` and
@@ -112,6 +129,58 @@ function codes. **Hostile input and descriptors**: `tests/modbus_net.rs` (2000 c
 `/proc/self/fd` must not grow; 300 concurrent clients; bad frames get no answer and the next client is served), `tests/modbus_emfile.rs` (descriptor limit lowered: the
 accept loop reports once, backs off and serves again when descriptors are free), `fuzz/fuzz_targets/fd_modbus.rs`. These are the bennu #79/#81 shapes (everything-burger's
 `modbus-churn` and `modbus-badframes`).
+
+## Field-device clients
+
+`<modbus-client>` and `<dnp3-client>` in `bennu` mode ([docs/field-device-clients.md](../docs/field-device-clients.md)), judged against the stock fd-client itself:
+the client is the DUT, the **stock** server runs beside it in the same container (under `stock/servectl.py`, so the peers can stop and start it), and
+`stock/probe_cmdif.py` drives the client's command interface the way `bennu-probe` does, with tcpdump on the protocol port.
+
+    DUT=rust make conformance PROTO=modbus-client    # our client vs the stock modbus-server; check.sh wants the stock client's transcript
+    DUT=rust make conformance PROTO=dnp3-client      # our master vs the stock outstation
+    conformance/stock/run-stock.sh modbus-client     # re-record stock/client-modbus.golden and .pcap from the stock client (also: dnp3-client)
+
+The goldens were recorded from `ffc-stock-2026.11.03:22.04` (bennu v2026.11.03); `STOCK_IMAGE` (default that image) names the stock image,
+`CONF_NAME` the container prefix, `TP_DOCKER_HOST` the daemon that has the image and `ferrofire-testpeers`.
+
+**The transcript** (`stock/client-<proto>.golden`): per command `request<TAB>reply`, then what the capture saw until the next command, `>` from the client
+and `<` from the server: payload bytes, and `SYN`, `FIN`, `RST`. For Modbus that is every byte. For DNP3 a clock decides where a periodic scan falls, so the
+compared transcript shows each frame as link control, addresses and the application fragment with CRCs, the transport octet and the sequence number taken out, and
+leaves out the all-classes scans and refused connection attempts; `client-dnp3-raw.golden` has every frame as sent, and `check.sh` notes whether ours equals that
+too (it has, frame for frame). `tests/modbus_client.rs` and `tests/dnp3_master.rs` replay the commands in one process and check the exact startup and command bytes.
+
+**What stock does** (recorded; rows 7 to 9 of [the protocol plan](../docs/field-device-protocols-plan.md) carry the detail):
+- Command interface: the op is `QUERY`/`READ`/`WRITE` in upper or lower case only; a `WRITE` is a binary write for `true`/`false` and otherwise whatever `stod`
+  makes of the text (` 7`, `7x`, `0x10`, `nan`), and the reply echoes the text.
+- Modbus: one connection kept open, one reconnect attempt by the request that finds it closed, transaction ids from 3 counting every request, no polling;
+  `value*slope + intercept` through 32 bits without a clamp; one range per address for the whole connection, the last declared.
+- DNP3: class 0 poll, clear-restart, class 0 poll, then the all-classes scan every `scan-rate`; no enable- or disable-unsolicited request; `READ` from a cache that
+  only binary and analog inputs update, by address, into whichever tag has it; `WRITE` updates the cache first and always answers ACK; a command given while the
+  outstation is away is dropped; reconnects at once, then 1, 2, 4 ... s apart.
+
+**Where we differ on purpose:**
+| Stock | Ours | Why |
+|---|---|---|
+| a failed READ or WRITE answers `ERR=Failed reading tag 't': ` followed by the bytes of a destroyed string (different every time; masked `<text>` in the goldens) | the text stock meant: `readRegisterByTag(): Failure`, `writeCoil(): Failed writing coil` | never send memory |
+| a request without `=`, a `WRITE` without `:value`, a value `stod` refuses or that overflows a double (`WRITE=gen-power:TRUE`): the device dies (`terminate called after throwing an instance of 'std::invalid_argument'`) | `ERR=Malformed request (must be QUERY=\|READ=tag\|WRITE=tag:value)` or `ERR=Failed writing tag 't': value 'v' is not true, false or a number`; nothing is written | a typo must not take the FEP down |
+| Modbus: no response timeout; a server that accepts and stays silent blocks the client and its command interface for good (no reply in 100 s) | 1000 ms per request, then the `ERR=Failed ...` reply and a new connection for the next request | a dead peer must not wedge the device |
+| a request with bytes that are not UTF-8 is echoed back byte for byte in an error reply | such bytes come back as U+FFFD | the reply is built as text |
+| a tag mapped twice: the last mapping wins | the first wins, with a WARN (an error under `--strict`) | one rule for every module that declares tags |
+| a command-interface bind failure exits the device | logged; the client runs without it | the rest of the device keeps running, as for every module |
+| DNP3: a connection lost is reopened at once, also when it never carried a response (a tight loop through a relay in front of a dead outstation) | at once only after a session that was answered; otherwise the 1, 2, 4 ... 60 s pauses | no connection storm |
+| DNP3: after a clear-restart that leaves IIN1.7 set, opendnp3 stops clearing but polls class 0 again on every response that carries the bit | the class 0 poll is not re-demanded either | no poll loop against an outstation that never clears the bit |
+| DNP3: commands wait in opendnp3's master queue, which has no size, only a 10 s start timeout (the callback result goes to stdout); WRITE is answered at once | the queue holds 1000 commands per connection (`COMMAND_QUEUE`); one more is dropped and WRITE is answered the same; the warning is logged once per overflow episode (the first drop), and a second line with the count when the queue drains | a WRITE flood while an outstation is silent cannot grow memory; the reply is stock's |
+| DNP3 server: a `<deadband>` that is not a number (`abc`, empty, `inf`) makes stock log `ERROR: There was a problem parsing dnp3 server setup: conversion of data to type "d" failed` to stdout and carry on with no DNP3 outstation at all (nothing listens on the port, no Size lines) | the config is refused with an error naming `<deadband>` | the generator never emits it |
+| an out-of-range Modbus write is converted from double to `uint16_t`, which C++ leaves undefined: the arm64 build wraps it (`2000` over 0..1000 leaves as `fffe`), another build may not | the arm64 bytes, on every architecture | the capture is from arm64 |
+
+**Serial endpoints** (plan F6, bead ww-y5q): an `<endpoint>` that is a device path is opened at 9600 8N1, no flow control, raw. Modbus puts MBAP on the port (no slave byte, no CRC);
+DNP3 uses the same link frames as on TCP. Recorded from the source, not from the stock image, because neither `ffc-stock-2026.11.03:22.04` nor `ferrofire-testpeers`
+has `socat` and our servers have no serial path yet (ww-z5w): opendnp3's `asyncOpenDelay` (500 ms) is never read, so there is no delay after open; stock Modbus never
+applies its stored 9600 8N1 (our port is 9600 8N1 raw, so a peer at the OS default of 9600 is unaffected). `tests/serial_clients.rs` runs both clients over a pty pair
+into our TCP server (the first DNP3 frame equals the TCP one, every Modbus request is 12 octets for one register); a conformance run of the stock server behind a
+pty (a `python3` `pty.openpty` relay would do, the image has python3) is the open item in ww-z5w.
+
+`fep` mode has no stock counterpart; its rules are in [docs/field-device-clients.md](../docs/field-device-clients.md) and its tests in `tests/fd_fep.rs`.
 
 ## IEC 61850 (no oracle)
 Bennu never loads an IEC 61850 server, so `conformance/iec61850/` has only the acceptance half, and `proto.env` sets `DUT_DEFAULT=rust`:

@@ -14,9 +14,9 @@ impl Sink for Null {
 }
 
 fuzz_target!(|data: &[u8]| {
-    let bin = [(2, BinPoint::new("bi", false, true)), (5, BinPoint::new("bo", true, false))];
-    let ana = [(0, AnaPoint::new("ai", false, true)), (1, AnaPoint::new("ao", true, false))];
-    let mut dev = Device::new(10, 1, bin.into_iter().collect(), ana.into_iter().collect());
+    let bin = [((false, 2), BinPoint::new("bi", false, true)), ((true, 5), BinPoint::new("bo", true, false))];
+    let ana = [((false, 0), AnaPoint::new("ai", false, true)), ((true, 1), AnaPoint::new("ao", true, false))];
+    let mut dev = Device::new(10, 1, bin.into_iter().collect(), ana.into_iter().collect(), 100);
     let mut conn = Conn::new();
     for (i, chunk) in data.split(|&b| b == 0xFF).enumerate() {
         let now = Duration::from_millis(500 * i as u64);

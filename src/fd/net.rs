@@ -1,8 +1,12 @@
 //! Endpoints shared by every protocol module (`<endpoint>`): `tcp://ip:port`, or a bare path for a serial device.
 //! No wildcard is assumed, as stock: the address in the config is the address bound.
 
+use std::io;
 use std::net::SocketAddr;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 
@@ -33,9 +37,8 @@ pub fn parse(ep: &str) -> Result<Endpoint, String> {
 fn tcp(ep: &str) -> Result<SocketAddr, String> {
     match parse(ep)? {
         Endpoint::Tcp(a) => Ok(a),
-        // ponytail: serial lands with feature `proto-serial` (tokio-serial) in F6.
         Endpoint::Serial(p) => Err(format!(
-            "serial endpoint {p}: not supported yet (feature proto-serial)"
+            "serial endpoint {p}: not supported yet (bead ww-z5w)"
         )),
     }
 }
@@ -93,12 +96,91 @@ pub async fn accept_loop(
     }
 }
 
-/// Connect a client endpoint.
-pub async fn connect(ep: &str) -> Result<TcpStream, String> {
-    let addr = tcp(ep)?;
-    TcpStream::connect(addr)
-        .await
-        .map_err(|e| format!("connect {addr}: {e}"))
+/// A client connection: a TCP socket, or a serial port.
+#[derive(Debug)]
+pub enum Conn {
+    Tcp(TcpStream),
+    #[cfg(feature = "proto-serial")]
+    Serial(tokio_serial::SerialStream),
+}
+
+/// Forward to whichever stream `Conn` holds.
+macro_rules! each {
+    ($c:expr, $s:ident => $e:expr) => {
+        match $c {
+            Conn::Tcp($s) => $e,
+            #[cfg(feature = "proto-serial")]
+            Conn::Serial($s) => $e,
+        }
+    };
+}
+
+impl Conn {
+    /// Send small writes at once (TCP; a serial port has no Nagle).
+    pub fn nodelay(&self) {
+        match self {
+            Conn::Tcp(t) => {
+                let _ = t.set_nodelay(true);
+            }
+            #[cfg(feature = "proto-serial")]
+            Conn::Serial(_) => {}
+        }
+    }
+
+    /// Write what fits right now, without waiting.
+    pub fn try_write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        each!(self, s => s.try_write(buf))
+    }
+}
+
+impl AsyncRead for Conn {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        each!(&mut *self, s => Pin::new(s).poll_read(cx, buf))
+    }
+}
+
+impl AsyncWrite for Conn {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        each!(&mut *self, s => Pin::new(s).poll_write(cx, buf))
+    }
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        each!(&mut *self, s => Pin::new(s).poll_flush(cx))
+    }
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        each!(&mut *self, s => Pin::new(s).poll_shutdown(cx))
+    }
+}
+
+/// Open a serial device as stock does: 9600 8N1, no flow control, raw. Stock Modbus never applies its stored 9600 8N1 and runs
+/// the port at OS defaults (asio opens it raw); opendnp3 applies `SerialSettings` and its 500 ms `asyncOpenDelay` is never read.
+#[cfg(feature = "proto-serial")]
+pub fn open_serial(path: &str) -> Result<tokio_serial::SerialStream, String> {
+    use tokio_serial::SerialPortBuilderExt;
+    tokio_serial::new(path, 9600)
+        .open_native_async()
+        .map_err(|e| format!("open {path}: {e}"))
+}
+
+/// Connect a client endpoint: `tcp://ip:port`, or a serial device path.
+pub async fn connect(ep: &str) -> Result<Conn, String> {
+    match parse(ep)? {
+        Endpoint::Tcp(addr) => TcpStream::connect(addr)
+            .await
+            .map(Conn::Tcp)
+            .map_err(|e| format!("connect {addr}: {e}")),
+        #[cfg(feature = "proto-serial")]
+        Endpoint::Serial(p) => open_serial(&p).map(Conn::Serial),
+        #[cfg(not(feature = "proto-serial"))]
+        Endpoint::Serial(p) => Err(format!("serial endpoint {p}: built without proto-serial")),
+    }
 }
 
 #[cfg(test)]
@@ -163,10 +245,14 @@ mod tests {
         let (a, b) = tokio::join!(l.accept(), connect(&ep));
         assert!(a.is_ok() && b.is_ok());
         assert!(listen("tcp://127.0.0.1:99999").await.is_err());
-        assert!(connect("/dev/ttyS0")
+        assert!(connect("/dev/no-such-tty")
             .await
             .unwrap_err()
-            .contains("proto-serial"));
+            .starts_with("open /dev/no-such-tty"));
+        assert!(listen("/dev/ttyS0")
+            .await
+            .unwrap_err()
+            .contains("not supported yet"));
         assert!(listen("tcp://nope").await.is_err());
     }
 }

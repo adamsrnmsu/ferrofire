@@ -1,0 +1,11 @@
+0,2026-Nov-19-17:56:47,info,dnp3-server,dnp3 server init,Binary Size is 1 and Analog Size is 1.
+1,2026-Nov-19-17:56:47,info,dnp3-server,dnp3 server init,Binary Output Size is 1 and Analog Output Size is 1.
+2,2026-Nov-19-17:56:47,info,dnp3-server,dnp3 server init,Event buffer size (per type) is 100.
+3,2026-Nov-19-17:56:55,info,dnp3-server,dnp3 Server writeBinary,Binary point command at address 0 with value 1.
+4,2026-Nov-19-17:56:55,info,dnp3-server,write binary,Data successfully written.
+5,2026-Nov-19-17:57:13,info,dnp3-server,dnp3 Server writeAnalog,Analog point command at address 0 with value 9.
+6,2026-Nov-19-17:57:13,info,dnp3-server,write analog,Data successfully written.
+7,2026-Nov-19-17:57:19,info,dnp3-server,dnp3 Server writeBinary,Binary point command at address 0 with value 0.
+8,2026-Nov-19-17:57:19,info,dnp3-server,write binary,Data successfully written.
+9,2026-Nov-19-17:57:24,info,dnp3-server,dnp3 Server writeAnalog,Analog point command at address 0 with value 3.
+10,2026-Nov-19-17:57:24,info,dnp3-server,write analog,Data successfully written.

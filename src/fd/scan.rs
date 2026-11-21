@@ -249,7 +249,8 @@ mod tests {
         assert_eq!(sent.lock().unwrap()[1], "WRITE=p.a:1.500000\0");
         assert_eq!(
             (s.get_f64("ta"), s.get_bool("tb")),
-            (Some(1.5), Some(false))
+            (Some(1.5), Some(true)),
+            "the rejected value is applied all the same (ww-a7r)"
         );
         assert!(!s.is_queued("ta") && !s.is_queued("tb"));
     }

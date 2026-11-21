@@ -2,6 +2,7 @@
 //! child, parses its own element, and serves on the shared `Store` until told to stop. To add one: write
 //! `proto/<name>.rs` implementing `Module`, add a `REGISTRY` line behind its `proto-<name>` feature, and list its tag in `KNOWN`.
 
+pub mod client;
 #[cfg(feature = "proto-dnp3")]
 pub mod dnp3;
 #[cfg(feature = "proto-iccp")]
@@ -89,8 +90,12 @@ pub fn start<M: Module>(node: Node, tags: &mut Tags, opts: &Opts) -> Result<Runn
 pub static REGISTRY: &[(&str, Start)] = &[
     #[cfg(feature = "proto-dnp3")]
     ("dnp3-server", start::<dnp3::Outstation>),
+    #[cfg(feature = "proto-dnp3")]
+    ("dnp3-client", start::<dnp3::master::Client>),
     #[cfg(feature = "proto-modbus")]
     ("modbus-server", start::<modbus::Server>),
+    #[cfg(feature = "proto-modbus")]
+    ("modbus-client", start::<modbus::client::Client>),
     #[cfg(feature = "proto-iec61850")]
     ("iec61850-server", start::<iec61850::Server>),
     #[cfg(feature = "proto-iccp")]

@@ -30,6 +30,8 @@ pub mod func {
 pub mod iin {
     pub const BROADCAST: u16 = 0x0001;
     pub const CLASS1: u16 = 0x0002;
+    pub const CLASS2: u16 = 0x0004;
+    pub const CLASS3: u16 = 0x0008;
     pub const NEED_TIME: u16 = 0x0010;
     pub const RESTART: u16 = 0x0080;
     pub const NO_FUNC: u16 = 0x0100;
@@ -69,6 +71,13 @@ impl<'a> Request<'a> {
     pub fn unsolicited(&self) -> bool {
         self.ctl & UNS != 0
     }
+}
+
+/// A request fragment as a master sends it: one whole fragment (FIR and FIN), the sequence number, the function, the objects.
+pub fn request(seq: u8, func: u8, objects: &[u8]) -> Vec<u8> {
+    let mut out = vec![FIR | FIN | (seq & 0x0F), func];
+    out.extend_from_slice(objects);
+    out
 }
 
 /// A response fragment: control (`flags` are FIR/FIN/CON), RESPONSE, IIN, then `objects`.
