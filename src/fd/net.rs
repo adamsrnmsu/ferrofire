@@ -1,4 +1,5 @@
-//! Endpoints shared by every protocol module (`<endpoint>`): `tcp://ip:port`, or a bare path for a serial device.
+//! Endpoints shared by every protocol module (`<endpoint>`): `tcp://ip:port`, `udp://ip:port` (DNP3 only), or a bare path for a
+//! serial device.
 //! No wildcard is assumed, as stock: the address in the config is the address bound.
 
 use std::io;
@@ -7,12 +8,13 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Endpoint {
     Tcp(SocketAddr),
+    Udp(SocketAddr),
     Serial(String),
 }
 
@@ -21,6 +23,12 @@ pub fn parse(ep: &str) -> Result<Endpoint, String> {
         Some(("tcp", addr)) => addr.parse().map(Endpoint::Tcp).map_err(|_| {
             format!(
                 "endpoint `{}`: expected tcp://ip:port",
+                crate::hint::show(ep)
+            )
+        }),
+        Some(("udp", addr)) => addr.parse().map(Endpoint::Udp).map_err(|_| {
+            format!(
+                "endpoint `{}`: expected udp://ip:port",
                 crate::hint::show(ep)
             )
         }),
@@ -40,6 +48,7 @@ fn tcp(ep: &str) -> Result<SocketAddr, String> {
         Endpoint::Serial(p) => Err(format!(
             "serial endpoint {p}: this server takes tcp:// only"
         )),
+        Endpoint::Udp(a) => Err(format!("udp://{a}: this server takes tcp:// only")),
     }
 }
 
@@ -51,9 +60,10 @@ pub async fn listen(ep: &str) -> Result<TcpListener, String> {
         .map_err(|e| format!("bind {addr}: {e}"))
 }
 
-/// A bound server endpoint: a TCP listener, or a serial port, which is one connection for the life of the device.
+/// A bound server endpoint: a TCP listener, a UDP socket, or a serial port, which is one connection for the life of the device.
 pub enum Bound {
     Tcp(TcpListener),
+    Udp(UdpSocket),
     #[cfg(feature = "proto-serial")]
     Serial(String, tokio_serial::SerialStream),
 }
@@ -62,6 +72,10 @@ pub enum Bound {
 pub async fn bind(ep: &str) -> Result<Bound, String> {
     match parse(ep)? {
         Endpoint::Tcp(_) => listen(ep).await.map(Bound::Tcp),
+        Endpoint::Udp(a) => UdpSocket::bind(a)
+            .await
+            .map(Bound::Udp)
+            .map_err(|e| format!("bind udp://{a}: {e}")),
         #[cfg(feature = "proto-serial")]
         Endpoint::Serial(p) => open_serial(&p).map(|s| Bound::Serial(p, s)),
         #[cfg(not(feature = "proto-serial"))]
@@ -146,34 +160,33 @@ pub async fn accept_loop(
     }
 }
 
-/// A client connection: a TCP socket, or a serial port.
+/// A client connection: a TCP socket, a UDP socket connected to its peer (a write is one datagram, a read one datagram, cut to
+/// the buffer; a refused datagram fails the next write), or a serial port.
 #[derive(Debug)]
 pub enum Conn {
     Tcp(TcpStream),
+    Udp(UdpSocket),
     #[cfg(feature = "proto-serial")]
     Serial(tokio_serial::SerialStream),
 }
 
-/// Forward to whichever stream `Conn` holds.
+/// Forward to whichever stream `Conn` holds; a UDP socket has calls of its own.
 macro_rules! each {
-    ($c:expr, $s:ident => $e:expr) => {
+    ($c:expr, $s:ident => $e:expr, udp $u:pat => $on_udp:expr) => {
         match $c {
             Conn::Tcp($s) => $e,
             #[cfg(feature = "proto-serial")]
             Conn::Serial($s) => $e,
+            Conn::Udp($u) => $on_udp,
         }
     };
 }
 
 impl Conn {
-    /// Send small writes at once (TCP; a serial port has no Nagle).
+    /// Send small writes at once (TCP; a serial port and a UDP socket have no Nagle).
     pub fn nodelay(&self) {
-        match self {
-            Conn::Tcp(t) => {
-                let _ = t.set_nodelay(true);
-            }
-            #[cfg(feature = "proto-serial")]
-            Conn::Serial(_) => {}
+        if let Conn::Tcp(t) = self {
+            let _ = t.set_nodelay(true);
         }
     }
 
@@ -186,7 +199,7 @@ impl Conn {
 
     /// Write what fits right now, without waiting.
     pub fn try_write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        each!(self, s => s.try_write(buf))
+        each!(self, s => s.try_write(buf), udp u => u.try_send(buf))
     }
 }
 
@@ -196,7 +209,7 @@ impl AsyncRead for Conn {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        each!(&mut *self, s => Pin::new(s).poll_read(cx, buf))
+        each!(&mut *self, s => Pin::new(s).poll_read(cx, buf), udp u => u.poll_recv(cx, buf))
     }
 }
 
@@ -206,13 +219,13 @@ impl AsyncWrite for Conn {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
-        each!(&mut *self, s => Pin::new(s).poll_write(cx, buf))
+        each!(&mut *self, s => Pin::new(s).poll_write(cx, buf), udp u => u.poll_send(cx, buf))
     }
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        each!(&mut *self, s => Pin::new(s).poll_flush(cx))
+        each!(&mut *self, s => Pin::new(s).poll_flush(cx), udp _ => Poll::Ready(Ok(())))
     }
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        each!(&mut *self, s => Pin::new(s).poll_shutdown(cx))
+        each!(&mut *self, s => Pin::new(s).poll_shutdown(cx), udp _ => Poll::Ready(Ok(())))
     }
 }
 
@@ -226,13 +239,28 @@ pub fn open_serial(path: &str) -> Result<tokio_serial::SerialStream, String> {
         .map_err(|e| format!("open {path}: {e}"))
 }
 
-/// Connect a client endpoint: `tcp://ip:port`, or a serial device path.
+/// Connect a client endpoint: `tcp://ip:port`, `udp://ip:port` (a socket on an ephemeral port, connected to the peer: it
+/// succeeds whether or not anyone listens, and a refused datagram fails a later write), or a serial device path.
 pub async fn connect(ep: &str) -> Result<Conn, String> {
     match parse(ep)? {
         Endpoint::Tcp(addr) => TcpStream::connect(addr)
             .await
             .map(Conn::Tcp)
             .map_err(|e| format!("connect {addr}: {e}")),
+        Endpoint::Udp(addr) => {
+            let any: SocketAddr = if addr.is_ipv4() {
+                (std::net::Ipv4Addr::UNSPECIFIED, 0).into()
+            } else {
+                (std::net::Ipv6Addr::UNSPECIFIED, 0).into()
+            };
+            let sock = UdpSocket::bind(any)
+                .await
+                .map_err(|e| format!("bind for udp://{addr}: {e}"))?;
+            sock.connect(addr)
+                .await
+                .map(|()| Conn::Udp(sock))
+                .map_err(|e| format!("connect udp://{addr}: {e}"))
+        }
         #[cfg(feature = "proto-serial")]
         Endpoint::Serial(p) => open_serial(&p).map(Conn::Serial),
         #[cfg(not(feature = "proto-serial"))]
@@ -257,9 +285,16 @@ mod tests {
         assert!(parse("tcp://host:502")
             .unwrap_err()
             .contains("expected tcp://ip:port"));
-        assert!(parse("udp://1.2.3.4:5")
+        assert_eq!(
+            parse("udp://1.2.3.4:5"),
+            Ok(Endpoint::Udp("1.2.3.4:5".parse().unwrap()))
+        );
+        assert!(parse("udp://host:5")
             .unwrap_err()
-            .contains("unsupported scheme `udp`"));
+            .contains("expected udp://ip:port"));
+        assert!(parse("sctp://1.2.3.4:5")
+            .unwrap_err()
+            .contains("unsupported scheme `sctp`"));
         assert_eq!(parse(""), Err("endpoint is empty".into()));
     }
 
@@ -336,5 +371,44 @@ mod tests {
             .unwrap_err()
             .contains("tcp:// only"));
         assert!(listen("tcp://nope").await.is_err());
+        assert!(listen("udp://127.0.0.1:0")
+            .await
+            .unwrap_err()
+            .contains("tcp:// only"));
+    }
+
+    /// A UDP connection keeps datagram edges: one write is one datagram, one read one datagram. A datagram to a port where nothing
+    /// listens comes back as ICMP port unreachable, which Linux reports on the next send (tokio does not wake a read for a socket
+    /// error), so a client sees it as a failed write, a lost connection.
+    #[tokio::test]
+    async fn a_udp_connection_sends_and_reads_whole_datagrams() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let Ok(Bound::Udp(server)) = bind("udp://127.0.0.1:0").await else {
+            panic!("udp:// should bind a UDP socket")
+        };
+        let ep = format!("udp://{}", server.local_addr().unwrap());
+        let mut c = connect(&ep).await.unwrap();
+        c.write_all(b"one").await.unwrap();
+        c.write_all(b"two").await.unwrap();
+        let mut buf = [0u8; 16];
+        let (n, from) = server.recv_from(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"one");
+        server.send_to(b"reply", from).await.unwrap();
+        assert_eq!(c.read(&mut buf).await.unwrap(), 5);
+        assert_eq!(&buf[..5], b"reply");
+
+        let port = server.local_addr().unwrap().port();
+        drop(server);
+        let mut gone = connect(&format!("udp://127.0.0.1:{port}")).await.unwrap();
+        gone.write_all(b"anyone?").await.unwrap();
+        let mut refused = None;
+        for _ in 0..20 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            if let Err(e) = gone.write_all(b"anyone?").await {
+                refused = Some(e.kind());
+                break;
+            }
+        }
+        assert_eq!(refused, Some(io::ErrorKind::ConnectionRefused));
     }
 }

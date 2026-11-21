@@ -752,9 +752,10 @@ impl Wire {
             if let Some(r) = self.buffered() {
                 return r;
             }
-            let mut chunk = [0u8; 1024];
-            match self.stream.read(&mut chunk).await {
-                Ok(n @ 1..) => self.buf.extend_from_slice(&chunk[..n]),
+            // room for a whole datagram: a UDP read is cut to the buffer, the rest of the datagram is lost
+            self.buf.reserve(65536);
+            match self.stream.read_buf(&mut self.buf).await {
+                Ok(1..) => {}
                 _ => return Err(Lost),
             }
         }

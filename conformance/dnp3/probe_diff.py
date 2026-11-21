@@ -162,14 +162,18 @@ send("other master", bytes([0xC0 | 6, 1, 60, 1, 6]), src=7)
 send("no FIR/FIN", bytes([0xC0 | 7, 1, 60, 1, 6]), raw_tp=bytes([0x00 | 9, 0xC7, 1, 60, 1, 6]))
 send("empty tp", b"", raw_tp=b"")
 print("== one master at a time (CloseNew), and state outlives a connection")
-second = socket.create_connection((host, port), timeout=3)
-second.sendall(frame(10, 1, 0xC4, bytes([0xC0 | 0]) + bytes([0xC0 | 2, 1, 60, 1, 6])))
-time.sleep(0.6); second.settimeout(0.4)
-try:
-    d = second.recv(4096); print("second connection: closed" if not d else "second connection: %d bytes" % len(d))
-except socket.timeout: print("second connection: open, no reply")
-except OSError: print("second connection: closed")   # a reset and an orderly close are both a refusal
-second.close()
+if os.environ.get("UDP"):
+    # no master slot on UDP: a second master is answered, which moves the shared sequences (tests/dnp3_udp.rs covers it)
+    print("second connection: skipped on udp")
+else:
+    second = socket.create_connection((host, port), timeout=3)
+    second.sendall(frame(10, 1, 0xC4, bytes([0xC0 | 0]) + bytes([0xC0 | 2, 1, 60, 1, 6])))
+    time.sleep(0.6); second.settimeout(0.4)
+    try:
+        d = second.recv(4096); print("second connection: closed" if not d else "second connection: %d bytes" % len(d))
+    except socket.timeout: print("second connection: open, no reply")
+    except OSError: print("second connection: closed")   # a reset and an orderly close are both a refusal
+    second.close()
 req("first still served", 1, bytes([60, 2, 6]))
 trace("close"); P.s.real.close(); time.sleep(0.5); connect()
 req("after reconnect: class1", 1, bytes([60, 2, 6]))

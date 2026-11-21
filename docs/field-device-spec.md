@@ -261,6 +261,10 @@ All three bind the address given in `<endpoint>` (`tcp://<ip>:<port>`, no wildca
 rest of the device keeps running, as stock). Serial endpoints (a path without `tcp://`) exist for Modbus and DNP3 (`MOD:comms/modbus/module/Server.cpp:46-55`,
 `.../dnp3/module/Server.cpp:38-52`), via `tokio-serial` at 9600 8N1 (`net::bind`, `src/fd/net.rs`). A serial port is one connection for the life of the
 device: no keepalive, no second-master check, and when the session ends (EIO once a pty's other side closes) the port is opened again after the accept pause.
+DNP3 also takes `udp://<ip>:<port>` (ww-8l7, an extra: stock has no UDP channel). The outstation binds one UDP socket, feeds each datagram to the same state
+machine as a TCP read and sends the reply to the datagram's sender as one datagram (no splitting below the 1500-byte MTU: IP fragments a long response).
+There is no master slot, so every sender is answered, and all senders share one session (application and transport sequences, a pending select). A datagram
+that breaks the session (bad CRC, fragment too long) starts a fresh session and keeps the event buffer. Modbus refuses `udp://` (server and client).
 
 ### 4.1 Modbus/TCP server (`<modbus-server>`)
 

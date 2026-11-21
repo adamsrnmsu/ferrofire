@@ -10,7 +10,7 @@ DRY_MIN := 0.8
 # ponytail: pid lock; a kill -9 of make leaves a stale file that src-free ignores because the pid is gone.
 MUTATE_LOCK := .mutate.lock
 
-.PHONY: dut netns differential diff-dnp3 diff-modbus diff-serial diff-serial-mismatch testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report bench-control bench-fdmicro bench-maxrate bench-maxrate-control charts image rtu-image rtu-image-smoke fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
+.PHONY: dut netns differential diff-dnp3 diff-modbus diff-udp diff-serial diff-serial-mismatch testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report bench-control bench-fdmicro bench-maxrate bench-maxrate-control charts image rtu-image rtu-image-smoke fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
 help:    # list targets
 	@grep -E '^[a-z-]+:.*#' $(MAKEFILE_LIST) | sed -E 's/^([a-z-]+):[^#]*#/\1\t/'
 src-free:   # fail fast while make mutate is rewriting src/
@@ -98,6 +98,10 @@ diff-dnp3: dut   # our DNP3 outstation vs the recorded stock transcripts, live i
 	@for s in diff big out grp cfg ovf nack nopv; do $(TP) conformance/differential.sh dnp3 rust $$s | diff conformance/dnp3/stock-$$s.golden - && echo "dnp3 $$s: byte-equal to stock" || exit 1; done
 diff-modbus: dut   # our Modbus server vs the recorded stock transcripts, live in containers
 	@for s in diff waterway edges; do $(TP) conformance/differential.sh modbus rust $$s | diff conformance/modbus/stock-$$s.golden - && echo "modbus $$s: byte-equal to stock" || exit 1; done
+diff-udp: dut   # our DNP3 outstation on udp:// (ww-8l7) vs the recorded stock TCP transcripts: the same requests as datagrams
+	@mkdir -p target; for s in diff big out grp cfg ovf nack nopv; do \
+	  sed 's/^second connection: closed$$/second connection: skipped on udp/' conformance/dnp3/stock-$$s.golden > target/udp-want.txt; \
+	  UDP=20000 $(TP) conformance/differential.sh dnp3 rust $$s | diff target/udp-want.txt - && echo "dnp3 $$s on udp: byte-equal to stock" || exit 1; done
 SERIAL_SETTINGS := \# serial line: 9600 8N1 flow=none raw
 diff-serial: dut   # both servers on a serial line (a paced 9600 8N1 pty relayed to the TCP port, ww-8k4, ww-y51) vs the stock transcripts and port settings
 	@mkdir -p target; for s in diff waterway edges; do g=conformance/modbus/stock-serial-$$s.golden; [ -f $$g ] || g=conformance/modbus/stock-$$s.golden; \

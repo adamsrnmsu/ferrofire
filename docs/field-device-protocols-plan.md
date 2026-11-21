@@ -48,7 +48,7 @@ byte-equal) plus the **cross-pair** for clients (stock server ↔ our client thr
 | 5 | Omron FINS server (UDP/TCP 9600) | ICSNPP omron-fins, nmap `omron-info` | own (~400 lines), `omron-fins` 0.6.0 as test client | 2 |
 | 6 | IEEE C37.118 PMU (4712) | ICSNPP + Arkime synchrophasor | own (CFG-2/DATA frames, CRC-CCITT; `pypmu` BSD-3 as reference). ferrofire's power flow already yields bus V/angle, so the phasors are real | 2-3 |
 | 7 | GE SRTP (18245) | ICSNPP ge-srtp | own (~300 lines) | 2 |
-| 8 | DNP3 over UDP (20000) | Zeek DNP3 (UDP parsing UNVERIFIED) | reuse F3 with a UDP socket | 0.5 |
+| 8 | DNP3 over UDP (20000) | Zeek DNP3 (UDP parsing UNVERIFIED) | reuse F3 with a UDP socket. **Built (ww-8l7, 2026-11-21)**, outstation and master, `udp://ip:port`: [field-device-spec.md](field-device-spec.md) §4, [field-device-clients.md](field-device-clients.md); proven by `tests/dnp3_udp.rs` and `make diff-udp` (the stock DNP3 probes as datagrams, transcripts equal to the stock TCP goldens) | 0.5 |
 | 9 | IEC 60870-5-101 (serial) | none (Zeek sees no serial) | `fegrid-iec60870-cs101` 0.1.0 (MIT/Apache) after F4 | 2 |
 
 Wave 1 = rows 1-4 (9-12 days); rows 5-9 on request. Any Tier 2 protocol is reachable from a scenario only after a 3-line branch in

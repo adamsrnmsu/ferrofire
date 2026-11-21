@@ -318,8 +318,15 @@ fn points(
 fn connection(c: Node, mode: Mode, tags: &mut Tags, opts: &Opts) -> Result<Conn, ConfigError> {
     let fep = shared::fep_keys(c, mode, tags, opts)?;
     let (points, ranges) = points(c, mode, tags, opts)?;
+    let endpoint = require(c, "endpoint")?;
+    if endpoint.starts_with("udp://") {
+        return Err(ConfigError(format!(
+            "<modbus-connection> endpoint {}: udp:// is DNP3 only",
+            crate::hint::show(&endpoint)
+        )));
+    }
     Ok(Conn {
-        endpoint: require(c, "endpoint")?,
+        endpoint,
         unit: number::<u8>(c, "unit-id")?.unwrap_or(0),
         points,
         fep,
