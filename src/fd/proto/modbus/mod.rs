@@ -93,6 +93,13 @@ impl Module for Server {
             discretes: names(table(node, "discrete-input", Kind::Binary, tags, opts)?),
             holding: table(node, "holding-register", Kind::Analog, tags, opts)?,
             input: table(node, "input-register", Kind::Analog, tags, opts)?,
+            strict: opts.strict,
+            // stock ignores `<unit-id>` on a server, so it is read (and checked for being a byte) only under `--strict`
+            unit: match opts.strict {
+                true => number::<u8>(node, "unit-id")?,
+                false => None,
+            },
+            wrap: opts.compat_wrap,
         };
         Ok(Server { endpoint, log, dev })
     }
@@ -286,7 +293,14 @@ mod tests {
             .device()
             .coils
             .is_empty());
-        assert!(parse(skip, &Opts { strict: true }).is_err());
+        assert!(parse(
+            skip,
+            &Opts {
+                strict: true,
+                ..Opts::default()
+            }
+        )
+        .is_err());
         assert!(err("<coil><address>1</address><tag>an</tag></coil>")
             .contains("is Analog but its mapping needs Binary"));
         assert!(
@@ -306,5 +320,30 @@ mod tests {
             parse(&a, &Opts::default()).unwrap().device().holding[&3].range,
             DEFAULT_RANGE
         );
+    }
+
+    #[test]
+    fn the_flags_reach_the_device_and_unit_id_counts_only_under_strict() {
+        let uid = "<unit-id>7</unit-id>";
+        let d = parse(uid, &Opts::default()).unwrap().device();
+        assert_eq!((d.strict, d.unit, d.wrap), (false, None, false));
+        let strict = Opts {
+            strict: true,
+            ..Opts::default()
+        };
+        let d = parse(uid, &strict).unwrap().device();
+        assert_eq!((d.strict, d.unit), (true, Some(7)));
+        assert_eq!(parse("", &strict).unwrap().device().unit, None);
+        assert!(err_with("<unit-id>300</unit-id>", &strict).contains("not a valid number"));
+        assert!(parse("<unit-id>300</unit-id>", &Opts::default()).is_ok());
+        let wrap = Opts {
+            compat_wrap: true,
+            ..Opts::default()
+        };
+        assert!(parse("", &wrap).unwrap().device().wrap);
+    }
+
+    fn err_with(inner: &str, opts: &Opts) -> String {
+        parse(inner, opts).err().expect("an error").0
     }
 }

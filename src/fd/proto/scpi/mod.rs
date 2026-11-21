@@ -683,7 +683,14 @@ mod tests {
             .ins
             .routes
             .is_empty());
-        assert!(parse(&skip, &Opts { strict: true }).is_err());
+        assert!(parse(
+            &skip,
+            &Opts {
+                strict: true,
+                ..Opts::default()
+            }
+        )
+        .is_err());
         assert!(
             err(&point("level", "<default-value>x</default-value>")).contains("not a valid number")
         );

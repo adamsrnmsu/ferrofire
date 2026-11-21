@@ -1645,7 +1645,10 @@ mod tests {
         let s = Duration::from_secs;
         let (c, tags) = parse(
             &format!("{HEAD}{CONN}<command-interface>tcp://127.0.0.1:1330</command-interface>"),
-            &Opts { strict: true },
+            &Opts {
+                strict: true,
+                ..Opts::default()
+            },
         )
         .unwrap();
         assert_eq!(
@@ -1758,15 +1761,24 @@ mod tests {
             "<status-tag>up</status-tag></dnp3-connection>",
         );
         assert_eq!(
-            parse(&format!("{HEAD}{status}"), &Opts { strict: true })
-                .err()
-                .unwrap()
-                .0,
+            parse(
+                &format!("{HEAD}{status}"),
+                &Opts {
+                    strict: true,
+                    ..Opts::default()
+                }
+            )
+            .err()
+            .unwrap()
+            .0,
             "<status-tag> is fep-only, ignored"
         );
         let (c, tags) = parse(
             &format!("{HEAD}<mode>fep</mode>{status}"),
-            &Opts { strict: true },
+            &Opts {
+                strict: true,
+                ..Opts::default()
+            },
         )
         .unwrap();
         assert_eq!(
@@ -1778,7 +1790,14 @@ mod tests {
         let twice = format!("{HEAD}{CONN}{}", CONN.replace("20000", "20001"));
         let (c, _) = parse(&twice, &Opts::default()).unwrap();
         assert_eq!((c.conns[0].points.len(), c.conns[1].points.len()), (4, 0));
-        assert!(parse(&twice, &Opts { strict: true }).is_err());
+        assert!(parse(
+            &twice,
+            &Opts {
+                strict: true,
+                ..Opts::default()
+            }
+        )
+        .is_err());
     }
 
     #[test]

@@ -28,6 +28,9 @@ pub struct Cli {
     /// Refuse stock quirks and soft failures (unknown tags in mappings, `&&` truncation)
     #[arg(long)]
     strict: bool,
+    /// Modbus server: reproduce stock's 16-bit wrap of a value outside its register range (SPEC Q4) instead of clamping
+    #[arg(long)]
+    compat_wrap: bool,
     /// Print the protocol modules this binary has and exit
     #[arg(long)]
     list_protocols: bool,
@@ -41,7 +44,14 @@ pub fn main(cli: Cli) -> i32 {
     }
     crate::trace::init();
     let file = cli.file.unwrap_or_default();
-    let cfg = match load(&file, proto::REGISTRY, &Opts { strict: cli.strict }) {
+    let cfg = match load(
+        &file,
+        proto::REGISTRY,
+        &Opts {
+            strict: cli.strict,
+            compat_wrap: cli.compat_wrap,
+        },
+    ) {
         Ok(c) => c,
         Err(e) => {
             tracing::error!(
@@ -230,6 +240,7 @@ mod tests {
         let cli = |file: Option<&str>, list| Cli {
             file: file.map(String::from),
             strict: false,
+            compat_wrap: false,
             list_protocols: list,
         };
         assert_eq!(main(cli(None, true)), 0);

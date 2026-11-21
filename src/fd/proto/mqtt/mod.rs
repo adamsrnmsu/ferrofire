@@ -613,7 +613,10 @@ mod tests {
         let strict = parse_in(
             "<name>d</name>",
             "<point><tag>nope</tag></point>",
-            &Opts { strict: true },
+            &Opts {
+                strict: true,
+                ..Opts::default()
+            },
         );
         assert!(strict.err().unwrap().0.contains("unknown tag `nope`"));
     }

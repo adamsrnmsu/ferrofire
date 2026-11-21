@@ -241,10 +241,10 @@ file contents were not captured: UNVERIFIED on a live run). Replicate: ELK/dashb
 
 | # | Stock behaviour | Default | Flag |
 |---|---|---|---|
-| Q1 | Modbus unit id ignored on requests, echoed in the reply (`O:` uid 0, 7, 255 all served) | replicate | `--strict` rejects other than configured |
-| Q2 | Modbus unsupported function (FC 23, 8) answered with a **7-byte header-only** frame `0001 0000 0001 01` (`O:`); FC 43 → `80 04` | replicate | `--strict` → proper exception 0x01 |
+| Q1 | Modbus unit id ignored on requests, echoed in the reply (`O:` uid 0, 7, 255 all served) | replicate | `--strict` rejects other than configured (built, ww-ik2: the server's `<unit-id>`, read only under `--strict`; a request for another id gets no reply and an `error` log line, the connection stays up; no `<unit-id>` serves every id) |
+| Q2 | Modbus unsupported function (FC 23, 8) answered with a **7-byte header-only** frame `0001 0000 0001 01` (`O:`); FC 43 → `80 04` | replicate | `--strict` → proper exception 0x01 (built, ww-ik2: any function but 1-6, 15, 16, whatever the body, so FC43 too) |
 | Q3 | Modbus read of an unmapped *coil* → exception 0x03; unmapped discrete/holding/input → 0x02 (`MOD:comms/modbus/module/Server.cpp:202-243` vs `:420-`; `O:`) | replicate | — |
-| Q4 | analog registers scaled to 16-bit over `[min,max]`, conversion `double → uint16` truncating; out-of-range input is C++ UB (arch-dependent) | truncate in range, **clamp** out of range | `--compat-wrap` UNVERIFIED target |
+| Q4 | analog registers scaled to 16-bit over `[min,max]`, conversion `double → uint16` truncating; out-of-range input is C++ UB (arch-dependent) | truncate in range, **clamp** out of range | `--compat-wrap` (built, ww-ik2, its own flag: `--strict` is about refusing, this reproduces stock): `(u32)(slope*v+intercept)` saturating, low 16 bits kept, byte-equal to `conformance/modbus/stock-q4.golden`; a negative value still reads 0, so it does not carry -1 (ww-4d7) |
 | Q5 | DNP3 binary/analog *outputs*: the 2026-11-07 `bennu:arm64` published them as **inputs** (g1v1 / g30v1, Class 0, never events); **stock v2026.11.03 reports output status**, binary g10v2 and analog g40v1 (flags + 32-bit integer), in tables of their own, so an input and an output may share an index and a control touches outputs only (ww-270, `O:` from `ffc-stock-2026.11.03:22.04`) | **replicate v2026.11.03** | — |
 | Q6 | DNP3 `AnalogOutputInt16/Int32/Double64` commands return SUCCESS and write nothing (`O:` status 0) | replicate | `--strict` → NOT_SUPPORTED |
 | Q7 | IEC 104 select/execute bit ignored, commands handled as direct operate (`O:`) | replicate | — |

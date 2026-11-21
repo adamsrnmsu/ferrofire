@@ -425,7 +425,15 @@ fn the_gateway_example_in_the_docs_loads() {
         "<dnp3-server>",
         "<dnp3-server><event-logging>/dev/null</event-logging>",
     );
-    let cfg = Config::parse(&xml, ferrofire::fd::proto::REGISTRY, &Opts { strict: true }).unwrap();
+    let cfg = Config::parse(
+        &xml,
+        ferrofire::fd::proto::REGISTRY,
+        &Opts {
+            strict: true,
+            ..Opts::default()
+        },
+    )
+    .unwrap();
     let names: Vec<_> = cfg.modules.iter().map(|(n, _)| n.as_str()).collect();
     assert_eq!(names, ["modbus-client", "dnp3-server"]);
     assert_eq!(cfg.store.get("rtu-2-up"), Some(Binary(false)));

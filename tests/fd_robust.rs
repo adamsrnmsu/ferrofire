@@ -49,7 +49,14 @@ fn mutated_configs_never_panic() {
         for _ in 0..3000 {
             let xml = mutate(&mut rng, base);
             let _ = Config::parse(&xml, &[], &Opts::default());
-            let _ = Config::parse(&xml, &[], &Opts { strict: true });
+            let _ = Config::parse(
+                &xml,
+                &[],
+                &Opts {
+                    strict: true,
+                    ..Opts::default()
+                },
+            );
         }
     }
 }

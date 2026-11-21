@@ -25,6 +25,8 @@ impl fmt::Display for ConfigError {
 pub struct Opts {
     /// Refuse stock quirks and soft failures: an unknown tag in a mapping is an error, not a warning.
     pub strict: bool,
+    /// Modbus server, SPEC Q4: a value outside its register's range wraps to 16 bits as stock arm64 does, instead of clamping.
+    pub compat_wrap: bool,
 }
 
 impl Opts {
@@ -423,7 +425,14 @@ mod tests {
     }
 
     fn strict(xml: &str) -> Result<Config, ConfigError> {
-        Config::parse(xml, fake::REGISTRY, &Opts { strict: true })
+        Config::parse(
+            xml,
+            fake::REGISTRY,
+            &Opts {
+                strict: true,
+                ..Opts::default()
+            },
+        )
     }
 
     /// A device around `body`.
@@ -440,7 +449,15 @@ mod tests {
     #[test]
     fn the_stock_modbus_client_sample_loads() {
         let xml = include_str!("../../tests/conformance/modbus-client.xml");
-        let c = Config::parse(xml, crate::fd::proto::REGISTRY, &Opts { strict: true }).unwrap();
+        let c = Config::parse(
+            xml,
+            crate::fd::proto::REGISTRY,
+            &Opts {
+                strict: true,
+                ..Opts::default()
+            },
+        )
+        .unwrap();
         assert_eq!(c.modules.len(), 1);
         assert_eq!(c.store.get("load-power"), Some(Value::Analog(0.0)));
         assert_eq!(c.store.get("gen-status"), Some(Value::Binary(false)));
@@ -449,7 +466,10 @@ mod tests {
     #[cfg(all(feature = "proto-modbus", feature = "proto-dnp3"))]
     #[test]
     fn the_stock_dnp3_client_sample_and_a_generated_fd_client_config_load() {
-        let strict = Opts { strict: true };
+        let strict = Opts {
+            strict: true,
+            ..Opts::default()
+        };
         let xml = include_str!("../../tests/conformance/dnp3-client.xml");
         let c = Config::parse(xml, crate::fd::proto::REGISTRY, &strict).unwrap();
         assert_eq!(c.modules.len(), 1);

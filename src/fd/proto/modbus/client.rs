@@ -1146,7 +1146,10 @@ mod tests {
     fn the_stock_schema_is_read_and_the_points_become_device_local_tags() {
         let (c, tags) = parse(
             &format!("{CONN}<command-interface>tcp://127.0.0.1:1330</command-interface>"),
-            &Opts { strict: true },
+            &Opts {
+                strict: true,
+                ..Opts::default()
+            },
         )
         .unwrap();
         assert_eq!(c.mode, Mode::Bennu);
@@ -1217,14 +1220,30 @@ mod tests {
         let twice = format!("{CONN}{}", CONN.replace("127.0.0.1:1", "127.0.0.1:2"));
         let (c, _) = parse(&twice, &Opts::default()).unwrap();
         assert_eq!((c.conns[0].points.len(), c.conns[1].points.len()), (4, 0));
-        assert!(parse(&twice, &Opts { strict: true }).is_err());
+        assert!(parse(
+            &twice,
+            &Opts {
+                strict: true,
+                ..Opts::default()
+            }
+        )
+        .is_err());
         // stock has no scan-rate: a warning, an error under --strict
         let scan = CONN.replace("<coil>", "<scan-rate>2</scan-rate><coil>");
         assert!(parse(&scan, &Opts::default()).unwrap().0.conns[0]
             .fep
             .is_none());
         assert_eq!(
-            parse(&scan, &Opts { strict: true }).err().unwrap().0,
+            parse(
+                &scan,
+                &Opts {
+                    strict: true,
+                    ..Opts::default()
+                }
+            )
+            .err()
+            .unwrap()
+            .0,
             "<scan-rate> is fep-only, ignored"
         );
     }
@@ -1339,7 +1358,14 @@ mod tests {
                 "<scan-rate>2</scan-rate><status-tag>up</status-tag><coil>"
             )
         );
-        let (c, tags) = parse(&fep, &Opts { strict: true }).unwrap();
+        let (c, tags) = parse(
+            &fep,
+            &Opts {
+                strict: true,
+                ..Opts::default()
+            },
+        )
+        .unwrap();
         assert_eq!(c.mode, Mode::Fep);
         assert_eq!(
             c.conns[0].fep,
@@ -1350,7 +1376,14 @@ mod tests {
         );
         assert_eq!(tags.kind("up"), Some(Kind::Binary));
         let typed = fep.replace("<tag>hr</tag>", "<tag>hr</tag><type>binary</type>");
-        let (c, tags) = parse(&typed, &Opts { strict: true }).unwrap();
+        let (c, tags) = parse(
+            &typed,
+            &Opts {
+                strict: true,
+                ..Opts::default()
+            },
+        )
+        .unwrap();
         assert_eq!(c.conns[0].points[2].kind, Kind::Binary);
         assert_eq!(tags.kind("hr"), Some(Kind::Binary));
         let e = parse(
@@ -1375,7 +1408,18 @@ mod tests {
             "<max-value>5</max-value><min-value>5</min-value><type>binary</type>",
         );
         assert_eq!(
-            parse(&lax, &Opts { strict: true }).unwrap().0.conns[0].points[2].kind,
+            parse(
+                &lax,
+                &Opts {
+                    strict: true,
+                    ..Opts::default()
+                }
+            )
+            .unwrap()
+            .0
+            .conns[0]
+                .points[2]
+                .kind,
             Kind::Analog
         );
     }
