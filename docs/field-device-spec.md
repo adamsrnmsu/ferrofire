@@ -259,7 +259,8 @@ file contents were not captured: UNVERIFIED on a live run). Replicate: ELK/dashb
 
 All three bind the address given in `<endpoint>` (`tcp://<ip>:<port>`, no wildcard assumption; a bind failure logs and leaves the server absent while the
 rest of the device keeps running, as stock). Serial endpoints (a path without `tcp://`) exist for Modbus and DNP3 (`MOD:comms/modbus/module/Server.cpp:46-55`,
-`.../dnp3/module/Server.cpp:38-52`): phase F6, via `tokio-serial`.
+`.../dnp3/module/Server.cpp:38-52`), via `tokio-serial` at 9600 8N1 (`net::bind`, `src/fd/net.rs`). A serial port is one connection for the life of the
+device: no keepalive, no second-master check, and when the session ends (EIO once a pty's other side closes) the port is opened again after the accept pause.
 
 ### 4.1 Modbus/TCP server (`<modbus-server>`)
 

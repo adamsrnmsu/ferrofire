@@ -17,9 +17,9 @@ command interface is a `zeromq` REP socket (`src/fd/cmdif.rs`).
 no flow control, raw. Modbus: MBAP framing on the port, no slave byte, no CRC, as stock (`SerialChannel.cpp`); stock stores 9600 8N1 and never applies it, so
 its port runs at the OS defaults, ours at 9600 8N1; the request timeout is 1000 ms as on TCP (stock `SerialClient.hpp`). DNP3: opendnp3's `SerialSettings`
 defaults, client address 1, link, transport and application layers as on TCP; its `asyncOpenDelay` (500 ms) is declared in `SerialSettings.h` and never read by
-the library, so there is no delay after open. A port that cannot be opened is retried as a refused connection is. The servers have no serial path yet (bead
-ww-z5w), so `tests/serial_clients.rs` puts a pty pair between our client and our TCP server; stock-over-pty is not run (the stock and testpeers images have no
-`socat`).
+the library, so there is no delay after open. A port that cannot be opened is retried as a refused connection is. `tests/serial_clients.rs` puts a pty pair between our
+client and our TCP server, and `tests/serial_servers.rs` between our TCP client and our server on the pty; stock-over-pty is not run (the stock and testpeers
+images have no `socat`).
 
 ## Config
 

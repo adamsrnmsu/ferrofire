@@ -234,6 +234,22 @@ impl Tap {
     }
 }
 
+#[cfg(feature = "proto-serial")]
+/// A pty for a server's serial endpoint: the server opens the returned slave path, and the one TCP client of the returned port
+/// reaches it.
+pub async fn pty_from() -> (String, u16) {
+    let (mut master, slave) = tokio_serial::SerialStream::pair().expect("pty pair");
+    let path = tokio_serial::SerialPort::name(&slave).expect("pty name");
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = l.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let _slave = slave;
+        let (mut tcp, _) = l.accept().await.unwrap();
+        let _ = tokio::io::copy_bidirectional(&mut master, &mut tcp).await;
+    });
+    (path, port)
+}
+
 /// A serial port in front of `tap_port`: the path of a pty slave to use as a client's `<endpoint>`, a bridge from its master side
 /// to the tap (which keeps what the client wrote). The pair stays open until the runtime ends.
 #[cfg(feature = "proto-serial")]

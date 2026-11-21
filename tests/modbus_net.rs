@@ -218,9 +218,10 @@ async fn a_bind_failure_is_logged_and_does_not_panic() {
 }
 
 #[tokio::test]
-async fn a_serial_endpoint_is_reported_not_served() {
+async fn a_serial_port_that_cannot_open_is_reported() {
     let log = std::env::temp_dir().join(format!("modbus-serial-{}.log", free_port()));
-    let xml = config(1, &log.display().to_string()).replace("tcp://127.0.0.1:1", "/dev/ttyUSB0");
+    let xml =
+        config(1, &log.display().to_string()).replace("tcp://127.0.0.1:1", "/dev/no-such-tty");
     let (out, store) = common::load_as::<Server>(&xml, "modbus-server");
     timeout(
         Duration::from_secs(2),
@@ -230,7 +231,7 @@ async fn a_serial_endpoint_is_reported_not_served() {
     .unwrap();
     assert!(std::fs::read_to_string(&log)
         .unwrap()
-        .contains("not supported yet"));
+        .contains("open /dev/no-such-tty"));
 }
 
 #[tokio::test]

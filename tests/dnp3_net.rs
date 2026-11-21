@@ -298,12 +298,12 @@ async fn a_bind_failure_is_logged_and_does_not_panic() {
 }
 
 #[tokio::test]
-async fn a_serial_endpoint_is_reported_not_served() {
+async fn a_serial_port_that_cannot_open_is_reported() {
     let log = std::env::temp_dir()
         .join("dnp3-serial.log")
         .display()
         .to_string();
-    let xml = config(1, &log).replace("tcp://127.0.0.1:1", "/dev/ttyS99");
+    let xml = config(1, &log).replace("tcp://127.0.0.1:1", "/dev/no-such-tty");
     let (out, store) = common::load(&xml);
     timeout(
         Duration::from_secs(3),
@@ -313,7 +313,7 @@ async fn a_serial_endpoint_is_reported_not_served() {
     .expect("returns");
     assert!(std::fs::read_to_string(&log)
         .unwrap()
-        .contains("serial endpoint"));
+        .contains("open /dev/no-such-tty"));
 }
 
 #[tokio::test]

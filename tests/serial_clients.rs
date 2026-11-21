@@ -1,6 +1,6 @@
 //! `<modbus-client>` and `<dnp3-client>` on a serial endpoint (ww-y5q, plan F6): the client opens a pty slave, a bridge carries the
 //! bytes to our own TCP server, so the framing on the port is what the stock transcripts show on the socket: MBAP without a slave
-//! byte or CRC for Modbus, the same link frames for DNP3. (The servers have no serial path yet: ww-z5w.)
+//! byte or CRC for Modbus, the same link frames for DNP3. `tests/serial_servers.rs` is the other way round.
 #![cfg(feature = "proto-serial")]
 
 mod common;
