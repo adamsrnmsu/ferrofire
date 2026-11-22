@@ -40,6 +40,12 @@ pub enum FromModule {
         tag: String,
         value: Value,
     },
+    /// Client role: the peer answered (`ok`) or refused the write of output `tag`.
+    Sent {
+        tag: String,
+        value: Value,
+        ok: bool,
+    },
     Log {
         level: String,
         msg: String,
@@ -184,6 +190,15 @@ fn write(o: &Map<String, J>) -> Result<FromModule, String> {
     })
 }
 
+fn sent(o: &Map<String, J>) -> Result<FromModule, String> {
+    let ok = field(o, "ok")?.as_bool();
+    Ok(FromModule::Sent {
+        tag: text(o, "tag")?,
+        value: value(field(o, "value")?)?,
+        ok: ok.ok_or("field `ok` is not a boolean")?,
+    })
+}
+
 fn log(o: &Map<String, J>) -> Result<FromModule, String> {
     Ok(FromModule::Log {
         level: text(o, "level")?,
@@ -195,13 +210,23 @@ fn log(o: &Map<String, J>) -> Result<FromModule, String> {
 pub fn decode(line: &str) -> Result<FromModule, String> {
     let j: J = serde_json::from_str(line).map_err(|e| e.to_string())?;
     let o = j.as_object().ok_or("message is not an object")?;
-    match text(o, "t")?.as_str() {
-        "ready" => ready(o),
-        "write" => write(o),
-        "log" => log(o),
-        "error" => text(o, "msg").map(FromModule::Error),
-        t => Err(format!("unknown message type `{t}`")),
-    }
+    let parse = pick("message type", &text(o, "t")?, &PARSERS)?;
+    parse(o)
+}
+
+type Parse = fn(&Map<String, J>) -> Result<FromModule, String>;
+
+/// Each module message type and its parser.
+const PARSERS: [(&str, Parse); 5] = [
+    ("ready", ready),
+    ("write", write),
+    ("sent", sent),
+    ("log", log),
+    ("error", error),
+];
+
+fn error(o: &Map<String, J>) -> Result<FromModule, String> {
+    text(o, "msg").map(FromModule::Error)
 }
 
 #[cfg(test)]
@@ -303,6 +328,33 @@ mod tests {
             decode(r#"{"t":"error","msg":"bind"}"#),
             Ok(FromModule::Error("bind".into()))
         );
+    }
+
+    #[test]
+    fn decode_sent() {
+        assert_eq!(
+            decode(r#"{"t":"sent","tag":"x","value":3.0,"ok":true}"#),
+            Ok(FromModule::Sent {
+                tag: "x".into(),
+                value: Value::Analog(3.0),
+                ok: true
+            })
+        );
+        assert_eq!(
+            decode(r#"{"t":"sent","tag":"y","value":false,"ok":false}"#),
+            Ok(FromModule::Sent {
+                tag: "y".into(),
+                value: Value::Binary(false),
+                ok: false
+            })
+        );
+        for bad in [
+            r#"{"t":"sent","tag":"x","value":3.0}"#,
+            r#"{"t":"sent","tag":"x","value":3.0,"ok":1}"#,
+            r#"{"t":"sent","tag":"x","value":null,"ok":true}"#,
+        ] {
+            assert!(decode(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

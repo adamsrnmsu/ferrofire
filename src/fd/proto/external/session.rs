@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, watch};
-use tokio::time::MissedTickBehavior;
+use tokio::time::{Instant, MissedTickBehavior};
 use tokio_util::sync::{CancellationToken, DropGuard};
 
 /// How long a module has to answer `hello` with `ready`.
@@ -20,6 +20,8 @@ pub const READY_TIMEOUT: Duration = Duration::from_secs(10);
 const ANSWERS: usize = 64;
 /// How long the writer has to put `stop` on the wire once the session is over, before it is cut off.
 const STOP_GRACE: Duration = Duration::from_secs(1);
+/// How long a client's output write stays under way without the module's `sent` before it counts as failed.
+const SENT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// What a session needs to know about its module and the device.
 #[derive(Clone, Debug)]
@@ -80,6 +82,8 @@ pub async fn session<R: AsyncBufRead + Unpin, W: AsyncWrite + Unpin + Send + 'st
         client: false,
         ins: BTreeSet::new(),
         outs: BTreeMap::new(),
+        inflight: BTreeMap::new(),
+        stalled: false,
     };
     let end = s.run(&stop).await;
     drop(s); // closes the writer's channels: it sends `stop` and ends
@@ -212,12 +216,19 @@ struct Session<'a, R> {
     client: bool,
     ins: BTreeSet<String>,
     outs: BTreeMap<String, Out>,
+    /// Outputs whose write went out in `values` and waits for the module's `sent`, until when.
+    inflight: BTreeMap<String, Instant>,
+    /// The last answer was dropped: the module is not reading (warned once per stall).
+    stalled: bool,
 }
 
 impl<R: AsyncBufRead + Unpin> Session<'_, R> {
     async fn run(&mut self, stop: &CancellationToken) -> End {
+        // closed once the writer has ended: the module's input is gone
+        let gone = self.answers.clone();
         let ready = tokio::select! {
             _ = stop.cancelled() => return End::Stopped,
+            _ = gone.closed() => return End::Broken,
             r = tokio::time::timeout(READY_TIMEOUT, self.ready()) => r,
         };
         let (role, uses) = match ready {
@@ -231,11 +242,17 @@ impl<R: AsyncBufRead + Unpin> Session<'_, R> {
         };
         self.take(role, &uses);
         let _cmdif = self.command_interface(role, &uses, stop);
+        self.serve(stop, &gone).await
+    }
+
+    /// After `ready`: scan cycles and module messages until something ends the session.
+    async fn serve(&mut self, stop: &CancellationToken, gone: &mpsc::Sender<ToModule>) -> End {
         let mut tick = tokio::time::interval(self.spec.cycle.max(Duration::from_millis(1)));
         tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             let end = tokio::select! {
                 _ = stop.cancelled() => Some(End::Stopped),
+                _ = gone.closed() => Some(End::Broken),
                 _ = tick.tick() => {
                     self.on_tick();
                     None
@@ -362,13 +379,42 @@ impl<R: AsyncBufRead + Unpin> Session<'_, R> {
             .filter(|(t, _)| !self.outs.contains_key(t))
             .collect();
         self.last = now;
+        self.expire();
+        let until = Instant::now() + SENT_TIMEOUT;
         for (tag, out) in &mut self.outs {
             if let Some(v) = out.due(&self.store, tag, |v| v) {
-                out.echo.sent_ok(v);
+                self.inflight.insert(tag.clone(), until);
                 ch.push((tag.clone(), v));
             }
         }
         self.queue(ch);
+    }
+
+    /// Output writes with no `sent` in time count as failed, so they are due again.
+    fn expire(&mut self) {
+        let (now, outs, name) = (Instant::now(), &mut self.outs, &self.spec.name);
+        self.inflight.retain(|tag, until| {
+            let late = *until <= now;
+            if let Some(out) = outs.get_mut(tag).filter(|_| late) {
+                tracing::warn!("module {name}: no sent for `{tag}` within {SENT_TIMEOUT:?}");
+                out.echo.sent_failed();
+            }
+            !late
+        });
+    }
+
+    /// The module's peer answered the write of an output: the echo rule takes it as sent, or as due again.
+    fn on_sent(&mut self, tag: &str, v: Value, ok: bool) {
+        let out = self.inflight.remove(tag).and(self.outs.get_mut(tag));
+        match (out, ok) {
+            (Some(out), true) => out.echo.sent_ok(v),
+            (Some(out), false) => out.echo.sent_failed(),
+            (None, _) => tracing::warn!(
+                "module {}: sent for `{}`, which has no write under way, ignored",
+                self.spec.name,
+                show(tag)
+            ),
+        }
     }
 
     fn queue(&self, ch: Vec<(String, Value)>) {
@@ -388,6 +434,10 @@ impl<R: AsyncBufRead + Unpin> Session<'_, R> {
                 self.on_write(id, &tag, value);
                 None
             }
+            Some(FromModule::Sent { tag, value, ok }) => {
+                self.on_sent(&tag, value, ok);
+                None
+            }
             Some(m) => self.aside(m),
         }
     }
@@ -402,12 +452,14 @@ impl<R: AsyncBufRead + Unpin> Session<'_, R> {
             Ok(()) => ToModule::Ack(id),
             Err(why) => ToModule::Reject(id, why.into()),
         };
-        if self.answers.try_send(answer).is_err() {
+        let full = self.answers.try_send(answer).is_err();
+        if full && !self.stalled {
             tracing::warn!(
-                "module {}: not reading, answer to write {id} dropped",
+                "module {}: not reading, answers dropped until it does",
                 self.spec.name
             );
         }
+        self.stalled = full;
     }
 
     /// A client's polled value: an input into its tag, an output through its echo rule (a local change it runs into is sent).
@@ -423,7 +475,8 @@ impl<R: AsyncBufRead + Unpin> Session<'_, R> {
             return Ok(());
         };
         if let Some(local) = out.polled(&self.store, tag, v, v, |v| v) {
-            out.echo.sent_ok(local);
+            self.inflight
+                .insert(tag.into(), Instant::now() + SENT_TIMEOUT);
             self.queue(vec![(tag.into(), local)]);
         }
         Ok(())
@@ -517,12 +570,36 @@ mod tests {
             hello
         }
 
+        /// The output `b` changes to 3.0 locally, and the `values` carrying it arrives.
+        async fn local_change(&mut self, s: &Store) {
+            s.publish("b", 3.0, 1);
+            assert_eq!(
+                self.recv().await,
+                json!({"t":"values","changes":[["b",3.0]]})
+            );
+        }
+
+        /// The peer answered the write of `b` = 3.0.
+        async fn sent(&mut self, ok: bool) {
+            self.send(&json!({"t":"sent","tag":"b","value":3.0,"ok":ok}).to_string())
+                .await;
+        }
+
         /// A `write` and the device's answer to it.
         async fn write(&mut self, id: u64, tag: &str, value: J) -> J {
             self.send(&json!({"t":"write","id":id,"tag":tag,"value":value}).to_string())
                 .await;
             self.recv().await
         }
+    }
+
+    /// A client session with `a` an input and `b` an output.
+    async fn client(s: &Store) -> Module {
+        let mut m = start(spec(false), s.clone());
+        let uses =
+            r#"{"tag":"a","kind":"binary","dir":"in"},{"tag":"b","kind":"analog","dir":"out"}"#;
+        m.ready("client", uses).await;
+        m
     }
 
     fn reject(id: u64, err: &str) -> J {
@@ -603,10 +680,7 @@ mod tests {
     #[tokio::test]
     async fn client_role_uses_the_client_rules() {
         let s = store();
-        let mut m = start(spec(false), s.clone());
-        let uses =
-            r#"{"tag":"a","kind":"binary","dir":"in"},{"tag":"b","kind":"analog","dir":"out"}"#;
-        m.ready("client", uses).await;
+        let mut m = client(&s).await;
         // a poll that brings what the tag holds queues nothing
         assert_eq!(
             m.write(1, "a", json!(false)).await,
@@ -619,9 +693,9 @@ mod tests {
         );
         assert_eq!(s.queued("a"), Some(Value::Binary(true)));
         // a local change of an output goes down once; the poll that shows it is not sent back
-        s.publish("b", 3.0, 1);
-        assert_eq!(m.recv().await, json!({"t":"values","changes":[["b",3.0]]}));
+        m.local_change(&s).await;
         m.quiet().await;
+        m.sent(true).await;
         assert_eq!(m.write(3, "b", json!(3.0)).await, json!({"t":"ack","id":3}));
         m.quiet().await;
         assert!(!s.is_queued("b"));
@@ -636,6 +710,60 @@ mod tests {
         assert_eq!(m.write(6, "b", json!(true)).await, reject(6, "wrong kind"));
     }
 
+    /// Fix round 1: polls that still show the old value while the write is under way do not revert the local change.
+    #[tokio::test]
+    async fn a_stale_poll_does_not_revert_a_write_under_way() {
+        let s = store();
+        let mut m = client(&s).await;
+        m.local_change(&s).await;
+        assert_eq!(m.write(1, "b", json!(0.0)).await, json!({"t":"ack","id":1}));
+        assert_eq!(m.write(2, "b", json!(0.0)).await, json!({"t":"ack","id":2}));
+        assert_ne!(s.queued("b"), Some(Value::Analog(0.0)));
+        m.quiet().await;
+    }
+
+    /// After `sent`, one poll still showing the old value is let pass; the poll that shows the write settles it.
+    #[tokio::test]
+    async fn sent_ok_then_poll_settles() {
+        let s = store();
+        let mut m = client(&s).await;
+        m.local_change(&s).await;
+        m.sent(true).await;
+        assert_eq!(m.write(1, "b", json!(0.0)).await, json!({"t":"ack","id":1}));
+        assert!(!s.is_queued("b"));
+        assert_eq!(m.write(2, "b", json!(3.0)).await, json!({"t":"ack","id":2}));
+        assert!(!s.is_queued("b"));
+        m.quiet().await;
+    }
+
+    /// No `sent` within `SENT_TIMEOUT`, or `ok: false`: the write failed and goes down again.
+    #[tokio::test(start_paused = true)]
+    async fn no_sent_in_time_counts_as_failed() {
+        let s = store();
+        let mut m = client(&s).await;
+        m.local_change(&s).await;
+        let t0 = tokio::time::Instant::now();
+        let again = timeout(2 * SENT_TIMEOUT, m.lines.next_line()).await;
+        let again: J = serde_json::from_str(&again.unwrap().unwrap().unwrap()).unwrap();
+        assert_eq!(again, json!({"t":"values","changes":[["b",3.0]]}));
+        assert!(t0.elapsed() >= SENT_TIMEOUT);
+        m.sent(false).await;
+        assert_eq!(m.recv().await, json!({"t":"values","changes":[["b",3.0]]}));
+        m.sent(true).await;
+        m.quiet().await;
+    }
+
+    /// A module whose input is gone (the writer cannot write) ends the session.
+    #[tokio::test]
+    async fn writer_gone_is_broken() {
+        let s = store();
+        let mut m = start(spec(false), s.clone());
+        m.ready("server", "").await;
+        drop(m.lines);
+        s.publish("b", 3.0, 1);
+        assert_eq!(m.end.await.unwrap(), End::Broken);
+    }
+
     /// Review Focus 1: a line that does not decode, or is over `MAX_LINE`, is dropped and the session goes on.
     #[tokio::test]
     async fn garbage_and_long_lines_are_dropped() {
@@ -648,6 +776,8 @@ mod tests {
         }
         m.send("not json").await;
         m.send(r#"{"t":"nope"}"#).await;
+        m.send(r#"{"t":"sent","tag":"b","value":1.0,"ok":true}"#)
+            .await;
         m.send(r#"{"t":"ready","role":"server","uses":[]}"#).await;
         // a write padded to `len` bytes, newline excluded
         let padded = |id: u64, len: usize| {
