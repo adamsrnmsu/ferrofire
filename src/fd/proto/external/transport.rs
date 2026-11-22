@@ -4,15 +4,18 @@
 use super::session::{session, End, Spec};
 use super::External;
 use crate::fd::config::ConfigError;
-use crate::fd::proto::{backoff, BACKOFF_FIRST, BACKOFF_MAX};
+use crate::fd::proto::{backoff, BACKOFF_FIRST};
 use crate::fd::store::Store;
 use crate::hint::show;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::os::unix::fs::{FileTypeExt, MetadataExt};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tokio::io::{split, AsyncRead, AsyncWrite, BufReader};
 use tokio::net::{TcpListener, UnixListener};
-use tokio::task::JoinHandle;
-use tokio::time::{sleep, Instant};
+use tokio::sync::watch;
+use tokio::task::{JoinHandle, JoinSet};
+use tokio::time::{sleep, timeout, Instant};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, PartialEq)]
@@ -59,19 +62,40 @@ impl Transport {
 trait Duplex: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Duplex for T {}
 
+/// How long the supervisor gives a session's end to be noticed after its module's process has exited.
+const END_GRACE: Duration = Duration::from_millis(100);
+
 enum Listener {
     Tcp(TcpListener),
-    Unix(UnixListener, PathBuf),
+    /// The path, and the (device, inode) of the socket file this listener made there.
+    Unix(UnixListener, PathBuf, (u64, u64)),
+}
+
+fn file_id(p: &Path) -> std::io::Result<(u64, u64)> {
+    let m = std::fs::symlink_metadata(p)?;
+    Ok((m.dev(), m.ino()))
+}
+
+/// Remove a stale socket file at `p`; anything else there is an error.
+fn clear_stale(p: &Path) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(p) {
+        Ok(m) if m.file_type().is_socket() => std::fs::remove_file(p),
+        Ok(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "the path exists and is not a socket",
+        )),
+        Err(_) => Ok(()),
+    }
 }
 
 impl Listener {
-    /// A stale socket file is removed first.
     async fn bind(t: &Transport) -> std::io::Result<Listener> {
         match t {
             Transport::Tcp(a) => Ok(Listener::Tcp(TcpListener::bind(a).await?)),
             Transport::Unix(p) => {
-                let _ = std::fs::remove_file(p);
-                Ok(Listener::Unix(UnixListener::bind(p)?, p.clone()))
+                clear_stale(p)?;
+                let l = UnixListener::bind(p)?;
+                Ok(Listener::Unix(l, p.clone(), file_id(p)?))
             }
             Transport::Stdio => unreachable!("stdio is not bound"),
         }
@@ -80,15 +104,18 @@ impl Listener {
     async fn accept(&self) -> std::io::Result<Box<dyn Duplex>> {
         Ok(match self {
             Listener::Tcp(l) => Box::new(l.accept().await?.0),
-            Listener::Unix(l, _) => Box::new(l.accept().await?.0),
+            Listener::Unix(l, ..) => Box::new(l.accept().await?.0),
         })
     }
 }
 
 impl Drop for Listener {
+    /// The socket file goes, unless another instance has bound the path since.
     fn drop(&mut self) {
-        if let Listener::Unix(_, p) = self {
-            let _ = std::fs::remove_file(p);
+        if let Listener::Unix(_, p, id) = self {
+            if file_id(p).is_ok_and(|now| now == *id) {
+                let _ = std::fs::remove_file(p);
+            }
         }
     }
 }
@@ -130,7 +157,12 @@ impl External {
     pub(super) async fn run_socket(&self, store: Store, stop: CancellationToken) {
         match Listener::bind(&self.transport).await {
             Ok(l) => {
-                tokio::join!(self.listen(l, &store, &stop), self.supervise(&stop));
+                // `up`: a session that had come up has ended; the command is stopped with the listener
+                let (up, local) = (watch::channel(false).0, stop.child_token());
+                tokio::join!(
+                    self.listen(l, &store, &stop, &local, &up),
+                    self.supervise(&local, &up)
+                );
             }
             Err(e) => {
                 let msg = format!(
@@ -145,42 +177,61 @@ impl External {
         }
     }
 
-    async fn listen(&self, l: Listener, store: &Store, stop: &CancellationToken) {
-        let mut cur: Option<Running> = None;
+    async fn listen(
+        &self,
+        l: Listener,
+        store: &Store,
+        stop: &CancellationToken,
+        local: &CancellationToken,
+        up: &watch::Sender<bool>,
+    ) {
+        let (mut cur, mut old, mut refused): (Option<Running>, JoinSet<()>, _) =
+            (None, JoinSet::new(), None);
         loop {
             tokio::select! {
                 _ = stop.cancelled() => break,
                 c = l.accept() => match c {
                     Ok(conn) => {
-                        end(cur.take()).await;
+                        // the old peer may be slow to take `stop`: the new one does not wait for it
+                        old.spawn(end(cur.take()));
                         cur = Some(serve(conn, &self.spec, store, stop));
                     }
                     Err(e) => {
                         tracing::error!("module {}: accept: {e}", self.spec.name);
-                        sleep(BACKOFF_FIRST).await;
+                        tokio::select! { _ = stop.cancelled() => {}, _ = sleep(BACKOFF_FIRST) => {} }
                     }
                 },
-                e = finished(&mut cur) => {
-                    if let End::Refused(msg) = e {
-                        return self.refused(msg, stop);
+                e = finished(&mut cur) => match e {
+                    End::Refused(msg) => {
+                        refused = Some(msg);
+                        break;
                     }
+                    End::Broken { was_ready: true } => {
+                        up.send_replace(true);
+                    }
+                    _ => {}
                 }
             }
         }
         end(cur).await;
+        while old.join_next().await.is_some() {}
+        if let Some(msg) = refused {
+            local.cancel();
+            self.refused(msg, stop);
+        }
     }
 
-    /// Keep the `<command>` (if there is one) running: restarted on the backoff, which starts over once it has lived long enough;
-    /// at the device's stop it is signalled as in the stdio transport.
-    async fn supervise(&self, stop: &CancellationToken) {
+    /// Keep the `<command>` (if there is one) running: restarted on the backoff, which starts over after a module whose session
+    /// came up; at `stop` it is signalled as in the stdio transport.
+    async fn supervise(&self, stop: &CancellationToken, up: &watch::Sender<bool>) {
         if self.argv.is_empty() {
             return;
         }
         let name = &self.spec.name;
         let mut pause = BACKOFF_FIRST;
         loop {
-            let started = Instant::now();
             tracing::info!("module {name}: starting {:?}", self.argv);
+            let mut seen = up.subscribe();
             match self.spawn(false) {
                 Ok(mut child) => {
                     super::stderr(name, child.stderr.take().expect("piped"));
@@ -191,9 +242,12 @@ impl External {
                 }
                 Err(e) => tracing::error!("module {name}: cannot start: {e}"),
             }
-            if started.elapsed() > BACKOFF_MAX {
+            // its session ends as it does: give the end a moment to be noticed
+            let was_up = timeout(END_GRACE, seen.wait_for(|v| *v)).await;
+            if was_up.is_ok_and(|r| r.is_ok()) {
                 pause = BACKOFF_FIRST;
             }
+            up.send_replace(false);
             tokio::select! {
                 _ = stop.cancelled() => return,
                 _ = sleep(pause) => {}
@@ -302,8 +356,9 @@ mod tests {
     #[tokio::test]
     async fn unix_socket_round_trip() {
         let path = std::env::temp_dir().join(format!("ff-ext-{}.sock", std::process::id()));
-        // a file left over from an earlier run does not stop the bind
-        std::fs::write(&path, "stale").unwrap();
+        // a socket file left over from an earlier run does not stop the bind
+        drop(std::os::unix::net::UnixListener::bind(&path).unwrap());
+        assert!(path.exists());
         let (stop, task) = run(&format!("unix://{}", path.display()));
         let (r, mut w) = retry(|| UnixStream::connect(&path)).await.into_split();
         let mut r = lines(r);
@@ -362,6 +417,92 @@ mod tests {
         let task = tokio::spawn(m.run(store, stop.clone()));
         retry(|| async { std::fs::read_to_string(&out).map_err(std::io::Error::other) }).await;
         assert_eq!(std::fs::read_to_string(&out).unwrap().trim(), tr);
+        stop.cancel();
+        timeout(WAIT, task).await.unwrap().unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_path_that_is_not_a_socket_is_refused_and_kept() {
+        let path = std::env::temp_dir().join(format!("ff-ext-{}-file", std::process::id()));
+        std::fs::write(&path, "mine").unwrap();
+        let (_stop, task) = run(&format!("unix://{}", path.display()));
+        timeout(WAIT, task).await.unwrap().unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "mine");
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_listener_leaves_a_socket_that_another_one_has_bound() {
+        let path = std::env::temp_dir().join(format!("ff-ext-{}-rebind", std::process::id()));
+        let t = Transport::Unix(path.clone());
+        let first = Listener::bind(&t).await.unwrap();
+        let second = Listener::bind(&t).await.unwrap();
+        drop(first);
+        assert!(
+            path.exists(),
+            "the first listener removed the second's socket"
+        );
+        drop(second);
+        assert!(!path.exists());
+    }
+
+    #[tokio::test]
+    async fn a_new_connection_does_not_wait_for_a_peer_that_never_reads() {
+        let port = free_port();
+        let (stop, task) = run(&format!("tcp://127.0.0.1:{port}"));
+        // held open, never read from
+        let _deaf = retry(|| TcpStream::connect(("127.0.0.1", port))).await;
+        sleep(Duration::from_millis(100)).await;
+        let mut two = lines(TcpStream::connect(("127.0.0.1", port)).await.unwrap());
+        assert!(line(&mut two).await.contains("hello"));
+        let t = Instant::now();
+        stop.cancel();
+        timeout(WAIT, task).await.unwrap().unwrap();
+        assert!(t.elapsed() < Duration::from_secs(3));
+    }
+
+    /// A module that reached `ready` and exited is restarted after the first pause each time: in 5.5 s that is 5 starts (0, 1.3,
+    /// 2.6, 3.9, 5.2 s), where a pause that doubled gives 3.
+    #[tokio::test]
+    async fn a_command_whose_session_was_ready_restarts_after_the_first_pause() {
+        let dir = std::env::temp_dir().join(format!("ff-ext-{}-ready", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (starts, script, port) = (dir.join("starts"), dir.join("m.sh"), free_port());
+        std::fs::write(
+            &script,
+            format!("echo start >> {}\nsleep 0.3\n", starts.display()),
+        )
+        .unwrap();
+        let xml = format!(
+            "<external-module><name>m</name><transport>tcp://127.0.0.1:{port}</transport><command>sh {}</command></external-module>",
+            script.display()
+        );
+        let doc = roxmltree::Document::parse(&xml).unwrap();
+        let m =
+            External::parse(doc.root_element(), &mut Tags::default(), &Opts::default()).unwrap();
+        let store = Store::new(Layout {
+            points: vec![],
+            external: vec![],
+            internal: vec![],
+        });
+        let stop = CancellationToken::new();
+        let task = tokio::spawn(m.run(store, stop.clone()));
+        let count = || std::fs::read_to_string(&starts).map_or(0, |s| s.lines().count());
+        let (end, mut seen) = (Instant::now() + Duration::from_millis(5500), 0);
+        while Instant::now() < end {
+            // as a module: connect after each start, say `ready`, and hang up
+            if count() > seen {
+                seen = count();
+                if let Ok(mut c) = TcpStream::connect(("127.0.0.1", port)).await {
+                    let ready = b"{\"t\":\"ready\",\"role\":\"server\",\"uses\":[]}\n";
+                    c.write_all(ready).await.unwrap();
+                    sleep(Duration::from_millis(50)).await;
+                }
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+        assert!(count() >= 4, "{} starts in 5.5 s", count());
         stop.cancel();
         timeout(WAIT, task).await.unwrap().unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
