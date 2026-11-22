@@ -1,0 +1,15 @@
+{
+    "name": "dssfed",
+    "period": 1,
+    "real_time": true,
+    "terminate_on_error": true,
+    "publications": [
+        {"key": "line1.amps", "type": "double"},
+        {"key": "line1.volts", "type": "double"},
+        {"key": "brk5.amps", "type": "double"},
+        {"key": "brk4.active", "type": "bool"}
+    ],
+    "endpoints": [
+        {"name": "brk4.active"}
+    ]
+}

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SCEPTRE>
+    <field-device>
+        <name>rtu-hdss</name>
+        <cycle-time>100</cycle-time>
+        <tags>
+            <external-tag><name>line1_amps</name><io>I0</io><type>analog</type></external-tag>
+            <external-tag><name>line1_volts</name><io>I1</io><type>analog</type></external-tag>
+            <external-tag><name>brk5_amps</name><io>I2</io><type>analog</type></external-tag>
+            <external-tag><name>brk4_closed</name><io>I3</io><type>binary</type></external-tag>
+            <external-tag><name>brk4_cmd</name><io>O0</io><type>binary</type></external-tag>
+        </tags>
+        <comms>
+            <modbus-server>
+                <endpoint>tcp://127.0.0.1:502</endpoint>
+                <input-register><address>30000</address><max-value>1000</max-value><min-value>0</min-value><tag>line1_amps</tag></input-register>
+                <input-register><address>30001</address><max-value>20000</max-value><min-value>0</min-value><tag>line1_volts</tag></input-register>
+                <input-register><address>30002</address><max-value>1000</max-value><min-value>0</min-value><tag>brk5_amps</tag></input-register>
+                <discrete-input><address>10000</address><tag>brk4_closed</tag></discrete-input>
+                <coil><address>0</address><tag>brk4_cmd</tag></coil>
+            </modbus-server>
+        </comms>
+        <input>
+            <endpoint>udp://239.0.0.1:40000</endpoint>
+            <analog><id>I0</id><name>line1.amps</name></analog>
+            <analog><id>I1</id><name>line1.volts</name></analog>
+            <analog><id>I2</id><name>brk5.amps</name></analog>
+            <binary><id>I3</id><name>brk4.active</name></binary>
+        </input>
+        <output>
+            <endpoint>tcp://127.0.0.1:5555</endpoint>
+            <binary><id>O0</id><name>brk4.active</name></binary>
+        </output>
+    </field-device>
+</SCEPTRE>
