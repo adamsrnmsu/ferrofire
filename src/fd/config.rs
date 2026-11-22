@@ -56,7 +56,10 @@ impl Tags {
 
     /// Register a device-local tag (a client module's point). Its name must be new.
     pub fn add_internal(&mut self, name: &str, kind: Kind) -> Result<(), ConfigError> {
-        self.insert(name, kind)?;
+        if self.kinds.contains_key(name) {
+            return Err(Self::twice(name));
+        }
+        self.kinds.insert(name.to_string(), kind);
         let zero = match kind {
             Kind::Binary => Value::Binary(false),
             Kind::Analog => Value::Analog(0.0),
@@ -65,13 +68,20 @@ impl Tags {
         Ok(())
     }
 
-    fn insert(&mut self, name: &str, kind: Kind) -> Result<(), ConfigError> {
+    fn twice(name: &str) -> ConfigError {
+        ConfigError(format!("tag `{}` is defined twice", show(name)))
+    }
+
+    /// Register a `<tags>` entry. Stock never checks for a repeat (`FieldDevice.cpp:56-96`): the later one replaces the earlier
+    /// (`DataManager.hpp:118-126` overwrites the tag's point). The same kind twice is a warning; another kind is an error.
+    fn insert(&mut self, name: &str, kind: Kind, opts: &Opts) -> Result<(), ConfigError> {
         match self.kinds.insert(name.to_string(), kind) {
-            None => Ok(()),
-            Some(_) => Err(ConfigError(format!(
-                "tag `{}` is defined twice",
+            Some(k) if k != kind => Err(Self::twice(name)),
+            Some(_) => opts.warn(format!(
+                "tag `{}` is defined twice; the later definition is used",
                 show(name)
-            ))),
+            )),
+            None => Ok(()),
         }
     }
 
@@ -390,7 +400,11 @@ fn external_tag(
             show(point)
         )));
     }
-    tags.insert(&name, want)?;
+    if layout.internal.iter().any(|(n, _)| *n == name) {
+        return Err(Tags::twice(&name));
+    }
+    tags.insert(&name, want, opts)?;
+    layout.external.retain(|(n, _)| *n != name);
     layout.external.push((name, point.clone()));
     Ok(())
 }
@@ -408,7 +422,11 @@ fn local_tag(
         Value::Binary(_) => Kind::Binary,
         Value::Analog(_) => Kind::Analog,
     };
-    tags.insert(&name, kind)?;
+    if layout.external.iter().any(|(n, _)| *n == name) {
+        return Err(Tags::twice(&name));
+    }
+    tags.insert(&name, kind, opts)?;
+    layout.internal.retain(|(n, _)| *n != name);
     layout.internal.push((name, v));
     Ok(())
 }
@@ -639,11 +657,74 @@ mod tests {
         )
         .replace("</tags>", "");
         let dup = format!("{dup}</tags>");
+        // an external and an internal tag of one name stay an error
         assert!(err(parse(&device(&dup))).contains("tag `t` is defined twice"));
         assert!(err(parse(&device(
             "<tags><external-tag><name>t</name><type>analog</type></external-tag></tags>"
         )))
         .contains("<external-tag> has no <io>"));
+    }
+
+    /// Tag `t` defined as `first` on an input and again as `second` on an output.
+    fn twice(first: &str, second: &str) -> String {
+        let io = |k: &str| {
+            if k == "analog" {
+                ("I0", "O0")
+            } else {
+                ("I1", "O1")
+            }
+        };
+        let tag = |k: &str, id: &str| {
+            format!("<external-tag><name>t</name><io>{id}</io><type>{k}</type></external-tag>")
+        };
+        format!(
+            "{IO}<tags>{}{}</tags>",
+            tag(first, io(first).0),
+            tag(second, io(second).1)
+        )
+    }
+
+    /// Stock never rejects a repeated tag: `FieldDevice.cpp:56-96` adds every `<external-tag>` and `<internal-tag>` with no
+    /// lookup, and `DataManager.hpp:118-126` (`mTagToPoint[tag] = point`) lets the later one replace the earlier. So the later
+    /// definition wins and the store holds the tag once.
+    #[test]
+    fn a_tag_defined_twice_with_the_same_kind_loads_with_a_warning() {
+        let c = parse(&device(&twice("analog", "analog"))).unwrap();
+        assert_eq!(c.store.get("t"), Some(Value::Analog(0.0)));
+        c.store.publish("p.a", 5.0, 1);
+        assert_eq!(
+            c.store.get_f64("t"),
+            Some(0.0),
+            "the first definition is replaced"
+        );
+        c.store.publish("p.o", 7.0, 2);
+        assert_eq!(c.store.get_f64("t"), Some(7.0), "the later definition wins");
+    }
+
+    #[test]
+    fn a_tag_defined_twice_is_an_error_under_strict() {
+        let e = err(strict(&device(&twice("analog", "analog"))));
+        assert!(e.contains("tag `t` is defined twice"), "{e}");
+    }
+
+    #[test]
+    fn a_tag_defined_twice_with_different_kinds_is_an_error() {
+        let e = err(parse(&device(&twice("analog", "binary"))));
+        assert!(e.contains("tag `t` is defined twice"), "{e}");
+    }
+
+    /// `conformance/stock/bacnet-server.xml` repeats `generator-1_bus-1.active` and `bus-1.gen_mw`. BACnet itself is served by an
+    /// installed module, so the `<comms>` section is swapped for the fake module; the `<tags>` are what this checks.
+    #[test]
+    fn stock_bacnet_sample_loads() {
+        let xml = include_str!("../../conformance/stock/bacnet-server.xml");
+        let (head, rest) = xml.split_once("<comms>").unwrap();
+        let tail = rest.split_once("</comms>").unwrap().1;
+        let c = parse(&format!(
+            "{head}<comms><fake-server><tag>x</tag></fake-server></comms>{tail}"
+        ))
+        .unwrap();
+        assert!(c.store.get("generator-1_bus-1.active").is_some());
     }
 
     #[test]
