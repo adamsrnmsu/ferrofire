@@ -400,12 +400,32 @@ fn external_tag(
             show(point)
         )));
     }
-    if layout.internal.iter().any(|(n, _)| *n == name) {
-        return Err(Tags::twice(&name));
-    }
+    drop_shadowed_internal(&name, want, tags, layout, opts)?;
     tags.insert(&name, want, opts)?;
     layout.external.retain(|(n, _)| *n != name);
     layout.external.push((name, point.clone()));
+    Ok(())
+}
+
+/// An internal tag of the same name and kind as an external one is dropped (stock prefers the external, `DataManager.hpp:128-140`).
+fn drop_shadowed_internal(
+    name: &str,
+    kind: Kind,
+    tags: &mut Tags,
+    layout: &mut Layout,
+    opts: &Opts,
+) -> Result<(), ConfigError> {
+    let Some(i) = layout.internal.iter().position(|(n, _)| n == name) else {
+        return Ok(());
+    };
+    if tags.kind(name) == Some(kind) {
+        opts.warn(format!(
+            "tag `{}` is both external and internal; the external one is used",
+            show(name)
+        ))?;
+        layout.internal.remove(i);
+        tags.kinds.remove(name);
+    }
     Ok(())
 }
 
@@ -422,8 +442,11 @@ fn local_tag(
         Value::Binary(_) => Kind::Binary,
         Value::Analog(_) => Kind::Analog,
     };
-    if layout.external.iter().any(|(n, _)| *n == name) {
-        return Err(Tags::twice(&name));
+    if layout.external.iter().any(|(n, _)| *n == name) && tags.kind(&name) == Some(kind) {
+        return opts.warn(format!(
+            "tag `{}` is both external and internal; the external one is used",
+            show(&name)
+        ));
     }
     tags.insert(&name, kind, opts)?;
     layout.internal.retain(|(n, _)| *n != name);
@@ -657,8 +680,24 @@ mod tests {
         )
         .replace("</tags>", "");
         let dup = format!("{dup}</tags>");
-        // an external and an internal tag of one name stay an error
-        assert!(err(parse(&device(&dup))).contains("tag `t` is defined twice"));
+        // an external and an internal tag of one name: the external one wins (DataManager.hpp:128-140), with a warning
+        let c = parse(&device(&dup)).unwrap();
+        c.store.publish("p.a", 3.0, 1);
+        assert_eq!(c.store.get_f64("t"), Some(3.0));
+        assert!(err(strict(&device(&dup))).contains("both external and internal"));
+        let rev = format!(
+            "{IO}<tags><internal-tag><name>t</name><value>1</value></internal-tag>{}</tags>",
+            "<external-tag><name>t</name><io>I0</io><type>analog</type></external-tag>"
+        );
+        let c = parse(&device(&rev)).unwrap();
+        c.store.publish("p.a", 3.0, 1);
+        assert_eq!(c.store.get_f64("t"), Some(3.0));
+        assert!(err(strict(&device(&rev))).contains("both external and internal"));
+        let mixed = format!(
+            "{IO}<tags><internal-tag><name>t</name><status>1</status></internal-tag>{}</tags>",
+            "<external-tag><name>t</name><io>I0</io><type>analog</type></external-tag>"
+        );
+        assert!(err(parse(&device(&mixed))).contains("tag `t` is defined twice"));
         assert!(err(parse(&device(
             "<tags><external-tag><name>t</name><type>analog</type></external-tag></tags>"
         )))
@@ -702,6 +741,15 @@ mod tests {
     }
 
     #[test]
+    fn an_internal_tag_defined_twice_loads_with_a_warning_and_the_later_wins() {
+        let xml = device(
+            "<tags><internal-tag><name>t</name><value>1</value></internal-tag><internal-tag><name>t</name><value>2</value></internal-tag></tags>",
+        );
+        assert_eq!(parse(&xml).unwrap().store.get_f64("t"), Some(2.0));
+        assert!(err(strict(&xml)).contains("defined twice"));
+    }
+
+    #[test]
     fn a_tag_defined_twice_is_an_error_under_strict() {
         let e = err(strict(&device(&twice("analog", "analog"))));
         assert!(e.contains("tag `t` is defined twice"), "{e}");
@@ -725,6 +773,9 @@ mod tests {
         ))
         .unwrap();
         assert!(c.store.get("generator-1_bus-1.active").is_some());
+        // `bus-1.gen_mw` is I0 then O2, both the point of that name: the tag reads it
+        c.store.publish("bus-1.gen_mw", 9.0, 1);
+        assert_eq!(c.store.get_f64("bus-1.gen_mw"), Some(9.0));
     }
 
     #[test]
