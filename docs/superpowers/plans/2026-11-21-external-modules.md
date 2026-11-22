@@ -2,22 +2,22 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A documented ffmod/1 boundary so a protocol can be a separate program (stdio, socket or bennu channels), with an IEC 104 server and client in Python on `c104` as the first module, drop-in for stock configs.
+**Goal:** A documented ffmod/1 boundary so a protocol can be a separate program (stdio, socket or bennu channels), with a BACnet/IP server and client in Python on `bacpypes3` as the first module, drop-in for stock configs. (Amended after the c104 spike: IEC 104 is a compiled Rust module under its own plan.)
 
 **Architecture:** A new compiled module `external` (`src/fd/proto/external/`) implements the existing `Module` trait. It owns the child process and speaks ffmod/1 (JSON lines) over a transport; one transport-agnostic session loop diffs a store snapshot each scan cycle and turns module writes into the same store calls compiled modules make. A manifest lookup lets stock `<comms>` element names start an installed module.
 
-**Tech Stack:** Rust (tokio, `tokio::process`, serde_json, zeromq crate already used by `cmdif`), Python 3.10 + `c104==2.2.1` for the module, the existing `conformance/` harness (tshark, Zeek).
+**Tech Stack:** Rust (tokio, `tokio::process`, serde_json, zeromq crate already used by `cmdif`), Python 3.10 + `bacpypes3==0.1.0` (MIT) for the module, the existing `conformance/` harness (tshark, Zeek).
 
 **Spec:** `docs/superpowers/specs/2026-11-21-external-modules-design.md` (approved 2026-11-21). Bead: ww-7mw.3 (phenix-waterway-range).
 
 ## Global Constraints
 
-- ferrofire stays MIT; `modules/iec104/` is GPL-3.0 with its own `LICENSE`; `NOTICE` says so. No GPL code in the Rust crate.
+- ferrofire stays MIT; `modules/bacnet/` is MIT too (bacpypes3 is MIT). No GPL code anywhere in this plan.
 - Gates pass: `make fmt-check lint test crap dry deny` (CRAP < 10, dry < 0.8). Run them through the `IN` wrapper; retry a run that fails with E0460/E0463 up to 3 times.
 - No new lock or work on the scan loop's hot path; compiled modules unchanged in behaviour and timing.
 - A module that hangs, dies or misbehaves never takes the device down, and never makes device stop take longer than 5 s.
 - ffmod/1 is JSON, one object per line, `\n`-terminated, field `t` = type; unknown fields ignored; a message with an unknown `t` from a module is logged and ignored.
-- A stock `<iec60870-5-104-server>` / `<iec60870-5-104-client>` element loads and serves with no edits.
+- A stock `<bacnet-server>` / `<bacnet-client>` element loads and serves with no edits.
 - `ff-rust:22.04` has no Python: Rust tests use `sh` scripts as fake modules. Python runs in the module image (Task 7).
 - Commit locally only; nothing is pushed. Conventional Commit messages, normal English, ending with the attribution trailer.
 
@@ -40,6 +40,17 @@
 - [ ] **Step 2:** Write a 60-line c104 server with the points of the stock sample 104 config (`~/git/sceptre-bennu/data/configs/ep`, the `<iec60870-5-104-server>` element; read-only, do not modify that checkout), and run `conformance/stock/probe_104.py` against it and against the stock server (`ffc-stock-2026.11.03:22.04`, `bennu-field-device`).
 - [ ] **Step 3:** Compare what a master sees (spec "Fidelity bar"): GI with QOI 20 (ACT_CON, data COT 20 with all points incl. outputs, ACT_TERM), negative ACT_CON for another QOI, periodic COT 1 sends at `rpoll-rate`, single vs double mode (types 1/3/31), commands 45/46/50 and their replies, CA 1, IOA from `address`.
 - [ ] **Step 4: Decide.** If any of those cannot be matched, stop here, write the findings to the bead (`bd update ww-7mw.3 --notes ...`) and report back; do not start Task 1. Otherwise list the differences that remain (grouping, timers, queues) for the README and continue.
+
+### Task 0b: BACnet golden and bacpypes3 spike (gate)
+
+Task 0 (c104) ended NO-GO (commit 6ea07e9, `modules/iec104/spike/NOTES.md`); the user moved IEC 104 to Rust (own plan) and chose BACnet for the external module.
+
+**Files:**
+- Create: `conformance/stock/probe_bacnet.py`, `conformance/stock/bacnet-server.xml`, `conformance/stock/bacnet-server.golden` (+ `.pcap`), `modules/bacnet/spike/` with `NOTES.md`
+
+- [ ] **Step 1:** Capture stock's BACnet server golden, as protocols plan row 6 asks: `probe_bacnet.py` (bacpypes3 client) sends Who-Is, ReadProperty and ReadPropertyMultiple on the device object and on each configured object (present-value, object-name, object-list, status-flags), WriteProperty to each output, a read of an unknown object, and DeviceCommunicationControl, against stock `bennu-field-device` with a `<bacnet-server>` config (strip XML comments). Save transcript and pcap.
+- [ ] **Step 2:** Write a bacpypes3 server spike with the same objects (BI/BO/AI/AO by `address` = instance, device `instance`), run the same probe, compare against the golden on what a client sees (spec amendment's fidelity bar): I-Am fields, values, error classes/codes, WriteProperty effects (priority 0 for BO, 16 for AO as row 6 says), object list.
+- [ ] **Step 3: Decide.** If bacpypes3 cannot give that, stop, note it on the bead and report back. Otherwise list remaining differences in `NOTES.md` and continue.
 
 ### Task 1: ffmod/1 messages
 
@@ -164,28 +175,28 @@
 - [ ] **Step 2:** FAIL. **Step 3:** Implement. **Step 4:** Pass; gates.
 - [ ] **Step 5:** Commit `feat(external): bennu-channel transport, device-level command interface and change datagrams (ww-7mw.3)`.
 
-### Task 7: The IEC 104 module
+### Task 7: The BACnet module
 
 **Files:**
-- Create: `modules/iec104/module.py`, `module.json`, `requirements.txt` (`c104==2.2.1`), `LICENSE` (GPL-3.0 text), `README.md`, `Dockerfile` (FROM `ff-physics:22.04`; pip install the requirements; copy the module to `/opt/ferrofire/modules/iec104`; image tag `ff-mod104:22.04`), `test_module.py`
-- Modify: `Makefile` (`mod104-image:` builds it; `mod104-test:` runs pytest in it), `NOTICE` (the directory is GPL-3.0 and imports c104)
+- Create: `modules/bacnet/module.py`, `module.json` (`serves: ["bacnet-server","bacnet-client"]`), `requirements.txt` (`bacpypes3==0.1.0`), `LICENSE` (MIT, same holder as ferrofire's), `README.md`, `Dockerfile` (FROM `ff-physics:22.04`; pip install the requirements; module at `/opt/ferrofire/modules/bacnet`; image tag `ff-modbac:22.04`), `test_module.py`
+- Modify: `Makefile` (`modbac-image:`, `modbac-test:` running pytest in that image), `NOTICE` (bacpypes3, MIT)
 
 **Interfaces:**
-- Consumes: ffmod/1 (Task 1 shapes), the spike's findings (Task 0).
-- Behaviour: read `hello`, parse `config` (one `<iec60870-5-104-server>` or `<iec60870-5-104-client>` element, stock keys of field-device-spec.md 4.3 and protocols plan row 10), send `error` for what stock refuses at load (no `rpoll-rate` or `subtype` on a server, a non-`tcp://` endpoint), else `ready` with role and `uses` (server: inputs `out`, outputs `in`; client: inputs `in`, outputs `out`). Server: the 4.3 behaviour within the fidelity bar. Client: one GI at connect, then the server's sends; decodes `M_ME_NC_1` and `M_DP_NA_1`, plus `M_SP_NA_1` when `opts.strict`; `values` of `out` tags become `C_DC_NA_1` (select) / `C_SE_NC_1`. Logs to stderr only; stdout is ffmod/1 only.
+- Consumes: ffmod/1 (Task 1 shapes); Task 0b findings and golden.
+- Behaviour: read `hello`, parse `config` (one `<bacnet-server>` or `<bacnet-client>` element, keys of protocols plan rows 6 and 11), send `error` for what stock refuses at load (missing `udp://` prefix on the endpoint, no `instance`), else `ready` (server: inputs `out`, outputs `in`; client: points read `in`, points written `out`). Server: row 6 within the fidelity bar: I-Am at start and on Who-Is, RP/RPM/WP/WPM, 1 Hz refresh from the latest `values`, network writes become `write`s. Client: row 11: Who-Is bind at start, poll at `scan-rate` into `write`s, `values` of `out` tags become WriteProperty. Its `<command-interface>` (port 1332) is served by the device (Task 2). Logs to stderr only.
 
-- [ ] **Step 1: Write the failing tests** (`test_module.py`, pytest, module driven through its stdin/stdout with a scripted device): `stock_server_config_gives_ready`, `missing_rpoll_rate_is_an_error`, `server_command_becomes_a_write` (a c104 client in the test sends `C_SE_NC_1` IOA 102 value 7.5 → module prints `write` of that tag 7.5), `values_reach_a_gi` (after `values`, a GI from a c104 client returns the new value), `client_polls_into_writes` (module as client against a c104 server in the test).
-- [ ] **Step 2:** `make mod104-test`: FAIL. **Step 3:** Implement. **Step 4:** PASS.
-- [ ] **Step 5:** Commit `feat(modules): IEC 104 server and client on c104, GPL-3.0 (ww-7mw.3)`.
+- [ ] **Step 1: Write the failing tests** (`test_module.py`, pytest, module driven through stdin/stdout by a scripted device, a bacpypes3 peer in the test): `stock_server_config_gives_ready`, `missing_instance_is_an_error`, `write_property_becomes_a_write` (WP present-value 7.5 to the configured AO → a `write` of its tag 7.5), `values_reach_read_property`, `client_polls_into_writes`.
+- [ ] **Step 2:** `make modbac-test`: FAIL. **Step 3:** Implement. **Step 4:** PASS.
+- [ ] **Step 5:** Commit `feat(modules): BACnet/IP server and client on bacpypes3 (ww-7mw.3)`.
 
 ### Task 8: Conformance, docs and wiring
 
 **Files:**
-- Create: `conformance/iec104/` and `conformance/iec104-client/` (copy `conformance/dnp3/` and `conformance/modbus-client/`; `proto.env` uses `DUT_IMAGE=ff-mod104:22.04` for `DUT=rust`), `docs/modules.md`
-- Modify: `README.md` (protocol table rows for IEC 104 via module; a "Modules" line), `docs/field-device-protocols-plan.md` rows 5 and 10, `conformance/README.md` (divergences from Task 0/7)
+- Create: `conformance/bacnet/` and `conformance/bacnet-client/` (copy `conformance/dnp3/` and `conformance/modbus-client/`; `proto.env` uses `DUT_IMAGE=ff-modbac:22.04` for `DUT=rust`), `docs/modules.md`
+- Modify: `README.md` (BACnet via module; a "Modules" line), `docs/field-device-protocols-plan.md` rows 6 and 11, `conformance/README.md` (divergences from Task 0b/7)
 
-- [ ] **Step 1:** `conformance/iec104/check.sh`: `want_field` on the GI ACT_CON (type 100 COT 7), data COT 20 for each configured IOA, ACT_TERM (COT 10), a periodic COT 1 send, a `C_SE_NC_1` echo COT 7; `zeek.sh` on the ICSNPP iec104 logs. Run `make conformance PROTO=iec104` (stock oracle) and `DUT=rust make conformance PROTO=iec104`: both PASS.
-- [ ] **Step 2:** Differential: `conformance/differential.sh iec104` (stock vs ours, same config, `probe_104.py` transcript) equal except the listed divergences. Same for `iec104-client` against the stock 104 server.
-- [ ] **Step 3:** `docs/modules.md`: ffmod/1 (every message, with the spec's examples), the three transports and their config, lifecycle numbers, manifests and `--modules-dir`, the worked example (run the IEC 104 module from a stock config in `ff-mod104:22.04`), and a 30-line "write your own" example in `sh` or Python that the Task 3 test also runs (so the doc example is tested).
-- [ ] **Step 4:** All six gates; `make physics` still PASS (no regression of the providers path).
-- [ ] **Step 5:** Commit `docs(external): ffmod/1 reference, IEC 104 conformance (ww-7mw.3)`. Then update the bead with the commits and results; do not close it (the main session closes it after review).
+- [ ] **Step 1:** `conformance/bacnet/check.sh`: `want_field` on I-Am (device instance), RP present-value of each object, a WP followed by a read showing it, an unknown-object error; `zeek.sh` on the ICSNPP bacnet logs; `nmap --script bacnet-info` output equal for stock and ours (row 6). Run `make conformance PROTO=bacnet` (stock) and `DUT=rust make conformance PROTO=bacnet`: both PASS.
+- [ ] **Step 2:** Differential: `probe_bacnet.py` transcript, stock vs ours, same config, equal except the listed divergences. Client: our module against stock's BACnet server, and stock's `bacnet-client` against ours.
+- [ ] **Step 3:** `docs/modules.md`: ffmod/1 (every message, with the spec's examples), the three transports and their config, lifecycle numbers, manifests and `--modules-dir`, the worked example (the BACnet module from a stock config in `ff-modbac:22.04`), and a 30-line "write your own" example in `sh` that a Task 3 test also runs.
+- [ ] **Step 4:** All six gates; `make physics` still PASS.
+- [ ] **Step 5:** Commit `docs(external): ffmod/1 reference, BACnet conformance (ww-7mw.3)`. Update the bead with commits and results; do not close it.

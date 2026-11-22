@@ -7,8 +7,9 @@ Date: 2026-11-21. Status: approved by the user 2026-11-21.
 Today every ferrofire protocol is a Rust module compiled into the binary (`src/fd/proto/mod.rs`: `Module` trait, `REGISTRY`, one
 `proto-<name>` feature each). A new protocol means Rust, a registry line and a rebuild. This change adds a documented boundary so a
 protocol can be a **separate program in any language**, started and stopped by the field device from its config, with no change to
-ferrofire's core. The first program to use it is a new **IEC 60870-5-104 server and client**, written in Python on `c104`, which
-ferrofire lacks today.
+ferrofire's core. The first program to use it is a new **BACnet/IP server and client**, written in Python on `bacpypes3`
+(pure Python, MIT), which ferrofire lacks today. (Amended 2026-11-21: the c104 spike, `modules/iec104/spike/NOTES.md`, was NO-GO, so
+the user moved IEC 104 to a compiled Rust module, `proto-iec104`, under its own bead and plan, and made BACnet the external module.)
 
 Why: the private comparison scores ferrofire 3 on extensibility. The rubric's 5 anchor is "a documented module or plugin boundary; a
 new protocol is a separate process or crate in any language with no change to the core; existing modules show the pattern; clients
@@ -22,30 +23,30 @@ and servers both". The IEC 104 gap is also a listed ferrofire weakness.
    - **B. socket**: ferrofire listens on a socket and a module connects to it, started by ferrofire or by something else.
    - **C. bennu**: no ffmod/1. Instead ferrofire offers bennu's own channels at the device level: a command interface (stock
      `QUERY`/`READ`/`WRITE` wording) and change datagrams in datagram-v1 format, so an existing bennu or pybennu program can be a module.
-3. `modules/iec104/`: an IEC 104 server and client in Python on `c104`, drop-in for stock bennu's `<iec60870-5-104-server>` and
-   `<iec60870-5-104-client>` config elements (field-device-spec.md section 4.3, protocols plan rows 5 and 10).
+3. `modules/bacnet/`: a BACnet/IP server and client in Python on `bacpypes3`, drop-in for stock bennu's `<bacnet-server>` and
+   `<bacnet-client>` config elements (field-device-protocols-plan.md rows 6 and 11).
 4. Conformance and tests that hold the module to stock and to an independent decoder (see Testing).
 
 ## Non-goals
 
 - Moving the existing Rust modules out of process. They stay compiled in; their latency is part of ferrofire's performance score.
 - A module SDK or library in any language. The protocol is small enough to speak directly; the IEC 104 module shows how.
-- BACnet. It can follow the same pattern later.
+- IEC 104: a compiled Rust module under its own plan (user decision after the c104 spike).
 - Running modules on another host over a network with authentication. Transport B listens on loopback or a Unix socket by default.
 
 ## Anti-goals
 
 - Any regression of the in-process modules: no new lock on the store's hot path, no change to their timing.
 - A module that hangs or dies takes the device down. It must not: like a bind failure today, it logs and the rest keeps running.
-- A GPL library linked into ferrofire. `c104` (GPL-3.0, wraps lib60870-C, the library stock bennu uses) stays in its own process.
+- A GPL library linked into ferrofire.
 
 ## Constraints
 
-- ferrofire is MIT and stays so. `modules/iec104/` is GPL-3.0 (user decision).
+- ferrofire is MIT and stays so; `modules/bacnet/` is MIT (bacpypes3 is MIT).
 - Gates: `make fmt-check lint test crap dry deny` pass (CRAP < 10, dry < 0.8). Rust only; the Python module gets its own check.
 - arm64 host, Docker Desktop. `ff-rust:22.04` has no Python; `ff-physics:22.04` has Python 3.10 and pip, and `c104` 2.2.1 has a
   manylinux aarch64 wheel.
-- Config stays drop-in for stock: a stock `<iec60870-5-104-server>` element in a bennu config must load and serve with no edits.
+- Config stays drop-in for stock: a stock `<bacnet-server>` or `<bacnet-client>` element in a bennu config must load and serve with no edits.
 
 ## Approaches considered
 
@@ -185,3 +186,13 @@ sends `write`s.
 ## Decided by the user
 
 - `modules/iec104/` is GPL-3.0 (its own `LICENSE` file in that directory); the rest of ferrofire stays MIT. `NOTICE` says so.
+
+## Amendment 2026-11-21 (after the c104 spike, user decision)
+
+- IEC 104 is a compiled Rust module (`proto-iec104`), its own bead and plan; nothing of it is in this plan.
+- The external module is BACnet/IP server and client on `bacpypes3` 0.1.0 (MIT), in `modules/bacnet/`, MIT. The GPL-3.0 decision
+  above applied to the c104 module only and lapses with it.
+- The IEC 104 sections above stand as the record of the first design; where they conflict, this amendment wins. For BACnet the
+  fidelity bar is the same in kind: what a BACnet client sees (I-Am, ReadProperty/RPM values and errors, WriteProperty effects, the
+  object list) equals stock; encoding details a client does not act on may differ and are listed. Stock has no BACnet golden yet
+  (protocols plan row 6): capture one first, then a bacpypes3 spike is the new gate.
