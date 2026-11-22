@@ -6,6 +6,9 @@ use serde_json::{json, Map, Value as J};
 /// The longest line either side accepts, newline excluded.
 pub const MAX_LINE: usize = 65536;
 
+/// The longest line the device accepts from a module until `ready` has arrived: `ready.uses` grows with the point count.
+pub const MAX_READY_LINE: usize = 16 << 20;
+
 /// Device to module.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ToModule {

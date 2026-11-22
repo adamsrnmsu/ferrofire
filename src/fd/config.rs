@@ -558,7 +558,9 @@ mod tests {
         // no manifest serves this one
         let e = err(parse(&comms("bacnet-server")));
         assert!(
-            e.contains("<bacnet-server> needs the `proto-bacnet` feature or an installed module (see docs/modules.md)"),
+            e.contains(
+                "<bacnet-server> is served only by an installed module (see docs/modules.md)"
+            ),
             "{e}"
         );
     }

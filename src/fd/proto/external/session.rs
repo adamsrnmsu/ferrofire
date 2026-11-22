@@ -1,7 +1,7 @@
 //! One ffmod/1 session over any line stream: `hello`, `ready`, then a `values` each scan cycle and the module's writes, until
 //! stop, end of stream or the module's `error`. The transports (stdio, socket, bennu) run this over their streams.
 
-use super::msg::{decode, encode, Dir, FromModule, Role, ToModule, Use, MAX_LINE};
+use super::msg::{decode, encode, Dir, FromModule, Role, ToModule, Use, MAX_LINE, MAX_READY_LINE};
 use crate::fd::cmdif;
 use crate::fd::proto::client::{input_polled, Out, TagPoints};
 use crate::fd::store::{kind_of, same, zero, Store, WriteError};
@@ -75,6 +75,7 @@ pub async fn session<R: AsyncBufRead + Unpin, W: AsyncWrite + Unpin + Send + 'st
             r,
             buf: vec![],
             over: false,
+            cap: MAX_READY_LINE,
         },
         pending,
         answers,
@@ -156,13 +157,15 @@ async fn writer<W: AsyncWrite + Unpin>(
     let _ = w.shutdown().await;
 }
 
-/// The module's lines, each at most `MAX_LINE` bytes. State lives here between calls, so `next` can be raced in a `select!`
+/// The module's lines, each at most `cap` bytes (`MAX_LINE` once `ready` is in). State lives here between calls, so `next` can be raced in a `select!`
 /// without losing a byte.
 struct Lines<R> {
     r: R,
     buf: Vec<u8>,
     /// The line under way is over `MAX_LINE`: the rest of it is skipped.
     over: bool,
+    /// The longest line kept: `MAX_READY_LINE` until `ready`, then `MAX_LINE`.
+    cap: usize,
 }
 
 impl<R: AsyncBufRead + Unpin> Lines<R> {
@@ -181,7 +184,7 @@ impl<R: AsyncBufRead + Unpin> Lines<R> {
             let used = part.len() + usize::from(nl.is_some());
             self.r.consume(used);
             // once over, nothing more is kept and `take` drops what was
-            self.over |= self.buf.len() > MAX_LINE;
+            self.over |= self.buf.len() > self.cap;
             if nl.is_some() {
                 return Some(self.take());
             }
@@ -191,10 +194,19 @@ impl<R: AsyncBufRead + Unpin> Lines<R> {
     fn take(&mut self) -> Result<String, String> {
         let line = std::mem::take(&mut self.buf);
         if std::mem::take(&mut self.over) {
-            return Err(format!("line over {MAX_LINE} bytes"));
+            return Err(format!("line over {} bytes", self.cap));
         }
         String::from_utf8(line).map_err(|e| e.to_string())
     }
+}
+
+/// Each used tag with whether it is an output: out when any of its entries is, as `Session::take` decides.
+fn out_tags(uses: &[Use]) -> BTreeMap<String, bool> {
+    let mut m = BTreeMap::new();
+    for u in uses {
+        *m.entry(u.tag.clone()).or_insert(false) |= u.dir == Dir::Out;
+    }
+    m
 }
 
 /// A `log` line from the module, at its level (`info` for a level tracing does not have).
@@ -248,6 +260,7 @@ impl<R: AsyncBufRead + Unpin> Session<'_, R> {
             Ok(Err(end)) => return end,
             Err(_) => return self.late(),
         };
+        self.lines.cap = MAX_LINE;
         let uses = match self.checked(uses) {
             Ok(uses) => uses,
             Err(end) => return end,
@@ -372,8 +385,7 @@ impl<R: AsyncBufRead + Unpin> Session<'_, R> {
     ) -> Option<DropGuard> {
         let ep = self.spec.cmdif.clone().filter(|_| role == Role::Client)?;
         let token = stop.child_token();
-        let tags = uses.iter().map(|u| (u.tag.clone(), u.dir == Dir::Out));
-        let points = TagPoints::new(self.store.clone(), tags);
+        let points = TagPoints::new(self.store.clone(), out_tags(uses));
         let serving = token.clone();
         tokio::spawn(async move { cmdif::serve(&ep, points, serving).await });
         Some(token.drop_guard())
@@ -770,6 +782,38 @@ mod tests {
         drop(m.lines);
         s.publish("b", 3.0, 1);
         assert_eq!(m.end.await.unwrap(), End::Broken { was_ready: true });
+    }
+
+    /// A tag listed `out` before `in` is an output for the command interface too.
+    #[test]
+    fn a_tag_is_out_when_any_entry_is() {
+        let u = |tag: &str, dir| Use {
+            tag: tag.into(),
+            kind: Kind::Analog,
+            dir,
+        };
+        let m = out_tags(&[u("a", Dir::Out), u("a", Dir::In), u("b", Dir::In)]);
+        assert!(m["a"]);
+        assert!(!m["b"]);
+    }
+
+    /// I1: `ready` may be over `MAX_LINE`; every later line may not.
+    #[tokio::test]
+    async fn a_ready_over_the_line_cap_is_accepted() {
+        let s = store();
+        let mut m = start(spec(false), s.clone());
+        let uses = vec![r#"{"tag":"b","kind":"analog","dir":"in"}"#; 2000].join(",");
+        m.recv().await;
+        let ready = format!(r#"{{"t":"ready","role":"server","uses":[{uses}]}}"#);
+        assert!(ready.len() > MAX_LINE);
+        m.send(&ready).await;
+        let big = format!(
+            r#"{{"t":"write","id":1,"tag":"b","value":1.0,"pad":"{}"}}"#,
+            "x".repeat(MAX_LINE)
+        );
+        m.send(&big).await;
+        assert_eq!(m.write(2, "b", json!(2.0)).await, json!({"t":"ack","id":2}));
+        assert_eq!(s.queued("b"), Some(Value::Analog(2.0)));
     }
 
     /// Review Focus 1: a line that does not decode, or is over `MAX_LINE`, is dropped and the session goes on.

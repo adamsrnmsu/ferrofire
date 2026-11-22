@@ -86,11 +86,11 @@ pub fn cycle(n: Node) -> Duration {
 }
 
 /// Declare the device-local tag of a point. A tag that exists already (another connection's, a `<tags>` entry) is a warning and
-/// `false`: the first declaration keeps it and this mapping is left out.
+/// `false`: the first declaration keeps it (a compiled client leaves this mapping out; a module's own mapping goes on).
 pub fn point_tag(tags: &mut Tags, tag: &str, kind: Kind, opts: &Opts) -> Result<bool, ConfigError> {
     if tags.kind(tag).is_some() {
         opts.warn(format!(
-            "tag `{}` is already declared; this mapping is ignored (the first declaration wins)",
+            "tag `{}` is already declared; the first declaration's kind is kept",
             show(tag)
         ))?;
         return Ok(false);

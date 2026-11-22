@@ -78,8 +78,8 @@ A new `<comms>` child, plus a manifest lookup so stock element names work:
 </external-module>
 ```
 
-Drop-in: a module directory holds a `module.toml` manifest naming the stock `<comms>` tags it serves
-(`serves = ["iec60870-5-104-server", "iec60870-5-104-client"]`) and its command. At load, a `<comms>` child that no compiled module
+Drop-in: a module directory holds a `module.json` manifest naming the stock `<comms>` tags it serves
+(`{"serves": ["iec60870-5-104-server", "iec60870-5-104-client"], "command": "..."}`) and its command. At load, a `<comms>` child that no compiled module
 claims is looked up in the manifests under the modules directory (`--modules-dir`, default `/opt/ferrofire/modules`, also
 `FERROFIRE_MODULES`). A hit is started as if it were an `<external-module>` whose `<config>` is that element. The `KNOWN` table's
 "needs the `proto-iec104` feature" error then only appears when no manifest serves the tag.
@@ -147,7 +147,7 @@ sends `write`s.
 
 ### IEC 104 module (`modules/iec104/`)
 
-- `module.toml`, `module.py` (one file if it stays readable), `README.md`, a `requirements.txt` pinning `c104==2.2.1`.
+- `module.json`, `module.py` (one file if it stays readable), `README.md`, a `requirements.txt` pinning `c104==2.2.1`.
 - Server: section 4.3 of field-device-spec.md, observed stock behaviour: CA 1, IOA from `address`, single or double points by
   `subtype`, `rpoll-rate` periodic sends with COT 1, GI with QOI 20 only, commands 45/46/50 written to the device. Quirks stock has
   (periodic send to the last connection only) are kept by default and listed in the README.

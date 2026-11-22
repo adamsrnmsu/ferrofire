@@ -160,6 +160,10 @@ pub fn start_module(
         })));
     }
     match KNOWN.iter().find(|(t, _)| *t == tag) {
+        // no compiled module exists for BACnet: only an installed module can serve it
+        Some((_, "proto-bacnet")) => Err(ConfigError(format!(
+            "<{tag}> is served only by an installed module (see docs/modules.md), and none serves it"
+        ))),
         Some((_, feature)) => Err(ConfigError(format!(
             "<{tag}> needs the `{feature}` feature or an installed module (see docs/modules.md); this binary was built without the feature"
         ))),

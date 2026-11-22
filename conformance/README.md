@@ -262,6 +262,9 @@ Where ours differs from stock (`bacnet/rust-feed.diff`, the same in three runs):
 | AV 0, BV 0, MSI 0 detail properties (sweep) | bacnet-stack demo values | bacpypes3 defaults, some missing | module, open (known since Task 0b) |
 | ReadRange of a trend-log log-buffer | 66-76 synthetic records | `services/property-is-not-a-list` | module, open (known since Task 0b) |
 | A value written and ACKed by the provider, read within about 2 to 4 s (6 lines: AO 3 2.5 s after its write reads 9 where stock reads 44; AO 2 and 3 priority slot 16; AO 2 after its relinquish; AI 0 at the DCC step) | the provider's next datagram (0.5 s here) wins at once | the ACKed value is held 2 s against the stream (`ACK_HOLD`, ww-1df.32), then the stream wins | device, by design: a real provider applies the write at its next tick and then publishes it, so both converge; `feed.py` never applies a write |
+| AI present-value write with out-of-service set | accepted and enqueued (`ai.c`) | `write-access-denied`, as with out-of-service clear (not probed) | module, not probed |
+| Properties and services no probe touched (COV, Who-Has, BO priority 6) | per bacnet-stack | bacpypes3 behaviour, untested against stock | module, untested |
+| Config errors | logged when the device loads | `error` after `hello` (no `udp://`, a missing `endpoint`/`instance`/`address`/`tag`, a non-number) | module, by design |
 | The order of the points in one `WRITE=` batch to the provider | `generator-1_bus-1.active, load-1_bus-1.active, bus-1.gen_mw, load-1_bus-1.mw` | by tag name (`bus-1.gen_mw` first) | device; the same pairs, and a provider reads them as a set |
 
 The no-provider golden of Task 0b (`stock/bacnet-server.golden`) stays as its record; the fed run supersedes it (Task 7 found ours

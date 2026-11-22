@@ -31,8 +31,12 @@ or an explicit `<external-module>`:
 </comms>
 ```
 
-`<command>` is split on whitespace, with no shell: write `sh -c '...'` yourself if you want one. It is required for `stdio` and
-optional for the other transports. A client module's `<command-interface>` (in its element) is served by the device itself.
+`<command>` is split on whitespace, with no quoting and no shell: for anything more than a program and plain arguments, use a wrapper
+script. It is required for `stdio` and optional for the other transports. A client module's `<command-interface>` is served by the
+device itself, from the module's own element (a manifest-served `<bacnet-client>`) or, for an explicit `<external-module>`, from the
+`<external-module>` element's own `<command-interface>` child, not from inside `<config>`. A client wrapped in `<config>` therefore
+gets no command interface and, as the device declares point tags only for manifest-served elements, no point tags either. It is
+served while the module's session is up (after `ready`), not during a restart pause.
 
 ### Manifests and `--modules-dir`
 
@@ -54,14 +58,14 @@ element whose name ends in `-client` therefore declares its points' tags at load
 `<binary-input>`, `<binary-output>` (binary) and `<analog-input>`, `<analog-output>` (analog) under it, stock's client point names. A
 tag declared already (in `<tags>`, or by an earlier point) is a warning and the first declaration wins; under `--strict` it is an
 error. Any other element declares nothing: its tags must be in `<tags>`, and a module whose client points are named otherwise needs
-a `<tags>` section too. With neither, the load
-fails with `<bacnet-server> needs the proto-bacnet feature or an installed module`.
+a `<tags>` section too. If no module serves the element at all, the load fails: for `<bacnet-server>` with `<bacnet-server> is served only by an installed module (see docs/modules.md), and none serves it`.
 
 ## ffmod/1
 
 One JSON object per line, UTF-8, ending in `\n`. Field `t` is the type. Unknown fields are ignored. A line from a module that is not
 JSON, has an unknown `t` or a malformed field, or is over 64 KiB (65536 bytes without the newline) is dropped and logged, and the
-session goes on. Values are `true`/`false` for binary tags and numbers for analog ones. An analog that is NaN or infinite has no
+session goes on. The one exception is `ready`: until it has arrived, a line may be up to 16 MiB, since `ready.uses` grows with the
+point count; a longer one is dropped like any other, and `ready` then never comes. Values are `true`/`false` for binary tags and numbers for analog ones. An analog that is NaN or infinite has no
 JSON form: it is sent as `null`, and a module keeps its previous value.
 
 ### Device to module
@@ -125,12 +129,12 @@ writes come in through `WRITE`. No `hello`, no per-write ack beyond the reply.
 
 - A module starts after the store is built, like the compiled modules. A command that is missing, not executable or exits at once
   is logged and restarted on the backoff below; the device keeps running.
-- `ready` must come within **10 s** of `hello`; otherwise the module is stopped and restarted.
+- `ready` must come within **10 s** of `hello`; otherwise the session is dropped; a stdio module is stopped and restarted, a socket module that keeps running is not (only an exit restarts it).
 - Exit or a broken stream: restart after a pause of **1 s, doubling to 30 s**. The pause starts over at 1 s after a session that
   reached `ready`. Each restart is a fresh `hello`. `error` means no restart.
 - Writes from a module that is restarting are lost, as a peer's are on a dropped TCP session.
 - Stop: the device sends `stop` (its writer gets 1 s to put it on the wire), closes stdin, sends **SIGTERM to the module's process
-  group 2 s** after the device's stop began and **SIGKILL at 5 s**. The device's own stop never waits longer than that; a module that
+  group 2 s** after the device's stop began and **SIGKILL at 5 s**. The device's own stop waits for modules at most 5.5 s; a module that
   never reads its stdin does not hold it up either.
 
 ## Worked example: the BACnet module from a stock config
