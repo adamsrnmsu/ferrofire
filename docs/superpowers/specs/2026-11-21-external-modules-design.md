@@ -87,7 +87,7 @@ claims is looked up in the manifests under the modules directory (`--modules-dir
 ### ffmod/1 messages
 
 JSON, one object per line, UTF-8, `\n`-terminated. Field `t` is the type. Values are JSON `true`/`false` for binary points and numbers
-for analog. Unknown fields are ignored (forward compatible); an unknown `t` is answered with `error` and otherwise ignored.
+for analog. Unknown fields are ignored (forward compatible); a message with an unknown `t` is logged and ignored.
 
 Device to module:
 - `{"t":"hello","v":1,"device":"rtu-1","opts":{"strict":false},"config":"<iec60870-5-104-server>...</...>","points":[{"tag":"x","kind":"analog","value":2.5},...]}`:
@@ -111,6 +111,10 @@ Module to device:
   goes down in `values`), so the module does not reimplement them. (Builder-check answer; my call.)
 - `{"t":"write","id":7,"tag":"x","value":true}`: a value from the module's peer (a server's command, a client's polled input). The
   same path as a compiled module's write: `Store::write` for a server, the `proto/client.rs` path for a client.
+- `{"t":"sent","tag":"x","value":3.0,"ok":true}`: client role only: the module's peer answered the write of `out` tag `x` (ok) or
+  refused it. Until it arrives the device keeps the tag's Echo write pending (polls of `x` do not overwrite the local change); after
+  10 s without it the write counts as failed. Mirrors the compiled clients, which mark a write sent after the peer's reply.
+  (Builder-check follow-up, Ruling 5.)
 - `{"t":"log","level":"info","msg":"..."}`: optional; stderr lines are logged too.
 - `{"t":"error","msg":"..."}`: the module cannot run (bind failure, bad config). ferrofire logs it and does not restart it.
 
