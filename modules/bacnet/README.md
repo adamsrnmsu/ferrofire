@@ -59,11 +59,10 @@ exception that OctetStringValue objects logged at start.
 
 ## Client (protocols plan row 11)
 
-**Not drop-in yet** (open, `conformance/README.md`, BACnet/IP): on bennu's sample `<bacnet-client>`, which has no `<tags>`, the
-device knows none of the client's tags, so every `uses` entry is skipped. With the tags declared it runs, and differs from the stock
-client in the object types its scan reads (stock reads BO 0 and 1 and AO 1 for the sample's BI 0 and 1 and AI 1) and in its request
-header (`02 44`, bacpypes3's segmentation defaults, where stock sends `00 05`).
-
+The device declares the client's point tags at load (`docs/modules.md`, Manifests), so bennu's sample `<bacnet-client>` runs
+unchanged. Against the stock server the scan and the requests are the stock client's byte for byte
+(`DUT=rust make conformance PROTO=bacnet-client`); what differs is the device's write semantics, listed in
+`conformance/bacnet-client/rust-client.diff`.
 
 - `ready` lists inputs as `in` and outputs as `out`. The device serves the element's `<command-interface>` (port 1332) itself and
   runs the client echo rules. It sends the module `values` for output tags when they are due.
@@ -73,6 +72,9 @@ header (`02 44`, bacpypes3's segmentation defaults, where stock sends `00 05`).
   - So this module sends no Who-Is either. It takes the endpoint as the peer's address and writes no `address_cache` file.
   - An endpoint without `udp://`, or one bacpypes3 cannot resolve, is an `error`. Stock exits.
 - Every `scan-rate` seconds, per connection:
+  - The object type is stock's (`stock_type` in module.py, `ClientConnection.cpp`): every binary point is read and written as a
+    binary-output, an analog point as an analog-input only while its tag was last declared as one (the sample's BI 0 and 1 are
+    read as BO 0 and 1, its AI 1 as AO 1). Requests carry stock's `00 05` header (no segmentation, max APDU 1476).
   - ReadProperty present-value of each point, one at a time: binaries then analogs, by instance, as stock's maps order them. An
     input and an output on one instance share an entry, as in stock.
   - Each value read is a `write`, changed or not. A failed read is logged and skipped.

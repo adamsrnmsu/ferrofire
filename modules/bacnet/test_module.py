@@ -222,3 +222,55 @@ def test_values_of_outputs_become_write_property():
         run(go())
     finally:
         m.close()
+
+
+def test_client_reads_the_object_types_stock_reads():
+    """Stock's type rule (module.py stock_type): every binary point is read as a binary-output, an analog one as an analog-input
+    only while its tag was last declared as one. The peer has only the objects stock would read; every point still polls."""
+    server = next(PORTS)
+    m = Module(next(PORTS))
+    config = (f"<bacnet-client><scan-rate>1</scan-rate><bacnet-connection><endpoint>udp://127.0.0.1:{server}</endpoint>"
+              "<instance>77</instance><binary-input><address>0</address><tag>bi</tag></binary-input>"
+              "<analog-input><address>0</address><tag>a</tag></analog-input>"
+              "<analog-input><address>1</address><tag>g</tag></analog-input>"
+              "<analog-output><address>3</address><tag>g</tag></analog-output></bacnet-connection></bacnet-client>")
+    try:
+        async def go():
+            from bacpypes3.local.analog import AnalogOutputObject
+            objs = [BinaryOutputObject(objectIdentifier=("binary-output", 0), objectName="bo0", presentValue="active"),
+                    AnalogInputObject(objectIdentifier=("analog-input", 0), objectName="ai0", presentValue=1.5),
+                    AnalogOutputObject(objectIdentifier=("analog-output", 1), objectName="ao1", presentValue=2.5),
+                    AnalogOutputObject(objectIdentifier=("analog-output", 3), objectName="ao3", presentValue=4.0)]
+            app = peer(server, *objs)
+            try:
+                m.hello(config, [{"tag": "bi", "kind": "binary", "value": False}, {"tag": "a", "kind": "analog", "value": 0.0},
+                                 {"tag": "g", "kind": "analog", "value": 0.0}])
+                await m.expect("ready")
+                await m.expect("write", tag="bi", value=True)      # binary-output 0, not binary-input 0
+                await m.expect("write", tag="a", value=1.5)        # analog-input 0
+                await m.expect("write", tag="g", value=2.5)        # analog-output 1: g was last declared an output
+                await m.expect("write", tag="g", value=4.0)
+            finally:
+                app.close()
+        run(go())
+    finally:
+        m.close()
+
+
+def test_client_requests_carry_stocks_header():
+    """A confirmed request from the client is `00 05` after the BVLC and NPDU, as bacnet-stack sends it: no segmented response
+    accepted, max segments unspecified, max APDU 1476."""
+    import socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("127.0.0.1", 0))
+    sock.settimeout(15)
+    m = Module(next(PORTS))
+    try:
+        m.hello(client_config(sock.getsockname()[1]), [{"tag": "a", "kind": "analog", "value": 0.0},
+                                                        {"tag": "b", "kind": "binary", "value": False}])
+        d, _ = sock.recvfrom(1500)
+        assert d[:2] == b"\x81\x0a" and d[4] == 1 and d[5] & 0xa8 == 0, d.hex()   # BVLC unicast; NPDU with no DNET/SNET
+        assert d[6:8] == b"\x00\x05", d.hex()
+    finally:
+        m.close()
+        sock.close()

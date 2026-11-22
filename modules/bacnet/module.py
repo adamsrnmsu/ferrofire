@@ -458,6 +458,18 @@ def polled(v, binary):
     raise ValueError(repr(v))
 
 
+def stock_type(kind, last):
+    """The object type stock reads and writes for a point of `kind` whose tag was declared last as `last`
+    (sceptre-bennu ClientConnection.cpp:153 and :168 in poll(), :57 and :90 in writeBinary/writeAnalog: `mRegisterType ==
+    eValueReadOnly ? INPUT : OUTPUT`, with the descriptor looked up by tag in mRegisters, which DataHandler.cpp:118-158 fills in
+    the order BI, BO, AI, AO, the last declaration of a tag winning). Binary points are eStatusReadOnly/ReadWrite, never
+    eValueReadOnly, so every binary point is a binary-output; an analog point is an analog-input only while its tag was last
+    declared as one (the sample's AI 1 shares bus-1.gen_mw with AO 3, so stock reads analog-output 1)."""
+    if kind.startswith("binary"):
+        return "binary-output"
+    return "analog-input" if last == "analog-input" else "analog-output"
+
+
 class Client:
     """Stock binds each connection to the device at its endpoint from an address_cache entry it writes itself, so no Who-Is goes
     out; here the endpoint is the peer's address. Every scan-rate seconds: ReadProperty present-value of each point, binaries then
@@ -473,16 +485,22 @@ class Client:
             pts = points(c)
             peer = Address(udp(endpoint))         # stock checks the endpoint when the connection starts, after its points
             binary, analog = {}, {}               # stock's maps: instance -> point, an input and an output on one instance share it
+            last = {tag: kind for kind, _, tag in pts}    # mRegisters: the last declaration of a tag, whatever its kind
             for kind, inst, tag in pts:
-                (binary if kind.startswith("binary") else analog)[inst] = (f"{kind},{inst}", tag, kind.startswith("binary"))
+                obj = f"{stock_type(kind, last[tag])},{inst}"
+                (binary if kind.startswith("binary") else analog)[inst] = (obj, tag, kind.startswith("binary"))
                 if kind.endswith("output"):
-                    self.outs[tag] = (peer, f"{kind},{inst}", kind.startswith("binary"))
+                    self.outs[tag] = (peer, obj, kind.startswith("binary"))
                 self.uses.append(use(kind, tag, not kind.endswith("output")))
             self.polls.append((peer, [binary[i] for i in sorted(binary)] + [analog[i] for i in sorted(analog)]))
         self.args = app_args(len(self.polls))     # stock sets its own instance per connection, 1, 2, ...: the last one stays
 
     async def start(self):
         self.app = Application.from_args(self.args)
+        # confirmed requests as stock's bacnet-stack sends them: `00 05`, no segmented response accepted, max segments
+        # unspecified, max APDU 1476 (bacpypes3 reads these off the device object for every request)
+        dev = self.app.device_object
+        dev.segmentationSupported, dev.maxApduLengthAccepted, dev.maxSegmentsAccepted = "no-segmentation", 1476, 0
         self.tasks = [asyncio.create_task(self.poll(peer, pts)) for peer, pts in self.polls]
         log(f"BACnet client up: {len(self.polls)} connection(s), scan-rate {self.scan} s, {self.args.address}")
 

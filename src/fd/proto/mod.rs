@@ -154,7 +154,7 @@ pub fn start_module(
     // a compiled module wins; then an installed module whose manifest serves the tag
     #[cfg(feature = "external")]
     if let Some((dir, cmd)) = external::manifest::lookup(tag) {
-        let m = external::External::from_element(node, &cmd, &dir, opts)?;
+        let m = external::External::from_element(node, &cmd, &dir, tags, opts)?;
         return Ok(Some(Box::new(move |store, stop| {
             Box::pin(m.run(store, stop))
         })));

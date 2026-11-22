@@ -47,7 +47,14 @@ At load, a `<comms>` child that no compiled module claims is looked up in the ma
 read once, in name order; the first module that serves a tag keeps it, and a bad manifest is a warning naming the file. A hit runs
 as if it were an `<external-module>` named after the tag (`module bacnet-server: ...` in the log), with the whole element as
 `hello.config` and the stdio transport. Its command runs in the module's directory, so a relative `./run.sh` or `python3 module.py`
-resolves against that directory, not the device's. A compiled module wins over a manifest for the same tag. With neither, the load
+resolves against that directory, not the device's. A compiled module wins over a manifest for the same tag.
+
+The device's store is laid out at load, before any module says `ready`, so a module cannot bring tags of its own. A manifest-served
+element whose name ends in `-client` therefore declares its points' tags at load, as the compiled clients do: the `<tag>` of every
+`<binary-input>`, `<binary-output>` (binary) and `<analog-input>`, `<analog-output>` (analog) under it, stock's client point names. A
+tag declared already (in `<tags>`, or by an earlier point) is a warning and the first declaration wins; under `--strict` it is an
+error. Any other element declares nothing: its tags must be in `<tags>`, and a module whose client points are named otherwise needs
+a `<tags>` section too. With neither, the load
 fails with `<bacnet-server> needs the proto-bacnet feature or an installed module`.
 
 ## ffmod/1
@@ -144,14 +151,12 @@ The module binds the address of `BACNET_IFACE` (default `eth0`) at `BACNET_IP_PO
 
     make conformance PROTO=bacnet              # the stock device: probe, nmap, tshark, Zeek
     DUT=rust make conformance PROTO=bacnet     # the same against ferrofire + the module, and its transcript against stock's
+    DUT=rust make conformance PROTO=bacnet-client      # our client against the stock server
     SERVER=rust make conformance PROTO=bacnet-client   # the stock client against our server
-    DUT=rust CFG=conformance/bacnet-client/client-tags.xml make conformance PROTO=bacnet-client   # our client, tags declared
 
-**The client is not drop-in yet.** A compiled client creates its tags from its points at load; a manifest-served element is opaque
-to the device, so bennu's sample `<bacnet-client>`, which has no `<tags>`, loads but every tag the module names in `ready` is
-unknown and skipped, and its command interface has no tags. Until that is fixed, declare the client's tags as `<internal-tag>`s
-(as `conformance/bacnet-client/client-tags.xml` does). See [conformance/README.md](../conformance/README.md#bacnetip) for what the
-runs compare and the divergences.
+Both run bennu's sample `<bacnet-client>` unchanged. Our client's scan and requests are stock's byte for byte; what differs is the
+device's write semantics (a `WRITE=` is answered at once and goes down with the next scan cycle). See
+[conformance/README.md](../conformance/README.md#bacnetip) for what the runs compare and the divergences.
 
 ## Write your own
 

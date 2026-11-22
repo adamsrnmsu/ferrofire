@@ -238,7 +238,7 @@ UART hardware, cabling and RS-485 direction control are not covered.
     DUT=rust make conformance PROTO=bacnet            # ours, and its transcript against stock's (the differential)
     make conformance PROTO=bacnet-client              # the stock client against the stock server: the golden itself
     SERVER=rust make conformance PROTO=bacnet-client  # the stock client against our server
-    DUT=rust make conformance PROTO=bacnet-client     # our client against the stock server (fails: see below)
+    DUT=rust make conformance PROTO=bacnet-client     # our client against the stock server
     conformance/stock/run-stock.sh bacnet-feed        # re-record stock/bacnet-server-feed.golden (also: bacnet-client, and bacnet for
                                                       # the provider-less stock/bacnet-server.golden of Task 0b)
 
@@ -279,18 +279,21 @@ against the stock server (`stock/client-bacnet.golden`, two runs alike).
 
 - **The stock client against our server** (`SERVER=rust`): the transcript equals the golden (PASS): same answers to every scan
   request, WriteProperty and error, through a stop and restart.
-- **Our client** (`DUT=rust`): FAIL, open. On bennu's sample the device knows none of the client's tags: compiled clients create
-  them from their points at load, a manifest-served element is opaque to the device, and the plan did not say where its tags come
-  from. Every `uses` entry is skipped (`tag brkr: unknown tag, skipped`), polled values are rejected, and the command interface
-  answers `Client does not have any tag mappings`. With the tags declared (`CFG=conformance/bacnet-client/client-tags.xml`, an
-  edited copy) it polls and writes, and still differs from the stock client:
+- **Our client** (`DUT=rust`, the sample unchanged): PASS, the transcript differs from the golden by exactly
+  `bacnet-client/rust-client.diff` (the same in two runs). The device declares the client's point tags at load (as compiled
+  clients do; `docs/modules.md`), and the module reads the object types stock's type rule names (every binary point as a
+  binary-output, AI 1 as AO 1, `ClientConnection.cpp`) with stock's `00 05` request header, so every scan request and answer is the
+  stock client's. What the diff lists is the device's write semantics, open in ww-4s8:
 
 | Area | Stock client | Ours | Whose |
 |---|---|---|---|
-| Object type of each scan read | BO 0, BO 1, BO 2, BO 3, AI 0, AO 1, AO 2, AO 3 (its type rule, `ClientConnection.cpp`: BI 0 and 1 read as BO, AI 1 as AO) | BI 0, BI 1, BO 2, BO 3, AI 0, AI 1, AO 2, AO 3, as configured (so `brkr` reads true where stock reads false) | module, open |
-| Confirmed-request header | `00 05`: no segmentation, max APDU 1476 | `02 44`: segmented response accepted, 16 segments, max APDU 1024 (bacpypes3's defaults) | module, open |
-| `WRITE=` on the command interface | sends the WriteProperty and answers with its outcome (`ACK=Wrote tag ...`, or `ERR=...` after about 5 to 10 s with the server away) | answers `ACK=Wrote tag ...` at once; the WriteProperty goes out with the next `values`, and one not answered within 3 s is reported failed (`sent` `ok:false`) and sent again when due. With the server away: `ACK`, then the write lands twice after the restart (bacpypes3's own retry, and the device's) | device (client echo rule over ffmod/1), module (3 s) |
-| `WRITE=` to an input tag (`brkr`, `load-power`) | sent as a WriteProperty to the object its type rule names (BO 0 is ACKed; AI 0 is `write-access-denied`, `ERR`) | `ERR=Failed writing tag ...` with nothing on the wire | device |
+| `WRITE=` on the command interface | sends the WriteProperty inside the request and answers with its outcome (`ACK=Wrote tag ...`, or `ERR=...` after about 5 to 10 s with the server away) | answers `ACK=Wrote tag ...` at once; the WriteProperty goes out with the next scan cycle (`peer.sh` waits 3 s after each write so both fall under their command), and one not answered within 3 s is reported failed and sent again when due. With the server away: `ACK`, and the write lands after the restart (bacpypes3's own retry, then the device's) | device (client echo rule over ffmod/1) |
+| `WRITE=` of the value the tag already holds (`load-breaker-toggle:true` after a poll read true) | a WriteProperty all the same | nothing on the wire (the echo rule sends changes only) | device |
+| `WRITE=` to an input tag (`brkr`, `load-power`) | sent as a WriteProperty to the object its type rule names (BO 0 is ACKed and then reads active in the scans; AI 0 is `write-access-denied`, `ERR`) | `ERR=Failed writing tag ...` with nothing on the wire | device |
+
+The echo rule also skips the first poll after a write it sent (a device may answer and show the old value a moment longer), so a
+read right after a write can show the written value where stock's next poll already shows the server's; `peer.sh` reads after two
+scans, so the transcript does not show it.
 
 ## IEC 61850 (no oracle)
 Bennu never loads an IEC 61850 server, so `conformance/iec61850/` has only the acceptance half, and `proto.env` sets `DUT_DEFAULT=rust`:

@@ -12,7 +12,9 @@ mod transport;
 
 use super::{backoff, device_name, name_in, Module, BACKOFF_FIRST};
 use crate::fd::config::{child, number, require, text, ConfigError, Opts, Tags};
+use crate::fd::proto::client::point_tag;
 use crate::fd::store::Store;
+use crate::model::Kind;
 use msg::MAX_LINE;
 use roxmltree::Node;
 use session::{session, End, Spec};
@@ -82,6 +84,27 @@ impl Module for External {
     }
 }
 
+/// Stock's client point elements and the kind of tag each one names.
+const CLIENT_POINTS: [(&str, Kind); 4] = [
+    ("binary-input", Kind::Binary),
+    ("binary-output", Kind::Binary),
+    ("analog-input", Kind::Analog),
+    ("analog-output", Kind::Analog),
+];
+
+/// The tags of a manifest-served client: the `<tag>` of every point element under it, declared through `client::point_tag` (a
+/// tag declared already is a warning, the first declaration wins). The store's layout is fixed at load, before the module's
+/// `ready`, so its tags cannot come from `uses`. A module whose points are named otherwise needs a `<tags>` section.
+fn client_tags(node: Node, tags: &mut Tags, opts: &Opts) -> Result<(), ConfigError> {
+    for p in node.descendants() {
+        let kind = CLIENT_POINTS.iter().find(|(n, _)| p.has_tag_name(*n));
+        if let (Some((_, kind)), Some(tag)) = (kind, text(p, "tag")) {
+            point_tag(tags, &tag, *kind, opts)?;
+        }
+    }
+    Ok(())
+}
+
 /// The module's `<command>`: required for stdio, optional for the others (a socket module may be started elsewhere).
 fn command(node: Node, transport: &Transport, name: &str) -> Result<String, ConfigError> {
     if *transport != Transport::Stdio {
@@ -114,16 +137,21 @@ impl External {
     }
 
     /// An `External` for `node`, a stock element the manifest of the module in `dir` serves: `node` itself is the module's config.
+    /// A `*-client` element declares its points' tags, as the compiled clients do (`client_tags`).
     pub fn from_element(
         node: Node,
         cmd: &str,
         dir: &Path,
+        tags: &mut Tags,
         opts: &Opts,
     ) -> Result<External, ConfigError> {
         let config = &node.document().input_text()[node.range()];
         let name = node.tag_name().name();
         if cmd.trim().is_empty() {
             return Err(ConfigError(format!("module {name}: <command> is empty")));
+        }
+        if name.ends_with("-client") {
+            client_tags(node, tags, opts)?;
         }
         let mut m = External::new(node, name.into(), cmd, config, opts)?;
         m.cwd = Some(dir.into());
@@ -343,6 +371,7 @@ mod tests {
             node,
             "python3 module.py",
             Path::new("/opt/m"),
+            &mut Tags::default(),
             &Opts {
                 strict: true,
                 ..Opts::default()
@@ -357,5 +386,49 @@ mod tests {
         assert_eq!(m.spec.cmdif.as_deref(), Some("tcp://127.0.0.1:9"));
         assert!(m.spec.strict);
         assert_eq!(m.cwd.as_deref(), Some(Path::new("/opt/m")));
+    }
+
+    /// `from_element` on the `comms` element `tag` of `xml`, with fresh tags.
+    fn element(xml: &str, tag: &str, strict: bool) -> Result<Tags, ConfigError> {
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let node = doc.descendants().find(|n| n.has_tag_name(tag)).unwrap();
+        let (mut tags, opts) = (
+            Tags::default(),
+            Opts {
+                strict,
+                ..Opts::default()
+            },
+        );
+        External::from_element(node, "m", Path::new("/m"), &mut tags, &opts).map(|_| tags)
+    }
+
+    #[test]
+    fn a_stock_client_declares_its_points_tags() {
+        let xml = include_str!("../../../../conformance/stock/client-bacnet.xml");
+        let tags = element(xml, "bacnet-client", false).unwrap();
+        for (t, k) in [
+            ("brkr", Kind::Binary),
+            ("generator-1_bus-1.active", Kind::Binary),
+            ("load-breaker-toggle", Kind::Binary),
+            ("load-power", Kind::Analog),
+            ("bus-1.gen_mw", Kind::Analog),
+            ("load-mw-setpoint", Kind::Analog),
+        ] {
+            assert_eq!(tags.kind(t), Some(k), "{t}");
+        }
+        // generator-1_bus-1.active (BI 1, BO 3) and bus-1.gen_mw (AI 1, AO 3) are declared twice: a warning, an error under --strict
+        let e = element(xml, "bacnet-client", true).err().unwrap().0;
+        assert!(
+            e.contains("`generator-1_bus-1.active` is already declared"),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn a_server_element_declares_nothing() {
+        let xml = "<field-device><name>d</name><comms><bacnet-server><endpoint>udp://0.0.0.0:47808</endpoint>\
+                   <binary-input><address>0</address><tag>x</tag></binary-input></bacnet-server></comms></field-device>";
+        let tags = element(xml, "bacnet-server", true).unwrap();
+        assert_eq!(tags.kind("x"), None);
     }
 }
