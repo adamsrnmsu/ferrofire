@@ -43,8 +43,8 @@ pub struct Spec {
 pub enum End {
     /// The device is stopping.
     Stopped,
-    /// End of stream, or no `ready` in time: restart.
-    Broken,
+    /// End of stream, or no `ready` in time: restart. `was_ready`: the module's `ready` had been taken.
+    Broken { was_ready: bool },
     /// The module sent `error`, or `--strict` refused its tags: no restart.
     Refused(String),
 }
@@ -228,7 +228,7 @@ impl<R: AsyncBufRead + Unpin> Session<'_, R> {
         let gone = self.answers.clone();
         let ready = tokio::select! {
             _ = stop.cancelled() => return End::Stopped,
-            _ = gone.closed() => return End::Broken,
+            _ = gone.closed() => return End::Broken { was_ready: false },
             r = tokio::time::timeout(READY_TIMEOUT, self.ready()) => r,
         };
         let (role, uses) = match ready {
@@ -252,7 +252,7 @@ impl<R: AsyncBufRead + Unpin> Session<'_, R> {
         loop {
             let end = tokio::select! {
                 _ = stop.cancelled() => Some(End::Stopped),
-                _ = gone.closed() => Some(End::Broken),
+                _ = gone.closed() => Some(End::Broken { was_ready: true }),
                 _ = tick.tick() => {
                     self.on_tick();
                     None
@@ -270,7 +270,7 @@ impl<R: AsyncBufRead + Unpin> Session<'_, R> {
             "module {}: no ready within {READY_TIMEOUT:?}",
             self.spec.name
         );
-        End::Broken
+        End::Broken { was_ready: false }
     }
 
     /// Wait for `ready`; `log` and `error` are taken on the way.
@@ -283,7 +283,7 @@ impl<R: AsyncBufRead + Unpin> Session<'_, R> {
                         return Err(end);
                     }
                 }
-                None => return Err(End::Broken),
+                None => return Err(End::Broken { was_ready: false }),
             }
         }
     }
@@ -429,7 +429,7 @@ impl<R: AsyncBufRead + Unpin> Session<'_, R> {
 
     fn on_msg(&mut self, m: Option<FromModule>) -> Option<End> {
         match m {
-            None => Some(End::Broken),
+            None => Some(End::Broken { was_ready: true }),
             Some(FromModule::Write { id, tag, value }) => {
                 self.on_write(id, &tag, value);
                 None
@@ -634,7 +634,7 @@ mod tests {
         assert_eq!(m.write(2, "zz", json!(1.0)).await, reject(2, "unknown tag"));
         assert_eq!(m.write(3, "a", json!(1.5)).await, reject(3, "wrong kind"));
         drop(m.w);
-        assert_eq!(m.end.await.unwrap(), End::Broken);
+        assert_eq!(m.end.await.unwrap(), End::Broken { was_ready: true });
     }
 
     #[tokio::test]
@@ -657,7 +657,7 @@ mod tests {
         let mut m = start(spec(false), store());
         let t0 = tokio::time::Instant::now();
         assert_eq!(m.recv().await["t"], "hello");
-        assert_eq!(m.end.await.unwrap(), End::Broken);
+        assert_eq!(m.end.await.unwrap(), End::Broken { was_ready: false });
         assert!(t0.elapsed() >= READY_TIMEOUT);
     }
 
@@ -674,7 +674,7 @@ mod tests {
         let mut m = start(spec(false), store());
         m.recv().await;
         drop(m.w);
-        assert_eq!(m.end.await.unwrap(), End::Broken);
+        assert_eq!(m.end.await.unwrap(), End::Broken { was_ready: false });
     }
 
     #[tokio::test]
@@ -761,7 +761,7 @@ mod tests {
         m.ready("server", "").await;
         drop(m.lines);
         s.publish("b", 3.0, 1);
-        assert_eq!(m.end.await.unwrap(), End::Broken);
+        assert_eq!(m.end.await.unwrap(), End::Broken { was_ready: true });
     }
 
     /// Review Focus 1: a line that does not decode, or is over `MAX_LINE`, is dropped and the session goes on.

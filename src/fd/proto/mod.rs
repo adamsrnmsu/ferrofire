@@ -114,6 +114,12 @@ pub static REGISTRY: &[(&str, Start)] = &[
     ("external-module", start::<external::External>),
 ];
 
+/// Whether a started `<comms>` tag runs a compiled module: one in `REGISTRY` other than `<external-module>`. Anything else came
+/// from an external module (`<external-module>`, or a stock tag only a module manifest serves), whose stop the device waits for.
+pub fn compiled(tag: &str) -> bool {
+    tag != "external-module" && REGISTRY.iter().any(|(t, _)| *t == tag)
+}
+
 /// Every `<comms>` tag a build can have, and the Cargo feature that provides it.
 pub const KNOWN: &[(&str, &str)] = &[
     ("modbus-server", "proto-modbus"),
@@ -228,6 +234,15 @@ mod tests {
         assert_eq!(backoff(s(16), false), s(30));
         assert_eq!(backoff(s(30), false), s(30));
         assert_eq!(backoff(s(30), true), s(1));
+    }
+
+    #[test]
+    fn only_a_registry_module_other_than_external_module_is_compiled() {
+        assert!(!compiled("external-module"));
+        assert!(!compiled("bacnet-server")); // only a module manifest can serve it
+        assert!(!compiled("nonsense"));
+        #[cfg(feature = "proto-modbus")]
+        assert!(compiled("modbus-server"));
     }
 
     #[test]

@@ -13,7 +13,7 @@ use crate::fd::store::Store;
 use crate::hint::show;
 use msg::MAX_LINE;
 use roxmltree::Node;
-use session::{session, End, Spec, READY_TIMEOUT};
+use session::{session, End, Spec};
 use std::process::Stdio;
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
@@ -64,14 +64,12 @@ impl Module for External {
     async fn run(self, store: Store, stop: CancellationToken) {
         let mut pause = BACKOFF_FIRST;
         loop {
-            let began = Instant::now();
             match self.once(&store, &stop).await {
                 End::Stopped => return,
                 End::Refused(msg) => return self.refused(msg, &stop),
-                End::Broken => {}
-            }
-            if was_up(began.elapsed()) {
-                pause = BACKOFF_FIRST;
+                // a module that came up starts over from the first pause
+                End::Broken { was_ready: true } => pause = BACKOFF_FIRST,
+                End::Broken { was_ready: false } => {}
             }
             tokio::select! {
                 _ = stop.cancelled() => return,
@@ -129,7 +127,7 @@ impl External {
             Ok(child) => self.session(child, store, stop).await,
             Err(e) => {
                 tracing::error!("module {name}: cannot start: {e}");
-                End::Broken
+                End::Broken { was_ready: false }
             }
         }
     }
@@ -160,14 +158,6 @@ impl External {
             fatal(msg, stop);
         }
     }
-}
-
-/// Whether a run that ended after `ran` (spawn, session and reap) had come up.
-// ponytail: `End` does not say whether `ready` came. A run without it lasts READY_TIMEOUT plus the session's stop grace (1 s) plus
-// the reap (up to 5 s), so only a run longer than twice READY_TIMEOUT surely had it; a module that crashes sooner after `ready`
-// backs off as if it never came up. Exact: `End::Broken { was_ready }` in session.rs.
-fn was_up(ran: Duration) -> bool {
-    ran > 2 * READY_TIMEOUT
 }
 
 /// Log the module's stderr, a line (at most `MAX_LINE` bytes: a longer one is logged in pieces) at a time at `info`, until it closes.
@@ -255,14 +245,6 @@ mod tests {
         );
         let tcp = "<external-module><name>m</name><command>x</command><transport>tcp://h:1</transport></external-module>";
         assert!(err(tcp).contains("<transport> `tcp://h:1`"));
-    }
-
-    #[test]
-    fn only_a_run_longer_than_a_ready_timeout_and_its_stop_counts_as_up() {
-        // no `ready`: the timeout, the session's stop grace and a module that has to be killed
-        assert!(!was_up(READY_TIMEOUT + Duration::from_secs(6)));
-        assert!(was_up(2 * READY_TIMEOUT + Duration::from_millis(1)));
-        assert!(!was_up(Duration::ZERO));
     }
 
     #[test]

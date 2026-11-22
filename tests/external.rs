@@ -134,6 +134,18 @@ fn alive_in_group(pgid: i32) -> Vec<String> {
         .collect()
 }
 
+/// What is still alive in process group `pgid` after up to 1 s (a killed grandchild takes a moment to go).
+fn left_in_group(pgid: i32) -> Vec<String> {
+    let end = Instant::now() + Duration::from_secs(1);
+    loop {
+        let left = alive_in_group(pgid);
+        if left.is_empty() || Instant::now() >= end {
+            return left;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 /// Stop `dev` and return how long its stop took.
 fn stop_time(mut dev: common::clients::Device) -> Duration {
     let t = Instant::now();
@@ -154,7 +166,7 @@ fn stdio_module_round_trip() {
     let pid = pid_in(&dir.path("pid"));
     // the module exits once its stdin closes: no signal needed
     assert!(stop_time(dev) < Duration::from_secs(2));
-    assert_eq!(alive_in_group(pid), Vec::<String>::new());
+    assert_eq!(left_in_group(pid), Vec::<String>::new());
     stop.cancel();
 }
 
@@ -189,6 +201,24 @@ fn a_crashing_module_backs_off() {
     stop.cancel();
 }
 
+/// A module that sent `ready` and then exited is restarted after the first pause each time, not a doubled one: in 4.5 s that is
+/// 5 starts (0, 1, 2, 3, 4 s); a pause that doubled would give 3 (0, 1, 3 s).
+#[test]
+fn a_module_that_was_ready_restarts_after_the_first_pause() {
+    assert_eq!(ferrofire::fd::proto::BACKOFF_FIRST, Duration::from_secs(1));
+    let dir = Dir::new("ready-exit");
+    let body = "echo start >> \"$1\"\nread hello\necho '{\"t\":\"ready\",\"role\":\"server\",\"uses\":[]}'\n";
+    let cmd = format!("{} {}", dir.script("m.sh", body), dir.path("starts"));
+    let dev = device(&xml(free_tcp(), 20, "tick", &module("brief", &cmd)));
+    std::thread::sleep(Duration::from_millis(4500));
+    let starts = std::fs::read_to_string(dir.path("starts"))
+        .unwrap_or_default()
+        .lines()
+        .count();
+    drop(dev);
+    assert!(starts >= 4, "{starts} starts in 4.5 s");
+}
+
 /// Review Focus 4: a module that ignores SIGTERM (its whole process group) is killed at 5 s; stop waits no longer.
 #[test]
 fn stop_escalates_to_sigkill() {
@@ -204,7 +234,7 @@ fn stop_escalates_to_sigkill() {
         took >= Duration::from_secs(4),
         "SIGTERM should have been ignored: {took:?}"
     );
-    assert_eq!(alive_in_group(pid), Vec::<String>::new());
+    assert_eq!(left_in_group(pid), Vec::<String>::new());
 }
 
 /// Review Focus 2: a module that never reads its stdin, while a long tag changes every cycle (well past the pipe's buffer), does
@@ -233,37 +263,68 @@ fn a_module_that_never_reads_does_not_block_stop() {
     }
     let took = stop_time(dev);
     assert!(took < Duration::from_secs(6), "stop took {took:?}");
-    assert_eq!(alive_in_group(pid), Vec::<String>::new());
+    assert_eq!(left_in_group(pid), Vec::<String>::new());
+}
+
+/// A running `ferrofire field-device`. Dropped while it still runs (a failed assertion), it gets SIGTERM, then SIGKILL after 10 s.
+struct Fd(Child);
+
+impl Drop for Fd {
+    fn drop(&mut self) {
+        if matches!(self.0.try_wait(), Ok(None)) && poll_exit(self, 10).is_none() {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
 }
 
 /// `ferrofire field-device --file cfg [--strict]`, its stderr piped.
-fn binary(cfg: &str, strict: bool) -> Child {
+fn binary(cfg: &str, strict: bool) -> Fd {
     let mut c = Command::new(BIN);
     c.args(["field-device", "--file", cfg]);
     if strict {
         c.arg("--strict");
     }
-    c.stderr(Stdio::piped()).spawn().unwrap()
+    Fd(c.stderr(Stdio::piped()).spawn().unwrap())
 }
 
-/// SIGTERM the device (never SIGKILL: no coverage data, and its modules would be left over); whether it exited 0, and its stderr.
-fn sigterm(c: &mut Child) -> (bool, String) {
-    ferrofire::sys::kill(c.id() as i32, libc::SIGTERM);
-    exited(c, 10)
+/// SIGTERM the device (never SIGKILL: no coverage data, and its modules would be left over), then wait up to `secs`.
+fn poll_exit(fd: &mut Fd, secs: u64) -> Option<std::process::ExitStatus> {
+    ferrofire::sys::kill(fd.0.id() as i32, libc::SIGTERM);
+    wait_exit(fd, secs)
 }
 
-/// Wait up to `secs` for the device to exit: whether it exited 0, and its stderr.
-fn exited(c: &mut Child, secs: u64) -> (bool, String) {
+fn wait_exit(fd: &mut Fd, secs: u64) -> Option<std::process::ExitStatus> {
     let end = Instant::now() + Duration::from_secs(secs);
-    let status = loop {
-        if let Some(s) = c.try_wait().unwrap() {
-            break s;
+    while Instant::now() < end {
+        if let Some(s) = fd.0.try_wait().unwrap() {
+            return Some(s);
         }
-        assert!(Instant::now() < end, "device did not exit within {secs} s");
         std::thread::sleep(Duration::from_millis(20));
-    };
+    }
+    None
+}
+
+/// SIGTERM the device: whether it exited 0, and its stderr.
+fn sigterm(fd: &mut Fd) -> (bool, String) {
+    let status = poll_exit(fd, 10);
+    finished(fd, status, 10)
+}
+
+/// Wait up to `secs` for the device to exit by itself: whether it exited 0, and its stderr.
+fn exited(fd: &mut Fd, secs: u64) -> (bool, String) {
+    let status = wait_exit(fd, secs);
+    finished(fd, status, secs)
+}
+
+fn finished(fd: &mut Fd, status: Option<std::process::ExitStatus>, secs: u64) -> (bool, String) {
+    let status = status.unwrap_or_else(|| panic!("device did not exit within {secs} s"));
     let mut err = String::new();
-    c.stderr.take().unwrap().read_to_string(&mut err).unwrap();
+    fd.0.stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut err)
+        .unwrap();
     (status.success(), err)
 }
 
@@ -282,7 +343,7 @@ fn strict_error_exits_nonzero() {
     let mut dev = binary(&cfg, false);
     std::thread::sleep(Duration::from_millis(1500));
     assert!(
-        dev.try_wait().unwrap().is_none(),
+        dev.0.try_wait().unwrap().is_none(),
         "device exited without --strict"
     );
     let (ok, log) = sigterm(&mut dev);

@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 
 /// How long a provider request waits for its reply (SPEC 3.2).
 const PROVIDER_TIMEOUT_MS: i32 = 5000;
-/// How long the device's stop waits for its modules.
+/// How long the device's stop waits for its external modules.
 const MODULES_STOP: std::time::Duration = std::time::Duration::from_millis(5500);
 
 #[derive(clap::Args)]
@@ -105,10 +105,14 @@ pub fn run(cfg: Config, stop: CancellationToken, signals: bool) -> Result<(), St
         .iter()
         .map(|o| crate::transport::requester(&o.endpoint, PROVIDER_TIMEOUT_MS).map(Output::new))
         .collect::<Result<Vec<_>, _>>()?;
-    let mut modules = vec![];
+    // the external modules' tasks, waited for on stop; a compiled one is dropped at the runtime's shutdown as it always was
+    let mut external = vec![];
     for (tag, start) in cfg.modules {
         tracing::info!("{tag}: starting");
-        modules.push(rt.spawn(start(cfg.store.clone(), stop.clone())));
+        let task = rt.spawn(start(cfg.store.clone(), stop.clone()));
+        if !proto::compiled(&tag) {
+            external.push((tag, task));
+        }
     }
     let (store, logic, cycle_ms) = (cfg.store.clone(), cfg.logic, cfg.cycle_ms);
     let stop2 = stop.clone();
@@ -117,7 +121,7 @@ pub fn run(cfg: Config, stop: CancellationToken, signals: bool) -> Result<(), St
     }));
     rt.block_on(wait(&stop, signals));
     stop.cancel();
-    rt.block_on(stopped(modules));
+    rt.block_on(stopped(external));
     threads.into_iter().for_each(|t| {
         let _ = t.join();
     });
@@ -129,13 +133,13 @@ pub fn run(cfg: Config, stop: CancellationToken, signals: bool) -> Result<(), St
     Ok(())
 }
 
-/// Give the modules until `MODULES_STOP` after the stop to end (an external module may take 5 s to be stopped); the runtime's
-/// shutdown drops what is left.
-async fn stopped(modules: Vec<tokio::task::JoinHandle<()>>) {
+/// Give the external modules until `MODULES_STOP` after the stop to end (stopping one may take 5 s); the runtime's shutdown drops
+/// what is left.
+async fn stopped(external: Vec<(String, tokio::task::JoinHandle<()>)>) {
     let end = tokio::time::Instant::now() + MODULES_STOP;
-    for m in modules {
-        if tokio::time::timeout_at(end, m).await.is_err() {
-            tracing::warn!("a module did not end within {MODULES_STOP:?} of the stop");
+    for (tag, task) in external {
+        if tokio::time::timeout_at(end, task).await.is_err() {
+            tracing::warn!("<{tag}> did not end within {MODULES_STOP:?} of the stop");
         }
     }
 }
