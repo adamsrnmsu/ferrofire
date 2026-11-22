@@ -15,8 +15,6 @@ pub enum Reject {
     Garbage,
     /// Another endpoint's group.
     WrongGroup,
-    /// The body does not end in a comma (before an optional NUL): cut short on the way.
-    Truncated,
     /// A duplicate or an older datagram than one already seen.
     Stale,
 }
@@ -135,19 +133,17 @@ impl Receiver {
         }
     }
 
-    /// The body text of a datagram for our group: UTF-8, every point complete. The NUL is optional: pybennu sends none (ww-y87), and
-    /// a cut is told by the last point lacking its comma.
+    /// The body text of a datagram for our group, as UTF-8. The NUL is optional: pybennu sends none (ww-y87). The trailing comma is
+    /// optional too, as for stock's InputModule: pybennu adds one only when it chunks a message over its MTU, so its HELICS, OPAL-RT
+    /// and Siren providers end on a bare point (ww-9o1). UDP delivers a datagram whole, and every receiver's buffer holds the largest
+    /// one, so a missing comma is never a cut.
     fn body_of<'a>(&self, d: &'a [u8]) -> Result<&'a str, Reject> {
         let (group, body) = unframe(d).ok_or(Reject::Garbage)?;
         if group != self.group {
             return Err(Reject::WrongGroup);
         }
         let body = body.strip_suffix(&[0]).unwrap_or(body);
-        let body = std::str::from_utf8(body).map_err(|_| Reject::Garbage)?;
-        match body.is_empty() || body.ends_with(',') {
-            true => Ok(body),
-            false => Err(Reject::Truncated),
-        }
+        std::str::from_utf8(body).map_err(|_| Reject::Garbage)
     }
 
     /// Has this seq been seen (or is it too far behind)? If not, remember it.

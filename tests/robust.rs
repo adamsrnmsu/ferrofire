@@ -241,7 +241,7 @@ fn dgram(group: &str, body: &str) -> Vec<u8> {
 }
 
 #[test]
-fn the_receiver_ignores_garbage_truncated_unknown_duplicate_and_old_datagrams() {
+fn the_receiver_ignores_garbage_unknown_duplicate_and_old_datagrams() {
     let ep = "udp://239.0.0.1:40000";
     let g = group_for(ep);
     let mut r = Receiver::new(&g, ["a", "b"]);
@@ -269,9 +269,12 @@ fn the_receiver_ignores_garbage_truncated_unknown_duplicate_and_old_datagrams() 
     );
     assert_eq!(r.accept(b"\xff\xff"), Err(Reject::Garbage));
     assert_eq!(r.accept(b""), Err(Reject::Garbage));
-    let mut cut = dgram(&g, "a:123.5,_ff.seq:9,_ff.cyc:9,_ff.t:9999,");
-    cut.truncate(cut.len() - 2); // the NUL and the last comma
-    assert_eq!(r.accept(&cut), Err(Reject::Truncated));
+    // ww-9o1: no NUL and no last comma, as pybennu's HELICS provider sends it ("a:1,b:true" unchunked): every point counts
+    let bare = dgram(&g, "a:123.5,b:false,_ff.seq:9,_ff.cyc:9,_ff.t:9999,");
+    assert_eq!(
+        r.accept(&bare[..bare.len() - 2]).unwrap(),
+        vec![("a".to_string(), 123.5), ("b".to_string(), 0.0)]
+    );
     // bad values and half pairs are skipped, the good pairs of the same datagram survive
     let messy = dgram(&g, "a:zzz,b:,:3,,a,b:2,_ff.seq:10,_ff.cyc:9,_ff.t:9999,");
     assert_eq!(r.accept(&messy).unwrap(), vec![("b".to_string(), 2.0)]);
@@ -299,14 +302,12 @@ fn a_real_pybennu_datagram_without_a_nul_is_accepted() {
             ("gen-1.mw".to_string(), 12.5)
         ]
     );
-    // real truncation is still refused, NUL or not: cut mid-point
-    assert_eq!(r.accept(&d[..d.len() - 3]), Err(Reject::Truncated));
-    // half the datagram, a cut inside a value, a body with a trailing NUL and garbage after it, a lone NUL mid-body
-    assert_eq!(r.accept(&d[..d.len() / 2]), Err(Reject::Truncated));
-    assert_eq!(r.accept(&d[..d.len() - 1]), Err(Reject::Truncated));
+    // ww-9o1: the same datagram without its last comma (pybennu's unchunked HELICS/OPAL-RT/Siren publish) gives the same points
+    assert_eq!(r.accept(&d[..d.len() - 1]).unwrap().len(), 3);
+    // garbage after a NUL is a point with no `:`: skipped, the others count
     let mut junk = d.to_vec();
     junk.extend_from_slice(b"\0zz");
-    assert_eq!(r.accept(&junk), Err(Reject::Truncated));
+    assert_eq!(r.accept(&junk).unwrap().len(), 3);
     let mut mid = d.to_vec();
     mid.insert(d.len() - 6, 0);
     assert!(r.accept(&mid).map_or(true, |p| p.len() < 3));
