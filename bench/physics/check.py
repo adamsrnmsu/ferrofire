@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""check.py opendss|helics : drive one field device over Modbus against a bennu physics provider and judge the round trip (ww-82n).
+"""check.py opendss|helics|helics-opendss : drive one field device over Modbus against a bennu physics provider and judge the round trip (ww-82n).
 
 Prints one `state:` line per step (registers as read, so a ferrofire run and a stock run can be diffed) and `ok:`/`FAIL:` lines.
 Exit 1 on any FAIL. Runs inside ff-physics:22.04 (pymodbus 3.9 from pybennu), next to the device on 127.0.0.1:502.
@@ -66,10 +66,23 @@ def helics():
         check(di[0] == want, f"gen1.active follows the write only through the federate's logic ({str(want).lower()})")
 
 
+def helics_opendss():
+    # the same registers as opendss(), but the solve is in dss_federate.py and every value and the breaker command go through HELICS
+    ir0, _ = until(lambda ir, di: ir[0] > 0 and di[0], 3, 1, "closed")
+    check(ir0[0] > 0 and ir0[1] > 0, f"the federate's OpenDSS solve arrives through HELICS (amps reg {ir0[0]}, volts reg {ir0[1]})")
+    c.write_coil(0, False)
+    ir1, di1 = until(lambda ir, di: ir[0] == 0 and not di[0], 3, 1, "Breaker4 opened")
+    check(ir1[0] == 0 and ir1[1] == 0 and not di1[0], "opening Breaker4 over Modbus zeroes Line.1 in a solve that came back through HELICS")
+    check(ir1[2] != ir0[2], f"Breaker5's current moves ({ir0[2]} -> {ir1[2]}): a new power flow, not a copied value")
+    c.write_coil(0, True)
+    ir2, _ = until(lambda ir, di: near(ir, ir0) and di[0], 3, 1, "Breaker4 closed again")
+    check(near(ir2, ir0), f"closing Breaker4 restores the first solve ({ir0} -> {ir2})")
+
+
 if __name__ == "__main__":
     for _ in range(50):   # the device opens 502 a moment after it starts
         if c.connect():
             break
         time.sleep(0.2)
-    {"opendss": opendss, "helics": helics}[sys.argv[1]]()
+    {"opendss": opendss, "helics": helics, "helics-opendss": helics_opendss}[sys.argv[1]]()
     sys.exit(1 if fails else 0)

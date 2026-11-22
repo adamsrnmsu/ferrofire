@@ -1,6 +1,7 @@
 #!/bin/sh
-# bennu's own physics providers driving a field device (ww-82n): sh bench/physics/run.sh [opendss|helics|all] (default all).
+# bennu's own physics providers driving a field device (ww-82n): sh bench/physics/run.sh [opendss|helics|helics-opendss|all] (default all).
 #   opendss: pybennu-power-solver, solver OpenDSS, on bennu's sunspec feeder ($BENNU/src/gobennu/testing/sunspec/system.dss).
+#   helics-opendss: helics_broker + dss_federate.py (our own HELICS federate around OpenDSS, ww-dkf) + pybennu-power-solver, solver Helics.
 #   helics:  helics_broker + bennu's test power federate (pybennu-test-ep-server-helics) + pybennu-power-solver, solver Helics.
 # Each runs twice in a fresh ff-phys-* container, once with ferrofire's field device and once with stock bennu-field-device, and
 # check.py drives the device over Modbus. PASS when both DUTs pass every check and their `state:` lines match (compare.py: registers within 2 counts).
@@ -24,6 +25,10 @@ stack() {
       docker exec -d "$1" sh -c 'cd /physics && helics_broker -f 2 > /tmp/broker.out 2>&1'
       docker exec -d "$1" sh -c 'cd /physics && pybennu-test-ep-server-helics -d -c federate.json > /tmp/fed.out 2>&1'
       docker exec -d "$1" sh -c 'cd /physics && pybennu-power-solver -c solver.ini start > /tmp/prov.out 2>&1' ;;
+    helics-opendss)
+      docker exec -d "$1" sh -c 'cd /physics && helics_broker -f 2 > /tmp/broker.out 2>&1'
+      docker exec -d "$1" sh -c 'cd /physics && python3 dss_federate.py system.dss dss_federate.json > /tmp/fed.out 2>&1'
+      docker exec -d "$1" sh -c 'cd /physics && pybennu-power-solver -c solver.ini start > /tmp/prov.out 2>&1' ;;
   esac
 }
 
@@ -46,7 +51,7 @@ one() {   # scenario dut -> $OUT/<scenario>-<dut>.{txt,dut.out,prov.out,fed.out}
 }
 
 fail=0
-for s in $(if [ "${1:-all}" = all ]; then echo opendss helics; else echo "$1"; fi); do
+for s in $(if [ "${1:-all}" = all ]; then echo opendss helics helics-opendss; else echo "$1"; fi); do
   one "$s" rust || fail=1; one "$s" stock || fail=1
   if python3 "$here/compare.py" "$OUT/$s-rust.txt" "$OUT/$s-stock.txt"; then
     echo "ok:   $s: ferrofire and stock read the same registers at every step"
