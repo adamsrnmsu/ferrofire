@@ -36,6 +36,9 @@ pub struct Cli {
     /// Print the protocol modules this binary has and exit
     #[arg(long)]
     list_protocols: bool,
+    /// Where installed external modules live (default $FERROFIRE_MODULES, else /opt/ferrofire/modules)
+    #[arg(long)]
+    modules_dir: Option<std::path::PathBuf>,
 }
 
 /// Entry point of the subcommand; returns the process exit code.
@@ -45,6 +48,10 @@ pub fn main(cli: Cli) -> i32 {
         return 0;
     }
     crate::trace::init();
+    #[cfg(feature = "external")]
+    if let Some(d) = cli.modules_dir {
+        proto::external::manifest::set_dir(d);
+    }
     let file = cli.file.unwrap_or_default();
     let cfg = match load(
         &file,
@@ -265,6 +272,7 @@ mod tests {
             strict: false,
             compat_wrap: false,
             list_protocols: list,
+            modules_dir: None,
         };
         assert_eq!(main(cli(None, true)), 0);
         assert_eq!(main(cli(Some("/nonexistent/fd.xml"), false)), 1);

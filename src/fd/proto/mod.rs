@@ -151,9 +151,17 @@ pub fn start_module(
     if let Some((_, start)) = registry.iter().find(|(t, _)| *t == tag) {
         return start(node, tags, opts).map(Some);
     }
+    // a compiled module wins; then an installed module whose manifest serves the tag
+    #[cfg(feature = "external")]
+    if let Some((dir, cmd)) = external::manifest::lookup(tag) {
+        let m = external::External::from_element(node, &cmd, &dir, opts)?;
+        return Ok(Some(Box::new(move |store, stop| {
+            Box::pin(m.run(store, stop))
+        })));
+    }
     match KNOWN.iter().find(|(t, _)| *t == tag) {
         Some((_, feature)) => Err(ConfigError(format!(
-            "<{tag}> needs the `{feature}` feature, which this binary was built without"
+            "<{tag}> needs the `{feature}` feature or an installed module (see docs/modules.md); this binary was built without the feature"
         ))),
         None => {
             opts.warn(format!(
@@ -283,5 +291,18 @@ mod tests {
             e.0.contains("unknown <comms> element <whatever-server>"),
             "{e}"
         );
+    }
+
+    #[cfg(feature = "external")]
+    #[test]
+    fn registry_wins_over_a_manifest() {
+        external::manifest::tests::global();
+        assert!(external::manifest::lookup("fake-server").is_some());
+        // the manifest serves `fake-server` too; the compiled module is the one started, and it is not an external one
+        assert_eq!(
+            run("fake-server", fake::REGISTRY, &Opts::default()),
+            Ok(Some(()))
+        );
+        assert!(!compiled("iec60870-5-104-server"));
     }
 }

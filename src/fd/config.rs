@@ -506,6 +506,22 @@ mod tests {
         assert_eq!(s.get("lgate"), Some(Value::Analog(0.0)));
     }
 
+    #[cfg(feature = "external")]
+    #[test]
+    fn stock_104_element_starts_the_module() {
+        crate::fd::proto::external::manifest::tests::global();
+        let comms = |tag: &str| device(&format!("<comms><{tag}><port>2404</port></{tag}></comms>"));
+        let cfg = parse(&comms("iec60870-5-104-server")).unwrap();
+        assert_eq!(cfg.modules.len(), 1);
+        assert_eq!(cfg.modules[0].0, "iec60870-5-104-server");
+        // no manifest serves this one
+        let e = err(parse(&comms("bacnet-server")));
+        assert!(
+            e.contains("<bacnet-server> needs the `proto-bacnet` feature or an installed module (see docs/modules.md)"),
+            "{e}"
+        );
+    }
+
     #[test]
     fn real_stock_modbus_sample_needs_the_feature() {
         let e = err(parse(RTU1));

@@ -4,6 +4,7 @@
 //! speaks ffmod/1 over its stdin and stdout, logs its stderr lines, restarts it on the backoff when it exits or breaks the
 //! session, and stops it (`stop`, stdin closed, SIGTERM at 2 s, SIGKILL at 5 s) with the device.
 
+pub mod manifest;
 pub mod msg;
 pub mod session;
 
@@ -14,6 +15,7 @@ use crate::hint::show;
 use msg::MAX_LINE;
 use roxmltree::Node;
 use session::{session, End, Spec};
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
@@ -43,6 +45,8 @@ pub struct External {
     spec: Spec,
     /// `<command>` split on ASCII whitespace; never empty.
     argv: Vec<String>,
+    /// The module's working directory when a manifest started it; `<external-module>` runs in the device's.
+    cwd: Option<PathBuf>,
 }
 
 impl Module for External {
@@ -81,10 +85,17 @@ impl Module for External {
 }
 
 impl External {
-    /// An `External` for `node`, a stock element a module's manifest serves: `node` itself is the module's config.
-    pub fn from_element(node: Node, cmd: &str, opts: &Opts) -> Result<External, ConfigError> {
+    /// An `External` for `node`, a stock element the manifest of the module in `dir` serves: `node` itself is the module's config.
+    pub fn from_element(
+        node: Node,
+        cmd: &str,
+        dir: &Path,
+        opts: &Opts,
+    ) -> Result<External, ConfigError> {
         let config = &node.document().input_text()[node.range()];
-        External::new(node, node.tag_name().name().into(), cmd, config, opts)
+        let mut m = External::new(node, node.tag_name().name().into(), cmd, config, opts)?;
+        m.cwd = Some(dir.into());
+        Ok(m)
     }
 
     fn new(
@@ -109,7 +120,11 @@ impl External {
             cycle: Duration::from_millis(cycle),
             cmdif: text(node, "command-interface").filter(|s| !s.is_empty()),
         };
-        Ok(External { spec, argv })
+        Ok(External {
+            spec,
+            argv,
+            cwd: None,
+        })
     }
 
     /// One run of the module: spawn it, hold its session, and see it gone.
@@ -118,6 +133,9 @@ impl External {
         tracing::info!("module {name}: starting {:?}", self.argv);
         let mut cmd = Command::new(&self.argv[0]);
         cmd.args(&self.argv[1..]).env("FERROFIRE_MODULE", name);
+        if let Some(d) = &self.cwd {
+            cmd.current_dir(d);
+        }
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -259,6 +277,7 @@ mod tests {
         let m = External::from_element(
             node,
             "python3 module.py",
+            Path::new("/opt/m"),
             &Opts {
                 strict: true,
                 ..Opts::default()
@@ -272,5 +291,6 @@ mod tests {
             .starts_with("<bacnet-client><command-interface>"));
         assert_eq!(m.spec.cmdif.as_deref(), Some("tcp://127.0.0.1:9"));
         assert!(m.spec.strict);
+        assert_eq!(m.cwd.as_deref(), Some(Path::new("/opt/m")));
     }
 }
