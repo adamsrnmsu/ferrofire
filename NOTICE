@@ -35,3 +35,8 @@ derived from: wire formats and tag names are matched from observed behaviour onl
 
 HELICS (BSD-3-Clause, GMLC-TDC) is loaded at run time by `ferrofire run` models that have a `helics:` section;
 it is not linked into or distributed with ferrofire.
+
+modules/bacnet/ (MIT, its own LICENSE) runs on bacpypes3 0.1.0 (MIT, Copyright (c) Joel Bender,
+https://github.com/JoelBender/BACpypes3), installed from PyPI by modules/bacnet/requirements.txt; it is not vendored.
+Its server's behaviour is matched to stock bennu-field-device (bacnet-stack, GPL-2.0 with exception) from observed
+traffic and source reading only; no bacnet-stack code is copied.

@@ -1,0 +1,1 @@
+{"serves": ["bacnet-server", "bacnet-client"], "command": "python3 module.py"}
