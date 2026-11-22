@@ -9,6 +9,8 @@ pub mod dnp3;
 pub mod external;
 #[cfg(feature = "proto-iccp")]
 pub mod iccp;
+#[cfg(feature = "proto-iec104")]
+pub mod iec104;
 #[cfg(feature = "proto-iec61850")]
 pub mod iec61850;
 #[cfg(feature = "proto-modbus")]
@@ -94,6 +96,10 @@ pub static REGISTRY: &[(&str, Start)] = &[
     ("dnp3-server", start::<dnp3::Outstation>),
     #[cfg(feature = "proto-dnp3")]
     ("dnp3-client", start::<dnp3::master::Client>),
+    #[cfg(feature = "proto-iec104")]
+    ("iec60870-5-104-server", start::<iec104::Server>),
+    #[cfg(feature = "proto-iec104")]
+    ("iec60870-5-104-client", start::<iec104::Client>),
     #[cfg(feature = "proto-modbus")]
     ("modbus-server", start::<modbus::Server>),
     #[cfg(feature = "proto-modbus")]
@@ -307,6 +313,14 @@ mod tests {
             run("fake-server", fake::REGISTRY, &Opts::default()),
             Ok(Some(()))
         );
-        assert!(!compiled("iec60870-5-104-server"));
+        // the manifest serves `iec60870-5-104-server` too, and the compiled module wins: it parses the element (and refuses this
+        // one, which an external module would have taken), and the device does not wait for it as for an external one
+        assert!(external::manifest::lookup("iec60870-5-104-server").is_some());
+        #[cfg(feature = "proto-iec104")]
+        {
+            let e = run("iec60870-5-104-server", REGISTRY, &Opts::default()).unwrap_err();
+            assert!(e.0.contains("has no <rpoll-rate>"), "{e}");
+            assert!(compiled("iec60870-5-104-server"));
+        }
     }
 }

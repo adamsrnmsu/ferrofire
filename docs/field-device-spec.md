@@ -247,7 +247,7 @@ file contents were not captured: UNVERIFIED on a live run). Replicate: ELK/dashb
 | Q4 | analog registers scaled to 16-bit over `[min,max]`, conversion `double → uint16` truncating; out-of-range input is C++ UB (arch-dependent) | truncate in range, **clamp** out of range | `--compat-wrap` (built, ww-ik2, its own flag: `--strict` is about refusing, this reproduces stock): `(u32)(slope*v+intercept)` saturating, low 16 bits kept, byte-equal to `conformance/modbus/stock-q4.golden`; a negative value still reads 0, so it does not carry -1 (ww-4d7) |
 | Q5 | DNP3 binary/analog *outputs*: the 2026-11-07 `bennu:arm64` published them as **inputs** (g1v1 / g30v1, Class 0, never events); **stock v2026.11.03 reports output status**, binary g10v2 and analog g40v1 (flags + 32-bit integer), in tables of their own, so an input and an output may share an index and a control touches outputs only (ww-270, `O:` from `ffc-stock-2026.11.03:22.04`) | **replicate v2026.11.03** | — |
 | Q6 | DNP3 `AnalogOutputInt16/Int32/Double64` commands return SUCCESS and write nothing (`O:` status 0) | replicate | `--strict` → NOT_SUPPORTED |
-| Q7 | IEC 104 select/execute bit ignored, commands handled as direct operate (`O:`) | replicate | — |
+| Q7 | IEC 104 select/execute bit: the old source ignored it and executed; **stock v2026.11.03 refuses it** with a negative ACT_CON and no write (`conformance/iec104/STOCK.md`, "Contradictions") | **replicate v2026.11.03** | select-before-operate (`sbo-enabled`) not built: bead ww-3a4 |
 | Q8 | pidfile start guard without liveness test (§2.3) | replicate | `--strict` checks `/proc/<pid>` |
 | Q9 | Modbus MBAP `length` read into a 1024-byte buffer: **frames > ~1018 bytes corrupt memory**; `O:` a 1100-byte frame was answered, a 3000-byte frame killed the listener (reply reset, later connects refused, log `...accepting an incoming connection: Already open`) | **not replicated**: length > 254 → close the connection | — |
 | Q10 | type-mismatched published value / mapping crashes the device (§3.2) | **not replicated** | — |
@@ -405,30 +405,36 @@ Recorded from the stock `bennu:arm64` outstation with `probe_diff.py` and `probe
 
 ### 4.3 IEC 60870-5-104 slave (`<iec60870-5-104-server>`)
 
-Config: `endpoint` (tcp only; otherwise logs `Unknown endpoint protocol` and no server), `rpoll-rate` seconds (**required**), `subtype` (**required**; contains `double` → double-point mode, else single),
-`event-logging`, `binary-input|output{address,tag}`, `analog-input|output{address,tag}` (`MOD:comms/iec60870-5/module/DataHandler.cpp:51-100`). Library: `lib60870-C` (GPL-3), mode
-`CS104_MODE_SINGLE_REDUNDANCY_GROUP`, queues 1000/1000 (`Server.cpp:38`). One server per process (static `gServer`); the periodic sender talks to the **last opened** connection only.
+**Built (ww-vck, 2026-11-22)**: `src/fd/proto/iec104/`; `probe_104x.py`'s transcripts equal stock's, the stock client's against ours do not yet (a commanded value shows in the report for 2 s, the store's ACK hold; `conformance/README.md`, IEC 60870-5-104).
+The facts below are measured on `ffc-stock-2026.11.03:22.04` (bennu tag v2026.11.03) and recorded one a line with their evidence in
+[`conformance/iec104/STOCK.md`](../conformance/iec104/STOCK.md) (`S:` below); where this section once said otherwise from an older
+bennu source, STOCK.md wins.
 
-Observed wire behaviour (`conformance/stock/probe_104.py`, `O:`; hex, APDU start `68 <len>`; I-frame control fields little-endian N(S)<<1, N(R)<<1):
-- `STARTDT act` `68 04 07 00 00 00` → `STARTDT con` `68 04 0b 00 00 00`.
-- Common address is fixed at **1**, originator 0, IOA 3 bytes LE (the config address is a uint16).
-- General interrogation `C_IC_NA_1` (type 100) with QOI 20 (the only QOI handled, others get a negative ACT_CON, `Server.cpp:294`, double-point variant `:365`):
-  `68 0e 00 00 02 00 64 01 07 00 01 00 000000 14` (ACT_CON, COT 7) → data → ACT_TERM (COT 10).
-  Data, COT 20, **all** points of the map including outputs, ordered by address: type 1 `M_SP_NA_1` vsq 4 → `68 1a ... 01 04 14 00 01 00 | 000000 00 | 010000 00 | 640000 00 | 650000 00` (IOA + SIQ),
-  type 13 `M_ME_NC_1` vsq 4 → IOA + float32 LE + QDS (`00`), IOAs 2, 3, 102, 103. The ASDU is sent even when it holds no points (`Server.cpp:308,321`).
-- Periodic: every `rpoll-rate` s the same two ASDU kinds with COT 1 (periodic) go to the connected client (`reversePollSinglePoint`, `Server.cpp:147-195`), split when the payload reaches
-  `MAX_ASDU_PAYLOAD_SIZE`. In double-point mode binaries go as `M_DP_TB_1` (type 31, CP56Time2a, COT 3 spontaneous) per point, interrogation as `M_DP_NA_1` (type 3);
-  `convertBoolToDPValue`: false → OFF(1), true → ON(2); inbound double commands: ON(2) → true, OFF(1) → false, others → false + an error log line.
-- Commands: `C_SC_NA_1` (45) COT 6 → server echoes the ASDU with COT 7 and writes the bool; `C_DC_NA_1` (46) → ACT_CON, write, ACT_TERM; `C_SE_NC_1` (50, float) → echo COT 7, writes the float.
-  `O:` after a command the very next frames were the periodic data ASDUs (COT 1). Other type ids (clock sync 103, read 102, counter interrogation 101, reset process 105, test 107): handler returns false →
-  library default (UNVERIFIED; probe in F4).
-- APCI timers/windows (k, w, t0-t3): library defaults, UNVERIFIED; use the IEC 60870-5-104 standard values (k 12, w 8, t1 15 s, t2 10 s, t3 20 s) and compare on the wire in F4.
+Config: `endpoint` (tcp only; otherwise logs `Unknown endpoint protocol (<endpoint>)` and no server), `rpoll-rate` seconds (**required**), `subtype` (**required**; contains `double` → double-point mode, else single),
+`event-logging`, `sbo-enabled` (default false) and `sbo-timeout-secs` (default 30), `binary-input|output{address,tag}`, `analog-input|output{address,tag}` (`MOD:comms/iec60870-5/module/DataHandler.cpp:47-92`).
+Points are added binary inputs, binary outputs, analog inputs, analog outputs in turn, into one map per kind by address, so a later point at an address replaces an earlier one and an output an input.
+Library: `lib60870-C` (GPL-3), mode `CS104_MODE_SINGLE_REDUNDANCY_GROUP`, at most 5 masters. Start line: `Initialized IEC60870-5-104 server: <endpoint> (select-before-operate disabled)`.
+Ours: `sbo-enabled` true is refused at load (select-before-operate is not built, bead ww-3a4); `rpoll-rate` 0 reports every 100 ms where stock spins.
+
+Wire behaviour (`S:`; hex, APDU start `68 <len>`):
+- APCI: `STARTDT act` `68 04 07 00 00 00` → con `68 04 0b 00 00 00`; TESTFR answered also before STARTDT and while stopped; an I- or S-frame before STARTDT, or while stopped, closes the connection;
+  STOPDT act → an S-frame, then STOPDT con. k 12, w 8, t1 15 s, t2 10 s, t3 20 s (TESTFR act after 20 s of silence, close 15 s later), measured; t0 10 s, not observable.
+- Common address: not checked (a command or GI to CA 2 is answered with CA 2); data ASDUs carry CA 1, originator 0. IOA 3 bytes; a command's IOA is cut to 16 bits.
+- GI `C_IC_NA_1` QOI 20 at COT 6 **or 8**: ACT_CON (COT 7), the binaries (`M_SP_NA_1`, or `M_DP_NA_1` in double mode: false → OFF(1), true → ON(2)), the analogs (`M_ME_NC_1`, QDS 0), all COT 20,
+  all points including outputs in address order, split at a 240-byte payload (60 single points, 30 floats an ASDU); then ACT_TERM (COT 10). Another QOI: negative ACT_CON. Another COT: negative COT 45, then negative COT 44.
+- Periodic, every `rpoll-rate` s, to the connection opened last while it is started, and to nobody once any connection has closed until another opens: single mode the GI's ASDUs at COT 1;
+  double mode each binary its own `M_DP_TB_1` (COT 3, CP56Time2a in UTC), then the analogs at COT 1. A STARTDT on one connection deactivates every other; a deactivated one that sends an I-frame is closed.
+- Commands 45, 46, 50 by direct execute at a configured output of the command's kind: ACT_CON then ACT_TERM, each the received ASDU with only the COT changed, and the tag written
+  (45 ON/OFF, 46 ON(2)/OFF(1), 50 the float). **Refused with a negative ACT_CON** and no write: the select bit set (quirk Q7, "select ignored", no longer holds), an input, the other kind of output,
+  no point, a 46 with state 0 or 3. COT 8: negative COT 9; another COT: negative COT 45. (The older source gave 45 and 50 an echo only.)
+- Other type ids: 104 and 107 at COT 6 echoed with COT 7 (the library), at another COT negative 45; 101, 102, 103, 105, 58 and monitor types negative COT 44 (no handler), after a negative 45 when
+  the COT is one the library refuses. An ASDU under 6 bytes, or a GI at COT 6 or 8 shorter than one object, closes the connection (source only).
 
 ### 4.4 Client modes and the command interface (phase F5, optional)
 
 `modbus-client`, `dnp3-client`, `iec60870-5-104-client` (fd-client and FEP hosts, `A:templates/fd_client.mako`, `fep_template.mako`) poll remote servers every `scan-rate`/5 s and expose
 `QUERY=`/`READ=`/`WRITE=` on a ZeroMQ REP at `<command-interface>` (`MOD:comms/base/CommandInterface.cpp`: replies `ACK=tag1,tag2,` / `ACK=<tag>:<value>` / `ACK=Wrote tag <t> -- <v>` / `ERR=...`;
-op names in either case). Needed only when a scenario uses `fd-client`/`fep`; not for the waterway. Deferred; the Modbus client reuses the server codec, DNP3/104 clients are separate work.
+op names in either case). Needed only when a scenario uses `fd-client`/`fep`; not for the waterway. Built: the Modbus and DNP3 clients ([field-device-clients.md](field-device-clients.md)) and the 104 client in bennu mode (`src/fd/proto/iec104/client.rs`, ww-vck). The 104 client does not poll: stock connects once, sends one GI and then takes the server's periodic report (`conformance/iec104/STOCK.md`, "Client").
 
 ---
 
@@ -610,7 +616,7 @@ Total ≈ 15-17 days without F5 (F0-F2 ≈ 6 days for the waterway). Phases F0-F
 - Multi-write partial-queue behaviour on a mid-span unmapped address — F1.
 - Event-log file contents of a live stock run — F1.
 - DNP3 `sgvar/egvar/class` token spellings and the analog timestamp unit — F3 (only if a scenario sets them).
-- 104 behaviour for type ids 101-107, APCI timer values, redundancy-group behaviour on a second connection — F4.
+- ~~104 behaviour for type ids 101-107, APCI timer values, redundancy-group behaviour on a second connection — F4.~~ Measured: `conformance/iec104/STOCK.md` (§4.3).
 - `zeromq` REQ interop and `aarch64-unknown-linux-musl` daemonizing — F0/F6.
 - Step Function agreement applicability to the range — Ryan.
 

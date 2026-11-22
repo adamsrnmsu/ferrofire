@@ -1,0 +1,186 @@
+## before STARTDT
+> TESTFR act
+< U 68 04 83 00 00 00
+> I-frame C_IC_NA_1 QOI 20 (no STARTDT yet)
+< closed
+> S-frame (no STARTDT yet)
+< closed
+## one connection: STARTDT, interrogation, commands, other type ids, STOPDT
+> STARTDT act
+< U 68 04 0b 00 00 00
+> TESTFR act
+< U 68 04 83 00 00 00
+> C_IC_NA_1 COT 6 QOI 20
+< I 64 01 07 00 01 00 00 00 00 14
+< I 01 04 14 00 01 00 00 00 00 01 01 00 00 00 64 00 00 01 65 00 00 00
+< I 0d 04 14 00 01 00 02 00 00 9a 59 96 43 00 03 00 00 00 80 7a 43 00 66 00 00 9a 59 96 43 00 67 00 00 00 80 7a 43 00
+< I 64 01 0a 00 01 00 00 00 00 14
+periodic after the interrogation:
+  I 01 04 01 00 01 00 00 00 00 01 01 00 00 00 64 00 00 01 65 00 00 00
+  I 0d 04 01 00 01 00 02 00 00 9a 59 96 43 00 03 00 00 00 80 7a 43 00 66 00 00 9a 59 96 43 00 67 00 00 00 80 7a 43 00
+> C_IC_NA_1 COT 6 QOI 21
+< I 64 01 47 00 01 00 00 00 00 15
+> C_IC_NA_1 COT 8 QOI 20 (deactivation)
+< I 64 01 07 00 01 00 00 00 00 14
+< I 01 04 14 00 01 00 00 00 00 01 01 00 00 00 64 00 00 01 65 00 00 00
+< I 0d 04 14 00 01 00 02 00 00 9a 59 96 43 00 03 00 00 00 80 7a 43 00 66 00 00 9a 59 96 43 00 67 00 00 00 80 7a 43 00
+< I 64 01 0a 00 01 00 00 00 00 14
+> C_IC_NA_1 COT 3 QOI 20 (bad COT)
+< I 64 01 6d 00 01 00 00 00 00 14
+< I 64 01 6c 00 01 00 00 00 00 14
+> C_IC_NA_1 COT 6 QOI 20 to common address 2
+< I 64 01 07 00 02 00 00 00 00 14
+< I 01 04 14 00 01 00 00 00 00 01 01 00 00 00 64 00 00 01 65 00 00 00
+< I 0d 04 14 00 01 00 02 00 00 9a 59 96 43 00 03 00 00 00 80 7a 43 00 66 00 00 9a 59 96 43 00 67 00 00 00 80 7a 43 00
+< I 64 01 0a 00 02 00 00 00 00 14
+## commands at configured outputs (direct execute)
+> C_SC_NA_1 45 IOA 0 ON
+< I 2d 01 07 00 01 00 00 00 00 01
+< I 2d 01 0a 00 01 00 00 00 00 01
+> C_SC_NA_1 45 IOA 1 OFF
+< I 2d 01 07 00 01 00 01 00 00 00
+< I 2d 01 0a 00 01 00 01 00 00 00
+> C_DC_NA_1 46 IOA 0 OFF(1)
+< I 2e 01 07 00 01 00 00 00 00 01
+< I 2e 01 0a 00 01 00 00 00 00 01
+> C_DC_NA_1 46 IOA 1 ON(2)
+< I 2e 01 07 00 01 00 01 00 00 02
+< I 2e 01 0a 00 01 00 01 00 00 02
+> C_SE_NC_1 50 IOA 2 77.5
+< I 32 01 07 00 01 00 02 00 00 00 00 9b 42 00
+< I 32 01 0a 00 01 00 02 00 00 00 00 9b 42 00
+> C_SE_NC_1 50 IOA 3 -2.5
+< I 32 01 07 00 01 00 03 00 00 00 00 20 c0 00
+< I 32 01 0a 00 01 00 03 00 00 00 00 20 c0 00
+> C_IC_NA_1 COT 6 QOI 20 (after the commands)
+< I 64 01 07 00 01 00 00 00 00 14
+< I 01 04 14 00 01 00 00 00 00 01 01 00 00 00 64 00 00 01 65 00 00 00
+< I 0d 04 14 00 01 00 02 00 00 9a 59 96 43 00 03 00 00 00 80 7a 43 00 66 00 00 9a 59 96 43 00 67 00 00 00 80 7a 43 00
+< I 64 01 0a 00 01 00 00 00 00 14
+periodic after the commands:
+  I 01 04 01 00 01 00 00 00 00 01 01 00 00 00 64 00 00 01 65 00 00 00
+  I 0d 04 01 00 01 00 02 00 00 9a 59 96 43 00 03 00 00 00 80 7a 43 00 66 00 00 9a 59 96 43 00 67 00 00 00 80 7a 43 00
+## commands the server refuses or answers otherwise
+> C_SC_NA_1 45 IOA 50 (no such point)
+< I 2d 01 47 00 01 00 32 00 00 01
+> C_SC_NA_1 45 IOA 100 (a binary input)
+< I 2d 01 47 00 01 00 64 00 00 01
+> C_SC_NA_1 45 IOA 2 (an analog output)
+< I 2d 01 47 00 01 00 02 00 00 01
+> C_DC_NA_1 46 IOA 0 state 0 (not permitted)
+< I 2e 01 47 00 01 00 00 00 00 00
+> C_DC_NA_1 46 IOA 0 state 3 (not permitted)
+< I 2e 01 47 00 01 00 00 00 00 03
+> C_SE_NC_1 50 IOA 0 (a binary output)
+< I 32 01 47 00 01 00 00 00 00 00 00 80 3f 00
+> C_SE_NC_1 50 IOA 102 (an analog input)
+< I 32 01 47 00 01 00 66 00 00 00 00 80 3f 00
+> C_SC_NA_1 45 IOA 0 select ON (S/E 1)
+< I 2d 01 47 00 01 00 00 00 00 81
+> C_DC_NA_1 46 IOA 0 select ON (S/E 1)
+< I 2e 01 47 00 01 00 00 00 00 82
+> C_SE_NC_1 50 IOA 2 select 5.0 (S/E 1)
+< I 32 01 47 00 01 00 02 00 00 00 00 a0 40 80
+> C_SC_NA_1 45 IOA 0 COT 8 (deactivation)
+< I 2d 01 49 00 01 00 00 00 00 01
+> C_DC_NA_1 46 IOA 0 COT 8 (deactivation)
+< I 2e 01 49 00 01 00 00 00 00 02
+> C_SE_NC_1 50 IOA 2 COT 8 (deactivation)
+< I 32 01 49 00 01 00 02 00 00 00 00 a0 40 00
+> C_SC_NA_1 45 IOA 0 COT 3 (bad COT)
+< I 2d 01 6d 00 01 00 00 00 00 01
+> C_SC_NA_1 45 IOA 0 to common address 2
+< I 2d 01 07 00 02 00 00 00 00 00
+< I 2d 01 0a 00 02 00 00 00 00 00
+## other type ids
+> C_CI_NA_1 101 COT 6 QCC 5
+< I 65 01 6c 00 01 00 00 00 00 05
+> C_RD_NA_1 102 COT 5 IOA 100
+< I 66 01 6c 00 01 00 64 00 00
+> C_CS_NA_1 103 COT 6
+< I 67 01 6c 00 01 00 00 00 00 00 00 00 00 00 00 00
+> C_TS_NA_1 104 COT 6
+< I 68 01 07 00 01 00 00 00 00 aa 55
+> C_RP_NA_1 105 COT 6 QRP 1
+< I 69 01 6c 00 01 00 00 00 00 01
+> C_TS_TA_1 107 COT 6
+< I 6b 01 07 00 01 00 00 00 00 aa 55 00 00 00 00 00 00 00
+> C_TS_TA_1 107 COT 3 (bad COT)
+< I 6b 01 6d 00 01 00 00 00 00 aa 55 00 00 00 00 00 00 00
+> C_SC_TA_1 58 COT 6 IOA 0
+< I 3a 01 6c 00 01 00 00 00 00 01 00 00 00 00 00 00 00
+> M_SP_NA_1 1 COT 3 IOA 0 (a monitor type)
+< I 01 01 6c 00 01 00 00 00 00 01
+## STOPDT
+> STOPDT act
+< S
+< U 68 04 23 00 00 00
+periodic while stopped: no
+> TESTFR act (stopped)
+< U 68 04 83 00 00 00
+> STARTDT act
+< U 68 04 0b 00 00 00
+periodic after STARTDT again: yes
+> STOPDT act
+< S
+< U 68 04 23 00 00 00
+> C_IC_NA_1 QOI 20 (stopped)
+< closed
+## two connections (periodic: any COT 1 frame in 2.5 s)
+> A: open, STARTDT act
+< U 68 04 0b 00 00 00
+A periodic: yes
+> B: open (no STARTDT)
+A periodic: no, B periodic: no
+> B: STARTDT act
+< U 68 04 0b 00 00 00
+A periodic: no, B periodic: yes
+> A: C_IC_NA_1 QOI 20 (after B's STARTDT)
+< closed
+> B: close
+> C: open, STARTDT act
+< U 68 04 0b 00 00 00
+C periodic: yes
+> C: close
+> D: open, STARTDT act
+< U 68 04 0b 00 00 00
+> E: open, STARTDT act
+< U 68 04 0b 00 00 00
+D periodic: no, E periodic: yes
+> D: STARTDT act again
+< U 68 04 0b 00 00 00
+D periodic: no, E periodic: no
+> D: close (E stays open)
+E periodic: no
+> E: STARTDT act
+< U 68 04 0b 00 00 00
+> E: C_IC_NA_1 QOI 20
+< I 64 01 07 00 01 00 00 00 00 14
+< I 01 04 14 00 01 00 00 00 00 01 01 00 00 00 64 00 00 01 65 00 00 00
+< I 0d 04 14 00 01 00 02 00 00 9a 59 96 43 00 03 00 00 00 80 7a 43 00 66 00 00 9a 59 96 43 00 67 00 00 00 80 7a 43 00
+< I 64 01 0a 00 01 00 00 00 00 14
+E periodic: no
+> E: close
+## k, w and t1: the master never acks (N(R) 0 in its I-frames, no S-frames)
+> STARTDT act, C_IC_NA_1 QOI 20, then nothing
+I-frames before the server stops sending: 12
+> 7 x C_TS_TA_1 107 (N(R) 0)
+> the 8th C_TS_TA_1 107 (N(R) 0)
+< S
+closed 15 s after the first I-frame it sent
+## t2: one I-frame from the master while the server's k window is full
+> STARTDT act, 3 x C_IC_NA_1 QOI 20 (12 I-frames back: the window is full), then one C_TS_TA_1 107 (N(R) 0)
+< S 10 s after that I-frame
+< closed 15 s after the first I-frame it sent
+## t3: a connection with no STARTDT and no traffic, TESTFR act left unanswered
+> open, then nothing
+< U 68 04 43 00 00 00 at 20 s
+< closed at 35 s
+## provider
+WRITE=generator-1_bus-1.active:true
+WRITE=load-1_bus-1.active:false
+WRITE=generator-1_bus-1.active:false
+WRITE=load-1_bus-1.active:true
+WRITE=bus-1.gen_mw:77.500000
+WRITE=load-1_bus-1.mw:-2.500000
+WRITE=generator-1_bus-1.active:false

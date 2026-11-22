@@ -14,6 +14,9 @@
                                      the invoke id masked (`__`), a run of the same frame (a retry) shown once; the scans (ReadProperty
                                      present-value and their answers) are left out where they fall and listed once at the end, each
                                      distinct request with each distinct answer it got; a reply of 3 s or more is `~3s+`
+    probe_cmdif.py --report PORT iec104   IEC 104 on tcp PORT: each APDU of the reassembled stream, I-frames as `I <ASDU>` with
+                                     N(S)/N(R) and CP56Time2a masked (probe_104x.py), U-frames in full; S-frames left out, and the
+                                     periodic and spontaneous data (COT 1, M_DP_TB_1 COT 3) listed once at the end, distinct
 Runs in the testpeers container, in the network namespace of the stock devices (conformance/stock/run-stock.sh).
 """
 import json, os, socket, subprocess, sys, time
@@ -162,6 +165,30 @@ def bacnet_lines(packets):
     return out, summary
 
 
+def iec104_lines(packets):
+    """`packets`: (bin, direction, what). Each direction's bytes are joined (a new connection starts afresh) and cut into APDUs."""
+    from probe_104x import asdu_text, periodic
+    out, data, buf = [], set(), {}
+    for i, d, what in packets:
+        if what in ("SYN", "FIN", "RST", ""):
+            if what == "SYN":
+                buf = {}
+            out.append((i, d + what))
+            continue
+        b = buf.get(d, b"") + bytes.fromhex(what)
+        while len(b) >= 2 and len(b) >= 2 + b[1]:
+            f, b = b[:2 + b[1]], b[2 + b[1]:]
+            if f[2] & 3 == 1:
+                continue
+            text = d + ("I " + asdu_text(f[6:]) if f[2] & 1 == 0 else "U " + f.hex(" "))
+            if periodic(f):
+                data.add(text)
+            else:
+                out.append((i, text))
+        buf[d] = b
+    return out, sorted(data)
+
+
 def sync(port):
     count = lambda: len(subprocess.run(["tshark", "-r", PCAP, "-Y", "tcp.dstport==%s && dnp3.al.func==1" % port],
                                        capture_output=True, text=True).stdout.splitlines())
@@ -170,7 +197,7 @@ def sync(port):
         time.sleep(0.2)
 
 
-def report(port, dnp3=False, bacnet=False):
+def report(port, dnp3=False, bacnet=False, iec104=False):
     recs = [json.loads(l) for l in open(LOG)]
     if bacnet:
         return report_bacnet(port, recs)
@@ -196,9 +223,16 @@ def report(port, dnp3=False, bacnet=False):
             else:
                 joined.append(p)
         packets = joined
-    for i, text in dnp3_lines(packets) if dnp3 else [(i, d + what) for i, d, what in packets]:
+    data = None
+    if iec104:
+        lines, data = iec104_lines(packets)
+    for i, text in dnp3_lines(packets) if dnp3 else lines if iec104 else [(i, d + what) for i, d, what in packets]:
         wire[i].append(text)
     print_records(recs, wire)
+    if data is not None:
+        print("# periodic and spontaneous data: each distinct frame")
+        for t in data:
+            print(t)
 
 
 def report_bacnet(port, recs):
@@ -249,7 +283,7 @@ if __name__ == "__main__":
     elif a[:1] == ["--sync"]:
         sync(a[1])
     elif a[:1] == ["--report"]:
-        report(a[1], a[2:] == ["dnp3"], a[2:] == ["bacnet"])
+        report(a[1], a[2:] == ["dnp3"], a[2:] == ["bacnet"], a[2:] == ["iec104"])
     else:
         for c in a:
             command(c)
