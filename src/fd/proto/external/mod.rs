@@ -1,17 +1,17 @@
 //! External protocol modules: a program that speaks a protocol for the device over ffmod/1 (JSON lines).
 //!
-//! `<external-module>` with transport `stdio`: the device starts `<command>` (split on ASCII whitespace: no shell, no quoting),
+//! `<external-module>` with transport `stdio` (see `transport` for `tcp://` and `unix://`): the device starts `<command>` (split on ASCII whitespace: no shell, no quoting),
 //! speaks ffmod/1 over its stdin and stdout, logs its stderr lines, restarts it on the backoff when it exits or breaks the
 //! session, and stops it (`stop`, stdin closed, SIGTERM at 2 s, SIGKILL at 5 s) with the device.
 
 pub mod manifest;
 pub mod msg;
 pub mod session;
+mod transport;
 
 use super::{backoff, device_name, name_in, Module, BACKOFF_FIRST};
 use crate::fd::config::{child, number, require, text, ConfigError, Opts, Tags};
 use crate::fd::store::Store;
-use crate::hint::show;
 use msg::MAX_LINE;
 use roxmltree::Node;
 use session::{session, End, Spec};
@@ -23,6 +23,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::time::{sleep, timeout_at, Instant};
 use tokio_util::sync::CancellationToken;
+use transport::Transport;
 
 /// Counted from the device's stop: until when a module may exit by itself, then SIGTERM; until when after that, then SIGKILL.
 const TERM_AT: Duration = Duration::from_secs(2);
@@ -47,25 +48,43 @@ pub struct External {
     argv: Vec<String>,
     /// The module's working directory when a manifest started it; `<external-module>` runs in the device's.
     cwd: Option<PathBuf>,
+    transport: Transport,
+    /// The `<transport>` as written; a socket module's `FERROFIRE_MODULE_ADDR`.
+    addr: String,
 }
 
 impl Module for External {
     fn parse(node: Node, _: &mut Tags, opts: &Opts) -> Result<Self, ConfigError> {
         let name = name_in(node, "name", "", |s| !s.is_empty(), "not empty")?;
-        let transport = text(node, "transport").unwrap_or_else(|| "stdio".into());
-        if transport != "stdio" {
-            let t = show(&transport);
-            return Err(ConfigError(format!(
-                "<transport> `{t}` is not supported (stdio)"
-            )));
+        let addr = text(node, "transport").unwrap_or_else(|| "stdio".into());
+        let transport = Transport::parse(&addr, opts.strict)?;
+        // a socket module may be started elsewhere: its `<command>` is optional
+        let cmd = match transport {
+            Transport::Stdio => require(node, "command")?,
+            _ => text(node, "command").unwrap_or_default(),
+        };
+        if cmd.is_empty() && transport == Transport::Stdio {
+            return Err(ConfigError(format!("module {name}: <command> is empty")));
         }
         // the inner XML of `<config>` as written: its first element
         let inner = child(node, "config").and_then(|c| c.first_element_child());
         let config = inner.map_or("", |e| &node.document().input_text()[e.range()]);
-        External::new(node, name, &require(node, "command")?, config, opts)
+        let mut m = External::new(node, name, &cmd, config, opts)?;
+        (m.transport, m.addr) = (transport, addr);
+        Ok(m)
     }
 
     async fn run(self, store: Store, stop: CancellationToken) {
+        if self.transport == Transport::Stdio {
+            self.run_stdio(store, stop).await
+        } else {
+            self.run_socket(store, stop).await
+        }
+    }
+}
+
+impl External {
+    async fn run_stdio(self, store: Store, stop: CancellationToken) {
         let mut pause = BACKOFF_FIRST;
         loop {
             match self.once(&store, &stop).await {
@@ -82,9 +101,7 @@ impl Module for External {
             pause = backoff(pause, false);
         }
     }
-}
 
-impl External {
     /// An `External` for `node`, a stock element the manifest of the module in `dir` serves: `node` itself is the module's config.
     pub fn from_element(
         node: Node,
@@ -93,7 +110,11 @@ impl External {
         opts: &Opts,
     ) -> Result<External, ConfigError> {
         let config = &node.document().input_text()[node.range()];
-        let mut m = External::new(node, node.tag_name().name().into(), cmd, config, opts)?;
+        let name = node.tag_name().name();
+        if cmd.trim().is_empty() {
+            return Err(ConfigError(format!("module {name}: <command> is empty")));
+        }
+        let mut m = External::new(node, name.into(), cmd, config, opts)?;
         m.cwd = Some(dir.into());
         Ok(m)
     }
@@ -106,9 +127,6 @@ impl External {
         opts: &Opts,
     ) -> Result<External, ConfigError> {
         let argv: Vec<String> = cmd.split_ascii_whitespace().map(String::from).collect();
-        if argv.is_empty() {
-            return Err(ConfigError(format!("module {name}: <command> is empty")));
-        }
         let fd = node.ancestors().find(|a| a.has_tag_name("field-device"));
         let cycle = fd.map(|fd| number::<u64>(fd, "cycle-time")).transpose()?;
         let cycle = cycle.flatten().filter(|c| *c > 0).unwrap_or(1000);
@@ -124,6 +142,8 @@ impl External {
             spec,
             argv,
             cwd: None,
+            transport: Transport::Stdio,
+            addr: "stdio".into(),
         })
     }
 
@@ -131,23 +151,32 @@ impl External {
     async fn once(&self, store: &Store, stop: &CancellationToken) -> End {
         let name = &self.spec.name;
         tracing::info!("module {name}: starting {:?}", self.argv);
-        let mut cmd = Command::new(&self.argv[0]);
-        cmd.args(&self.argv[1..]).env("FERROFIRE_MODULE", name);
-        if let Some(d) = &self.cwd {
-            cmd.current_dir(d);
-        }
-        cmd.stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        // its own process group, so that a signal reaches what a wrapper script started too
-        let child = cmd.process_group(0).kill_on_drop(true).spawn();
-        match child {
+        match self.spawn(true) {
             Ok(child) => self.session(child, store, stop).await,
             Err(e) => {
                 tracing::error!("module {name}: cannot start: {e}");
                 End::Broken { was_ready: false }
             }
         }
+    }
+
+    /// Start the module in its own process group, so that a signal reaches what a wrapper script started too. `piped`: its stdin and
+    /// stdout are the session's; a socket module has none.
+    fn spawn(&self, piped: bool) -> std::io::Result<Child> {
+        let mut cmd = Command::new(&self.argv[0]);
+        cmd.args(&self.argv[1..])
+            .env("FERROFIRE_MODULE", &self.spec.name);
+        if !piped {
+            cmd.env("FERROFIRE_MODULE_ADDR", &self.addr);
+        }
+        if let Some(d) = &self.cwd {
+            cmd.current_dir(d);
+        }
+        let io = |p| if piped { Stdio::piped() } else { p };
+        cmd.stdin(io(Stdio::null()))
+            .stdout(io(Stdio::null()))
+            .stderr(Stdio::piped());
+        cmd.process_group(0).kill_on_drop(true).spawn()
     }
 
     /// Run the session to its end (never dropped half way: its writer would be left running), then reap the module.
@@ -263,6 +292,8 @@ mod tests {
         );
         let tcp = "<external-module><name>m</name><command>x</command><transport>tcp://h:1</transport></external-module>";
         assert!(err(tcp).contains("<transport> `tcp://h:1`"));
+        let udp = "<external-module><name>m</name><command>x</command><transport>udp://127.0.0.1:1</transport></external-module>";
+        assert!(err(udp).contains("is not supported"));
     }
 
     #[test]
