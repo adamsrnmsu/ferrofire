@@ -41,7 +41,7 @@ base64 = { version = "0.23", optional = true }
 # One feature per protocol module (docs/field-device-protocols-plan.md section 2). The parity set is default; extras are opt-in.
 # proto-mqtt is the exception: the quality gates (crap, mutate) build the default features only, and deny.toml carries advisory ignores
 # for rumqttc's unused webpki 0.102 (bead ww-otj.56 follow-up: drop both once rumqttc moves on). Build without it: --no-default-features.
-default = ["proto-modbus", "proto-dnp3", "proto-iec104", "proto-bacnet", "proto-serial", "proto-iec61850", "proto-iccp", "proto-mqtt", "proto-scpi", "elastic"]
+default = ["proto-modbus", "proto-dnp3", "proto-iec104", "proto-bacnet", "proto-serial", "proto-iec61850", "proto-iccp", "proto-mqtt", "proto-scpi", "elastic", "helics"]
 proto-modbus = []
 proto-dnp3 = []
 proto-iec104 = []
@@ -54,6 +54,8 @@ proto-mqtt = ["dep:rumqttc", "dep:prost", "dep:rustls"]
 proto-scpi = []
 # default-on for the same reason: groundtruth monitor and the provider [elastic] export
 elastic = ["dep:rustls", "dep:rustls-native-certs", "dep:serde_json", "dep:base64"]
+# default-on for the same reason: `ferrofire run` as a HELICS federate (src/helics). No crate: libhelics is dlopen'd at run time.
+helics = []
 all-protocols = ["default", "proto-iec61850", "proto-iccp"]
 
 [profile.release]

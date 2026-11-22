@@ -32,3 +32,6 @@ ported from PYPOWER 5.1.19, https://github.com/rwl/PYPOWER, under its BSD 3-clau
 
 No MATPOWER case files are vendored. bennu / pybennu (GPL-3.0-or-later) are not
 derived from: wire formats and tag names are matched from observed behaviour only.
+
+HELICS (BSD-3-Clause, GMLC-TDC) is loaded at run time by `ferrofire run` models that have a `helics:` section;
+it is not linked into or distributed with ferrofire.

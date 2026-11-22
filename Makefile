@@ -10,7 +10,7 @@ DRY_MIN := 0.8
 # ponytail: pid lock; a kill -9 of make leaves a stale file that src-free ignores because the pid is gone.
 MUTATE_LOCK := .mutate.lock
 
-.PHONY: physics dut netns differential diff-dnp3 diff-modbus diff-udp diff-serial diff-serial-mismatch testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report bench-control bench-fdmicro bench-maxrate bench-maxrate-control charts image rtu-image rtu-image-smoke fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
+.PHONY: helics physics dut netns differential diff-dnp3 diff-modbus diff-udp diff-serial diff-serial-mismatch testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report bench-control bench-fdmicro bench-maxrate bench-maxrate-control charts image rtu-image rtu-image-smoke fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
 help:    # list targets
 	@grep -E '^[a-z-]+:.*#' $(MAKEFILE_LIST) | sed -E 's/^([a-z-]+):[^#]*#/\1\t/'
 src-free:   # fail fast while make mutate is rewriting src/
@@ -88,6 +88,8 @@ testpeers:   # build the ferrofire-testpeers image (opendnp3, libiec61850, tshar
 conformance: dut   # acceptance harness for one protocol vs the stock oracle: make conformance PROTO=dnp3 (see conformance/README.md)
 	@test -n "$(PROTO)" || { echo "usage: make conformance PROTO=dnp3"; exit 2; }
 	$(TP) conformance/run.sh $(PROTO)
+helics: dut   # ferrofire run as a HELICS federate next to a Python controller federate (bench/helics, ww-7mw.4); needs the ff-physics image
+	sh bench/helics/run.sh
 physics: src-free   # bennu's OpenDSS and HELICS providers drive our field device and stock's, same registers (ww-82n; bench/physics/README.md)
 	$(IN) cargo build --release --bin ferrofire
 	sh bench/physics/run.sh $(SCENARIO)
