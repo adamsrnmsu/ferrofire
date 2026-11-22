@@ -6,6 +6,7 @@
 //! Outputs with an `expr` own a slot; an output without one republishes the input/state/body field of that name.
 
 use crate::expr::{compile, Node};
+use crate::helics::HelicsDef;
 use crate::hint::did_you_mean;
 use crate::power::{case, Islands, Power};
 use serde::de::{MapAccess, Visitor};
@@ -245,6 +246,8 @@ struct Doc {
     outputs: Ordered<OutDef>,
     power: Option<PowerDef>,
     publish_order: Option<Vec<String>>,
+    /// Join a HELICS federation (src/helics); checked against the model once it is compiled.
+    helics: Option<HelicsDef>,
 }
 fn one() -> usize {
     1
@@ -301,6 +304,7 @@ pub struct Model {
     pub dt: f64,
     pub publish_rate: Option<f64>,
     pub publish_slices: Vec<SliceSpec>,
+    pub helics: Option<HelicsDef>,
     pub time: f64,
     substeps: usize,
     v: Vec<f64>,
@@ -727,6 +731,15 @@ fn reorder(
         .collect()
 }
 
+/// The `helics:` section must name real tags, and needs the `helics` feature.
+fn check_helics(m: &Model) -> Result<(), String> {
+    let Some(h) = &m.helics else { return Ok(()) };
+    if !cfg!(feature = "helics") {
+        return Err("model: has a helics: section but this build has no `helics` feature".into());
+    }
+    h.plan(m, "ferrofire").map(drop)
+}
+
 impl Model {
     pub fn load(yaml: &str) -> Result<Model, String> {
         Model::load_in(yaml, None)
@@ -742,6 +755,7 @@ impl Model {
         m.eval();
         m.power_update();
         m.eval();
+        check_helics(&m)?;
         Ok(m)
     }
 
@@ -762,6 +776,7 @@ impl Model {
             dt: doc.dt,
             publish_rate: doc.publish_rate,
             publish_slices: doc.publish_slices.clone(),
+            helics: doc.helics.clone(),
             time: 0.0,
             substeps: doc.substeps,
             v,
@@ -857,6 +872,11 @@ impl Model {
             min: f64::NEG_INFINITY,
             max: f64::INFINITY,
         })
+    }
+
+    /// The model's input tags (what a write can set besides writable power tags).
+    pub fn input_tags(&self) -> impl Iterator<Item = &str> {
+        self.inputs.keys().map(String::as_str)
     }
 
     /// True when a write to `tag` would be accepted (a model input, or a writable power tag).

@@ -1,0 +1,19 @@
+# A tank under a HELICS controller (bench/helics, docs/helics.md): the controller federate reads tank/level and tank/high and
+# commands ctl/valve; ferrofire's own engine is the other federate and is held to the controller's grants.
+version: 1
+dt: 0.1
+inputs:
+  valve.open: {type: analog, default: 0, min: 0, max: 1}
+states:
+  tank.level: {ode: "0.5 * valve.open - 0.2 * sqrt(max(tank.level, 0))", init: 2.5, min: 0, max: 10, units: m}
+outputs:
+  tank.level: {type: analog}
+  tank.high:  {type: binary, expr: "tank.level > 3"}
+helics:
+  name: tank
+  broker: tcp://127.0.0.1:23404
+  subscribe:
+    - {key: ctl/valve, tag: valve.open}
+  publish:
+    - {tag: tank.level, key: tank/level}
+    - {tag: tank.high,  key: tank/high}

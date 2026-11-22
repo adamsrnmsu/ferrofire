@@ -113,6 +113,7 @@ flowchart LR
 | Coupling | `power.drive`: process values set loads, e.g. pump flow sets a bus load in MW |
 | Generator Q limits | `power: {enforce_q_lims: true}` holds a PV or slack generator to its `mvar_min`/`mvar_max` (PYPOWER `ENFORCE_Q_LIMS`); off by default, as sceptre runs PyPower |
 | Ground-truth page | `ferrofire run --gt-addr 127.0.0.1:8080`: live tag table with value, age and staleness, and `/tags.json`; read-only, off by default (replaces `simulinkgt`) |
+| HELICS federate | a `helics:` section in the model makes `ferrofire run` join a HELICS federation: its engine steps on the grants, subscriptions write model inputs, publications carry tags ([docs/helics.md](docs/helics.md), worked example in [bench/helics](bench/helics/README.md)); libhelics is loaded at run time, nothing to link |
 | Islands | `deenergize` (zero the voltage on dead buses) or `fail` (raise `bus-alert`, PyPower behaviour) |
 | Tags | Waterway tags and the full PYPOWER/pybennu tag vocabulary (`bus-N.voltage`, `branch-1_F-T.active`, ...) |
 
@@ -123,6 +124,7 @@ flowchart LR
 | Native bennu provider | `ferrofire run model.yaml` | REP on tcp + UDP RADIO/DISH multicast | any bennu provider |
 | Simulink adapter | `simulinksolver -tf inf` (or `ferrofire simulink`) | SysV shm + POSIX semaphores to stock `bennu-simulink-provider` | the Simulink solver binary |
 | PyPower drop-in | `pybennu-power-solver start -c config.ini` (or `ferrofire pypower`) | same INI, pidfile, logs and ZMQ as pybennu | `pybennu-power-solver` |
+| HELICS federate | `ferrofire run model.yaml` with a `helics:` section | HELICS 3 value federate (zmq, tcp, ...) in lock-step with the engine, REP and datagrams as usual | a pybennu HELICS provider process, for value exchange |
 | Ground truth monitor | `ferrofire groundtruth -c config.ini start` | the provider's UDP datagrams in, Elasticsearch/OpenSearch `bennu-YYYY.MM.DD` out | `pybennu-groundtruth-monitor` |
 
 ## Transports

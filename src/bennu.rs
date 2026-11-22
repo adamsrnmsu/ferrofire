@@ -418,6 +418,7 @@ const USAGE: &str = "ferrofire run [model.yaml | --model model.yaml] [--server t
 
 pub fn main(args: RunArgs) {
     exit_on_err("run", USAGE, run(args));
+    crate::helics::finish();
 }
 
 /// A subcommand's failure: `ferrofire <cmd>: <error>` and its usage on stderr, exit 1.
@@ -463,6 +464,8 @@ pub struct RunArgs {
     /// Print an `Applied:` line per accepted write: when it was applied and when the step that re-solved it finished (unix ns)
     #[arg(long)]
     pub stamp_writes: bool,
+    #[command(flatten)]
+    pub helics: crate::helics::Cli,
 }
 
 impl RunArgs {
@@ -735,7 +738,7 @@ pub fn tick_and_publish(
 }
 
 /// Engine: tick in real time (one model step per `dt` of wall clock) until `STOP`.
-fn engine(model: &mut Model, sh: &Mutex<Shared>, targets: &[Target], every: u64) {
+pub fn engine(model: &mut Model, sh: &Mutex<Shared>, targets: &[Target], every: u64) {
     let t0 = Instant::now();
     let mut k = 0u64;
     let mut snap = vec![];
@@ -822,9 +825,9 @@ fn run(a: RunArgs) -> Result<(), String> {
             .join("; ")
     );
     let every = ((period / model.dt).round() as u64).max(1);
-    engine(&mut model, &sh, &targets, every);
+    let ran = crate::helics::run_engine(&a.helics, a.path(), &mut model, &sh, &targets, every);
     let _ = rep_t.join();
     crate::log::stop();
     println!("Info: stopped");
-    Ok(())
+    ran
 }

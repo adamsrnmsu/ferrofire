@@ -24,3 +24,14 @@ RUN curl -sSfL "https://github.com/EmbarkStudios/cargo-deny/releases/download/${
 RUN rustup toolchain install nightly --profile minimal && cargo install --locked cargo-fuzz
 # MQTT tests (tests/mqtt_net.rs) start a real Mosquitto broker as a child process; openssl makes the throwaway CA for the TLS case.
 RUN apt-retry --no-install-recommends mosquitto mosquitto-clients openssl && rm -rf /var/lib/apt/lists/*
+# HELICS (BSD-3-Clause) for the `helics` feature's tests: libhelics is dlopen'd at run time, never linked (docs/superpowers/specs/2026-11-21-helics-federate-design.md).
+# The shared release bundles libzmq (rpath) and needs only glibc; pinned by sha256 per architecture.
+ARG HELICS=3.7.1
+RUN case "$(uname -m)" in \
+      aarch64) sha=32e8fbf63525c6f00ff580bd6281fa5372683ca8194dd328f1a0c3a0c01a1120 ;; \
+      x86_64)  sha=6f4ad54f1330ecdec951661be7c3851fa055febdf7cb9e6d3753cbff9b4d1a8d ;; \
+    esac \
+ && curl -sSfL -o /tmp/helics.tgz "https://github.com/GMLC-TDC/HELICS/releases/download/v${HELICS}/Helics-shared-${HELICS}-Linux-$(uname -m).tar.gz" \
+ && echo "$sha  /tmp/helics.tgz" | sha256sum -c - \
+ && mkdir /opt/helics && tar xzf /tmp/helics.tgz -C /opt/helics --strip-components=1 && rm /tmp/helics.tgz
+ENV FERROFIRE_HELICS_LIB=/opt/helics/lib64/libhelics.so

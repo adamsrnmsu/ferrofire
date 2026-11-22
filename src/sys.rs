@@ -20,6 +20,12 @@ pub fn kill(pid: i32, sig: i32) -> bool {
     unsafe { libc::kill(pid, sig) == 0 }
 }
 
+/// `_exit(2)`: end the process now, without running atexit handlers or destructors (some of which can block).
+pub fn exit_now(code: i32) -> ! {
+    // SAFETY: _exit takes an integer and never returns.
+    unsafe { libc::_exit(code) }
+}
+
 pub fn getuid() -> u32 {
     // SAFETY: getuid cannot fail and takes no pointers.
     unsafe { libc::getuid() }

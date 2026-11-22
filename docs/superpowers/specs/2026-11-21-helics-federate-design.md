@@ -1,6 +1,6 @@
 # `ferrofire run` as a HELICS federate (design, ww-7mw.4)
 
-Status: design and feasibility only. No product code in this step. The risky part (load libhelics from a Rust binary built in
+Status: implemented in ww-7mw.4 (see "Corrections found while implementing" at the end; user documentation is docs/helics.md). The risky part (load libhelics from a Rust binary built in
 `ff-rust:22.04`, join a broker, exchange values with a second federate) was proved in scratch space; results are in "Feasibility".
 
 ## Goal
@@ -208,3 +208,32 @@ translators, federate-info JSON passthrough (`helicsCreateValueFederateFromConfi
 3. `bench/helics` worked example, `make helics`, README section.
 4. Message endpoints (pybennu provider parity) and `RequestTimeIterative`.
 5. Stuck-peer shutdown behaviour (async request plus signal poll).
+
+## Corrections found while implementing (ww-7mw.4)
+
+The design held; these details changed:
+
+- **Stuck peer / SIGTERM** (the open point above): the grant wait is `helicsFederateRequestTimeAsync` plus a 200 us poll of
+  `helicsFederateIsAsyncOperationCompleted` that checks the stop flag; `EnterExecutingMode` is waited for the same way (startup also
+  blocks until every federate joined). A stop during either leaves the federate abandoned: `helicsFederateFinalize` and libhelics'
+  exit handlers then block forever (measured: the process printed `Info: stopped` and never exited), so `ffi` skips finalize and free
+  and `helics::finish()` ends the process with `_exit` (new `sys::exit_now`). No `--helics-timeout` flag.
+- **Federation end**: HELICS does not return `HELICS_TIME_MAXTIME` to a federate whose peers have finalized; it free-runs. A run ends
+  on SIGINT/SIGTERM (the grant loop still stops on a MAXTIME grant, for a federation that closes down). The integration test and
+  `bench/helics` stop ferrofire with SIGTERM after the peer finishes.
+- **Loop order**: read subscriptions, publish the state at this instant (before the tick's writes), tick(s), request. HELICS writes
+  are queued behind REP writes so they win. Federates are uninterruptible so a grant equals the request.
+- **No `ferrofire doctor` line**: `doctor` probes a provider over REP and does not load a model; `--helics-*` flags override the
+  section and need it (they do not stand in for one).
+- **Tests**: `tests/helics.rs` runs the broker (`helicsCreateBroker`, zmq on 127.0.0.1) and the second federate (same `ffi::Fed`)
+  in the test process and `ferrofire run` as a child process (the CLI path, SIGTERM, and the stuck-peer exit), plus the same exchange with the
+  engine in the test process (`helics::run_engine`), because coverage is not collected from a child that libhelics exits; no `inproc` core (not needed once the
+  child process is the federate under test). Broker ports are scanned below the ephemeral range (a busy suite fills it). The tests share one lock: two federations in one libhelics process cross-talk
+  ("duplicate federate name").
+- **Worked example**: one `ff-physics:22.04` container (broker, ferrofire, controller on loopback), not three containers on a private
+  network; `make helics`. libhelics for ferrofire there is the image's `/usr/local/lib/libhelics.so` (3.6.1), controller on the
+  same 3.6.1; the Python controller needs `LD_LIBRARY_PATH=/usr/local/lib` for pyzmq. The REP check holds ferrofire at a grant
+  and reads `tank.level`, comparing it with the value the controller receives next (the engine's REP snapshot at the held grant
+  is the state HELICS delivers one grant later).
+- **Dockerfile**: the HELICS layer is appended last, so a rebuild of `ff-rust:22.04` that hits the layer cache is a one-layer build
+  (verified as `FROM ff-rust:22.04` plus exactly those lines; a from-scratch rebuild was not repeated).
