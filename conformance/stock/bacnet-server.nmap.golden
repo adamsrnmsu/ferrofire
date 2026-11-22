@@ -1,0 +1,14 @@
+
+PORT      STATE SERVICE
+47808/udp open  bacnet
+| bacnet-info: 
+|   Vendor ID: BACnet Stack at SourceForge (260)
+|   Vendor Name: BACnet Stack at SourceForge
+|   Object-identifier: 1234
+|   Firmware: 0.99.1
+|   Application Software: 1.0
+|   Object Name: SimpleServer
+|   Model Name: GNU
+|   Description: server
+|_  Location: USA
+

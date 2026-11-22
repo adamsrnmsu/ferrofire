@@ -1,0 +1,499 @@
+## Who-Is
+WHO-IS global broadcast, no range -> I-Am device=device,1234 maxAPDU=1476 segmentation=no-segmentation vendor=260
+WHO-IS range 1234..1234 -> I-Am device=device,1234 maxAPDU=1476 segmentation=no-segmentation vendor=260
+WHO-IS range 0..1000 (miss) -> (no I-Am)
+WHO-IS unicast no range -> I-Am device=device,1234 maxAPDU=1476 segmentation=no-segmentation vendor=260
+## Device object
+RP  device,1234 object-identifier -> [device, 1234]
+RP  device,1234 object-name -> SimpleServer
+RP  device,1234 object-type -> device
+RP  device,1234 vendor-identifier -> 260
+RP  device,1234 vendor-name -> BACnet Stack at SourceForge
+RP  device,1234 model-name -> GNU
+RP  device,1234 protocol-version -> 1
+RP  device,1234 protocol-revision -> 19
+RP  device,1234 protocol-services-supported -> [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+RP  device,1234 protocol-object-types-supported -> [1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+RP  device,1234 max-apdu-length-accepted -> 1476
+RP  device,1234 segmentation-supported -> no-segmentation
+RP  device,1234 system-status -> operational
+RP  device,1234 application-software-version -> 1.0
+RP  device,1234 firmware-revision -> 0.99.1
+RP  device,1234 description -> server
+RP  device,1234 location -> USA
+RP  device,1234 database-revision -> 1
+RP  device,1234 number-of-apdu-retries -> 3
+RP  device,1234 apdu-timeout -> 3000
+RP  device,1234 device-address-binding -> []
+RP  device,1234 object-list -> ABORT reason=segmentation-not-supported
+RP  device,1234 object-list[0] -> 4074
+RP  device,1234 object-list[1] -> [device, 1234]
+RP  device,1234 object-list[9] -> [analog-input, 6]
+RP  device,1234 object-list[99999] -> ERROR class=property code=invalid-array-index
+RP  device,1234 high-limit -> ERROR class=property code=unknown-property
+RP  device,1234 object-list[0] -> 4074
+OBJECT-LIST count=4074 runs=device 1234..1234; network-port 1..1; analog-input 0..999; analog-output 0..999; analog-value 0..3; binary-input 0..999; binary-output 0..999; binary-value 0..9; characterstring-value 0..0; command 0..3; integer-value 1..1; life-safety-point 0..6; load-control 0..3; multi-state-input 0..3; multi-state-output 0..3; multi-state-value 0..3; trend-log 0..7; lighting-output 1..8; channel 1..1; octetstring-value 0..3; positive-integer-value 0..3; schedule 0..3
+RPM [('device,1234', ['object-name', 'vendor-identifier', 'system-status'])] -> [[[device, 1234], object-name, None, SimpleServer], [[device, 1234], vendor-identifier, None, 260], [[device, 1234], system-status, None, operational]]
+RPM [('device,1234', ['all'])] -> ABORT reason=segmentation-not-supported
+RPM [('device,1234', ['required'])] -> ABORT reason=segmentation-not-supported
+## Configured objects
+RP  binary-input,0 object-identifier -> [binary-input, 0]
+RP  binary-input,0 object-name -> BINARY INPUT 0
+RP  binary-input,0 object-type -> binary-input
+RP  binary-input,0 present-value -> inactive
+RP  binary-input,0 status-flags -> [0, 0, 0, 0]
+RP  binary-input,0 description -> BINARY INPUT 0
+RP  binary-input,0 units -> ERROR class=property code=unknown-property
+RP  binary-input,0 out-of-service -> 0
+RP  binary-input,0 event-state -> normal
+RP  binary-input,0 reliability -> ERROR class=property code=unknown-property
+RP  binary-input,0 polarity -> normal
+RP  binary-input,0 priority-array -> ERROR class=property code=unknown-property
+RP  binary-input,0 relinquish-default -> ERROR class=property code=unknown-property
+RP  binary-input,0 active-text -> ERROR class=property code=unknown-property
+RP  binary-input,0 inactive-text -> ERROR class=property code=unknown-property
+RP  binary-input,0 cov-increment -> ERROR class=property code=unknown-property
+RP  binary-input,0 number-of-states -> ERROR class=property code=unknown-property
+RP  binary-input,1 object-identifier -> [binary-input, 1]
+RP  binary-input,1 object-name -> BINARY INPUT 1
+RP  binary-input,1 object-type -> binary-input
+RP  binary-input,1 present-value -> inactive
+RP  binary-input,1 status-flags -> [0, 0, 0, 0]
+RP  binary-input,1 description -> BINARY INPUT 1
+RP  binary-input,1 units -> ERROR class=property code=unknown-property
+RP  binary-input,1 out-of-service -> 0
+RP  binary-input,1 event-state -> normal
+RP  binary-input,1 reliability -> ERROR class=property code=unknown-property
+RP  binary-input,1 polarity -> normal
+RP  binary-input,1 priority-array -> ERROR class=property code=unknown-property
+RP  binary-input,1 relinquish-default -> ERROR class=property code=unknown-property
+RP  binary-input,1 active-text -> ERROR class=property code=unknown-property
+RP  binary-input,1 inactive-text -> ERROR class=property code=unknown-property
+RP  binary-input,1 cov-increment -> ERROR class=property code=unknown-property
+RP  binary-input,1 number-of-states -> ERROR class=property code=unknown-property
+RP  binary-output,2 object-identifier -> [binary-output, 2]
+RP  binary-output,2 object-name -> BINARY OUTPUT 2
+RP  binary-output,2 object-type -> binary-output
+RP  binary-output,2 present-value -> inactive
+RP  binary-output,2 status-flags -> [0, 0, 0, 0]
+RP  binary-output,2 description -> BINARY OUTPUT 2
+RP  binary-output,2 units -> ERROR class=property code=unknown-property
+RP  binary-output,2 out-of-service -> 0
+RP  binary-output,2 event-state -> normal
+RP  binary-output,2 reliability -> ERROR class=property code=unknown-property
+RP  binary-output,2 polarity -> normal
+RP  binary-output,2 priority-array -> [inactive, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -]
+RP  binary-output,2 relinquish-default -> inactive
+RP  binary-output,2 active-text -> on
+RP  binary-output,2 inactive-text -> off
+RP  binary-output,2 cov-increment -> ERROR class=property code=unknown-property
+RP  binary-output,2 number-of-states -> ERROR class=property code=unknown-property
+RP  binary-output,3 object-identifier -> [binary-output, 3]
+RP  binary-output,3 object-name -> BINARY OUTPUT 3
+RP  binary-output,3 object-type -> binary-output
+RP  binary-output,3 present-value -> inactive
+RP  binary-output,3 status-flags -> [0, 0, 0, 0]
+RP  binary-output,3 description -> BINARY OUTPUT 3
+RP  binary-output,3 units -> ERROR class=property code=unknown-property
+RP  binary-output,3 out-of-service -> 0
+RP  binary-output,3 event-state -> normal
+RP  binary-output,3 reliability -> ERROR class=property code=unknown-property
+RP  binary-output,3 polarity -> normal
+RP  binary-output,3 priority-array -> [inactive, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -]
+RP  binary-output,3 relinquish-default -> inactive
+RP  binary-output,3 active-text -> on
+RP  binary-output,3 inactive-text -> off
+RP  binary-output,3 cov-increment -> ERROR class=property code=unknown-property
+RP  binary-output,3 number-of-states -> ERROR class=property code=unknown-property
+RP  analog-input,0 object-identifier -> [analog-input, 0]
+RP  analog-input,0 object-name -> ANALOG INPUT 0
+RP  analog-input,0 object-type -> analog-input
+RP  analog-input,0 present-value -> 0.0000
+RP  analog-input,0 status-flags -> [0, 0, 0, 0]
+RP  analog-input,0 description -> ANALOG INPUT 0
+RP  analog-input,0 units -> percent
+RP  analog-input,0 out-of-service -> 0
+RP  analog-input,0 event-state -> normal
+RP  analog-input,0 reliability -> no-fault-detected
+RP  analog-input,0 polarity -> ERROR class=property code=unknown-property
+RP  analog-input,0 priority-array -> ERROR class=property code=unknown-property
+RP  analog-input,0 relinquish-default -> ERROR class=property code=unknown-property
+RP  analog-input,0 active-text -> ERROR class=property code=unknown-property
+RP  analog-input,0 inactive-text -> ERROR class=property code=unknown-property
+RP  analog-input,0 cov-increment -> 1.0000
+RP  analog-input,0 number-of-states -> ERROR class=property code=unknown-property
+RP  analog-input,1 object-identifier -> [analog-input, 1]
+RP  analog-input,1 object-name -> ANALOG INPUT 1
+RP  analog-input,1 object-type -> analog-input
+RP  analog-input,1 present-value -> 0.0000
+RP  analog-input,1 status-flags -> [0, 0, 0, 0]
+RP  analog-input,1 description -> ANALOG INPUT 1
+RP  analog-input,1 units -> percent
+RP  analog-input,1 out-of-service -> 0
+RP  analog-input,1 event-state -> normal
+RP  analog-input,1 reliability -> no-fault-detected
+RP  analog-input,1 polarity -> ERROR class=property code=unknown-property
+RP  analog-input,1 priority-array -> ERROR class=property code=unknown-property
+RP  analog-input,1 relinquish-default -> ERROR class=property code=unknown-property
+RP  analog-input,1 active-text -> ERROR class=property code=unknown-property
+RP  analog-input,1 inactive-text -> ERROR class=property code=unknown-property
+RP  analog-input,1 cov-increment -> 1.0000
+RP  analog-input,1 number-of-states -> ERROR class=property code=unknown-property
+RP  analog-output,2 object-identifier -> [analog-output, 2]
+RP  analog-output,2 object-name -> ANALOG OUTPUT 2
+RP  analog-output,2 object-type -> analog-output
+RP  analog-output,2 present-value -> 0.0000
+RP  analog-output,2 status-flags -> [0, 0, 0, 0]
+RP  analog-output,2 description -> ERROR class=property code=unknown-property
+RP  analog-output,2 units -> percent
+RP  analog-output,2 out-of-service -> 0
+RP  analog-output,2 event-state -> normal
+RP  analog-output,2 reliability -> ERROR class=property code=unknown-property
+RP  analog-output,2 polarity -> ERROR class=property code=unknown-property
+RP  analog-output,2 priority-array -> [-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, 0.0]
+RP  analog-output,2 relinquish-default -> 0.0000
+RP  analog-output,2 active-text -> ERROR class=property code=unknown-property
+RP  analog-output,2 inactive-text -> ERROR class=property code=unknown-property
+RP  analog-output,2 cov-increment -> ERROR class=property code=unknown-property
+RP  analog-output,2 number-of-states -> ERROR class=property code=unknown-property
+RP  analog-output,3 object-identifier -> [analog-output, 3]
+RP  analog-output,3 object-name -> ANALOG OUTPUT 3
+RP  analog-output,3 object-type -> analog-output
+RP  analog-output,3 present-value -> 0.0000
+RP  analog-output,3 status-flags -> [0, 0, 0, 0]
+RP  analog-output,3 description -> ERROR class=property code=unknown-property
+RP  analog-output,3 units -> percent
+RP  analog-output,3 out-of-service -> 0
+RP  analog-output,3 event-state -> normal
+RP  analog-output,3 reliability -> ERROR class=property code=unknown-property
+RP  analog-output,3 polarity -> ERROR class=property code=unknown-property
+RP  analog-output,3 priority-array -> [-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, 0.0]
+RP  analog-output,3 relinquish-default -> 0.0000
+RP  analog-output,3 active-text -> ERROR class=property code=unknown-property
+RP  analog-output,3 inactive-text -> ERROR class=property code=unknown-property
+RP  analog-output,3 cov-increment -> ERROR class=property code=unknown-property
+RP  analog-output,3 number-of-states -> ERROR class=property code=unknown-property
+RPM [('binary-input,0', ['object-name', 'present-value', 'status-flags'])] -> [[[binary-input, 0], object-name, None, BINARY INPUT 0], [[binary-input, 0], present-value, None, inactive], [[binary-input, 0], status-flags, None, [0, 0, 0, 0]]]
+RPM [('binary-input,1', ['object-name', 'present-value', 'status-flags'])] -> [[[binary-input, 1], object-name, None, BINARY INPUT 1], [[binary-input, 1], present-value, None, inactive], [[binary-input, 1], status-flags, None, [0, 0, 0, 0]]]
+RPM [('binary-output,2', ['object-name', 'present-value', 'status-flags'])] -> [[[binary-output, 2], object-name, None, BINARY OUTPUT 2], [[binary-output, 2], present-value, None, inactive], [[binary-output, 2], status-flags, None, [0, 0, 0, 0]]]
+RPM [('binary-output,3', ['object-name', 'present-value', 'status-flags'])] -> [[[binary-output, 3], object-name, None, BINARY OUTPUT 3], [[binary-output, 3], present-value, None, inactive], [[binary-output, 3], status-flags, None, [0, 0, 0, 0]]]
+RPM [('analog-input,0', ['object-name', 'present-value', 'status-flags'])] -> [[[analog-input, 0], object-name, None, ANALOG INPUT 0], [[analog-input, 0], present-value, None, 0.0000], [[analog-input, 0], status-flags, None, [0, 0, 0, 0]]]
+RPM [('analog-input,1', ['object-name', 'present-value', 'status-flags'])] -> [[[analog-input, 1], object-name, None, ANALOG INPUT 1], [[analog-input, 1], present-value, None, 0.0000], [[analog-input, 1], status-flags, None, [0, 0, 0, 0]]]
+RPM [('analog-output,2', ['object-name', 'present-value', 'status-flags'])] -> [[[analog-output, 2], object-name, None, ANALOG OUTPUT 2], [[analog-output, 2], present-value, None, 0.0000], [[analog-output, 2], status-flags, None, [0, 0, 0, 0]]]
+RPM [('analog-output,3', ['object-name', 'present-value', 'status-flags'])] -> [[[analog-output, 3], object-name, None, ANALOG OUTPUT 3], [[analog-output, 3], present-value, None, 0.0000], [[analog-output, 3], status-flags, None, [0, 0, 0, 0]]]
+RPM [('binary-input,0', ['present-value', 'status-flags']), ('binary-input,1', ['present-value', 'status-flags']), ('binary-output,2', ['present-value', 'status-flags']), ('binary-output,3', ['present-value', 'status-flags']), ('analog-input,0', ['present-value', 'status-flags']), ('analog-input,1', ['present-value', 'status-flags']), ('analog-output,2', ['present-value', 'status-flags']), ('analog-output,3', ['present-value', 'status-flags'])] -> [[[binary-input, 0], present-value, None, inactive], [[binary-input, 0], status-flags, None, [0, 0, 0, 0]], [[binary-input, 1], present-value, None, inactive], [[binary-input, 1], status-flags, None, [0, 0, 0, 0]], [[binary-output, 2], present-value, None, inactive], [[binary-output, 2], status-flags, None, [0, 0, 0, 0]], [[binary-output, 3], present-value, None, inactive], [[binary-output, 3], status-flags, None, [0, 0, 0, 0]], [[analog-input, 0], present-value, None, 0.0000], [[analog-input, 0], status-flags, None, [0, 0, 0, 0]], [[analog-input, 1], present-value, None, 0.0000], [[analog-input, 1], status-flags, None, [0, 0, 0, 0]], [[analog-output, 2], present-value, None, 0.0000], [[analog-output, 2], status-flags, None, [0, 0, 0, 0]], [[analog-output, 3], present-value, None, 0.0000], [[analog-output, 3], status-flags, None, [0, 0, 0, 0]]]
+RPM-ALL analog-input,0 object-identifier -> 4e c400000000 4f
+RPM-ALL analog-input,0 object-name -> 4e 750f00414e414c4f4720494e5055542030 4f
+RPM-ALL analog-input,0 object-type -> 4e 9100 4f
+RPM-ALL analog-input,0 present-value -> 4e 4400000000 4f
+RPM-ALL analog-input,0 status-flags -> 4e 820400 4f
+RPM-ALL analog-input,0 event-state -> 4e 9100 4f
+RPM-ALL analog-input,0 out-of-service -> 4e 10 4f
+RPM-ALL analog-input,0 units -> 4e 9162 4f
+RPM-ALL analog-input,0 description -> 4e 750f00414e414c4f4720494e5055542030 4f
+RPM-ALL analog-input,0 reliability -> 4e 9100 4f
+RPM-ALL analog-input,0 cov-increment -> 4e 443f800000 4f
+RPM-ALL analog-input,0 9997 -> 4e 4442b5051f 4f
+RPM-ALL analog-input,0 9998 -> 4e 215a 4f
+RPM-ALL analog-input,0 9999 -> 4e 32ff38 4f
+RPM-ALL analog-input,1 object-identifier -> 4e c400000001 4f
+RPM-ALL analog-input,1 object-name -> 4e 750f00414e414c4f4720494e5055542031 4f
+RPM-ALL analog-input,1 object-type -> 4e 9100 4f
+RPM-ALL analog-input,1 present-value -> 4e 4400000000 4f
+RPM-ALL analog-input,1 status-flags -> 4e 820400 4f
+RPM-ALL analog-input,1 event-state -> 4e 9100 4f
+RPM-ALL analog-input,1 out-of-service -> 4e 10 4f
+RPM-ALL analog-input,1 units -> 4e 9162 4f
+RPM-ALL analog-input,1 description -> 4e 750f00414e414c4f4720494e5055542031 4f
+RPM-ALL analog-input,1 reliability -> 4e 9100 4f
+RPM-ALL analog-input,1 cov-increment -> 4e 443f800000 4f
+RPM-ALL analog-input,1 9997 -> 4e 4442b5051f 4f
+RPM-ALL analog-input,1 9998 -> 4e 215a 4f
+RPM-ALL analog-input,1 9999 -> 4e 32ff38 4f
+RPM-ALL analog-input,500 object-identifier -> 4e c4000001f4 4f
+RPM-ALL analog-input,500 object-name -> 4e 751100414e414c4f4720494e50555420353030 4f
+RPM-ALL analog-input,500 object-type -> 4e 9100 4f
+RPM-ALL analog-input,500 present-value -> 4e 4400000000 4f
+RPM-ALL analog-input,500 status-flags -> 4e 820400 4f
+RPM-ALL analog-input,500 event-state -> 4e 9100 4f
+RPM-ALL analog-input,500 out-of-service -> 4e 10 4f
+RPM-ALL analog-input,500 units -> 4e 9162 4f
+RPM-ALL analog-input,500 description -> 4e 751100414e414c4f4720494e50555420353030 4f
+RPM-ALL analog-input,500 reliability -> 4e 9100 4f
+RPM-ALL analog-input,500 cov-increment -> 4e 443f800000 4f
+RPM-ALL analog-input,500 9997 -> 4e 4442b5051f 4f
+RPM-ALL analog-input,500 9998 -> 4e 215a 4f
+RPM-ALL analog-input,500 9999 -> 4e 32ff38 4f
+RPM-ALL analog-output,2 object-identifier -> 4e c400400002 4f
+RPM-ALL analog-output,2 object-name -> 4e 751000414e414c4f47204f55545055542032 4f
+RPM-ALL analog-output,2 object-type -> 4e 9101 4f
+RPM-ALL analog-output,2 present-value -> 4e 4400000000 4f
+RPM-ALL analog-output,2 status-flags -> 4e 820400 4f
+RPM-ALL analog-output,2 event-state -> 4e 9100 4f
+RPM-ALL analog-output,2 out-of-service -> 4e 10 4f
+RPM-ALL analog-output,2 units -> 4e 9162 4f
+RPM-ALL analog-output,2 priority-array -> 4e 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 4400000000 4f
+RPM-ALL analog-output,2 relinquish-default -> 4e 4400000000 4f
+RPM-ALL binary-input,0 object-identifier -> 4e c400c00000 4f
+RPM-ALL binary-input,0 object-name -> 4e 750f0042494e41525920494e5055542030 4f
+RPM-ALL binary-input,0 object-type -> 4e 9103 4f
+RPM-ALL binary-input,0 present-value -> 4e 9100 4f
+RPM-ALL binary-input,0 status-flags -> 4e 820400 4f
+RPM-ALL binary-input,0 event-state -> 4e 9100 4f
+RPM-ALL binary-input,0 out-of-service -> 4e 10 4f
+RPM-ALL binary-input,0 polarity -> 4e 9100 4f
+RPM-ALL binary-input,0 description -> 4e 750f0042494e41525920494e5055542030 4f
+RPM-ALL binary-output,2 object-identifier -> 4e c401000002 4f
+RPM-ALL binary-output,2 object-name -> 4e 75100042494e415259204f55545055542032 4f
+RPM-ALL binary-output,2 object-type -> 4e 9104 4f
+RPM-ALL binary-output,2 present-value -> 4e 9100 4f
+RPM-ALL binary-output,2 status-flags -> 4e 820400 4f
+RPM-ALL binary-output,2 event-state -> 4e 9100 4f
+RPM-ALL binary-output,2 out-of-service -> 4e 10 4f
+RPM-ALL binary-output,2 polarity -> 4e 9100 4f
+RPM-ALL binary-output,2 priority-array -> 4e 9100 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 4f
+RPM-ALL binary-output,2 relinquish-default -> 4e 9100 4f
+RPM-ALL binary-output,2 description -> 4e 75100042494e415259204f55545055542032 4f
+RPM-ALL binary-output,2 active-text -> 4e 73006f6e 4f
+RPM-ALL binary-output,2 inactive-text -> 4e 74006f6666 4f
+RPM [('analog-output,2', ['present-value']), ('analog-value,5', ['present-value']), ('analog-output,3', ['high-limit'])] -> [[[analog-output, 2], present-value, None, 0.0000], [[analog-value, 5], present-value, None, ERROR class=object code=unknown-object], [[analog-output, 3], high-limit, None, ERROR class=property code=unknown-property]]
+## Property sweep (every property id 0..260, tags as sent)
+RP-RAW device,1234 11 -> 3e 220bb8 3f
+RP-RAW device,1234 12 -> 3e 7400312e30 3f
+RP-RAW device,1234 24 -> 3e 10 3f
+RP-RAW device,1234 28 -> 3e 750700736572766572 3f
+RP-RAW device,1234 30 -> 3e 3f
+RP-RAW device,1234 44 -> 3e 750700302e39392e31 3f
+RP-RAW device,1234 58 -> 3e 7400555341 3f
+RP-RAW device,1234 62 -> 3e 2205c4 3f
+RP-RAW device,1234 70 -> 3e 7400474e55 3f
+RP-RAW device,1234 73 -> 3e 2103 3f
+RP-RAW device,1234 75 -> 3e c4020004d2 3f
+RP-RAW device,1234 76 -> ABORT reason=segmentation-not-supported
+RP-RAW device,1234 77 -> 3e 750d0053696d706c65536572766572 3f
+RP-RAW device,1234 79 -> 3e 9108 3f
+RP-RAW device,1234 96 -> 3e 850904fd865c0800858680 3f
+RP-RAW device,1234 97 -> 3e 850704000bc0203000 3f
+RP-RAW device,1234 98 -> 3e 2101 3f
+RP-RAW device,1234 107 -> 3e 9103 3f
+RP-RAW device,1234 112 -> 3e 9100 3f
+RP-RAW device,1234 119 -> 3e 3100 3f
+RP-RAW device,1234 120 -> 3e 220104 3f
+RP-RAW device,1234 121 -> 3e 751c004241436e657420537461636b20617420536f75726365466f726765 3f
+RP-RAW device,1234 139 -> 3e 2113 3f
+RP-RAW device,1234 152 -> 3e 3f
+RP-RAW device,1234 155 -> 3e 2101 3f
+RP-RAW analog-input,0 22 -> 3e 443f800000 3f
+RP-RAW analog-input,0 28 -> 3e 750f00414e414c4f4720494e5055542030 3f
+RP-RAW analog-input,0 36 -> 3e 9100 3f
+RP-RAW analog-input,0 75 -> 3e c400000000 3f
+RP-RAW analog-input,0 77 -> 3e 750f00414e414c4f4720494e5055542030 3f
+RP-RAW analog-input,0 79 -> 3e 9100 3f
+RP-RAW analog-input,0 81 -> 3e 10 3f
+RP-RAW analog-input,0 85 -> 3e 4400000000 3f
+RP-RAW analog-input,0 103 -> 3e 9100 3f
+RP-RAW analog-input,0 111 -> 3e 820400 3f
+RP-RAW analog-input,0 117 -> 3e 9162 3f
+RP-RAW analog-output,2 36 -> 3e 9100 3f
+RP-RAW analog-output,2 75 -> 3e c400400002 3f
+RP-RAW analog-output,2 77 -> 3e 751000414e414c4f47204f55545055542032 3f
+RP-RAW analog-output,2 79 -> 3e 9101 3f
+RP-RAW analog-output,2 81 -> 3e 10 3f
+RP-RAW analog-output,2 85 -> 3e 4400000000 3f
+RP-RAW analog-output,2 87 -> 3e 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 4400000000 3f
+RP-RAW analog-output,2 104 -> 3e 4400000000 3f
+RP-RAW analog-output,2 111 -> 3e 820400 3f
+RP-RAW analog-output,2 117 -> 3e 9162 3f
+RP-RAW binary-input,0 28 -> 3e 750f0042494e41525920494e5055542030 3f
+RP-RAW binary-input,0 36 -> 3e 9100 3f
+RP-RAW binary-input,0 75 -> 3e c400c00000 3f
+RP-RAW binary-input,0 77 -> 3e 750f0042494e41525920494e5055542030 3f
+RP-RAW binary-input,0 79 -> 3e 9103 3f
+RP-RAW binary-input,0 81 -> 3e 10 3f
+RP-RAW binary-input,0 84 -> 3e 9100 3f
+RP-RAW binary-input,0 85 -> 3e 9100 3f
+RP-RAW binary-input,0 111 -> 3e 820400 3f
+RP-RAW binary-output,2 4 -> 3e 73006f6e 3f
+RP-RAW binary-output,2 28 -> 3e 75100042494e415259204f55545055542032 3f
+RP-RAW binary-output,2 36 -> 3e 9100 3f
+RP-RAW binary-output,2 46 -> 3e 74006f6666 3f
+RP-RAW binary-output,2 75 -> 3e c401000002 3f
+RP-RAW binary-output,2 77 -> 3e 75100042494e415259204f55545055542032 3f
+RP-RAW binary-output,2 79 -> 3e 9104 3f
+RP-RAW binary-output,2 81 -> 3e 10 3f
+RP-RAW binary-output,2 84 -> 3e 9100 3f
+RP-RAW binary-output,2 85 -> 3e 9100 3f
+RP-RAW binary-output,2 87 -> 3e 9100 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 3f
+RP-RAW binary-output,2 104 -> 3e 9100 3f
+RP-RAW binary-output,2 111 -> 3e 820400 3f
+RP-RAW analog-input,500 22 -> 3e 443f800000 3f
+RP-RAW analog-input,500 28 -> 3e 751100414e414c4f4720494e50555420353030 3f
+RP-RAW analog-input,500 36 -> 3e 9100 3f
+RP-RAW analog-input,500 75 -> 3e c4000001f4 3f
+RP-RAW analog-input,500 77 -> 3e 751100414e414c4f4720494e50555420353030 3f
+RP-RAW analog-input,500 79 -> 3e 9100 3f
+RP-RAW analog-input,500 81 -> 3e 10 3f
+RP-RAW analog-input,500 85 -> 3e 4400000000 3f
+RP-RAW analog-input,500 103 -> 3e 9100 3f
+RP-RAW analog-input,500 111 -> 3e 820400 3f
+RP-RAW analog-input,500 117 -> 3e 9162 3f
+RP-RAW analog-value,0 22 -> 3e 443f800000 3f
+RP-RAW analog-value,0 28 -> 3e 750f00414e414c4f472056414c55452030 3f
+RP-RAW analog-value,0 36 -> 3e 9100 3f
+RP-RAW analog-value,0 75 -> 3e c400800000 3f
+RP-RAW analog-value,0 77 -> 3e 750f00414e414c4f472056414c55452030 3f
+RP-RAW analog-value,0 79 -> 3e 9102 3f
+RP-RAW analog-value,0 81 -> 3e 10 3f
+RP-RAW analog-value,0 85 -> 3e 4400000000 3f
+RP-RAW analog-value,0 111 -> 3e 820400 3f
+RP-RAW analog-value,0 117 -> 3e 915f 3f
+RP-RAW binary-value,0 28 -> 3e 750f0042494e4152592056414c55452030 3f
+RP-RAW binary-value,0 36 -> 3e 9100 3f
+RP-RAW binary-value,0 75 -> 3e c401400000 3f
+RP-RAW binary-value,0 77 -> 3e 750f0042494e4152592056414c55452030 3f
+RP-RAW binary-value,0 79 -> 3e 9105 3f
+RP-RAW binary-value,0 81 -> 3e 10 3f
+RP-RAW binary-value,0 85 -> 3e 9100 3f
+RP-RAW binary-value,0 87 -> 3e 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 3f
+RP-RAW binary-value,0 104 -> 3e 9100 3f
+RP-RAW binary-value,0 111 -> 3e 820400 3f
+RP-RAW multi-state-input,0 28 -> 3e 7513004d554c5449535441544520494e5055542030 3f
+RP-RAW multi-state-input,0 36 -> 3e 9100 3f
+RP-RAW multi-state-input,0 74 -> 3e 21fe 3f
+RP-RAW multi-state-input,0 75 -> 3e c403400000 3f
+RP-RAW multi-state-input,0 77 -> 3e 7513004d554c5449535441544520494e5055542030 3f
+RP-RAW multi-state-input,0 79 -> 3e 910d 3f
+RP-RAW multi-state-input,0 81 -> 3e 10 3f
+RP-RAW multi-state-input,0 85 -> 3e 2101 3f
+RP-RAW multi-state-input,0 110 -> 3e 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 3f
+RP-RAW multi-state-input,0 111 -> 3e 820400 3f
+## Unknown objects and properties
+RP  analog-input,500 present-value -> 0.0000
+RP  analog-input,999 present-value -> 0.0000
+RP  analog-input,1000 present-value -> ERROR class=object code=unknown-object
+RP  analog-value,0 present-value -> 0.0000
+RP  binary-value,0 present-value -> inactive
+RP  multi-state-input,0 present-value -> 1
+RP  device,9999 present-value -> ERROR class=object code=unknown-object
+RP  analog-input,0 high-limit -> ERROR class=property code=unknown-property
+RP  analog-input,0 present-value[1] -> ERROR class=property code=property-is-not-an-array
+RP  analog-input,0 object-list -> ERROR class=property code=unknown-property
+RPM [('analog-input,500', ['present-value'])] -> [[[analog-input, 500], present-value, None, 0.0000]]
+RPM [('analog-input,0', ['present-value', 'high-limit'])] -> [[[analog-input, 0], present-value, None, 0.0000], [[analog-input, 0], high-limit, None, ERROR class=property code=unknown-property]]
+## WriteProperty
+-- before:
+RP  binary-output,2 present-value -> inactive
+-- before:
+RP  binary-output,3 present-value -> inactive
+-- before:
+RP  analog-output,2 present-value -> 0.0000
+-- before:
+RP  analog-output,3 present-value -> 0.0000
+WP  binary-output,2 present-value=active prio=8 -> ACK
+RP  binary-output,2 present-value -> inactive
+RP  binary-output,2 priority-array -> [inactive, -, -, -, -, -, -, active, -, -, -, -, -, -, -, -]
+WP  binary-output,3 present-value=active prio=None -> ACK
+RP  binary-output,3 present-value -> inactive
+WP  analog-output,2 present-value=42.5 prio=8 -> ACK
+RP  analog-output,2 present-value -> 42.0000
+RP  analog-output,2 priority-array -> [-, -, -, -, -, -, -, 42.0, -, -, -, -, -, -, -, 0.0]
+WP  analog-output,3 present-value=7.25 prio=None -> ACK
+RP  analog-output,3 present-value -> 7.0000
+WP  analog-output,3 present-value=9.5 prio=16 -> ACK
+RP  analog-output,3 present-value -> 9.0000
+-- never-configured outputs:
+RP  binary-output,500 present-value -> inactive
+RP  binary-output,500 priority-array -> [-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -]
+RP  analog-output,500 present-value -> 0.0000
+RP  analog-output,500 priority-array -> [-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -]
+-- 2.5 s later (1 Hz refresh from the datastore):
+RP  binary-output,2 present-value -> inactive
+RP  binary-output,3 present-value -> inactive
+RP  analog-output,2 present-value -> 42.0000
+RP  analog-output,3 present-value -> 0.0000
+-- writes to read-only and unknown targets:
+WP  analog-input,0 present-value=1.0 prio=None -> ERROR class=property code=write-access-denied
+WP  binary-input,0 present-value=active prio=None -> ACK
+WP  analog-output,2 object-name=renamed prio=None -> ERROR class=property code=write-access-denied
+WP  analog-output,2 high-limit=1.0 prio=None -> ERROR class=property code=unknown-property
+WP  analog-output,2 present-value=active prio=8 -> ACK
+WP  analog-value,0 present-value=1.0 prio=None -> ACK
+WP  analog-output,500 present-value=1.0 prio=8 -> ACK
+WP  binary-output,2 present-value=active prio=16 -> ACK
+RP  binary-output,2 present-value -> inactive
+RP  binary-output,2 priority-array -> [inactive, -, -, -, -, -, -, active, -, -, -, -, -, -, -, active]
+WP  analog-output,2 present-value=5.0 prio=0 -> ABORT reason=other
+WP  analog-output,2 present-value=5.0 prio=17 -> ABORT reason=other
+RP  analog-output,2 priority-array -> [-, -, -, -, -, -, -, 1.0, -, -, -, -, -, -, -, 0.0]
+-- AO range (stock keeps whole numbers):
+WP  analog-output,3 present-value=300.7 prio=9 -> ACK
+WP  analog-output,3 present-value=-5.0 prio=10 -> ERROR class=property code=value-out-of-range
+WP  analog-output,3 present-value=255.9 prio=11 -> ACK
+WP  analog-output,3 present-value=70000.0 prio=12 -> ACK
+RP  analog-output,3 priority-array -> [-, -, -, -, -, -, -, -, 44.0, -, -, 112.0, -, -, -, 0.0]
+-- relinquish (null) and after:
+WP  analog-output,2 present-value=() prio=8 -> ACK
+RP  analog-output,2 present-value -> 0.0000
+## Writes to the other object types
+WP  analog-value,1 present-value=2.5 prio=None -> ACK
+RP  analog-value,1 present-value -> 2.5000
+WP  analog-value,2 present-value=2.5 prio=8 -> ACK
+RP  analog-value,2 present-value -> 2.5000
+WP  binary-value,0 present-value=active prio=None -> ACK
+RP  binary-value,0 present-value -> active
+WP  binary-value,1 present-value=active prio=8 -> ACK
+RP  binary-value,1 present-value -> active
+WP  multi-state-value,0 present-value=2 prio=None -> ACK
+RP  multi-state-value,0 present-value -> 2
+WP  multi-state-input,0 present-value=3 prio=None -> ACK
+RP  multi-state-input,0 present-value -> 3
+WP  multi-state-output,0 present-value=2 prio=8 -> ACK
+RP  multi-state-output,0 present-value -> 2
+WP  positive-integer-value,0 present-value=5 prio=None -> ACK
+RP  positive-integer-value,0 present-value -> 5
+WP  characterstring-value,0 present-value=hello prio=None -> ACK
+RP  characterstring-value,0 present-value -> hello
+WP  integer-value,1 present-value=-4 prio=None -> ACK
+RP  integer-value,1 present-value -> -4
+## WritePropertyMultiple and ReadRange
+WPM analog-output,3 present-value=12.5 prio 9 -> ACK
+WPM analog-input,0 present-value=1.0 -> write-access-denied
+WPM analog-output,500 present-value=3.0 prio 9 -> ACK
+WPM analog-value,9 present-value=3.0 -> unknown-object
+WPM two objects, second unknown -> unknown-object
+WPM unknown property -> unknown-property
+RP  analog-output,3 priority-array -> [-, -, -, -, -, -, -, -, 1.0, -, -, 112.0, -, -, -, 0.0]
+WP  analog-output,3 present-value=() prio=9 -> ACK
+ReadRange device object-list 1..3 -> ERROR class=services code=property-is-not-a-list
+ReadRange analog-input,0 present-value -> ERROR class=services code=property-is-not-a-list
+ReadRange trend-log,0 log-buffer 1..3 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer 1..3    itemCount=3 first-seq=None flags=[1, 0, 0] data=5e 0e a46d020107 b400000000 0f 1e 2c00000000 1f 2a0400 0e a46d020107 b4000f0000 0f 1e 2c3f800000 1f 2a0400 0e a46d020107 b4001e0000 0f 1e 2c40000000 1f 2a0400 5f
+ReadRange analog-input,5000 present-value -> ERROR class=services code=property-is-not-a-list
+ReadRange analog-input,0 high-limit -> ERROR class=services code=property-is-not-a-list
+## Vendor properties
+RP-RAW analog-input,0 9997 -> 3e 4442b5051f 3f
+RP-RAW analog-input,0 9998 -> 3e 215a 3f
+RP-RAW analog-input,0 9999 -> 3e 32ff38 3f
+RP-RAW analog-output,2 9997 -> ERROR class=property code=unknown-property
+## Unsupported services
+ReinitializeDevice -> REJECT reason=unrecognized-service
+SubscribeCOV -> REJECT reason=unrecognized-service
+## DeviceCommunicationControl
+DCC enable duration=None pw=None -> ERROR class=security code=password-failure
+DCC disable duration=None pw=wrong -> ERROR class=security code=password-failure
+DCC enable duration=None pw=filister -> ACK
+RP  analog-input,0 present-value -> 0.0000
+DCC disable duration=None pw=filister -> ACK
+RP  analog-input,0 present-value -> TIMEOUT
+RP  device,1234 object-name -> TIMEOUT
+WHO-IS (disabled) -> (no I-Am)
+DCC enable duration=None pw=filister -> ACK
+RP  analog-input,0 present-value -> 0.0000
+DCC disable-initiation duration=None pw=filister -> ACK
+RP  analog-input,0 present-value -> 0.0000
+WHO-IS (disable-initiation) -> I-Am
+DCC disable duration=1 pw=filister -> ACK
+RP  analog-input,0 present-value -> TIMEOUT
+RP  analog-input,0 present-value -> TIMEOUT
+DCC enable duration=None pw=filister -> ACK
+## done

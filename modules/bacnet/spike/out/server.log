@@ -1,0 +1,35 @@
+bacnet spike server up, instance 1234 objects 4074
+ERROR:asyncio:Task exception was never retrieved
+future: <Task finished name='Task-4066' coro=<Object._post_init() done, defined at /usr/local/lib/python3.10/dist-packages/bacpypes3/local/object.py:405> exception=AttributeError("'StockOctetStringValueObject' object has no attribute 'notificationClass'")>
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.10/dist-packages/bacpypes3/local/object.py", line 414, in _post_init
+    notification_class = self.notificationClass
+  File "/usr/local/lib/python3.10/dist-packages/bacpypes3/constructeddata.py", line 342, in __getattr__
+    return object.__getattribute__(self, attr)
+AttributeError: 'StockOctetStringValueObject' object has no attribute 'notificationClass'
+ERROR:asyncio:Task exception was never retrieved
+future: <Task finished name='Task-4067' coro=<Object._post_init() done, defined at /usr/local/lib/python3.10/dist-packages/bacpypes3/local/object.py:405> exception=AttributeError("'StockOctetStringValueObject' object has no attribute 'notificationClass'")>
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.10/dist-packages/bacpypes3/local/object.py", line 414, in _post_init
+    notification_class = self.notificationClass
+  File "/usr/local/lib/python3.10/dist-packages/bacpypes3/constructeddata.py", line 342, in __getattr__
+    return object.__getattribute__(self, attr)
+AttributeError: 'StockOctetStringValueObject' object has no attribute 'notificationClass'
+ERROR:asyncio:Task exception was never retrieved
+future: <Task finished name='Task-4068' coro=<Object._post_init() done, defined at /usr/local/lib/python3.10/dist-packages/bacpypes3/local/object.py:405> exception=AttributeError("'StockOctetStringValueObject' object has no attribute 'notificationClass'")>
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.10/dist-packages/bacpypes3/local/object.py", line 414, in _post_init
+    notification_class = self.notificationClass
+  File "/usr/local/lib/python3.10/dist-packages/bacpypes3/constructeddata.py", line 342, in __getattr__
+    return object.__getattribute__(self, attr)
+AttributeError: 'StockOctetStringValueObject' object has no attribute 'notificationClass'
+ERROR:asyncio:Task exception was never retrieved
+future: <Task finished name='Task-4069' coro=<Object._post_init() done, defined at /usr/local/lib/python3.10/dist-packages/bacpypes3/local/object.py:405> exception=AttributeError("'StockOctetStringValueObject' object has no attribute 'notificationClass'")>
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.10/dist-packages/bacpypes3/local/object.py", line 414, in _post_init
+    notification_class = self.notificationClass
+  File "/usr/local/lib/python3.10/dist-packages/bacpypes3/constructeddata.py", line 342, in __getattr__
+    return object.__getattribute__(self, attr)
+AttributeError: 'StockOctetStringValueObject' object has no attribute 'notificationClass'
+WARNING:bacpypes3.ipv4.service.UDPMultiplexer:unsupported message
+WARNING:bacpypes3.ipv4.service.UDPMultiplexer:unsupported message

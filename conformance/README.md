@@ -141,6 +141,11 @@ the client is the DUT, the **stock** server runs beside it in the same container
     DUT=rust make conformance PROTO=dnp3-client      # our master vs the stock outstation
     conformance/stock/run-stock.sh modbus-client     # re-record stock/client-modbus.golden and .pcap from the stock client (also: dnp3-client)
 
+    conformance/stock/run-stock.sh bacnet            # re-record stock/bacnet-server.golden (+ .pcap.gz, .nmap.golden): `<bacnet-server>` probed by stock/probe_bacnet.py
+
+The BACnet server golden has no `conformance/bacnet` peer yet; it is the target of the bacpypes3 spike (`modules/bacnet/spike/`). The stock device and the
+probe run in a private network (`ff-sdd-t0b-*`) because the stock device answers Who-Is by broadcast, which needs the probe to have its own address.
+
 The goldens were recorded from `ffc-stock-2026.11.03:22.04` (bennu v2026.11.03); `STOCK_IMAGE` (default that image) names the stock image,
 `CONF_NAME` the container prefix, `TP_DOCKER_HOST` the daemon that has the image and `ferrofire-testpeers`.
 
