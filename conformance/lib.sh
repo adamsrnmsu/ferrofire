@@ -54,3 +54,18 @@ want_transcript() {
   elif cmp -s "$e" "$d"; then pass "transcript equal to $(basename "$g") but for the divergences in $(basename "$e")"
   else fail "transcript vs $(basename "$g") is not the list in $(basename "$e"):"; diff "$e" "$d" | head -40 >&2; fi
 }
+# want_104_sequence PCAP: the transcripts mask N(S) and N(R), so check them here. On each connection every side's I-frames count N(S)
+# up from 0, and each N(R) (I- or S-frame) acknowledges no more I-frames than the other side had sent and no fewer than its last one.
+# No I-frame decoded at all (a missing pcap, a field tshark lacks: its message shows) is a failure, not a pass.
+want_104_sequence() {
+  local bad
+  bad=$(tshark -r "$1" -Y 'iec60870_104 && !tcp.analysis.retransmission' -T fields -E separator=/t -E occurrence=a -e tcp.stream \
+    -e tcp.srcport -e iec60870_104.type -e iec60870_104.tx -e iec60870_104.rx | awk -F'\t' '
+    { n = split($3, t, ","); split($4, tx, ","); split($5, rx, ","); i = 0; r = 0; me = $1 " " $2
+      for (k = 1; k <= n; k++) {
+        typ = substr(t[k], length(t[k])); if (typ == 3) continue; r++
+        if (typ == 0) { i++; seen++; if (tx[i] != ns[me]++) print "frame " NR ": N(S) " tx[i] " on " me; sent[$1]++ }
+        if (rx[r] > sent[$1] - ns[me] || rx[r] < nr[me]) print "frame " NR ": N(R) " rx[r] " on " me; nr[me] = rx[r] } }
+    END { if (!seen) print "no I-frames decoded" }' | head -5)
+  [ -z "$bad" ] && pass "N(S) and N(R) in sequence on every connection" || { fail "IEC 104 sequence numbers:"; echo "$bad" >&2; }
+}

@@ -1,0 +1,80 @@
+# server started
+# client started
+> SYN
+< SYN
+> U 68 04 07 00 00 00
+> I 64 01 06 03 01 00 00 00 00 14
+< U 68 04 0b 00 00 00
+< I 64 01 07 03 01 00 00 00 00 14
+< I 03 04 14 00 01 00 00 00 00 02 01 00 00 01 64 00 00 02 65 00 00 01
+< I 0d 04 14 00 01 00 02 00 00 9a 59 96 43 00 03 00 00 00 80 7a 43 00 66 00 00 9a 59 96 43 00 67 00 00 00 80 7a 43 00
+< I 64 01 0a 03 01 00 00 00 00 14
+QUERY=	ACK=I_bus-1.gen_mw,I_generator-1_bus-1.active,I_load-1_bus-1.active,I_load-1_bus-1.mw,O_bus-1.gen_mw,O_generator-1_bus-1.active,O_load-1_bus-1.active,O_load-1_bus-1.mw,\x00
+READ=I_bus-1.gen_mw	ACK=I_bus-1.gen_mw:300.700012\x00
+READ=I_load-1_bus-1.mw	ACK=I_load-1_bus-1.mw:250.500000\x00
+READ=I_generator-1_bus-1.active	ACK=I_generator-1_bus-1.active:true\x00
+READ=I_load-1_bus-1.active	ACK=I_load-1_bus-1.active:false\x00
+READ=O_generator-1_bus-1.active	ACK=O_generator-1_bus-1.active:true\x00
+READ=O_load-1_bus-1.active	ACK=O_load-1_bus-1.active:false\x00
+READ=O_bus-1.gen_mw	ACK=O_bus-1.gen_mw:300.700012\x00
+READ=O_load-1_bus-1.mw	ACK=O_load-1_bus-1.mw:250.500000\x00
+# writes
+WRITE=O_generator-1_bus-1.active:false	ACK=Wrote tag O_generator-1_bus-1.active -- false\x00
+> I 2e 01 06 03 01 00 00 00 00 01
+< I 2e 01 07 03 01 00 00 00 00 01
+< I 2e 01 0a 03 01 00 00 00 00 01
+WRITE=O_load-1_bus-1.active:true	ACK=Wrote tag O_load-1_bus-1.active -- true\x00
+> I 2e 01 06 03 01 00 01 00 00 02
+< I 2e 01 07 03 01 00 01 00 00 02
+< I 2e 01 0a 03 01 00 01 00 00 02
+WRITE=O_bus-1.gen_mw:42.5	ACK=Wrote tag O_bus-1.gen_mw -- 42.5\x00
+> I 32 01 06 03 01 00 02 00 00 00 00 2a 42 00
+< I 32 01 07 03 01 00 02 00 00 00 00 2a 42 00
+< I 32 01 0a 03 01 00 02 00 00 00 00 2a 42 00
+WRITE=O_load-1_bus-1.mw:-1.25	ACK=Wrote tag O_load-1_bus-1.mw -- -1.25\x00
+> I 32 01 06 03 01 00 03 00 00 00 00 a0 bf 00
+< I 32 01 07 03 01 00 03 00 00 00 00 a0 bf 00
+< I 32 01 0a 03 01 00 03 00 00 00 00 a0 bf 00
+READ=O_generator-1_bus-1.active	ACK=O_generator-1_bus-1.active:false\x00
+READ=O_load-1_bus-1.active	ACK=O_load-1_bus-1.active:true\x00
+READ=O_bus-1.gen_mw	ACK=O_bus-1.gen_mw:300.700012\x00
+READ=O_load-1_bus-1.mw	ACK=O_load-1_bus-1.mw:250.500000\x00
+# writes the server refuses or the client cannot map
+WRITE=I_bus-1.gen_mw:5	ACK=Wrote tag I_bus-1.gen_mw -- 5\x00
+> I 32 01 06 03 01 00 66 00 00 00 00 a0 40 00
+< I 32 01 47 03 01 00 66 00 00 00 00 a0 40 00
+WRITE=I_load-1_bus-1.active:true	ACK=Wrote tag I_load-1_bus-1.active -- true\x00
+> I 2e 01 06 03 01 00 65 00 00 02
+< I 2e 01 47 03 01 00 65 00 00 02
+WRITE=O_bus-1.gen_mw:true	ACK=Wrote tag O_bus-1.gen_mw -- true\x00
+> I 2e 01 06 03 01 00 02 00 00 02
+< I 2e 01 47 03 01 00 02 00 00 02
+WRITE=O_generator-1_bus-1.active:7	ACK=Wrote tag O_generator-1_bus-1.active -- 7\x00
+> I 32 01 06 03 01 00 00 00 00 00 00 e0 40 00
+< I 32 01 47 03 01 00 00 00 00 00 00 e0 40 00
+WRITE=nope:1	ERR=Client does not have a mapping for tag 'nope'\x00
+READ=I_bus-1.gen_mw	ACK=I_bus-1.gen_mw:300.700012\x00
+READ=I_load-1_bus-1.active	ACK=I_load-1_bus-1.active:true\x00
+READ=O_bus-1.gen_mw	ACK=O_bus-1.gen_mw:300.700012\x00
+READ=O_generator-1_bus-1.active	ACK=O_generator-1_bus-1.active:false\x00
+READ=nope	ERR=Client does not have a mapping for tag 'nope'\x00
+Query=	ERR=Unknown command type (must be QUERY|READ|WRITE)\x00
+FOO=x	ERR=Unknown command type (must be QUERY|READ|WRITE)\x00
+# server stopped
+< FIN
+< RST
+READ=I_bus-1.gen_mw	ACK=I_bus-1.gen_mw:300.700012\x00
+READ=O_load-1_bus-1.active	ACK=O_load-1_bus-1.active:true\x00
+WRITE=O_bus-1.gen_mw:9	ACK=Wrote tag O_bus-1.gen_mw -- 9\x00
+WRITE=O_load-1_bus-1.active:false	ACK=Wrote tag O_load-1_bus-1.active -- false\x00
+READ=O_bus-1.gen_mw	ACK=O_bus-1.gen_mw:9.000000\x00
+READ=O_load-1_bus-1.active	ACK=O_load-1_bus-1.active:false\x00
+# server started
+READ=I_bus-1.gen_mw	ACK=I_bus-1.gen_mw:300.700012\x00
+READ=O_bus-1.gen_mw	ACK=O_bus-1.gen_mw:9.000000\x00
+# periodic and spontaneous data: each distinct frame
+< I 0d 04 01 00 01 00 02 00 00 9a 59 96 43 00 03 00 00 00 80 7a 43 00 66 00 00 9a 59 96 43 00 67 00 00 00 80 7a 43 00
+< I 1f 01 03 00 01 00 00 00 00 02 __ __ __ __ __ __ __
+< I 1f 01 03 00 01 00 01 00 00 01 __ __ __ __ __ __ __
+< I 1f 01 03 00 01 00 64 00 00 02 __ __ __ __ __ __ __
+< I 1f 01 03 00 01 00 65 00 00 01 __ __ __ __ __ __ __

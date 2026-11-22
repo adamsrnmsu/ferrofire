@@ -1,6 +1,6 @@
-# Field-device clients: `<modbus-client>` and `<dnp3-client>`
+# Field-device clients: `<modbus-client>`, `<dnp3-client>` and `<iec60870-5-104-client>`
 
-Features `proto-modbus` and `proto-dnp3` (both default). A field device with one of these elements polls or commands other devices.
+Features `proto-modbus`, `proto-dnp3` and `proto-iec104` (all default). A field device with one of these elements polls or commands other devices.
 One setting per element, `<mode>`, picks what it is:
 
 - **`bennu`** (the default): a drop-in for the stock bennu fd-client. A config that sceptre generates (`fd_client.mako`) loads unchanged
@@ -10,8 +10,8 @@ One setting per element, `<mode>`, picks what it is:
   servers use and re-serve them, and a local change to an output tag is written down to the remote device.
 
 The only dependency is `tokio-serial` (feature `proto-serial`, default on; no udev), for serial endpoints. The Modbus client reuses the server's MBAP codec, the DNP3 master the outstation's link, transport and
-application layers (`src/fd/proto/modbus/client.rs`, `src/fd/proto/dnp3/master.rs`, shared parts in `src/fd/proto/client.rs`), and the
-command interface is a `zeromq` REP socket (`src/fd/cmdif.rs`).
+application layers, the 104 client the server's APCI and ASDU codec (`src/fd/proto/modbus/client.rs`, `src/fd/proto/dnp3/master.rs`,
+`src/fd/proto/iec104/client.rs` and `client_shell.rs`, shared parts in `src/fd/proto/client.rs`), and the command interface is a `zeromq` REP socket (`src/fd/cmdif.rs`).
 
 **Serial endpoints.** An `<endpoint>` without `tcp://` is a device path, opened by `net::connect` (`net::open_serial`, `src/fd/net.rs`) at 9600 8N1,
 no flow control, raw. Modbus: MBAP framing on the port, no slave byte, no CRC, as stock (`SerialChannel.cpp`); stock stores 9600 8N1 and never applies it, so
@@ -76,9 +76,9 @@ and three ferrofire-only keys:
 
 | Key | Where | Default | Meaning |
 |---|---|---|---|
-| `<mode>` | `<modbus-client>`, `<dnp3-client>` | `bennu` | `bennu` or `fep`; anything else is a config error naming it |
-| `<scan-rate>` | `<modbus-connection>` | 1 | `fep` only: seconds between polls (decimals allowed). In `bennu` mode a WARN, an error under `--strict`: stock has none |
-| `<status-tag>` | `<modbus-connection>`, `<dnp3-connection>` | none | `fep` only: a binary tag, true while that connection has a session and its last poll was answered |
+| `<mode>` | `<modbus-client>`, `<dnp3-client>`, `<iec60870-5-104-client>` | `bennu` | `bennu` or `fep`; anything else is a config error naming it |
+| `<scan-rate>` | `<modbus-connection>`, `<iec60870-5-104-connection>` | 1 | `fep` only: seconds between polls (104: between GIs; decimals allowed). In `bennu` mode a WARN, an error under `--strict`: stock has none |
+| `<status-tag>` | `<modbus-connection>`, `<dnp3-connection>`, `<iec60870-5-104-connection>` | none | `fep` only: a binary tag, true while that connection has a session and its last poll was answered (104: a STARTDT session whose last GI got its ACT_TERM) |
 | `<type>` | a Modbus register | `analog` | `fep` only: `binary` makes the tag binary: non-zero reads true, true writes 1 |
 | `<event-logging>` | `<modbus-client>` | none | a file for one line per request (stock's client keeps no log, so there is no default file) |
 
@@ -95,6 +95,9 @@ left out with a WARN (an error under `--strict`). In `fep` mode `<min-value>` eq
 - **DNP3.** At start the class 0 integrity poll; whenever a response says the outstation restarted, a clear-restart write and another
   class 0 poll; then the scans at their rates. `READ` answers from the master's cache; `WRITE` updates the cache at once and sends a CROB
   (`true`/`false`) or an AnalogOutputFloat32 (a number).
+- **IEC 104.** At connect STARTDT and one GI, back to back; the connection is made once and never again. `WRITE` updates the cache at
+  once and sends a `C_DC_NA_1` (`true`/`false`) or a `C_SE_NC_1` (a number), direct execute, ACKed whatever the server answers
+  ([conformance/README.md](../conformance/README.md#iec-60870-5-104)).
 - **Tags** hold what stock's client holds (the last value read or written; for DNP3 the cache), from the end of the next scan cycle.
 
 ## `fep` mode
@@ -109,7 +112,14 @@ left out with a WARN (an error under `--strict`). In `fep` mode `<min-value>` eq
   An outstation that reports its outputs as inputs (ferrofire's own before ww-270, stock's 2026-11-07 image) is understood too: an input
   value at an index that only an output has goes to that output. (In `bennu` mode the cache is stock's: one address space per kind,
   where an input and an output cannot share an address.)
-- **Writes down.** Once per `<cycle-time>` each connection looks at its output tags (coils, holding registers, DNP3 outputs) and sends
+- **IEC 104** sends a GI (station, QOI 20) every `<scan-rate>`, one at a time, after a write-down at connect. The GI's data and every
+  periodic or spontaneous ASDU feed the tags, single and double points (with or without time) and floats alike: Q12 is a `bennu` mode
+  quirk only. An input and an output of one kind share one address space (as the server's): the later point at an address wins.
+  Writes go down as direct execute: a binary as `C_DC_NA_1` when the last type-1 or type-3 ASDU at COT 20 (interrogated) was double
+  points (`M_DP_NA_1`), else `C_SC_NA_1` (also before the first GI); a number as `C_SE_NC_1`. A command counts as answered when its
+  ACT_CON comes, or any reply to it with the negative bit set (COT 44-47 too), one per point at a time; a refused command is not
+  repeated. A refused GI (negative) ends it with the status false.
+- **Writes down.** Once per `<cycle-time>` each connection looks at its output tags (coils, holding registers, DNP3 and 104 outputs) and sends
   the ones that changed locally: a `<logic>` assignment, a write to one of the device's servers, a command-interface `WRITE`.
   Modbus changes found in the same pass go down as one FC15 (coils) or FC16 (holding registers) per run of contiguous addresses, merged
   as the reads are (up to 1,968 coils or 123 registers); a lone change is FC5 or FC6. A run the device refuses with exception 1 or 2 is
@@ -125,10 +135,11 @@ left out with a WARN (an error under `--strict`). In `fep` mode `<min-value>` eq
   setpoint from logic. A local change wins over a poll that arrives at the same time; the poll result for that
   point is ignored until the write is answered. The value a tag starts with (0 or false) counts as sent, so a FEP does not open by
   zeroing every output.
-- **A device that is away.** A request has 1000 ms. A failed poll leaves the tags at their last values and turns `<status-tag>` false; the
-  next attempts come 1, 2, 4 ... s apart (Modbus up to 30 s, DNP3 up to 60 s as in `bennu` mode). Local changes made meanwhile are not
+- **A device that is away.** A request has 1000 ms (104: a command's ACT_CON, a GI's ACT_TERM; one that is late drops the
+  connection). A failed poll leaves the tags at their last values and turns `<status-tag>` false; the next attempts come 1, 2, 4 ... s
+  apart (Modbus up to 30 s, DNP3 up to 60 s as in `bennu` mode, 104 up to 60 s). Local changes made meanwhile are not
   queued one by one: when the device returns, the newest value of each changed tag is sent, before anything is read. A write the device
-  answers but refuses (an exception, a DNP3 status other than success) is not repeated; a later poll puts the device's value back. The first poll after a write is not believed when it still shows
+  answers but refuses (an exception, a DNP3 status other than success, a negative ACT_CON) is not repeated; a later poll puts the device's value back. The first poll after a write is not believed when it still shows
   another value (a device may answer a write before its read-back changes).
 - **What is never sent.** NaN (a WARN). A number past a register's range is clamped to the range's end.
 - **The command interface** answers `READ` from the tag and takes a `WRITE` to an output of the tag's kind (`true`/`false` for a binary
@@ -176,7 +187,8 @@ every half second and is served as analog input 0. When the level passes 900 the
 
 ## Tests
 
-`tests/modbus_client.rs` and `tests/dnp3_master.rs` (the stock transcripts replayed in one process, the framing rules a transcript cannot
-show), `tests/fd_fep.rs` (whole devices: gateway, write-down without echo, a peer that is down or silent, a write while it is down, NaN and
+`tests/modbus_client.rs`, `tests/dnp3_master.rs` and `tests/iec104_master.rs` (the stock transcripts replayed in one process, the framing
+rules a transcript cannot show), `tests/iec104_fep.rs` (the 104 FEP against our server; by hand against the stock server image),
+`tests/fd_fep.rs` (whole devices: gateway, write-down without echo, a peer that is down or silent, a write while it is down, NaN and
 range ends, exception 2), `tests/cmdif_net.rs`, unit tests beside the code, fuzz targets `fd_cmdif`, `fd_modbus_client` and `fd_dnp3_master`, and
-against stock bennu: `make conformance PROTO=modbus-client` and `PROTO=dnp3-client` ([conformance/README.md](../conformance/README.md#field-device-clients)).
+against stock bennu: `make conformance PROTO=modbus-client`, `PROTO=dnp3-client` and `PROTO=iec104-client` ([conformance/README.md](../conformance/README.md#field-device-clients)).

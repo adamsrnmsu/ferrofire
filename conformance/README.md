@@ -298,6 +298,111 @@ The echo rule also skips the first poll after a write it sent (a device may answ
 read right after a write can show the written value where stock's next poll already shows the server's; `peer.sh` reads after two
 scans, so the transcript does not show it.
 
+## IEC 60870-5-104
+
+`<iec60870-5-104-server>` and `<iec60870-5-104-client>` (ww-vck). Stock's behaviour, one fact a line with its evidence, is
+[`iec104/STOCK.md`](iec104/STOCK.md); the ferrofire module codes to it. Zeek is skipped: the testpeers image has no IEC 104 parser
+(`ZEEK_LOAD=''`, conn.log only); tshark's `iec60870_104` dissector decodes every frame.
+
+    make conformance PROTO=iec104                     # the stock server: stock/probe_104x.py, tshark (SET=double|big: the other configs)
+    make conformance PROTO=iec104-client              # the stock client against the stock server: the golden itself
+    SERVER=rust make conformance PROTO=iec104-client  # the stock client against our server
+    DUT=rust make conformance PROTO=iec104            # our server, SET=double|big too
+    DUT=rust make conformance PROTO=iec104-client     # our client against the stock server
+    [SET=double|big] conformance/stock/run-stock.sh iec104   # re-record stock/iec104-server[-SET].golden (also: iec104-client)
+
+**Server** (`conformance/iec104/`). `stock/iec104-server.xml` (bennu's sample with `<subtype>` added), with `bacnet/feed.py` beside
+it as provider. `stock/probe_104x.py` drives it: STARTDT, TESTFR, the interrogation and its variants, commands 45, 46 and 50 accepted
+and refused, other type ids, STOPDT, I-frames before STARTDT, two connections and the last-opened periodic rule, and the timers k, w,
+t1, t2 and t3 by measurement. It masks N(S)/N(R) and CP56Time2a and lists periodic frames as a set, so two stock runs give the same
+bytes. `SET=double` runs the sample in double-point mode with the DUT's TZ five hours off UTC (`M_DP_TB_1` time base); `SET=big` adds
+200 inputs, so the GI and the report split at the maximum ASDU payload. `check.sh`: the transcript equal to
+`stock/iec104-server[-SET].golden` (ours: but for `iec104/rust-SET.diff` once divergences are listed), and the GI, its data and the
+command confirmations in tshark. The transcripts mask N(S) and N(R), so `want_104_sequence` (`lib.sh`) checks them in tshark
+instead: on each connection every side's I-frames count up from 0, and each N(R) acknowledges no more I-frames than the other side
+sent and no fewer than its last (both harnesses; stock passes it too).
+
+**Client** (`conformance/iec104-client/`). bennu's sample `<iec60870-5-104-client>` copied unchanged (`stock/client-iec104.xml`, from the sceptre-bennu working tree;
+the v2026.11.03 tag's `data/configs/ep/iec60870-5-104-client.xml` differs only by a five-line commented-out SBO block, so both parse
+the same), the
+stock server beside it (`stock/server-iec104.xml`, double-point mode so binaries reach the client) under `stock/servectl.py` with
+`feed.py` as its provider. The stock client connects once, when it starts, so the DUT waits on a gate (`DUT_ENV` in `proto.env`: a
+listener on `IEC104_GATE`, 5998, that `peer.sh` connects to once the server is up), stock's command or ours, without a change to
+`run.sh`.
+`probe_cmdif.py --report 2404 iec104` prints the command-interface replies and the client's frames, S-frames left out and periodic
+data listed once at the end. Golden: `stock/client-iec104.golden` (two runs alike).
+
+Stock v2026.11.03 differs from spec 4.3 (written from an older bennu source) here; the measured behaviour wins (`iec104/STOCK.md`,
+"Contradictions"):
+
+- 45, 46 and 50 all answer ACT_CON (COT 7) then ACT_TERM (COT 10); the spec gave 45 and 50 an echo only.
+- A command with the select bit set gets a negative ACT_CON and no write (Q7, "the select bit is ignored", no longer holds); so does a
+  command at an input, at the other kind of output, or a 46 with state 0 or 3.
+- The client writes by direct execute (`C_DC_NA_1`/`C_SE_NC_1`, S/E 0) and never reconnects after its first connection.
+- The tag adds `sbo-enabled` and `sbo-timeout-secs` (server) and `sbo-enabled` (client connection), default off; not recorded with
+  SBO on.
+- Spec 4.3's UNVERIFIED APCI values are measured: k 12, w 8, t1 15 s, t2 10 s, t3 20 s (t0 10 s: the standard value, not observable).
+
+**Ours** (`src/fd/proto/iec104/`, ww-vck). `DUT=rust make conformance PROTO=iec104`: PASS for `SET=single`, `double` and `big`, each
+transcript equal to stock's golden with no `rust-SET.diff`, sequence numbers in order (stock passes the same check). `SERVER=rust
+make conformance PROTO=iec104-client`, the stock client against ours: **FAIL**, accepted for this branch (ledger Ruling 10: the
+store's `ACK_HOLD`, not 104 code), harness fix tracked in bead ww-28v. The transcript differs from
+`stock/client-iec104.golden` by the commanded values showing in our reports (first row below), and not by the same lines in every
+run (three runs: two alike, the third also has `READ=O_load-1_bus-1.mw` answering `-1.250000` where stock answers `250.500000`), so
+no `rust-server.diff` is listed. One of the three runs:
+
+    75a76,77
+    > < I 0d 04 01 00 01 00 02 00 00 00 00 2a 42 00 03 00 00 00 80 7a 43 00 66 00 00 00 00 2a 42 00 67 00 00 00 80 7a 43 00
+    > < I 0d 04 01 00 01 00 02 00 00 9a 59 96 43 00 03 00 00 00 00 a0 bf 00 66 00 00 9a 59 96 43 00 67 00 00 00 00 a0 bf 00
+    76a79
+    > < I 1f 01 03 00 01 00 00 00 00 01 __ __ __ __ __ __ __
+    78a82,83
+    > < I 1f 01 03 00 01 00 01 00 00 02 __ __ __ __ __ __ __
+    > < I 1f 01 03 00 01 00 64 00 00 01 __ __ __ __ __ __ __
+    80a86
+    > < I 1f 01 03 00 01 00 65 00 00 02 __ __ __ __ __ __ __
+
+The other rows differ from stock on input no probe sends, or where nothing on the wire shows it:
+
+| Area | Stock | Ours | Whose |
+|---|---|---|---|
+| A GI or report within about 2.5 s of an accepted command | the provider's published value (`feed.py` publishes every 0.5 s and never applies a write) | the commanded value, on every tag of the provider point: the store holds a value the provider ACKed for 2 s against the stream (`ACK_HOLD`, `store.rs`, ww-1df.32), as in the BACnet row above | device, by design; the server sets pass only because `probe_104x.py` interrogates 3 s after its last command, while the client harness's 1 s report falls inside each hold |
+| A 45, 46 or 50 whose object is cut short, at COT 8 or another COT | negative COT 9 or 45: the COT is checked before the object | negative COT 44 (the codec cannot decode it) | slave (Task 3), accepted |
+| An object present with VSQ count 0, or a count higher than the objects present | object 0 read whatever the count (`cs101_asdu.c:420`): a command executes, a GI is answered | a command gets negative 44, a GI no answer | slave (Task 3), accepted |
+| The ACT_CON/ACT_TERM echo of a command | the received bytes with the COT changed | a re-encode of the decoded ASDU, so bytes after the last object are dropped | slave (Task 3), accepted; every golden line matches |
+| The value in the event log's command line (`... with value <v>.`) | ostream `%g`, precision 6 (`1e+07`) | Rust's shortest float (`10000000`); alike for the values probed | slave (Task 3), accepted |
+| A point whose tag the store lacks | GI and single report: the 240-byte split is checked before `hasTag`, so a skipped point after a full ASDU still opens a new one (an empty last ASDU); the double report has no `hasTag` | the point is left out before the split, in every report | slave (Task 3); unreachable, every tag is declared at load |
+| An N(R) acknowledging frames never sent, an N(S) out of order | STOCK.md silent | the connection is closed (IEC 60870-5-104) | APCI (Task 1), the standard's choice |
+| Deactivation by another connection's STARTDT | at once | at this connection's next 100 ms tick or report; frames it receives meanwhile are handled as started | shell: frames on two sockets have no order between them (one run had E's S-frame reach the server 37 µs before D's STARTDT, handled after it, and E was closed for it; G:153-157 then failed) |
+| Report timing | one thread: within 1 s of a connection, then every `rpoll-rate` s whichever connection is served | per connection: the first `rpoll-rate` s after it opens, then every `rpoll-rate` s | shell, by design; the probe's 2.5 s windows cannot tell |
+| ASDUs waiting for the k window | one queue of 1000 for the group, reset on STARTDT (`cs104_slave.c:2293`); a dropped ASDU is a `DEBUG_PRINT` only | 1000 per connection, also emptied on STARTDT; one more is dropped with an `error` line, once until one fits again (a master that never acks cannot flood the log), and an ASDU over 249 bytes with one each (none is made) | shell |
+| A control field no mask matches, or one stock reads by mask | the first control octet classified by mask (`& 0x43`, `& 0x07`, `& 0x13`, `& 0x83`; S only when it is exactly `01`, `cs104_slave.c:2281-2338`); anything else, a STOPDT con (`0x23`) or STARTDT con (`0x0B`) among them, ignored ("unknown message - IGNORE", `:2340-2343`), without resetting t3; a U-frame with nonzero control octets 2-4, an S-frame whose second octet is set, or a code such as `0x0F` that a mask matches, taken as that frame | STOPDT con and STARTDT con ignored as stock (`apci.rs` `on_u`), but they reset t3; any other control field not exactly an IEC 104 I, S or U format closes the connection | APCI, ours: IEC 60870-5-104's reading |
+| Several I-frames from the master in one TCP segment, the w-th among them | each is answered before the next is read, and the answers ack it | the link may send an S-frame before the answers | shell; the probe sends one request at a time |
+| `rpoll-rate` 0 | the report thread spins | a report every 100 ms | shell |
+| `sbo-enabled` true; a config error | select-before-operate served; the server is left out and the device runs | refused at load naming the key (bead ww-3a4); every config error stops the load, as `<dnp3-server>` | module, by design |
+
+**Our client** (`src/fd/proto/iec104/client.rs`, `client_shell.rs`, ww-vck). `DUT=rust make conformance PROTO=iec104-client`, the sample unchanged against
+the stock server: PASS, the transcript equal to `stock/client-iec104.golden` with no `rust-client.diff`, sequence numbers in order.
+It connects once, sends STARTDT and the GI back to back, writes by direct execute, and ACKs a write whatever the server answers or
+whether it is there at all, as stock does. At the close it acknowledges the I-frames it owes with an S-frame before it closes the
+socket, as lib60870 does (`cs104_connection.c:897-900`): against the killed server that S-frame draws the server's RST (GC:65), where
+closing at once would show our FIN. The differences are on input or switches the harness does not use:
+
+| Area | Stock client | Ours | Whose |
+|---|---|---|---|
+| A cmdif request with no `=` (`nope`) | segmentation fault (`CI/:27-29`); every later request times out | `ERR=Malformed request (must be QUERY=\|READ=tag\|WRITE=tag:value)`, as for the other clients | ours, by design: stock crashes |
+| `sbo-enabled` true on a connection | select, then execute after a positive ACT_CON | refused at load naming the key (bead ww-3a4) | module, by design (no SBO yet) |
+| An endpoint without `tcp://` | `Error -- Unknown endpoint protocol: <ep>`, and the device exits (`MOD/ClientConnection.cpp:58-62`) | a load error with that text; the device does not start | module: the same end, at load |
+| An endpoint `tcp://` with a host name, or with text before `tcp://` | resolved (`getaddrinfo`) and connected | `tcp://ip:port` only (`net::connect`); anything else is the failed connect: logged, never connected | shell (every ferrofire client takes an IP) |
+| `--strict` | not a stock switch | also decodes `M_SP_NA_1` and the report's `M_DP_TB_1` (Q12 off), so binaries follow a single-point server and the report | module, by design |
+| Dead-peer detection | `TCP_USER_TIMEOUT` 10 s on the socket (`socket_linux.c:406-408`) | TCP keepalive (`net::keepalive`), as every ferrofire connection | shell |
+| U-frames that end a t1 wait | any U-frame clears it (`cs104_connection.c:674`) | only the STARTDT con or TESTFR con awaited | APCI (Task 1), the standard's reading |
+| A connection whose write the server has not taken in 10 s | the S-frame is sent before any close, a failed send included (`cs104_connection.c:897-900`, source only) | closed without it: a peer that stopped reading takes no S-frame either | shell |
+
+`<mode>fep` is ferrofire's front-end processor (no stock counterpart, so no golden): a GI every `<scan-rate>`, writes down through the
+echo rule, a reconnect with backoff ([docs/field-device-clients.md](../docs/field-device-clients.md#fep-mode)). `tests/iec104_fep.rs`
+runs it against our server, and by hand against the stock server image (`against_the_stock_server`, its doc comment).
+
 ## IEC 61850 (no oracle)
 Bennu never loads an IEC 61850 server, so `conformance/iec61850/` has only the acceptance half, and `proto.env` sets `DUT_DEFAULT=rust`:
 

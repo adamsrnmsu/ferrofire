@@ -6,6 +6,8 @@
 #                        STOCK_IMAGE names the stock image, default ffc-stock-2026.11.03:22.04). DNP3 also gets client-dnp3-raw.golden: every frame as sent, scans included.
 #                        conformance/stock/run-stock.sh bacnet-client   the same for <bacnet-client>; bacnet-feed: the fed server
 #                        transcript of conformance/bacnet (stock/bacnet-server-feed.golden)
+#                        conformance/stock/run-stock.sh iec104   stock/iec104-server.golden (SET=double|big: iec104-server-SET.golden),
+#                        conformance/iec104 through conformance/run.sh; iec104-client: client-iec104.golden as the other clients
 #                        conformance/stock/run-stock.sh bacnet   BACnet server golden: DUT and probe in private network ff-sdd-t0b-net (the
 #                        probe needs its own IP: the stock device answers Who-Is by broadcast); OUT=dir keeps probe output and pcap.
 # Creates and removes its own container ff-fd-stock; touches nothing else. Spec: docs/field-device-spec.md section 8.
@@ -39,7 +41,11 @@ case "$1" in
     # stock/bacnet-server-feed.golden: conformance/bacnet with its provider (FEED), through conformance/run.sh (containers ff-conf-*)
     : > "$here/bacnet-server-feed.golden"; DUT=stock "$here/../run.sh" bacnet || true
     cp "${OUT:-$here/../../target/conformance/bacnet}/transcript.txt" "$here/bacnet-server-feed.golden"; exit ;;
-  modbus-client|dnp3-client|bacnet-client)
+  iec104)
+    g=$here/iec104-server${SET:+-$SET}.golden; [ "${SET:-single}" != single ] || g=$here/iec104-server.golden
+    : > "$g"; DUT=stock "$here/../run.sh" iec104 || true
+    cp "${OUT:-$here/../../target/conformance/iec104}/transcript.txt" "$g"; exit ;;
+  modbus-client|dnp3-client|bacnet-client|iec104-client)
     # SERIAL=connect:PORT records the serial goldens instead (client-<proto>-serial*, run.sh SERIAL)
     p=${1%-client}${SERIAL:+-serial}; : > "$here/client-$p.golden"   # check.sh compares with the golden: empty while recording
     DUT=stock "$here/../run.sh" "$1" || true

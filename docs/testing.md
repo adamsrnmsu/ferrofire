@@ -168,8 +168,8 @@ and the gates below. Semantics come from [field-device-spec.md](field-device-spe
 device does, with probes in `conformance/stock/` (`probe_modbus.py`, `probe_modbus_overflow.py`, `probe_dnp3.py`, `probe_104.py`,
 `logic_corpus.xml`) run against `ffc-stock-2026.11.03:22.04` (`STOCK_IMAGE` overrides) on Docker Desktop by `conformance/stock/run-stock.sh`.
 
-**Gaps.** The core has no byte-level differential of its own; its stock comparison is through the DNP3 transcripts. There is no
-Rust Modbus or IEC 104 server in ferrofire yet, so the Modbus and 104 probes record stock behaviour and are not run against ours.
+**Gaps.** The core has no byte-level differential of its own; its stock comparison is through the DNP3 transcripts. The IEC 104
+server is run against stock by `conformance/iec104` (`probe_104x.py`); `probe_104.py` only records stock.
 
 **Ideas.** Run the logic corpus (`conformance/stock/logic_corpus.xml`) through the stock device and ours and compare the
 datastore after each step, as the DNP3 transcripts do for the wire.
@@ -660,8 +660,8 @@ two above turned up. The Brno traffic generator paper and the other literature b
 | ICCP | [boosali/iccp-sim](https://github.com/boosali/iccp-sim) | no licence, vendors telcon crates | no (telcon) | convenience only |
 | ICCP | FreeTase2, fcovatti/iccp, fledge-south/north-tase2 | GPL-3.0 / GPL-3.0 / Apache-2.0 with commercial MZ libtase2 | **no**: all wrap libiec61850 or libtase2 | nothing independent (FreeTase2 is a Python wrapper over libiec61850, dormant since 2020) |
 | ICCP | Triangle MicroWorks IEC 60870-6, MZ libtase2, SISCO, Ipesoft D2000 | commercial | yes | no free evaluation terms found |
-| IEC 104 | [j60870](https://github.com/gythialy/j60870) (OpenMUC lineage) | GPL-3.0 (commercial too), Java, 2026-11 | yes (separate from lib60870) | APCI state machine, ASDU codec, interrogation, SBO; **ferrofire has no 104 server to test** |
-| IEC 104 | [mz-automation/lib60870](https://github.com/mz-automation/lib60870) | GPL-3.0, C, 2026-08 | the reference stack; c104 and the Rust `lib60870` crate wrap it | same; primary oracle once a server exists |
+| IEC 104 | [j60870](https://github.com/gythialy/j60870) (OpenMUC lineage) | GPL-3.0 (commercial too), Java, 2026-11 | yes (separate from lib60870) | APCI state machine, ASDU codec, interrogation, SBO; not yet run against ferrofire's 104 server |
+| IEC 104 | [mz-automation/lib60870](https://github.com/mz-automation/lib60870) | GPL-3.0, C, 2026-08 | the reference stack; c104 and the Rust `lib60870` crate wrap it | same; stock bennu runs it, so it is the oracle `conformance/iec104` compares ours with |
 | IEC 104 | [otfabric/go-iec104](https://github.com/otfabric/go-iec104) + `iec104ctl`; wendy512/iec104; cB-Sigma/iec60870 | MIT; Apache-2.0; Apache-2.0, Go | yes | scripted clients; go-iec104 CI cross-tests j60870 and lib60870 |
 | DNP3 | dnp3-interop images, cB-Sigma/dnp3, go-dnp3 | see the DNP3 section | yes | Secure Authentication v5, file transfer |
 | BACnet/IP | [bacnet-stack](https://github.com/bacnet-stack/bacnet-stack) apps (`bacwi`, `bacrp`, `bacrpm`, `bacwp`) | GPL-2.0 with GCC exception, C, v1.5.10 2026-10 | yes | Who-Is, ReadProperty(Multiple), WriteProperty; Tier 2, no BACnet server module exists yet |
@@ -691,8 +691,8 @@ OpenPLC61850, libiec61850 forks.
 None gives the byte layouts of `Bilateral_Table`, `Transfer_Set`, DS conditions or `Supported_Features`. Those still need the IEC 60870-6-503
 and -802 text (ICCP section, idea 1).
 
-**Still open.** ICCP layouts are not checked against the standard. No IEC 60870-5-104 server exists to test j60870 or lib60870 (file a bead when
-one is planned). Nothing was run on amd64. The "remaining options" above are untried; every one is a young single-author project except the
+**Still open.** ICCP layouts are not checked against the standard. j60870 and go-iec104 are not yet run against our IEC 60870-5-104 server (stock's
+lib60870 is the oracle). Nothing was run on amd64. The "remaining options" above are untried; every one is a young single-author project except the
 bacnet-stack, open62541, OpENer, Mosquitto, python-snap7 and lib60870 group, which are the ones to prefer when the Tier 2 modules land.
 
 ## Quality gates
