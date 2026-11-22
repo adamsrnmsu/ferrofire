@@ -7,7 +7,7 @@ proto=$1; d=/conformance/$proto; out=/out
 . "$d/proto.env"
 mkdir -p "$out"
 [ ! -f "$d/prepare.sh" ] || . "$d/prepare.sh"   # optional: build whatever check.sh / zeek.sh need before the peers run
-tcpdump -U -i lo -w "$out/$proto.pcap" "$CAPTURE_FILTER" 2>"$out/tcpdump.err" &
+tcpdump -U -i "${CAPTURE_IFACE:-lo}" -w "$out/$proto.pcap" "$CAPTURE_FILTER" 2>"$out/tcpdump.err" &
 tdpid=$!; sleep 1
 bash "$d/peer.sh" > "$out/peer.out" 2>&1; peer_rc=$?
 sleep 1; kill "$tdpid"; wait "$tdpid" 2>/dev/null

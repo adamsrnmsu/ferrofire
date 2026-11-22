@@ -44,3 +44,13 @@ want_zeek() {
   if zeek-cut "$col" < "$log" | grep -q -x -F -- "$val"; then pass "zeek $1.log $col=$val"; else fail "zeek $1.log has no row with $col=$val"; fi
 }
 finish() { if [ "$FAILS" = 0 ]; then echo "CONFORMANCE PASS: $proto"; else echo "CONFORMANCE FAIL: $proto ($FAILS failures)" >&2; exit 1; fi; }
+# want_transcript GOLDEN TRANSCRIPT [EXPECTED_DIFF]: TRANSCRIPT equals GOLDEN, or, given EXPECTED_DIFF, `diff GOLDEN TRANSCRIPT` is that
+# file exactly (the listed divergences: one that goes away fails too, until the list is updated). The diff is left in $out.
+want_transcript() {
+  local g=$1 t=$2 e=${3:-} d=$out/transcript.diff
+  diff "$g" "$t" > "$d"
+  if [ -z "$e" ]; then
+    [ -s "$d" ] && { fail "transcript differs from $(basename "$g"):"; head -40 "$d" >&2; } || pass "transcript equal to $(basename "$g")"
+  elif cmp -s "$e" "$d"; then pass "transcript equal to $(basename "$g") but for the divergences in $(basename "$e")"
+  else fail "transcript vs $(basename "$g") is not the list in $(basename "$e"):"; diff "$e" "$d" | head -40 >&2; fi
+}

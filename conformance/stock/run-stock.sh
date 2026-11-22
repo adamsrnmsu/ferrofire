@@ -4,6 +4,8 @@
 #                        conformance/stock/run-stock.sh modbus-client|dnp3-client   re-record client-<proto>.golden and .pcap: the
 #                        stock fd-client against the stock server, through conformance/run.sh (containers ff-conf-*, or CONF_NAME-*;
 #                        STOCK_IMAGE names the stock image, default ffc-stock-2026.11.03:22.04). DNP3 also gets client-dnp3-raw.golden: every frame as sent, scans included.
+#                        conformance/stock/run-stock.sh bacnet-client   the same for <bacnet-client>; bacnet-feed: the fed server
+#                        transcript of conformance/bacnet (stock/bacnet-server-feed.golden)
 #                        conformance/stock/run-stock.sh bacnet   BACnet server golden: DUT and probe in private network ff-sdd-t0b-net (the
 #                        probe needs its own IP: the stock device answers Who-Is by broadcast); OUT=dir keeps probe output and pcap.
 # Creates and removes its own container ff-fd-stock; touches nothing else. Spec: docs/field-device-spec.md section 8.
@@ -33,7 +35,11 @@ case "$1" in
     cp "$out/nmap.txt" "$here/bacnet-server.nmap.golden"
     sleep 1; docker exec $N-probe pkill tcpdump; sleep 1; docker cp $N-probe:/tmp/b.pcap "$out/bacnet-server.pcap"; gzip -kf "$out/bacnet-server.pcap"; cp "$out/bacnet-server.pcap.gz" "$here/"   # .gz: the 1 MB large-file hook
     sed -e "s/$dut/DUT/g" -e "s/$me/PROBE/g" "$out/transcript.txt" > "$here/bacnet-server.golden"; exit ;;
-  modbus-client|dnp3-client)
+  bacnet-feed)
+    # stock/bacnet-server-feed.golden: conformance/bacnet with its provider (FEED), through conformance/run.sh (containers ff-conf-*)
+    : > "$here/bacnet-server-feed.golden"; DUT=stock "$here/../run.sh" bacnet || true
+    cp "${OUT:-$here/../../target/conformance/bacnet}/transcript.txt" "$here/bacnet-server-feed.golden"; exit ;;
+  modbus-client|dnp3-client|bacnet-client)
     # SERIAL=connect:PORT records the serial goldens instead (client-<proto>-serial*, run.sh SERIAL)
     p=${1%-client}${SERIAL:+-serial}; : > "$here/client-$p.golden"   # check.sh compares with the golden: empty while recording
     DUT=stock "$here/../run.sh" "$1" || true

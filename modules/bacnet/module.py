@@ -1,6 +1,7 @@
 """ferrofire's BACnet/IP module: a stock <bacnet-server> or <bacnet-client> (protocols plan rows 6 and 11) over ffmod/1 on stdio,
-on bacpypes3 0.1.0. The server is the Task 0b spike (spike/server.py, spike/NOTES.md): an override layer over 0.1.0's defects that
-gives a client what stock bennu-field-device gives. stdout carries ffmod/1 only; everything else goes to stderr.
+on bacpypes3 0.1.0. The server grew from the Task 0b spike (spike/NOTES.md): an override layer over 0.1.0's defects that gives a
+client what stock bennu-field-device gives (conformance/bacnet holds it to stock). stdout carries ffmod/1 only; everything else
+goes to stderr.
 Transport as stock (bacnet-stack dlenv): interface BACNET_IFACE (eth0), port BACNET_IP_PORT (47808), BACNET_BBMD_ADDRESS/_PORT/
 _TIMETOLIVE register as a foreign device; the <endpoint> ip and port are parsed and discarded, as stock does.
 """

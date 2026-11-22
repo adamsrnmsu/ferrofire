@@ -10,6 +10,10 @@
     probe_cmdif.py --report PORT dnp3   the same with what a clock decides taken out: each frame is `link-control dst<src
                                      app-control function+objects`, CRCs and the transport octet removed and the sequence number
                                      masked; the all-classes scans, their responses and refused connection attempts are left out
+    probe_cmdif.py --report PORT bacnet   BACnet/IP on udp, PORT the client's own port: each frame as BVLC, NPDU and APDU bytes with
+                                     the invoke id masked (`__`), a run of the same frame (a retry) shown once; the scans (ReadProperty
+                                     present-value and their answers) are left out where they fall and listed once at the end, each
+                                     distinct request with each distinct answer it got; a reply of 3 s or more is `~3s+`
 Runs in the testpeers container, in the network namespace of the stock devices (conformance/stock/run-stock.sh).
 """
 import json, os, socket, subprocess, sys, time
@@ -102,6 +106,62 @@ def dnp3_lines(packets):
     return out
 
 
+def apdu_at(b):
+    """Offset of the APDU in a BACnet/IP frame (BVLC 4 bytes, an NPDU with or without DNET/SNET); None for a network message."""
+    i, ctrl = 6, b[5]
+    if ctrl & 0x80:
+        return None
+    if ctrl & 0x20:
+        i += 3 + b[i + 2]
+    if ctrl & 0x08:
+        i += 3 + b[i + 2]
+    return i + (1 if ctrl & 0x20 else 0)
+
+
+def bacnet_frame(payload):
+    """(masked hex, invoke id or None, is a ReadProperty present-value request, is an answer to a ReadProperty)."""
+    b = bytearray.fromhex(payload)
+    a = apdu_at(b) if len(b) > 6 else None
+    if a is None or a >= len(b):
+        return b.hex(), None, False, False
+    kind, at = b[a] >> 4, None
+    if kind == 0 and a + 3 < len(b):
+        at = a + 2                                # confirmed request: type, max segs/APDU, invoke id, service
+    elif kind in (2, 3, 5, 6, 7) and a + 1 < len(b):
+        at = a + 1                                # simple/complex ack, error, reject, abort: type, invoke id, ...
+    if at is None:
+        return b.hex(), None, False, False
+    inv = b[at]
+    h = b.hex()
+    h = h[:2 * at] + "__" + h[2 * at + 2:]
+    rp_pv = kind == 0 and b[a + 3] == 12 and b[a + 4:a + 5] == b"\x0c" and b[a + 9:] == b"\x19\x55"   # object id, property 85
+    return h, inv, rp_pv, kind in (3, 5) and at + 1 < len(b) and b[at + 1] == 12
+
+
+def bacnet_lines(packets):
+    """`packets`: (bin, direction, payload). Scan requests and their answers go to the summary; repeats are shown once."""
+    out, scans, asked, last = [], {}, {}, None    # asked: invoke id -> the scan request that used it last
+    for i, d, payload in packets:
+        h, inv, rp_pv, rp_answer = bacnet_frame(payload)
+        if rp_pv:
+            scans.setdefault(h, [])
+            asked[inv] = h
+            continue
+        if rp_answer and inv in asked:
+            if h not in scans[asked[inv]]:
+                scans[asked[inv]].append(h)
+            continue
+        line = d + h
+        if line != last:
+            out.append((i, line))
+        last = line
+    summary = []
+    for req, answers in scans.items():
+        summary.append("> " + req)
+        summary += ["< " + a for a in answers] or ["  (no answer)"]
+    return out, summary
+
+
 def sync(port):
     count = lambda: len(subprocess.run(["tshark", "-r", PCAP, "-Y", "tcp.dstport==%s && dnp3.al.func==1" % port],
                                        capture_output=True, text=True).stdout.splitlines())
@@ -110,8 +170,10 @@ def sync(port):
         time.sleep(0.2)
 
 
-def report(port, dnp3=False):
+def report(port, dnp3=False, bacnet=False):
     recs = [json.loads(l) for l in open(LOG)]
+    if bacnet:
+        return report_bacnet(port, recs)
     out = subprocess.run(
         ["tshark", "-r", PCAP, "-Y", "tcp.port==%s && (tcp.len>0 || tcp.flags.syn==1 || tcp.flags.fin==1 || tcp.flags.reset==1)" % port,
          "-T", "fields", "-e", "frame.time_epoch", "-e", "tcp.dstport", "-e", "tcp.flags.syn", "-e", "tcp.flags.fin",
@@ -136,6 +198,29 @@ def report(port, dnp3=False):
         packets = joined
     for i, text in dnp3_lines(packets) if dnp3 else [(i, d + what) for i, d, what in packets]:
         wire[i].append(text)
+    print_records(recs, wire)
+
+
+def report_bacnet(port, recs):
+    out = subprocess.run(["tshark", "-r", PCAP, "-Y", "udp.port==%s && bvlc" % port, "-T", "fields", "-e", "frame.time_epoch",
+                          "-e", "udp.srcport", "-e", "udp.payload"], capture_output=True, text=True).stdout
+    packets = []
+    for line in out.splitlines():
+        t, sport, payload = (line.split("\t") + [""] * 3)[:3]
+        i = sum(1 for r in recs if r["t0"] <= float(t))
+        packets.append((i, "> " if sport == str(port) else "< ", payload.replace(":", "")))
+    lines, summary = bacnet_lines(packets)
+    wire = [[] for _ in range(len(recs) + 1)]
+    for i, text in lines:
+        wire[i].append(text)
+    print_records(recs, wire, coarse=True)
+    print("# scans: each ReadProperty present-value request, and each answer it got")
+    for s in summary:
+        print(s)
+
+
+def print_records(recs, wire, coarse=False):
+    """`coarse`: a reply that took 3 s or more is `~3s+` (a BACnet client waits out retries the scans interleave with)."""
     for w in wire[0]:
         print(w)
     for r, ws in zip(recs, wire[1:]):
@@ -143,7 +228,8 @@ def report(port, dnp3=False):
             print("# " + r["mark"])
         else:
             took = r["t1"] - r["t0"]
-            print(r["req"] + "\t" + r["reply"] + ("\t~%ds" % round(took) if took >= 0.5 else ""))
+            slow = "\t~3s+" if coarse and took >= 3 else "\t~%ds" % round(took) if took >= 0.5 else ""
+            print(r["req"] + "\t" + r["reply"] + slow)
         for w in ws:
             print(w)
 
@@ -163,7 +249,7 @@ if __name__ == "__main__":
     elif a[:1] == ["--sync"]:
         sync(a[1])
     elif a[:1] == ["--report"]:
-        report(a[1], a[2:] == ["dnp3"])
+        report(a[1], a[2:] == ["dnp3"], a[2:] == ["bacnet"])
     else:
         for c in a:
             command(c)

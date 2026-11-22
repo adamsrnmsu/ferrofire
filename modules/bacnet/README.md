@@ -19,7 +19,7 @@ The `<endpoint>` ip and port of a server are parsed and discarded, as stock does
 
 ## Server (protocols plan row 6)
 
-The Task 0b spike (`spike/server.py`, `spike/NOTES.md`) with the device feed in place of its stand-in datastore:
+The Task 0b spike's server (`spike/NOTES.md`) with the device feed in place of its stand-in datastore:
 
 - `ready` lists binary/analog inputs as `out` (the device supplies them) and outputs as `in`.
 - `hello` and `values` fill the module's copy of the device. A `null` (a non-finite analog) keeps the previous value.
@@ -34,11 +34,14 @@ The Task 0b spike (`spike/server.py`, `spike/NOTES.md`) with the device feed in 
 - One I-Am at start. Who-Is gets a global-broadcast I-Am. RP, RPM, WP, WPM, ReadRange and DCC are answered as stock answers them.
   Anything else is rejected with `unrecognized-service`.
 
-Against `conformance/stock/probe_bacnet.py` with the stock sample element, driven through `hello`:
-- The transcript equals `conformance/stock/bacnet-server.golden` except for the same 28 diff lines (of 499) as the spike, listed
-  below.
+Held to stock by `conformance/bacnet/` (`DUT=rust make conformance PROTO=bacnet`; `conformance/README.md`, BACnet/IP): the real
+module through ferrofire, fed by a provider so that nonzero values are compared:
+- The `conformance/stock/probe_bacnet.py` transcript equals stock's fed one (`conformance/stock/bacnet-server-feed.golden`) except
+  for the rows below and two device-side ones (the provider's write hold, the order of a `WRITE=` batch), exactly as
+  `conformance/bacnet/rust-feed.diff` lists them.
 - `nmap --script bacnet-info` equals `bacnet-server.nmap.golden`.
-- Stock's own `bacnet-client` (ffc-stock-2026.11.03) polls this server and gets answers.
+- Stock's own `bacnet-client` (ffc-stock-2026.11.03) polls and writes this server and gets the same transcript as from the stock
+  server (`SERVER=rust make conformance PROTO=bacnet-client`).
 
 Differences from stock:
 
@@ -55,6 +58,12 @@ RPM `all`, ReadRange, WPM errors, vendor properties, bit-string lengths. To thos
 exception that OctetStringValue objects logged at start.
 
 ## Client (protocols plan row 11)
+
+**Not drop-in yet** (open, `conformance/README.md`, BACnet/IP): on bennu's sample `<bacnet-client>`, which has no `<tags>`, the
+device knows none of the client's tags, so every `uses` entry is skipped. With the tags declared it runs, and differs from the stock
+client in the object types its scan reads (stock reads BO 0 and 1 and AO 1 for the sample's BI 0 and 1 and AI 1) and in its request
+header (`02 44`, bacpypes3's segmentation defaults, where stock sends `00 05`).
+
 
 - `ready` lists inputs as `in` and outputs as `out`. The device serves the element's `<command-interface>` (port 1332) itself and
   runs the client echo rules. It sends the module `values` for output tags when they are due.

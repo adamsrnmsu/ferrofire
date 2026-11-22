@@ -141,10 +141,7 @@ the client is the DUT, the **stock** server runs beside it in the same container
     DUT=rust make conformance PROTO=dnp3-client      # our master vs the stock outstation
     conformance/stock/run-stock.sh modbus-client     # re-record stock/client-modbus.golden and .pcap from the stock client (also: dnp3-client)
 
-    conformance/stock/run-stock.sh bacnet            # re-record stock/bacnet-server.golden (+ .pcap.gz, .nmap.golden): `<bacnet-server>` probed by stock/probe_bacnet.py
-
-The BACnet server golden has no `conformance/bacnet` peer yet; it is the target of the bacpypes3 spike (`modules/bacnet/spike/`). The stock device and the
-probe run in a private network (`ff-sdd-t0b-*`) because the stock device answers Who-Is by broadcast, which needs the probe to have its own address.
+The BACnet client and server are under [BACnet/IP](#bacnetip).
 
 The goldens were recorded from `ffc-stock-2026.11.03:22.04` (bennu v2026.11.03); `STOCK_IMAGE` (default that image) names the stock image,
 `CONF_NAME` the container prefix, `TP_DOCKER_HOST` the daemon that has the image and `ferrofire-testpeers`.
@@ -230,6 +227,70 @@ a real port). Ours sets 9600 8N1, a difference we keep on purpose. The model che
 UART hardware, cabling and RS-485 direction control are not covered.
 
 `fep` mode has no stock counterpart; its rules are in [docs/field-device-clients.md](../docs/field-device-clients.md) and its tests in `tests/fd_fep.rs`.
+
+## BACnet/IP
+
+`<bacnet-server>` and `<bacnet-client>` are served by an external module, `modules/bacnet/` (bacpypes3 0.1.0, ffmod/1:
+[docs/modules.md](../docs/modules.md)), so `DUT=rust` runs our binary in `ff-modbac:22.04` (`RUST_DUT_IMAGE`), which has the module at
+`/opt/ferrofire/modules/bacnet`. `make modbac-image` builds it; rebuild it after any change under `modules/bacnet/`.
+
+    make conformance PROTO=bacnet                     # the stock server: probe_bacnet.py, nmap bacnet-info, tshark, Zeek icsnpp-bacnet
+    DUT=rust make conformance PROTO=bacnet            # ours, and its transcript against stock's (the differential)
+    make conformance PROTO=bacnet-client              # the stock client against the stock server: the golden itself
+    SERVER=rust make conformance PROTO=bacnet-client  # the stock client against our server
+    DUT=rust make conformance PROTO=bacnet-client     # our client against the stock server (fails: see below)
+    conformance/stock/run-stock.sh bacnet-feed        # re-record stock/bacnet-server-feed.golden (also: bacnet-client, and bacnet for
+                                                      # the provider-less stock/bacnet-server.golden of Task 0b)
+
+**Server** (`conformance/bacnet/`, protocols plan row 6). The device answers Who-Is by broadcast, so the probe needs an address of its
+own: `OWN_NET=1` puts the DUT on a private network `ff-conf-net` that the peers join (capture on `eth0`). Beside the DUT runs
+`feed.py`, its provider: it publishes `FEED` (BI 0 and 1 active, AI 0 250.5, AI 1 300.7) to the `<input>` group twice a second and
+ACKs and logs the writes that reach the `<output>` REP. `peer.sh` waits until AI 0 reads 250.5, runs `stock/probe_bacnet.py` (bacpypes3,
+pip-installed by `prepare.sh`; 502 lines: Who-Is, the device and every configured object by RP and RPM, a sweep of property ids 0 to
+260 on nine objects, WP and WPM with their read-backs, errors, ReadRange, DCC with its 70 s duration), `nmap --script bacnet-info`,
+and appends the provider's log (`## provider`). `check.sh`: I-Am device 1234 vendor 260, the fed present values of each object (AO as
+stock's uint8: 250.5 reads 250, 300.7 reads 44), WP AO 2 42.5 then a read of 42, `object/unknown-object`; nmap equal to
+`stock/bacnet-server.nmap.golden`; the transcript equal to `stock/bacnet-server-feed.golden` (stock, three runs alike) or, for ours,
+differing from it by exactly `bacnet/rust-feed.diff` (a divergence that goes away fails too). Zeek: `bacnet`, `bacnet_discovery`,
+`bacnet_property`, `bacnet_device_control` logs. Stock with a feed confirms what the module had only modelled: BI/AI present values,
+BO priority slot 1 and AO slot 16 follow the datastore at 1 Hz, and an output tag reads the value published for its provider point.
+
+Where ours differs from stock (`bacnet/rust-feed.diff`, the same in three runs):
+
+| Area | Stock | Ours | Whose |
+|---|---|---|---|
+| AV 0, BV 0, MSI 0 detail properties (sweep) | bacnet-stack demo values | bacpypes3 defaults, some missing | module, open (known since Task 0b) |
+| ReadRange of a trend-log log-buffer | 66-76 synthetic records | `services/property-is-not-a-list` | module, open (known since Task 0b) |
+| A value written and ACKed by the provider, read within about 2 to 4 s (6 lines: AO 3 2.5 s after its write reads 9 where stock reads 44; AO 2 and 3 priority slot 16; AO 2 after its relinquish; AI 0 at the DCC step) | the provider's next datagram (0.5 s here) wins at once | the ACKed value is held 2 s against the stream (`ACK_HOLD`, ww-1df.32), then the stream wins | device, by design: a real provider applies the write at its next tick and then publishes it, so both converge; `feed.py` never applies a write |
+| The order of the points in one `WRITE=` batch to the provider | `generator-1_bus-1.active, load-1_bus-1.active, bus-1.gen_mw, load-1_bus-1.mw` | by tag name (`bus-1.gen_mw` first) | device; the same pairs, and a provider reads them as a set |
+
+The no-provider golden of Task 0b (`stock/bacnet-server.golden`) stays as its record; the fed run supersedes it (Task 7 found ours
+different from it by the first two rows only).
+
+**Client** (`conformance/bacnet-client/`, row 11). bennu's sample `<bacnet-client>` (`stock/client-bacnet.xml`: device 1234 at
+127.0.0.1:47808, scan-rate 5, command interface 1330) with a BACnet server beside it in the same network namespace, under
+`stock/servectl.py`: `SERVER=stock` (bennu's sample server in the stock image) or `SERVER=rust` (ours in `ff-modbac`; `run.sh`'s
+`SIDE_IMAGE` container). Both stacks use `BACNET_IFACE=lo`, the client port 47809 (`DUT_ENV`) and the server 47808. `peer.sh` drives
+the command interface (`stock/probe_cmdif.py`): reads, a RADIO datagram for the server's inputs, a write of each point type, errors,
+the server stopped and started. `probe_cmdif.py --report 47809 bacnet` prints the replies and the client's frames as BVLC/NPDU/APDU
+bytes with the invoke id masked; the scans (RP present-value) are left out where they fall and listed once at the end, each request
+with each distinct answer; a reply of 3 s or more is `~3s+` (stock's WRITE waits out its retries). The golden is the stock client
+against the stock server (`stock/client-bacnet.golden`, two runs alike).
+
+- **The stock client against our server** (`SERVER=rust`): the transcript equals the golden (PASS): same answers to every scan
+  request, WriteProperty and error, through a stop and restart.
+- **Our client** (`DUT=rust`): FAIL, open. On bennu's sample the device knows none of the client's tags: compiled clients create
+  them from their points at load, a manifest-served element is opaque to the device, and the plan did not say where its tags come
+  from. Every `uses` entry is skipped (`tag brkr: unknown tag, skipped`), polled values are rejected, and the command interface
+  answers `Client does not have any tag mappings`. With the tags declared (`CFG=conformance/bacnet-client/client-tags.xml`, an
+  edited copy) it polls and writes, and still differs from the stock client:
+
+| Area | Stock client | Ours | Whose |
+|---|---|---|---|
+| Object type of each scan read | BO 0, BO 1, BO 2, BO 3, AI 0, AO 1, AO 2, AO 3 (its type rule, `ClientConnection.cpp`: BI 0 and 1 read as BO, AI 1 as AO) | BI 0, BI 1, BO 2, BO 3, AI 0, AI 1, AO 2, AO 3, as configured (so `brkr` reads true where stock reads false) | module, open |
+| Confirmed-request header | `00 05`: no segmentation, max APDU 1476 | `02 44`: segmented response accepted, 16 segments, max APDU 1024 (bacpypes3's defaults) | module, open |
+| `WRITE=` on the command interface | sends the WriteProperty and answers with its outcome (`ACK=Wrote tag ...`, or `ERR=...` after about 5 to 10 s with the server away) | answers `ACK=Wrote tag ...` at once; the WriteProperty goes out with the next `values`, and one not answered within 3 s is reported failed (`sent` `ok:false`) and sent again when due. With the server away: `ACK`, then the write lands twice after the restart (bacpypes3's own retry, and the device's) | device (client echo rule over ffmod/1), module (3 s) |
+| `WRITE=` to an input tag (`brkr`, `load-power`) | sent as a WriteProperty to the object its type rule names (BO 0 is ACKed; AI 0 is `write-access-denied`, `ERR`) | `ERR=Failed writing tag ...` with nothing on the wire | device |
 
 ## IEC 61850 (no oracle)
 Bennu never loads an IEC 61850 server, so `conformance/iec61850/` has only the acceptance half, and `proto.env` sets `DUT_DEFAULT=rust`:

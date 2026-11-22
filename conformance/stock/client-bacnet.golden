@@ -1,0 +1,65 @@
+# server started
+READ=load-power	ACK=load-power:0.000000\x00
+READ=brkr	ACK=brkr:false\x00
+# inputs published
+QUERY=	ACK=brkr,bus-1.gen_mw,generator-1_bus-1.active,load-breaker-toggle,load-mw-setpoint,load-power,\x00
+READ=load-power	ACK=load-power:250.500000\x00
+READ=bus-1.gen_mw	ACK=bus-1.gen_mw:44.000000\x00
+READ=brkr	ACK=brkr:false\x00
+READ=generator-1_bus-1.active	ACK=generator-1_bus-1.active:true\x00
+READ=load-breaker-toggle	ACK=load-breaker-toggle:true\x00
+READ=load-mw-setpoint	ACK=load-mw-setpoint:250.000000\x00
+WRITE=load-breaker-toggle:true	ACK=Wrote tag load-breaker-toggle -- true\x00
+> 810a001501040005__0f0c0100000219553e91013f
+< 810a0009010020__0f
+WRITE=load-mw-setpoint:42.5	ACK=Wrote tag load-mw-setpoint -- 42.5\x00
+> 810a001801040005__0f0c0040000219553e44422a00003f
+< 810a0009010020__0f
+WRITE=bus-1.gen_mw:7.25	ACK=Wrote tag bus-1.gen_mw -- 7.25\x00
+> 810a001801040005__0f0c0040000319553e4440e800003f
+< 810a0009010020__0f
+WRITE=generator-1_bus-1.active:false	ACK=Wrote tag generator-1_bus-1.active -- false\x00
+> 810a001501040005__0f0c0100000319553e91003f
+< 810a0009010020__0f
+READ=load-breaker-toggle	ACK=load-breaker-toggle:true\x00
+READ=load-mw-setpoint	ACK=load-mw-setpoint:250.000000\x00
+READ=bus-1.gen_mw	ACK=bus-1.gen_mw:44.000000\x00
+READ=generator-1_bus-1.active	ACK=generator-1_bus-1.active:true\x00
+# errors
+READ=nope	ERR=Client does not have a mapping for tag 'nope'\x00
+WRITE=nope:1	ERR=Client does not have a mapping for tag 'nope'\x00
+WRITE=load-power:5	ERR=Failed writing tag 'load-power': <text>\x00
+> 810a001801040005__0f0c0000000019553e4440a000003f
+< 810a000d010050__0f91029128
+WRITE=brkr:true	ACK=Wrote tag brkr -- true\x00
+> 810a001501040005__0f0c0100000019553e91013f
+< 810a0009010020__0f
+# server stopped
+WRITE=load-mw-setpoint:9	ERR=Failed writing tag 'load-mw-setpoint': <text>\x00	~3s+
+> 810a001801040005__0f0c0040000219553e44411000003f
+READ=load-power	ACK=load-power:250.500000\x00
+# server started
+READ=load-power	ACK=load-power:0.000000\x00
+READ=load-mw-setpoint	ACK=load-mw-setpoint:0.000000\x00
+# scans: each ReadProperty present-value request, and each answer it got
+> 810a001101040005__0c0c010000001955
+< 810a0014010030__0c0c0100000019553e91003f
+> 810a001101040005__0c0c010000011955
+< 810a0014010030__0c0c0100000119553e91003f
+> 810a001101040005__0c0c010000021955
+< 810a0014010030__0c0c0100000219553e91003f
+< 810a0014010030__0c0c0100000219553e91013f
+> 810a001101040005__0c0c010000031955
+< 810a0014010030__0c0c0100000319553e91003f
+< 810a0014010030__0c0c0100000319553e91013f
+> 810a001101040005__0c0c000000001955
+< 810a0017010030__0c0c0000000019553e44000000003f
+< 810a0017010030__0c0c0000000019553e44437a80003f
+> 810a001101040005__0c0c004000011955
+< 810a0017010030__0c0c0040000119553e44000000003f
+> 810a001101040005__0c0c004000021955
+< 810a0017010030__0c0c0040000219553e44000000003f
+< 810a0017010030__0c0c0040000219553e44437a00003f
+> 810a001101040005__0c0c004000031955
+< 810a0017010030__0c0c0040000319553e44000000003f
+< 810a0017010030__0c0c0040000319553e44423000003f

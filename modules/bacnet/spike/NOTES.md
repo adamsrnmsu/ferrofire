@@ -4,10 +4,11 @@ Task 0b gate of the external-modules plan. Question: can a Python module on `bac
 `bennu-field-device` gives (spec amendment 2026-11-21, protocols plan rows 6 and 11)? Answer: **yes**, for everything a client of the configured
 objects and of the device sees, at the price of an override layer over a library with a good many 0.1.0 defects (listed below).
 
-Run: `./run.sh` (containers and network `ff-sdd-t0b-spike-*`, removed on exit; `DCC_WAIT=0` skips the 70 s DCC-duration wait). `server.py` is the
-spike server, built from `conformance/stock/bacnet-server.xml` (instance 1234, BI 0-1, BO 2-3, AI 0-1, AO 2-3, `address` = object instance).
-`wirediff.sh STOCK.pcap SPIKE.pcap` compares what each server sent, frame by frame. Output in `out/` (`spike.txt` transcript, `diff.txt` against the
-golden, `nmap.txt`, `bacnet-spike.pcap.gz`, `server.log`).
+The spike's `server.py`, its `run.sh` and `wirediff.sh` are gone: the server became `../module.py` (Task 7), and the comparison with
+stock is now `conformance/bacnet/` (the real module through ferrofire, `DUT=rust make conformance PROTO=bacnet`, with a provider so
+that nonzero values are compared too) and `conformance/bacnet-client/` (the client both ways). `out/` keeps what the spike recorded
+(`spike.txt` transcript, `diff.txt` against the golden, `nmap.txt`, `bacnet-spike.pcap.gz`, `server.log`) as the record of this note.
+What follows is the record of the spike as it was run.
 
 ## The golden (new, `conformance/stock/`)
 
@@ -46,6 +47,8 @@ the AO wrap, the priority arrays after each write, the 4074-entry object list in
 **Not compared with stock: any nonzero value.** Stock ran with no provider, so every value in the golden is 0/inactive and the 1 Hz refresh
 from the datastore was never observed on stock. On the spike alone, with a seeded datastore, BI/AI/BO/AO read the seeded values (AO 33.7 reads
 33.0, by the uint8 rule above); that is our model of stock's refresh (BO slot 1, AO slot 16, from the plan row), not a measurement.
+(Since measured: `conformance/bacnet/` feeds stock and ours the same values, and stock does what this model says;
+`conformance/README.md`, BACnet/IP.)
 
 ## Remaining differences
 

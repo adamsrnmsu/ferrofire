@@ -185,7 +185,7 @@ fn a_crashing_module_backs_off() {
     ];
     let cfg = dir.path("fd.xml");
     std::fs::write(&cfg, xml(port, 20, "tick", &mods.concat())).unwrap();
-    let mut dev = binary(&cfg, false);
+    let mut dev = binary(&cfg, &[]);
     std::thread::sleep(Duration::from_secs(4));
     assert!(
         provider_sees(&reqs, "out.p:5.000000", 5),
@@ -278,13 +278,10 @@ impl Drop for Fd {
     }
 }
 
-/// `ferrofire field-device --file cfg [--strict]`, its stderr piped.
-fn binary(cfg: &str, strict: bool) -> Fd {
+/// `ferrofire field-device --file cfg ARGS...`, its stderr piped.
+fn binary(cfg: &str, args: &[&str]) -> Fd {
     let mut c = Command::new(BIN);
-    c.args(["field-device", "--file", cfg]);
-    if strict {
-        c.arg("--strict");
-    }
+    c.args(["field-device", "--file", cfg]).args(args);
     Fd(c.stderr(Stdio::piped()).spawn().unwrap())
 }
 
@@ -336,11 +333,11 @@ fn strict_error_exits_nonzero() {
     let mods = module("picky", &dir.script("m.sh", body));
     std::fs::write(&cfg, xml(free_tcp(), 20, "tick", &mods)).unwrap();
 
-    let (ok, log) = exited(&mut binary(&cfg, true), 15);
+    let (ok, log) = exited(&mut binary(&cfg, &["--strict"]), 15);
     assert!(!ok, "{log}");
     assert!(log.contains("no rpoll-rate"), "{log}");
 
-    let mut dev = binary(&cfg, false);
+    let mut dev = binary(&cfg, &[]);
     std::thread::sleep(Duration::from_millis(1500));
     assert!(
         dev.0.try_wait().unwrap().is_none(),
@@ -349,4 +346,49 @@ fn strict_error_exits_nonzero() {
     let (ok, log) = sigterm(&mut dev);
     assert!(ok, "{log}");
     assert_eq!(log.matches("module picky: starting").count(), 1, "{log}");
+}
+
+/// The `sh` module of docs/modules.md ("Write your own"), as the page has it.
+fn docs_example() -> &'static str {
+    let doc = include_str!("../docs/modules.md");
+    let section = &doc[doc.find("## Write your own").unwrap()..];
+    let start = section.find("```sh\n").unwrap() + "```sh\n".len();
+    let len = section[start..].find("```").unwrap();
+    &section[start..start + len]
+}
+
+/// The docs example, installed as a module directory with a manifest whose command is relative (`./echo.sh`, so it must resolve
+/// against the module's directory), serves a stock-style element through `--modules-dir`: ready, its write, values, stop.
+#[test]
+fn the_docs_example_runs_from_a_manifest() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, port, stop) = (Dir::new("docs"), free_tcp(), CancellationToken::new());
+    let reqs = provider(port, stop.clone());
+    let home = dir.0.join("echo");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(home.join("echo.sh"), docs_example()).unwrap();
+    std::fs::set_permissions(home.join("echo.sh"), PermissionsExt::from_mode(0o755)).unwrap();
+    let manifest = r#"{"serves":["echo-server"],"command":"./echo.sh"}"#;
+    std::fs::write(home.join("module.json"), manifest).unwrap();
+    let cfg = dir.path("fd.xml");
+    let comms = "<echo-server><tag>out</tag></echo-server>";
+    std::fs::write(&cfg, xml(port, 20, "tick", comms)).unwrap();
+
+    let mut dev = binary(&cfg, &["--modules-dir", &dir.path("")]);
+    let seen = provider_sees(&reqs, "out.p:1.000000", 15);
+    std::thread::sleep(Duration::from_millis(500)); // the ACKed value comes back in `values`
+    let (ok, log) = sigterm(&mut dev);
+    assert!(
+        seen,
+        "the example's write never reached the provider: {log}"
+    );
+    assert!(ok, "{log}");
+    for want in [
+        "module echo-server: serving out",
+        "write accepted",
+        "changed: ",
+    ] {
+        assert!(log.contains(want), "no `{want}` in: {log}");
+    }
+    stop.cancel();
 }
