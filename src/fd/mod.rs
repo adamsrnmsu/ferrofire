@@ -19,6 +19,8 @@ use tokio_util::sync::CancellationToken;
 
 /// How long a provider request waits for its reply (SPEC 3.2).
 const PROVIDER_TIMEOUT_MS: i32 = 5000;
+/// How long the device's stop waits for its modules.
+const MODULES_STOP: std::time::Duration = std::time::Duration::from_millis(5500);
 
 #[derive(clap::Args)]
 pub struct Cli {
@@ -103,9 +105,10 @@ pub fn run(cfg: Config, stop: CancellationToken, signals: bool) -> Result<(), St
         .iter()
         .map(|o| crate::transport::requester(&o.endpoint, PROVIDER_TIMEOUT_MS).map(Output::new))
         .collect::<Result<Vec<_>, _>>()?;
+    let mut modules = vec![];
     for (tag, start) in cfg.modules {
         tracing::info!("{tag}: starting");
-        rt.spawn(start(cfg.store.clone(), stop.clone()));
+        modules.push(rt.spawn(start(cfg.store.clone(), stop.clone())));
     }
     let (store, logic, cycle_ms) = (cfg.store.clone(), cfg.logic, cfg.cycle_ms);
     let stop2 = stop.clone();
@@ -114,11 +117,27 @@ pub fn run(cfg: Config, stop: CancellationToken, signals: bool) -> Result<(), St
     }));
     rt.block_on(wait(&stop, signals));
     stop.cancel();
+    rt.block_on(stopped(modules));
     threads.into_iter().for_each(|t| {
         let _ = t.join();
     });
     rt.shutdown_timeout(std::time::Duration::from_secs(2));
+    #[cfg(feature = "external")]
+    if let Some(msg) = proto::external::take_fatal() {
+        return Err(msg);
+    }
     Ok(())
+}
+
+/// Give the modules until `MODULES_STOP` after the stop to end (an external module may take 5 s to be stopped); the runtime's
+/// shutdown drops what is left.
+async fn stopped(modules: Vec<tokio::task::JoinHandle<()>>) {
+    let end = tokio::time::Instant::now() + MODULES_STOP;
+    for m in modules {
+        if tokio::time::timeout_at(end, m).await.is_err() {
+            tracing::warn!("a module did not end within {MODULES_STOP:?} of the stop");
+        }
+    }
 }
 
 async fn wait(stop: &CancellationToken, signals: bool) {
