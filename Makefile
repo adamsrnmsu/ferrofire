@@ -10,7 +10,7 @@ DRY_MIN := 0.8
 # ponytail: pid lock; a kill -9 of make leaves a stale file that src-free ignores because the pid is gone.
 MUTATE_LOCK := .mutate.lock
 
-.PHONY: helics physics dut netns differential diff-dnp3 diff-modbus diff-udp diff-serial diff-serial-mismatch testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report bench-control bench-fdmicro bench-maxrate bench-maxrate-control charts image rtu-image rtu-image-smoke fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
+.PHONY: helics physics dut netns differential diff-dnp3 diff-modbus diff-udp diff-serial diff-serial-mismatch testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report bench-control bench-fdmicro bench-maxrate bench-maxrate-control modbac-image modbac-test charts image rtu-image rtu-image-smoke fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
 help:    # list targets
 	@grep -E '^[a-z-]+:.*#' $(MAKEFILE_LIST) | sed -E 's/^([a-z-]+):[^#]*#/\1\t/'
 src-free:   # fail fast while make mutate is rewriting src/
@@ -123,6 +123,11 @@ diff-serial-mismatch: dut   # negative control: on a line at another speed or pa
 	    grep -q MISMATCH target/serial-mismatch.err || { echo "$$p $$who at $$line: the relay saw no mismatch"; exit 1; }; \
 	    echo "$$p $$who at $$line: no stock transcript, as it should ($$(grep -m1 MISMATCH target/serial-mismatch.err))"; \
 	  done; done; done
+
+modbac-image:   # build ff-modbac:22.04, the BACnet module image (modules/bacnet/Dockerfile: ff-physics + bacpypes3)
+	$(TP) docker build --platform $(PLATFORM) -t ff-modbac:22.04 modules/bacnet
+modbac-test: modbac-image   # the BACnet module's tests (pytest, a scripted device and a bacpypes3 peer) in ff-modbac
+	$(TP) docker run --rm --platform $(PLATFORM) -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/src -w /src/modules/bacnet ff-modbac:22.04 python3 -m pytest -q -p no:cacheprovider test_module.py
 
 clean:   # remove build output and metrics
 	rm -rf target target-linux dist .metrics

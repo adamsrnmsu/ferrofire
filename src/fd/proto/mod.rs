@@ -5,6 +5,8 @@
 pub mod client;
 #[cfg(feature = "proto-dnp3")]
 pub mod dnp3;
+#[cfg(feature = "external")]
+pub mod external;
 #[cfg(feature = "proto-iccp")]
 pub mod iccp;
 #[cfg(feature = "proto-iec61850")]
@@ -108,7 +110,15 @@ pub static REGISTRY: &[(&str, Start)] = &[
     ("scpi-server", start::<scpi::Server>),
     #[cfg(feature = "proto-scpi")]
     ("scpi-client", start::<scpi::client::Client>),
+    #[cfg(feature = "external")]
+    ("external-module", start::<external::External>),
 ];
+
+/// Whether a started `<comms>` tag runs a compiled module: one in `REGISTRY` other than `<external-module>`. Anything else came
+/// from an external module (`<external-module>`, or a stock tag only a module manifest serves), whose stop the device waits for.
+pub fn compiled(tag: &str) -> bool {
+    tag != "external-module" && REGISTRY.iter().any(|(t, _)| *t == tag)
+}
 
 /// Every `<comms>` tag a build can have, and the Cargo feature that provides it.
 pub const KNOWN: &[(&str, &str)] = &[
@@ -126,6 +136,7 @@ pub const KNOWN: &[(&str, &str)] = &[
     ("mqtt-client", "proto-mqtt"),
     ("scpi-server", "proto-scpi"),
     ("scpi-client", "proto-scpi"),
+    ("external-module", "external"),
 ];
 
 /// Start the module a `<comms>` child names. `Ok(None)`: a tag nothing knows is warned about and skipped; a tag whose feature is
@@ -140,9 +151,21 @@ pub fn start_module(
     if let Some((_, start)) = registry.iter().find(|(t, _)| *t == tag) {
         return start(node, tags, opts).map(Some);
     }
+    // a compiled module wins; then an installed module whose manifest serves the tag
+    #[cfg(feature = "external")]
+    if let Some((dir, cmd)) = external::manifest::lookup(tag) {
+        let m = external::External::from_element(node, &cmd, &dir, tags, opts)?;
+        return Ok(Some(Box::new(move |store, stop| {
+            Box::pin(m.run(store, stop))
+        })));
+    }
     match KNOWN.iter().find(|(t, _)| *t == tag) {
+        // no compiled module exists for BACnet: only an installed module can serve it
+        Some((_, "proto-bacnet")) => Err(ConfigError(format!(
+            "<{tag}> is served only by an installed module (see docs/modules.md), and none serves it"
+        ))),
         Some((_, feature)) => Err(ConfigError(format!(
-            "<{tag}> needs the `{feature}` feature, which this binary was built without"
+            "<{tag}> needs the `{feature}` feature or an installed module (see docs/modules.md); this binary was built without the feature"
         ))),
         None => {
             opts.warn(format!(
@@ -226,6 +249,15 @@ mod tests {
     }
 
     #[test]
+    fn only_a_registry_module_other_than_external_module_is_compiled() {
+        assert!(!compiled("external-module"));
+        assert!(!compiled("bacnet-server")); // only a module manifest can serve it
+        assert!(!compiled("nonsense"));
+        #[cfg(feature = "proto-modbus")]
+        assert!(compiled("modbus-server"));
+    }
+
+    #[test]
     fn registry_ships_only_what_is_known() {
         assert!(REGISTRY
             .iter()
@@ -263,5 +295,18 @@ mod tests {
             e.0.contains("unknown <comms> element <whatever-server>"),
             "{e}"
         );
+    }
+
+    #[cfg(feature = "external")]
+    #[test]
+    fn registry_wins_over_a_manifest() {
+        external::manifest::tests::global();
+        assert!(external::manifest::lookup("fake-server").is_some());
+        // the manifest serves `fake-server` too; the compiled module is the one started, and it is not an external one
+        assert_eq!(
+            run("fake-server", fake::REGISTRY, &Opts::default()),
+            Ok(Some(()))
+        );
+        assert!(!compiled("iec60870-5-104-server"));
     }
 }

@@ -1,0 +1,21 @@
+13,14d12
+< > 810a001501040005__0f0c0100000219553e91013f
+< < 810a0009010020__0f
+32,36c30
+< > 810a001801040005__0f0c0000000019553e4440a000003f
+< < 810a000d010050__0f91029128
+< WRITE=brkr:true	ACK=Wrote tag brkr -- true\x00
+< > 810a001501040005__0f0c0100000019553e91013f
+< < 810a0009010020__0f
+---
+> WRITE=brkr:true	ERR=Failed writing tag 'brkr': <text>\x00
+38c32
+< WRITE=load-mw-setpoint:0	ERR=Failed writing tag 'load-mw-setpoint': <text>\x00	~3s+
+---
+> WRITE=load-mw-setpoint:0	ACK=Wrote tag load-mw-setpoint -- 0\x00
+41a36,38
+> < 810a0009010020__0f
+> > 810a001801040005__0f0c0040000219553e44000000003f
+> < 810a0009010020__0f
+47d43
+< < 810a0014010030__0c0c0100000019553e91013f

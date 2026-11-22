@@ -19,6 +19,8 @@ use tokio_util::sync::CancellationToken;
 
 /// How long a provider request waits for its reply (SPEC 3.2).
 const PROVIDER_TIMEOUT_MS: i32 = 5000;
+/// How long the device's stop waits for its external modules.
+const MODULES_STOP: std::time::Duration = std::time::Duration::from_millis(5500);
 
 #[derive(clap::Args)]
 pub struct Cli {
@@ -34,6 +36,9 @@ pub struct Cli {
     /// Print the protocol modules this binary has and exit
     #[arg(long)]
     list_protocols: bool,
+    /// Where installed external modules live (default $FERROFIRE_MODULES, else /opt/ferrofire/modules)
+    #[arg(long)]
+    modules_dir: Option<std::path::PathBuf>,
 }
 
 /// Entry point of the subcommand; returns the process exit code.
@@ -43,6 +48,10 @@ pub fn main(cli: Cli) -> i32 {
         return 0;
     }
     crate::trace::init();
+    #[cfg(feature = "external")]
+    if let Some(d) = cli.modules_dir {
+        proto::external::manifest::set_dir(d);
+    }
     let file = cli.file.unwrap_or_default();
     let cfg = match load(
         &file,
@@ -103,9 +112,14 @@ pub fn run(cfg: Config, stop: CancellationToken, signals: bool) -> Result<(), St
         .iter()
         .map(|o| crate::transport::requester(&o.endpoint, PROVIDER_TIMEOUT_MS).map(Output::new))
         .collect::<Result<Vec<_>, _>>()?;
+    // the external modules' tasks, waited for on stop; a compiled one is dropped at the runtime's shutdown as it always was
+    let mut external = vec![];
     for (tag, start) in cfg.modules {
         tracing::info!("{tag}: starting");
-        rt.spawn(start(cfg.store.clone(), stop.clone()));
+        let task = rt.spawn(start(cfg.store.clone(), stop.clone()));
+        if !proto::compiled(&tag) {
+            external.push((tag, task));
+        }
     }
     let (store, logic, cycle_ms) = (cfg.store.clone(), cfg.logic, cfg.cycle_ms);
     let stop2 = stop.clone();
@@ -114,11 +128,27 @@ pub fn run(cfg: Config, stop: CancellationToken, signals: bool) -> Result<(), St
     }));
     rt.block_on(wait(&stop, signals));
     stop.cancel();
+    rt.block_on(stopped(external));
     threads.into_iter().for_each(|t| {
         let _ = t.join();
     });
     rt.shutdown_timeout(std::time::Duration::from_secs(2));
+    #[cfg(feature = "external")]
+    if let Some(msg) = proto::external::take_fatal() {
+        return Err(msg);
+    }
     Ok(())
+}
+
+/// Give the external modules until `MODULES_STOP` after the stop to end (stopping one may take 5 s); the runtime's shutdown drops
+/// what is left.
+async fn stopped(external: Vec<(String, tokio::task::JoinHandle<()>)>) {
+    let end = tokio::time::Instant::now() + MODULES_STOP;
+    for (tag, task) in external {
+        if tokio::time::timeout_at(end, task).await.is_err() {
+            tracing::warn!("<{tag}> did not end within {MODULES_STOP:?} of the stop");
+        }
+    }
 }
 
 async fn wait(stop: &CancellationToken, signals: bool) {
@@ -242,6 +272,7 @@ mod tests {
             strict: false,
             compat_wrap: false,
             list_protocols: list,
+            modules_dir: None,
         };
         assert_eq!(main(cli(None, true)), 0);
         assert_eq!(main(cli(Some("/nonexistent/fd.xml"), false)), 1);
