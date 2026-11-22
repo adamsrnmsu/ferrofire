@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SCEPTRE>
+    <field-device>
+        <name>rtu-helics</name>
+        <cycle-time>100</cycle-time>
+        <tags>
+            <external-tag><name>bus1_volts</name><io>I0</io><type>analog</type></external-tag>
+            <external-tag><name>gen1_on</name><io>I1</io><type>binary</type></external-tag>
+            <external-tag><name>load1_on</name><io>I2</io><type>binary</type></external-tag>
+            <external-tag><name>load1_cmd</name><io>O0</io><type>binary</type></external-tag>
+        </tags>
+        <comms>
+            <modbus-server>
+                <endpoint>tcp://127.0.0.1:502</endpoint>
+                <input-register><address>30000</address><max-value>2</max-value><min-value>0</min-value><tag>bus1_volts</tag></input-register>
+                <discrete-input><address>10000</address><tag>gen1_on</tag></discrete-input>
+                <discrete-input><address>10001</address><tag>load1_on</tag></discrete-input>
+                <coil><address>0</address><tag>load1_cmd</tag></coil>
+            </modbus-server>
+        </comms>
+        <input>
+            <endpoint>udp://239.0.0.1:40000</endpoint>
+            <analog><id>I0</id><name>bus-1.voltage</name></analog>
+            <binary><id>I1</id><name>gen1.active</name></binary>
+            <binary><id>I2</id><name>load1.active</name></binary>
+        </input>
+        <output>
+            <endpoint>tcp://127.0.0.1:5555</endpoint>
+            <binary><id>O0</id><name>load1.active</name></binary>
+        </output>
+    </field-device>
+</SCEPTRE>

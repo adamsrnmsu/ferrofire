@@ -48,11 +48,7 @@ function p.dissector(buf, pinfo, tree)
   t:add(f.body, buf(base, #text), text)
   local pos, count, seq = 1, 0, nil
   while pos <= #text do
-    local c = text:find(",", pos, true)
-    if not c then
-      t:add_proto_expert_info(expert, "truncated: last point has no comma")
-      break
-    end
+    local c = text:find(",", pos, true) or #text + 1   -- pybennu's unchunked messages end on a bare point (ww-9o1)
     local part = text:sub(pos, c - 1)
     local name, val = part:match("^([^:]*):(.*)$")
     local rng = buf(base + pos - 1, #part)

@@ -170,8 +170,9 @@ mod tests {
         assert_eq!(s.dropped(), 0);
         apply(&mut rx, &s, &frame("other", b"a:9,\0"), 78);
         apply(&mut rx, &s, b"\xff\xff", 78);
-        apply(&mut rx, &s, &frame("g", b"a:9"), 78); // no NUL
         assert_eq!(s.get_f64("ta"), Some(2.5));
+        apply(&mut rx, &s, &frame("g", b"a:9"), 78); // no NUL, no last comma: pybennu's HELICS provider (ww-9o1)
+        assert_eq!(s.get_f64("ta"), Some(9.0));
         apply(&mut rx, &s, &frame("g", b"b:7,\0"), 79); // not a bool
         assert_eq!((s.get_bool("tb"), s.dropped()), (Some(true), 1));
     }

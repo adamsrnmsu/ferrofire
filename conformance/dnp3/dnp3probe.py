@@ -164,7 +164,7 @@ def confirm(label, seq=None, wait=0.4):
 
 def publish(body):
     g = b"54386972605942b"
-    body += ","   # the provider ends every entry with a comma; ours treats a body without one as truncated
+    body += ","   # the stock PyPower provider ends every entry with a comma
     d = bytes([len(g)]) + g + body.encode() + b"\0"
     u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     trace("publish", body); u.sendto(d, ("239.0.0.1", 40000)); u.close()

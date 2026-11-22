@@ -1,0 +1,18 @@
+{
+    "name": "helics-test-ep-server",
+    "request_time": 1,
+    "period": 1,
+    "real_time": true,
+    "terminate_on_error": true,
+    "subscriptions": [
+        {"key": "helics-test-ep-server/bus-1.voltage", "type": "double", "info": "gen1.active = load1.active"}
+    ],
+    "publications": [
+        {"key": "bus-1.voltage", "type": "double"},
+        {"key": "gen1.active", "type": "bool"},
+        {"key": "load1.active", "type": "bool"}
+    ],
+    "endpoints": [
+        {"name": "load1.active"}
+    ]
+}
