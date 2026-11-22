@@ -1,0 +1,167 @@
+STARTDT U/S 68 04 0b 00 00 00
+GI20 t=3.2 64 01 07 00 01 00 00 00 00 14
+GI20 t=3.2 03 04 14 00 01 00 00 00 00 01 01 00 00 01 64 00 00 01 65 00 00 01
+GI20 t=3.2 0d 04 14 00 01 00 02 00 00 00 00 00 00 00 03 00 00 00 00 00 00 00 66 00 00 00 00 00 00 00 67 00 00 00 00 00 00 00
+GI20 t=3.2 64 01 0a 00 01 00 00 00 00 14
+GI20 t=3.2 1f 01 03 00 01 00 00 00 00 01 9a b2 34 03 16 0b 1a
+GI20 t=3.2 1f 01 03 00 01 00 01 00 00 01 9a b2 34 03 16 0b 1a
+GI20 t=3.2 1f 01 03 00 01 00 64 00 00 01 9a b2 34 03 16 0b 1a
+GI20 t=3.2 1f 01 03 00 01 00 65 00 00 01 9a b2 34 03 16 0b 1a
+GI20 t=3.2 1f 01 03 00 01 00 00 00 00 01 8a b6 34 03 16 0b 1a
+GI20 t=3.2 1f 01 03 00 01 00 01 00 00 01 8a b6 34 03 16 0b 1a
+GI20 t=3.2 1f 01 03 00 01 00 64 00 00 01 8a b6 34 03 16 0b 1a
+GI20 periodic COT1 ASDU types: [13]
+GI21(other QOI) t=5.2 64 01 47 00 01 00 00 00 00 15
+GI21(other QOI) t=5.2 1f 01 03 00 01 00 65 00 00 01 8a b6 34 03 16 0b 1a
+GI21(other QOI) t=5.2 1f 01 03 00 01 00 00 00 00 01 73 ba 34 03 16 0b 1a
+GI21(other QOI) t=5.2 1f 01 03 00 01 00 01 00 00 01 73 ba 34 03 16 0b 1a
+GI21(other QOI) t=5.2 1f 01 03 00 01 00 64 00 00 01 73 ba 34 03 16 0b 1a
+GI21(other QOI) t=5.2 1f 01 03 00 01 00 65 00 00 01 73 ba 34 03 16 0b 1a
+GI21(other QOI) t=5.2 1f 01 03 00 01 00 00 00 00 01 5b be 34 03 16 0b 1a
+GI21(other QOI) t=5.2 1f 01 03 00 01 00 01 00 00 01 5b be 34 03 16 0b 1a
+GI21(other QOI) t=5.2 1f 01 03 00 01 00 64 00 00 01 5b be 34 03 16 0b 1a
+GI21(other QOI) t=5.2 1f 01 03 00 01 00 65 00 00 01 5b be 34 03 16 0b 1a
+GI21(other QOI) periodic COT1 ASDU types: [13, 13]
+C_SC 45 ioa0 ON t=7.2 2d 01 07 00 01 00 00 00 00 01
+C_SC 45 ioa0 ON t=7.2 2d 01 0a 00 01 00 00 00 00 01
+C_SC 45 ioa0 ON t=7.2 1f 01 03 00 01 00 00 00 00 01 45 c2 34 03 16 0b 1a
+C_SC 45 ioa0 ON t=7.2 1f 01 03 00 01 00 01 00 00 01 45 c2 34 03 16 0b 1a
+C_SC 45 ioa0 ON t=7.2 1f 01 03 00 01 00 64 00 00 01 45 c2 34 03 16 0b 1a
+C_SC 45 ioa0 ON t=7.2 1f 01 03 00 01 00 65 00 00 01 45 c2 34 03 16 0b 1a
+C_SC 45 ioa0 ON t=7.2 1f 01 03 00 01 00 00 00 00 01 2d c6 34 03 16 0b 1a
+C_SC 45 ioa0 ON t=7.2 1f 01 03 00 01 00 01 00 00 01 2d c6 34 03 16 0b 1a
+C_SC 45 ioa0 ON t=7.2 1f 01 03 00 01 00 64 00 00 01 2d c6 34 03 16 0b 1a
+C_SC 45 ioa0 ON t=7.2 1f 01 03 00 01 00 65 00 00 01 2d c6 34 03 16 0b 1a
+C_SC 45 ioa0 ON periodic COT1 ASDU types: [13, 13]
+C_SC 45 ioa1 OFF t=9.2 2d 01 07 00 01 00 01 00 00 00
+C_SC 45 ioa1 OFF t=9.2 2d 01 0a 00 01 00 01 00 00 00
+C_SC 45 ioa1 OFF t=9.2 1f 01 03 00 01 00 00 00 00 01 17 ca 34 03 16 0b 1a
+C_SC 45 ioa1 OFF t=9.2 1f 01 03 00 01 00 01 00 00 01 17 ca 34 03 16 0b 1a
+C_SC 45 ioa1 OFF t=9.2 1f 01 03 00 01 00 64 00 00 01 17 ca 34 03 16 0b 1a
+C_SC 45 ioa1 OFF t=9.2 1f 01 03 00 01 00 65 00 00 01 17 ca 34 03 16 0b 1a
+C_SC 45 ioa1 OFF t=9.2 1f 01 03 00 01 00 00 00 00 01 01 ce 34 03 16 0b 1a
+C_SC 45 ioa1 OFF t=9.2 1f 01 03 00 01 00 01 00 00 01 01 ce 34 03 16 0b 1a
+C_SC 45 ioa1 OFF t=9.2 1f 01 03 00 01 00 64 00 00 01 01 ce 34 03 16 0b 1a
+C_SC 45 ioa1 OFF t=9.2 1f 01 03 00 01 00 65 00 00 01 01 ce 34 03 16 0b 1a
+C_SC 45 ioa1 OFF periodic COT1 ASDU types: [13, 13]
+C_DC 46 ioa0 ON t=11.2 2e 01 07 00 01 00 00 00 00 02
+C_DC 46 ioa0 ON t=11.2 2e 01 0a 00 01 00 00 00 00 02
+C_DC 46 ioa0 ON t=11.2 1f 01 03 00 01 00 00 00 00 01 ee d1 34 03 16 0b 1a
+C_DC 46 ioa0 ON t=11.2 1f 01 03 00 01 00 01 00 00 01 ee d1 34 03 16 0b 1a
+C_DC 46 ioa0 ON t=11.2 1f 01 03 00 01 00 64 00 00 01 ee d1 34 03 16 0b 1a
+C_DC 46 ioa0 ON t=11.2 1f 01 03 00 01 00 65 00 00 01 ee d1 34 03 16 0b 1a
+C_DC 46 ioa0 ON t=11.2 1f 01 03 00 01 00 00 00 00 01 d8 d5 34 03 16 0b 1a
+C_DC 46 ioa0 ON t=11.2 1f 01 03 00 01 00 01 00 00 01 d8 d5 34 03 16 0b 1a
+C_DC 46 ioa0 ON t=11.2 1f 01 03 00 01 00 64 00 00 01 d8 d5 34 03 16 0b 1a
+C_DC 46 ioa0 ON t=11.2 1f 01 03 00 01 00 65 00 00 01 d8 d5 34 03 16 0b 1a
+C_DC 46 ioa0 ON periodic COT1 ASDU types: [13, 13]
+C_DC 46 ioa1 OFF t=13.2 2e 01 07 00 01 00 01 00 00 01
+C_DC 46 ioa1 OFF t=13.2 2e 01 0a 00 01 00 01 00 00 01
+C_DC 46 ioa1 OFF t=13.2 1f 01 03 00 01 00 00 00 00 01 c2 d9 34 03 16 0b 1a
+C_DC 46 ioa1 OFF t=13.2 1f 01 03 00 01 00 01 00 00 01 c2 d9 34 03 16 0b 1a
+C_DC 46 ioa1 OFF t=13.2 1f 01 03 00 01 00 64 00 00 01 c2 d9 34 03 16 0b 1a
+C_DC 46 ioa1 OFF t=13.2 1f 01 03 00 01 00 65 00 00 01 c2 d9 34 03 16 0b 1a
+C_DC 46 ioa1 OFF t=13.2 1f 01 03 00 01 00 00 00 00 01 aa dd 34 03 16 0b 1a
+C_DC 46 ioa1 OFF t=13.2 1f 01 03 00 01 00 01 00 00 01 aa dd 34 03 16 0b 1a
+C_DC 46 ioa1 OFF t=13.2 1f 01 03 00 01 00 64 00 00 01 aa dd 34 03 16 0b 1a
+C_DC 46 ioa1 OFF t=13.2 1f 01 03 00 01 00 65 00 00 01 aa dd 34 03 16 0b 1a
+C_DC 46 ioa1 OFF periodic COT1 ASDU types: [13, 13]
+C_SE 50 ioa3 77.5 t=15.2 32 01 07 00 01 00 03 00 00 00 00 9b 42 00
+C_SE 50 ioa3 77.5 t=15.2 32 01 0a 00 01 00 03 00 00 00 00 9b 42 00
+C_SE 50 ioa3 77.5 t=15.2 1f 01 03 00 01 00 00 00 00 01 94 e1 34 03 16 0b 1a
+C_SE 50 ioa3 77.5 t=15.2 1f 01 03 00 01 00 01 00 00 01 94 e1 34 03 16 0b 1a
+C_SE 50 ioa3 77.5 t=15.2 1f 01 03 00 01 00 64 00 00 01 94 e1 34 03 16 0b 1a
+C_SE 50 ioa3 77.5 t=15.2 1f 01 03 00 01 00 65 00 00 01 94 e1 34 03 16 0b 1a
+C_SE 50 ioa3 77.5 t=15.2 1f 01 03 00 01 00 00 00 00 01 7e e5 34 03 16 0b 1a
+C_SE 50 ioa3 77.5 t=15.2 1f 01 03 00 01 00 01 00 00 01 7e e5 34 03 16 0b 1a
+C_SE 50 ioa3 77.5 t=15.2 1f 01 03 00 01 00 64 00 00 01 7e e5 34 03 16 0b 1a
+C_SE 50 ioa3 77.5 t=15.2 1f 01 03 00 01 00 65 00 00 01 7e e5 34 03 16 0b 1a
+C_SE 50 ioa3 77.5 periodic COT1 ASDU types: [13, 13]
+C_SC 45 unknown ioa 50 t=17.2 2d 01 47 00 01 00 32 00 00 01
+C_SC 45 unknown ioa 50 t=17.2 1f 01 03 00 01 00 00 00 00 01 67 e9 34 03 16 0b 1a
+C_SC 45 unknown ioa 50 t=17.2 1f 01 03 00 01 00 01 00 00 01 67 e9 34 03 16 0b 1a
+C_SC 45 unknown ioa 50 t=17.2 1f 01 03 00 01 00 64 00 00 01 67 e9 34 03 16 0b 1a
+C_SC 45 unknown ioa 50 t=17.2 1f 01 03 00 01 00 65 00 00 01 67 e9 34 03 16 0b 1a
+C_SC 45 unknown ioa 50 t=17.2 1f 01 03 00 01 00 00 00 00 01 f1 02 35 03 16 0b 1a
+C_SC 45 unknown ioa 50 t=17.2 1f 01 03 00 01 00 01 00 00 01 f1 02 35 03 16 0b 1a
+C_SC 45 unknown ioa 50 t=17.2 1f 01 03 00 01 00 64 00 00 01 f1 02 35 03 16 0b 1a
+C_SC 45 unknown ioa 50 t=17.2 1f 01 03 00 01 00 65 00 00 01 f1 02 35 03 16 0b 1a
+C_SC 45 unknown ioa 50 periodic COT1 ASDU types: [13, 13, 13]
+C_CS 103 clock sync t=20.2 67 01 6c 00 01 00 00 00 00 00 00 00 00 00 00 00
+C_CS 103 clock sync t=20.2 1f 01 03 00 01 00 00 00 00 01 db 06 35 03 16 0b 1a
+C_CS 103 clock sync t=20.2 1f 01 03 00 01 00 01 00 00 01 db 06 35 03 16 0b 1a
+C_CS 103 clock sync t=20.2 1f 01 03 00 01 00 64 00 00 01 db 06 35 03 16 0b 1a
+C_CS 103 clock sync t=20.2 1f 01 03 00 01 00 65 00 00 01 db 06 35 03 16 0b 1a
+C_CS 103 clock sync t=20.2 1f 01 03 00 01 00 00 00 00 01 c6 0a 35 03 16 0b 1a
+C_CS 103 clock sync t=20.2 1f 01 03 00 01 00 01 00 00 01 c6 0a 35 03 16 0b 1a
+C_CS 103 clock sync t=20.2 1f 01 03 00 01 00 64 00 00 01 c6 0a 35 03 16 0b 1a
+C_CS 103 clock sync t=20.2 1f 01 03 00 01 00 65 00 00 01 c6 0a 35 03 16 0b 1a
+C_CS 103 clock sync t=20.2 1f 01 03 00 01 00 00 00 00 01 b0 0e 35 03 16 0b 1a
+C_CS 103 clock sync periodic COT1 ASDU types: [13, 13]
+C_CI 101 counter GI t=22.2 65 01 6c 00 01 00 00 00 00 05
+C_CI 101 counter GI t=22.2 1f 01 03 00 01 00 01 00 00 01 b0 0e 35 03 16 0b 1a
+C_CI 101 counter GI t=22.2 1f 01 03 00 01 00 64 00 00 01 b0 0e 35 03 16 0b 1a
+C_CI 101 counter GI t=22.2 1f 01 03 00 01 00 65 00 00 01 b0 0e 35 03 16 0b 1a
+C_CI 101 counter GI t=22.2 1f 01 03 00 01 00 00 00 00 01 99 12 35 03 16 0b 1a
+C_CI 101 counter GI t=22.2 1f 01 03 00 01 00 01 00 00 01 99 12 35 03 16 0b 1a
+C_CI 101 counter GI t=22.2 1f 01 03 00 01 00 64 00 00 01 99 12 35 03 16 0b 1a
+C_CI 101 counter GI t=22.2 1f 01 03 00 01 00 65 00 00 01 99 12 35 03 16 0b 1a
+C_CI 101 counter GI t=22.2 1f 01 03 00 01 00 00 00 00 01 81 16 35 03 16 0b 1a
+C_CI 101 counter GI t=22.2 1f 01 03 00 01 00 01 00 00 01 81 16 35 03 16 0b 1a
+C_CI 101 counter GI periodic COT1 ASDU types: [13, 13]
+C_RD 102 read ioa100 t=24.2 66 01 6c 00 01 00 64 00 00
+C_RD 102 read ioa100 t=24.2 1f 01 03 00 01 00 64 00 00 01 81 16 35 03 16 0b 1a
+C_RD 102 read ioa100 t=24.2 1f 01 03 00 01 00 65 00 00 01 81 16 35 03 16 0b 1a
+C_RD 102 read ioa100 t=24.2 1f 01 03 00 01 00 00 00 00 01 6b 1a 35 03 16 0b 1a
+C_RD 102 read ioa100 t=24.2 1f 01 03 00 01 00 01 00 00 01 6b 1a 35 03 16 0b 1a
+C_RD 102 read ioa100 t=24.2 1f 01 03 00 01 00 64 00 00 01 6b 1a 35 03 16 0b 1a
+C_RD 102 read ioa100 t=24.2 1f 01 03 00 01 00 65 00 00 01 6b 1a 35 03 16 0b 1a
+C_RD 102 read ioa100 t=24.2 1f 01 03 00 01 00 00 00 00 01 54 1e 35 03 16 0b 1a
+C_RD 102 read ioa100 t=24.2 1f 01 03 00 01 00 01 00 00 01 54 1e 35 03 16 0b 1a
+C_RD 102 read ioa100 t=24.2 1f 01 03 00 01 00 64 00 00 01 54 1e 35 03 16 0b 1a
+C_RD 102 read ioa100 periodic COT1 ASDU types: [13, 13]
+C_TS 107 test t=26.2 6b 01 07 00 01 00 00 00 00 aa 55 00 00 00 00 00 00 00
+C_TS 107 test t=26.2 1f 01 03 00 01 00 65 00 00 01 54 1e 35 03 16 0b 1a
+C_TS 107 test t=26.2 1f 01 03 00 01 00 00 00 00 01 3d 22 35 03 16 0b 1a
+C_TS 107 test t=26.2 1f 01 03 00 01 00 01 00 00 01 3d 22 35 03 16 0b 1a
+C_TS 107 test t=26.2 1f 01 03 00 01 00 64 00 00 01 3d 22 35 03 16 0b 1a
+C_TS 107 test t=26.2 1f 01 03 00 01 00 65 00 00 01 3d 22 35 03 16 0b 1a
+C_TS 107 test t=26.2 1f 01 03 00 01 00 00 00 00 01 27 26 35 03 16 0b 1a
+C_TS 107 test t=26.2 1f 01 03 00 01 00 01 00 00 01 27 26 35 03 16 0b 1a
+C_TS 107 test t=26.2 1f 01 03 00 01 00 64 00 00 01 27 26 35 03 16 0b 1a
+C_TS 107 test t=26.2 1f 01 03 00 01 00 65 00 00 01 27 26 35 03 16 0b 1a
+C_TS 107 test periodic COT1 ASDU types: [13, 13]
+-- idle 5.5s: periodic timing
+== server log
+INFO: Parser changed file name: "/tmp/cfg.xml" --> ".//tmp/cfg.xml"
+INFO: Loader changed library name: "bennu-field-device-base" -> "libbennu-field-device-base.so
+INFO: Loader changed library name: "bennu-iec60870-5-module" -> "libbennu-iec60870-5-module.so
+I: Client connect (tcp://127.0.0.1:5555): Connecting to provider
+add iec60870-5-104 binary-input I_generator-1_bus-1.active
+add iec60870-5-104 binary-input I_load-1_bus-1.active
+add iec60870-5-104 binary-output O_generator-1_bus-1.active
+add iec60870-5-104 binary-output O_load-1_bus-1.active
+add iec60870-5-104 analog-input I_bus-1.gen_mw
+add iec60870-5-104 analog-input I_load-1_bus-1.mw
+add iec60870-5-104 analog-output O_bus-1.gen_mw
+add iec60870-5-104 analog-output O_load-1_bus-1.mw
+starting slave: tcp://127.0.0.1:2404
+Initialized IEC60870-5-104 server: tcp://127.0.0.1:2404 (select-before-operate disabled)
+New connection request from 127.0.0.1
+Connection opened (0xaaaaeddeef68)
+Connection activated (0xaaaaeddeef68)
+Received interrogation for group 20
+Received interrogation for group 21
+received single command
+IOA: 0 switch to 1
+received single command
+IOA: 1 switch to 0
+received double command
+IOA: 0 switch to 2
+I: Client connect (tcp://127.0.0.1:5555): Connecting to provider
+received double command
+IOA: 1 switch to 1
+received setpoint command (float)
+IOA: 3 switch to 77.500000
+received single command
+E: OutputModule: provider not responding, will retry writes

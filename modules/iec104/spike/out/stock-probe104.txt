@@ -1,0 +1,35 @@
+STARTDT con: 68 04 0b 00 00 00
+APDU: 68 0e 00 00 02 00 64 01 07 00 01 00 00 00 00 14
+APDU: 68 1a 02 00 02 00 01 04 14 00 01 00 00 00 00 00 01 00 00 00 64 00 00 00 65 00 00 00
+APDU: 68 2a 04 00 02 00 0d 04 14 00 01 00 02 00 00 00 00 00 00 00 03 00 00 00 00 00 00 00 66 00 00 00 00 00 00 00 67 00 00 00 00 00 00 00
+APDU: 68 0e 06 00 02 00 64 01 0a 00 01 00 00 00 00 14
+APDU: 68 1a 08 00 02 00 01 04 01 00 01 00 00 00 00 00 01 00 00 00 64 00 00 00 65 00 00 00
+APDU: 68 2a 0a 00 02 00 0d 04 01 00 01 00 02 00 00 00 00 00 00 00 03 00 00 00 00 00 00 00 66 00 00 00 00 00 00 00 67 00 00 00 00 00 00 00
+APDU: 68 1a 0c 00 02 00 01 04 01 00 01 00 00 00 00 00 01 00 00 00 64 00 00 00 65 00 00 00
+APDU: 68 2a 0e 00 02 00 0d 04 01 00 01 00 02 00 00 00 00 00 00 00 03 00 00 00 00 00 00 00 66 00 00 00 00 00 00 00 67 00 00 00 00 00 00 00
+APDU: 68 1a 10 00 02 00 01 04 01 00 01 00 00 00 00 00 01 00 00 00 64 00 00 00 65 00 00 00
+APDU: 68 2a 12 00 02 00 0d 04 01 00 01 00 02 00 00 00 00 00 00 00 03 00 00 00 00 00 00 00 66 00 00 00 00 00 00 00 67 00 00 00 00 00 00 00
+APDU: 68 1a 14 00 02 00 01 04 01 00 01 00 00 00 00 00 01 00 00 00 64 00 00 00 65 00 00 00
+APDU: 68 2a 16 00 02 00 0d 04 01 00 01 00 02 00 00 00 00 00 00 00 03 00 00 00 00 00 00 00 66 00 00 00 00 00 00 00 67 00 00 00 00 00 00 00
+cmd resp none timed out
+setpoint resp none timed out
+== server log
+INFO: Parser changed file name: "/tmp/cfg.xml" --> ".//tmp/cfg.xml"
+INFO: Loader changed library name: "bennu-field-device-base" -> "libbennu-field-device-base.so
+INFO: Loader changed library name: "bennu-iec60870-5-module" -> "libbennu-iec60870-5-module.so
+I: Client connect (tcp://127.0.0.1:5555): Connecting to provider
+add iec60870-5-104 binary-input I_generator-1_bus-1.active
+add iec60870-5-104 binary-input I_load-1_bus-1.active
+add iec60870-5-104 binary-output O_generator-1_bus-1.active
+add iec60870-5-104 binary-output O_load-1_bus-1.active
+add iec60870-5-104 analog-input I_bus-1.gen_mw
+add iec60870-5-104 analog-input I_load-1_bus-1.mw
+add iec60870-5-104 analog-output O_bus-1.gen_mw
+add iec60870-5-104 analog-output O_load-1_bus-1.mw
+starting slave: tcp://127.0.0.1:2404
+Initialized IEC60870-5-104 server: tcp://127.0.0.1:2404 (select-before-operate disabled)
+New connection request from 127.0.0.1
+Connection opened (0xaaaaf3a1ddd8)
+Connection activated (0xaaaaf3a1ddd8)
+Received interrogation for group 20
+received single command

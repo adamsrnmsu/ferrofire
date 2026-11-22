@@ -1,0 +1,71 @@
+STARTDT U/S 68 04 0b 00 00 00
+GI20 t=5.2 64 01 07 00 01 00 00 00 00 14
+GI20 t=5.2 01 04 14 00 01 00 00 00 00 00 01 00 00 00 64 00 00 00 65 00 00 00
+GI20 t=5.2 0d 04 14 00 01 00 02 00 00 00 00 00 00 00 03 00 00 00 00 00 00 00 66 00 00 00 00 00 00 00 67 00 00 00 00 00 00 00
+GI20 t=5.2 64 01 0a 00 01 00 00 00 00 14
+GI20 periodic COT1 ASDU types: [1, 13, 1, 13, 1, 13, 1, 13]
+GI21(other QOI) t=11.2 64 01 47 00 01 00 00 00 00 15
+GI21(other QOI) periodic COT1 ASDU types: [1, 13, 1, 13, 1, 13, 1, 13, 1, 13, 1]
+C_SC 45 ioa0 ON t=16.2 2d 01 07 00 01 00 00 00 00 01
+C_SC 45 ioa0 ON t=16.2 2d 01 0a 00 01 00 00 00 00 01
+C_SC 45 ioa0 ON periodic COT1 ASDU types: [13, 1, 13, 1, 13, 1, 13, 1, 13, 1]
+C_SC 45 ioa1 OFF t=21.2 2d 01 07 00 01 00 01 00 00 00
+C_SC 45 ioa1 OFF t=21.2 2d 01 0a 00 01 00 01 00 00 00
+C_SC 45 ioa1 OFF periodic COT1 ASDU types: [13, 1, 13, 1, 13, 1, 13, 1, 13, 1]
+C_DC 46 ioa0 ON t=26.2 2e 01 07 00 01 00 00 00 00 02
+C_DC 46 ioa0 ON t=26.2 2e 01 0a 00 01 00 00 00 00 02
+C_DC 46 ioa0 ON periodic COT1 ASDU types: [13, 1, 13, 1, 13, 1, 13, 1, 13, 1]
+C_DC 46 ioa1 OFF t=31.3 2e 01 07 00 01 00 01 00 00 01
+C_DC 46 ioa1 OFF t=31.3 2e 01 0a 00 01 00 01 00 00 01
+C_DC 46 ioa1 OFF periodic COT1 ASDU types: [13, 1, 13, 1, 13, 1, 13, 1, 13, 1]
+C_SE 50 ioa3 77.5 t=36.3 32 01 07 00 01 00 03 00 00 00 00 9b 42 00
+C_SE 50 ioa3 77.5 t=36.3 32 01 0a 00 01 00 03 00 00 00 00 9b 42 00
+C_SE 50 ioa3 77.5 periodic COT1 ASDU types: [13, 1, 13, 1, 13, 1, 13, 1, 13, 1]
+C_SC 45 unknown ioa 50 t=41.3 2d 01 47 00 01 00 32 00 00 01
+C_SC 45 unknown ioa 50 periodic COT1 ASDU types: [13, 1, 13, 1, 13, 1, 13, 1, 13, 1, 13]
+C_CS 103 clock sync t=47.3 67 01 6c 00 01 00 00 00 00 00 00 00 00 00 00 00
+C_CS 103 clock sync periodic COT1 ASDU types: [1, 13, 1, 13, 1, 13, 1, 13, 1, 13, 1]
+C_CI 101 counter GI t=52.4 65 01 6c 00 01 00 00 00 00 05
+C_CI 101 counter GI periodic COT1 ASDU types: [13, 1, 13, 1, 13, 1, 13, 1, 13, 1, 13]
+C_RD 102 read ioa100 t=58.4 66 01 6c 00 01 00 64 00 00
+C_RD 102 read ioa100 periodic COT1 ASDU types: [1, 13, 1, 13, 1, 13, 1, 13, 1, 13, 1]
+C_TS 107 test t=63.4 6b 01 07 00 01 00 00 00 00 aa 55 00 00 00 00 00 00 00
+C_TS 107 test periodic COT1 ASDU types: [13, 1, 13, 1, 13, 1, 13, 1, 13, 1, 13]
+-- idle 5.5s: periodic timing
+== server log
+INFO: Parser changed file name: "/tmp/cfg.xml" --> ".//tmp/cfg.xml"
+INFO: Loader changed library name: "bennu-field-device-base" -> "libbennu-field-device-base.so
+INFO: Loader changed library name: "bennu-iec60870-5-module" -> "libbennu-iec60870-5-module.so
+I: Client connect (tcp://127.0.0.1:5555): Connecting to provider
+add iec60870-5-104 binary-input I_generator-1_bus-1.active
+add iec60870-5-104 binary-input I_load-1_bus-1.active
+add iec60870-5-104 binary-output O_generator-1_bus-1.active
+add iec60870-5-104 binary-output O_load-1_bus-1.active
+add iec60870-5-104 analog-input I_bus-1.gen_mw
+add iec60870-5-104 analog-input I_load-1_bus-1.mw
+add iec60870-5-104 analog-output O_bus-1.gen_mw
+add iec60870-5-104 analog-output O_load-1_bus-1.mw
+starting slave: tcp://127.0.0.1:2404
+Initialized IEC60870-5-104 server: tcp://127.0.0.1:2404 (select-before-operate disabled)
+New connection request from 127.0.0.1
+Connection opened (0xaaaaded0cdd8)
+Connection activated (0xaaaaded0cdd8)
+Received interrogation for group 20
+Received interrogation for group 21
+received single command
+IOA: 0 switch to 1
+received single command
+IOA: 1 switch to 0
+I: Client connect (tcp://127.0.0.1:5555): Connecting to provider
+received double command
+IOA: 0 switch to 2
+I: Client connect (tcp://127.0.0.1:5555): Connecting to provider
+received double command
+E: OutputModule: provider not responding, will retry writes
+IOA: 1 switch to 1
+E: Client send: server seems to be offline, abandoning
+I: Client connect (tcp://127.0.0.1:5555): Connecting to provider
+received setpoint command (float)
+IOA: 3 switch to 77.500000
+I: Client connect (tcp://127.0.0.1:5555): Connecting to provider
+received single command
