@@ -112,6 +112,18 @@ fn fresh(p: &Pending, seen: &mut u64) -> Vec<(String, Value)> {
     out
 }
 
+/// The points of snapshot `now` that differ from `last`, the snapshot before it. The same tags in the same order every time: the
+/// store's layout is fixed at load.
+pub(super) fn moved<'a>(
+    now: &'a [(String, Value)],
+    last: &'a [(String, Value)],
+) -> impl Iterator<Item = &'a (String, Value)> {
+    now.iter()
+        .zip(last)
+        .filter(|(n, o)| !same(&n.1, &o.1))
+        .map(|(n, _)| n)
+}
+
 async fn send<W: AsyncWrite + Unpin>(w: &mut W, m: &ToModule) -> std::io::Result<()> {
     w.write_all(encode(m).as_bytes()).await?;
     w.flush().await
@@ -370,13 +382,9 @@ impl<R: AsyncBufRead + Unpin> Session<'_, R> {
     /// One scan cycle: what changed in the store since the last, an output's change as its echo rule decides.
     fn on_tick(&mut self) {
         let now = self.store.snapshot();
-        // the same tags in the same order every time: the store's layout is fixed at load
-        let moved = now
-            .iter()
-            .zip(&self.last)
-            .filter(|(n, o)| !same(&n.1, &o.1));
-        let mut ch: Vec<_> = (moved.map(|(n, _)| n.clone()))
+        let mut ch: Vec<_> = moved(&now, &self.last)
             .filter(|(t, _)| !self.outs.contains_key(t))
+            .cloned()
             .collect();
         self.last = now;
         self.expire();

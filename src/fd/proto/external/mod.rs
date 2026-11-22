@@ -4,6 +4,7 @@
 //! speaks ffmod/1 over its stdin and stdout, logs its stderr lines, restarts it on the backoff when it exits or breaks the
 //! session, and stops it (`stop`, stdin closed, SIGTERM at 2 s, SIGKILL at 5 s) with the device.
 
+mod bennu;
 pub mod manifest;
 pub mod msg;
 pub mod session;
@@ -51,6 +52,8 @@ pub struct External {
     transport: Transport,
     /// The `<transport>` as written; a socket module's `FERROFIRE_MODULE_ADDR`.
     addr: String,
+    /// A bennu module's `<publish-group>`.
+    publish: String,
 }
 
 impl Module for External {
@@ -58,28 +61,36 @@ impl Module for External {
         let name = name_in(node, "name", "", |s| !s.is_empty(), "not empty")?;
         let addr = text(node, "transport").unwrap_or_else(|| "stdio".into());
         let transport = Transport::parse(&addr, opts.strict)?;
-        // a socket module may be started elsewhere: its `<command>` is optional
-        let cmd = match transport {
-            Transport::Stdio => require(node, "command")?,
-            _ => text(node, "command").unwrap_or_default(),
-        };
-        if cmd.is_empty() && transport == Transport::Stdio {
-            return Err(ConfigError(format!("module {name}: <command> is empty")));
-        }
+        let cmd = command(node, &transport, &name)?;
         // the inner XML of `<config>` as written: its first element
         let inner = child(node, "config").and_then(|c| c.first_element_child());
         let config = inner.map_or("", |e| &node.document().input_text()[e.range()]);
         let mut m = External::new(node, name, &cmd, config, opts)?;
+        if transport == Transport::Bennu {
+            m.publish = bennu::checked(node)?;
+        }
         (m.transport, m.addr) = (transport, addr);
         Ok(m)
     }
 
     async fn run(self, store: Store, stop: CancellationToken) {
-        if self.transport == Transport::Stdio {
-            self.run_stdio(store, stop).await
-        } else {
-            self.run_socket(store, stop).await
+        match self.transport {
+            Transport::Stdio => self.run_stdio(store, stop).await,
+            Transport::Bennu => self.run_bennu(store, stop).await,
+            _ => self.run_socket(store, stop).await,
         }
+    }
+}
+
+/// The module's `<command>`: required for stdio, optional for the others (a socket module may be started elsewhere).
+fn command(node: Node, transport: &Transport, name: &str) -> Result<String, ConfigError> {
+    if *transport != Transport::Stdio {
+        return Ok(text(node, "command").unwrap_or_default());
+    }
+    let cmd = require(node, "command")?;
+    match cmd.is_empty() {
+        true => Err(ConfigError(format!("module {name}: <command> is empty"))),
+        false => Ok(cmd),
     }
 }
 
@@ -144,6 +155,7 @@ impl External {
             cwd: None,
             transport: Transport::Stdio,
             addr: "stdio".into(),
+            publish: String::new(),
         })
     }
 
@@ -294,6 +306,28 @@ mod tests {
         assert!(err(tcp).contains("<transport> `tcp://h:1`"));
         let udp = "<external-module><name>m</name><command>x</command><transport>udp://127.0.0.1:1</transport></external-module>";
         assert!(err(udp).contains("is not supported"));
+    }
+
+    #[test]
+    fn bennu_needs_a_command_interface_and_a_udp_publish_group_and_no_command() {
+        let xml = |rest: &str| {
+            format!("<external-module><name>m</name><transport>bennu</transport>{rest}</external-module>")
+        };
+        let ci = "<command-interface>tcp://127.0.0.1:1340</command-interface>";
+        let pg = "<publish-group>udp://127.0.0.1:40000</publish-group>";
+        let m = parse(&xml(&format!("{ci}{pg}"))).unwrap();
+        assert_eq!(
+            (m.transport, m.publish.as_str()),
+            (Transport::Bennu, "udp://127.0.0.1:40000")
+        );
+        assert!(m.argv.is_empty());
+        let err = |rest: &str| parse(&xml(rest)).err().unwrap().0;
+        assert!(err(pg).contains("<command-interface>"));
+        assert!(err(ci).contains("<publish-group>"));
+        assert!(
+            err(&format!("{ci}<publish-group>tcp://x:1</publish-group>"))
+                .contains("<publish-group>")
+        );
     }
 
     #[test]

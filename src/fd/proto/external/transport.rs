@@ -23,39 +23,49 @@ pub enum Transport {
     Stdio,
     Tcp(SocketAddr),
     Unix(PathBuf),
+    /// bennu channels: no ffmod/1 session, see `bennu`.
+    Bennu,
+}
+
+fn unsupported(s: &str) -> ConfigError {
+    let t = show(s);
+    ConfigError(format!(
+        "<transport> `{t}` is not supported (stdio, bennu, tcp://HOST:PORT, unix:///path)"
+    ))
 }
 
 impl Transport {
-    /// `stdio`, `tcp://HOST:PORT` (an IP, or `localhost`) or `unix:///path`. A host that is not loopback is a warning, an error
+    /// `stdio`, `bennu`, `tcp://HOST:PORT` (an IP, or `localhost`) or `unix:///path`. A host that is not loopback is a warning, an error
     /// under `--strict`: the module's session carries tag values and writes, with no authentication.
     pub fn parse(s: &str, strict: bool) -> Result<Transport, ConfigError> {
-        let bad = || {
-            let t = show(s);
-            ConfigError(format!(
-                "<transport> `{t}` is not supported (stdio, tcp://HOST:PORT, unix:///path)"
-            ))
-        };
-        if s == "stdio" {
-            return Ok(Transport::Stdio);
-        }
         match s.split_once("://") {
+            None if s == "stdio" => Ok(Transport::Stdio),
+            None if s == "bennu" => Ok(Transport::Bennu),
             Some(("unix", p)) if p.starts_with('/') => Ok(Transport::Unix(p.into())),
-            Some(("tcp", a)) => {
-                let a = a
-                    .strip_prefix("localhost:")
-                    .map_or_else(|| a.to_string(), |port| format!("127.0.0.1:{port}"));
-                let a: SocketAddr = a.parse().map_err(|_| bad())?;
-                if !a.ip().is_loopback() {
-                    let msg = format!("<transport> `{}` is not loopback: anyone who can reach it can drive the device", show(s));
-                    if strict {
-                        return Err(ConfigError(msg));
-                    }
-                    tracing::warn!("{msg}");
-                }
-                Ok(Transport::Tcp(a))
-            }
-            _ => Err(bad()),
+            Some(("tcp", a)) => Transport::tcp(a, s, strict),
+            _ => Err(unsupported(s)),
         }
+    }
+
+    /// `a` is the `HOST:PORT` of the `<transport>` `s`.
+    fn tcp(a: &str, s: &str, strict: bool) -> Result<Transport, ConfigError> {
+        let a = a
+            .strip_prefix("localhost:")
+            .map_or_else(|| a.to_string(), |port| format!("127.0.0.1:{port}"));
+        let Ok(a) = a.parse::<SocketAddr>() else {
+            return Err(unsupported(s));
+        };
+        if !a.ip().is_loopback() {
+            let msg = format!(
+                "<transport> `{}` is not loopback: anyone who can reach it can drive the device",
+                show(s)
+            );
+            if strict {
+                return Err(ConfigError(msg));
+            }
+            tracing::warn!("{msg}");
+        }
+        Ok(Transport::Tcp(a))
     }
 }
 
@@ -97,7 +107,7 @@ impl Listener {
                 let l = UnixListener::bind(p)?;
                 Ok(Listener::Unix(l, p.clone(), file_id(p)?))
             }
-            Transport::Stdio => unreachable!("stdio is not bound"),
+            Transport::Stdio | Transport::Bennu => unreachable!("not a listening transport"),
         }
     }
 
@@ -223,7 +233,7 @@ impl External {
 
     /// Keep the `<command>` (if there is one) running: restarted on the backoff, which starts over after a module whose session
     /// came up; at `stop` it is signalled as in the stdio transport.
-    async fn supervise(&self, stop: &CancellationToken, up: &watch::Sender<bool>) {
+    pub(super) async fn supervise(&self, stop: &CancellationToken, up: &watch::Sender<bool>) {
         if self.argv.is_empty() {
             return;
         }
