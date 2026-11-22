@@ -73,7 +73,8 @@ pub fn zero(kind: Kind) -> Value {
     }
 }
 
-fn kind_of(v: Value) -> Kind {
+/// The kind of tag that can hold `v`.
+pub fn kind_of(v: Value) -> Kind {
     match v {
         Value::Binary(_) => Kind::Binary,
         Value::Analog(_) => Kind::Analog,
