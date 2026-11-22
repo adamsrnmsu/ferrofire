@@ -1,0 +1,15 @@
+{
+    "name": "bennu",
+    "request_time": 1,
+    "period": 1,
+    "real_time": true,
+    "terminate_on_error": true,
+    "subscriptions": [
+        {"key": "helics-test-ep-server/bus-1.voltage", "type": "double"},
+        {"key": "helics-test-ep-server/gen1.active", "type": "bool"},
+        {"key": "helics-test-ep-server/load1.active", "type": "bool"}
+    ],
+    "endpoints": [
+        {"name": "load1.active", "destination": "helics-test-ep-server/load1.active"}
+    ]
+}
