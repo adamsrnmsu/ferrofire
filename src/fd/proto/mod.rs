@@ -5,6 +5,8 @@
 pub mod client;
 #[cfg(feature = "proto-dnp3")]
 pub mod dnp3;
+#[cfg(feature = "external")]
+pub mod external;
 #[cfg(feature = "proto-iccp")]
 pub mod iccp;
 #[cfg(feature = "proto-iec61850")]
