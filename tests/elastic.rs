@@ -5,6 +5,7 @@
 #![cfg(feature = "elastic")]
 
 mod common;
+use common::ports::free_port;
 
 use common::es::FakeEs;
 use ferrofire::bennu::{frame, group_for};
@@ -181,11 +182,7 @@ fn rejected_items_are_resent_when_retryable_and_dropped_when_not() {
 
 #[test]
 fn a_dead_server_never_blocks_the_producer_and_the_oldest_are_dropped() {
-    let dead = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
+    let dead = free_port();
     let mut c = conf(&format!("http://127.0.0.1:{dead}"));
     c.queue = 100;
     let sink = Sink::start(&c, None, 500, identity()).unwrap();
@@ -305,20 +302,8 @@ fn terminate(mut c: Child) -> String {
     out
 }
 
-fn free_udp() -> u16 {
-    std::net::UdpSocket::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
-
 fn server() -> String {
-    let p = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
+    let p = free_port();
     format!("tcp://127.0.0.1:{p}")
 }
 
@@ -335,7 +320,7 @@ fn run_exports_every_published_tag_with_the_pybennu_fields() {
         "run",
         &format!("[elastic]\nenabled = true\nhost = {}\nindex_basename = opalrt-clean\nthreads = 1\nfrequency = lowerwater.height\nexperiment = e1\n", es.url),
     );
-    let publish = format!("udp://*;127.0.0.1:{}", free_udp());
+    let publish = format!("udp://*;127.0.0.1:{}", free_port());
     let child = Command::new(BIN)
         .args([
             "run",
@@ -407,7 +392,7 @@ fn run_without_an_enabled_elastic_section_exports_nothing() {
             "--server",
             &server(),
             "--publish",
-            &format!("udp://*;127.0.0.1:{}", free_udp()),
+            &format!("udp://*;127.0.0.1:{}", free_port()),
             "--rate",
             "0.05",
             "--config",
@@ -440,7 +425,7 @@ fn send(port: u16, endpoint: &str, bodies: &[&str], times: usize) {
 #[test]
 fn groundtruth_indexes_the_stream_with_the_stock_shape() {
     let es = FakeEs::ok();
-    let port = free_udp();
+    let port = free_port();
     let endpoint = format!("udp://127.0.0.1:{port}");
     let ini = write_ini(
         "gt",
@@ -501,7 +486,7 @@ fn groundtruth_indexes_the_stream_with_the_stock_shape() {
 #[test]
 fn groundtruth_alert_limit_skips_only_alert_points() {
     let es = FakeEs::ok();
-    let port = free_udp();
+    let port = free_port();
     let endpoint = format!("udp://127.0.0.1:{port}");
     let ini = write_ini(
         "gt2",
@@ -555,7 +540,7 @@ fn groundtruth_reports_bad_invocations() {
 #[test]
 fn groundtruth_daemon_verbs_pidfile_and_stream() {
     let es = FakeEs::ok();
-    let port = free_udp();
+    let port = free_port();
     let endpoint = format!("udp://127.0.0.1:{port}");
     let ini = write_ini(
         "gtd",
@@ -609,7 +594,7 @@ fn pypower_exports_its_snapshot_when_the_config_enables_elastic() {
         &format!(
             "[power-solver-service]\nsolver-type = PyPower\nserver-endpoint = {}\npublish-endpoint = udp://*;127.0.0.1:{}\ncase-file = {case9}\n[elastic]\nenabled = true\nhost = {}\nindex_basename = power-clean\nfrequency = 60\n",
             server(),
-            free_udp(),
+            free_port(),
             es.url
         ),
     );

@@ -3,6 +3,7 @@
 #![cfg(feature = "proto-iccp")]
 
 mod common;
+use common::ports::free_port;
 #[path = "common/iccp_client.rs"]
 mod iccp_client;
 
@@ -13,14 +14,6 @@ use iccp_client::Iccp;
 use iec61850_rs::proto::data::Value;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
-
-fn port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
 
 fn config(port: u16, peers: &str) -> String {
     let log = std::env::temp_dir()
@@ -52,7 +45,7 @@ fn config(port: u16, peers: &str) -> String {
 const PEER: &str = "<peer><name>EMS1</name><domain>EMS1</domain><address>127.0.0.1</address><read>BRKR_1 MW_1 TOGGLE SP</read><write>TOGGLE SP</write></peer>";
 
 async fn start_with(peers: &str) -> (String, Store, CancellationToken) {
-    let port = port();
+    let port = free_port();
     let (srv, store) = common::load_as::<Server>(&config(port, peers), "iccp-server");
     let stop = CancellationToken::new();
     tokio::spawn(srv.run(store.clone(), stop.clone()));

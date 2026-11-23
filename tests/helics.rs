@@ -63,11 +63,6 @@ fn lib() -> Option<(Arc<Lib>, Closing)> {
     Some((lib.clone(), Closing(lib)))
 }
 
-fn free_port() -> u16 {
-    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    l.local_addr().unwrap().port()
-}
-
 /// A port whose successor is free too (the zmq broker binds `port` and `port + 1`). Scanned from a start that differs per test
 /// process and never the same twice (libhelics reuses an in-process core for an address it has seen), below the ephemeral
 /// range: after a busy test run that range is full, so asking the kernel for a port is slow and a scan up there finds nothing.
@@ -117,7 +112,7 @@ mod tempdir {
 }
 
 fn spawn(model: &str) -> Child {
-    let server = format!("tcp://127.0.0.1:{}", free_port());
+    let server = format!("tcp://127.0.0.1:{}", free_port_pair());
     Command::new(BIN)
         .args([
             "run",
@@ -259,7 +254,7 @@ fn sigterm_ends_a_run_still_waiting_for_its_peers() {
 
 #[test]
 fn helics_flags_need_a_helics_section() {
-    let server = format!("tcp://127.0.0.1:{}", free_port());
+    let server = format!("tcp://127.0.0.1:{}", free_port_pair());
     let model = concat!(env!("CARGO_MANIFEST_DIR"), "/models/waterway.yaml");
     let out = Command::new(BIN)
         .args([

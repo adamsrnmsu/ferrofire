@@ -3,6 +3,7 @@
 //! per response, the reply to whoever sent, no master slot, and a master that takes a refused datagram for a lost connection.
 
 mod common;
+use common::ports::free_port;
 
 use common::clients::*;
 use common::unhex;
@@ -18,14 +19,6 @@ const MODBUS_CLIENT: &str = include_str!("../conformance/stock/client-modbus.xml
 
 /// The stock master's first frame (conformance/stock/client-dnp3-raw.golden): a class 0 read from master 1 to outstation 10.
 const CLASS0: &str = "05640bc40a000100acd1c0c0013c0106ff50";
-
-fn free_udp_port() -> u16 {
-    std::net::UdpSocket::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
 
 fn server_xml(port: u16) -> String {
     SERVER
@@ -80,7 +73,7 @@ fn frames(datagram: &[u8]) -> Vec<link::Frame> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_outstation_answers_every_sender_with_one_datagram() {
-    let port = free_udp_port();
+    let port = free_port();
     let _server = modules(&server_xml(port));
     let (a, b) = (
         UdpSocket::bind("127.0.0.1:0").await.unwrap(),
@@ -99,7 +92,7 @@ async fn the_outstation_answers_every_sender_with_one_datagram() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_broken_datagram_starts_a_fresh_session_and_the_next_is_answered() {
-    let port = free_udp_port();
+    let port = free_port();
     let _server = modules(&server_xml(port));
     let sock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     first_reply(&sock, port, &unhex(CLASS0)).await;
@@ -118,7 +111,7 @@ async fn a_broken_datagram_starts_a_fresh_session_and_the_next_is_answered() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn master_and_outstation_read_and_command_over_udp() {
-    let (port, cmdif) = (free_udp_port(), free_port());
+    let (port, cmdif) = (free_port(), free_port());
     let server = modules(&server_xml(port));
     let _client = modules(&client_xml(port, cmdif));
     for (point, x) in [
@@ -158,7 +151,7 @@ async fn master_and_outstation_read_and_command_over_udp() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_master_finds_an_outstation_that_comes_up_later() {
-    let (port, cmdif) = (free_udp_port(), free_port());
+    let (port, cmdif) = (free_port(), free_port());
     let _client = modules(&client_xml(port, cmdif));
     // nothing listens yet: the master's datagrams are refused and it backs off
     tokio::time::sleep(Duration::from_millis(1500)).await;

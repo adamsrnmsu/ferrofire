@@ -1,5 +1,9 @@
 //! `ferrofire top --once` against the real binary: a local `ferrofire run` over its control socket, the datagram
 //! stream, and a replayed `probe record` CSV.
+
+#[path = "common/ports.rs"]
+mod ports;
+use ports::free_port;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::Duration;
 
@@ -17,14 +21,6 @@ impl Drop for Run {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
-}
-
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
 }
 
 fn spawn(tag: &str, publish: &str) -> Run {

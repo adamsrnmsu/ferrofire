@@ -1,6 +1,10 @@
 //! `ferrofire doctor`: the diagnosis on hand-made observations, and the real binary against a running `ferrofire run`.
+
+#[path = "common/ports.rs"]
+mod ports;
 use ferrofire::bennu::{datagrams_msg, group_for};
 use ferrofire::doctor::*;
+use ports::free_port;
 use std::process::{Child, Command, Stdio};
 
 const BIN: &str = env!("CARGO_BIN_EXE_ferrofire");
@@ -148,14 +152,6 @@ impl Drop for Server {
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
-}
-
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
 }
 
 fn doctor(server: &str, listen: &str, extra: &[&str]) -> (bool, String) {

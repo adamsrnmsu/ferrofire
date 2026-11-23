@@ -1,6 +1,10 @@
 //! pull-bridge: config tag extraction, argument parsing, one tick with fakes, and the real thing end to end (provider, bridge, subscriber).
+
+#[path = "common/ports.rs"]
+mod ports;
 use ferrofire::pull::*;
 use ferrofire::transport::{Publisher, Requester};
+use ports::free_port;
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
@@ -312,13 +316,6 @@ fn missed_ticks_are_skipped_not_replayed() {
     assert_eq!(next_k(t0, p, at(0), 5), 6); // never goes backwards
 }
 
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
 fn spawn(args: &[&str]) -> Child {
     Command::new(BIN)
         .args(args)

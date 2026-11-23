@@ -4,6 +4,7 @@
 #![cfg(feature = "proto-iec61850")]
 
 mod common;
+use common::ports::free_port;
 
 use ferrofire::fd::mms::step;
 use ferrofire::fd::proto::iec61850::{Device, Server};
@@ -71,11 +72,7 @@ fn proxy(to: u16, seen: Arc<Mutex<Vec<Vec<u8>>>>) -> u16 {
 }
 
 async fn record() -> Vec<Vec<u8>> {
-    let sport = TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
+    let sport = free_port();
     let (srv, store) =
         common::load_as::<Server>(&XML.replace("PORT", &sport.to_string()), "iec61850-server");
     let stop = CancellationToken::new();

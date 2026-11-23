@@ -3,6 +3,7 @@
 #![cfg(feature = "proto-iec61850")]
 
 mod common;
+use common::ports::free_port;
 
 use ferrofire::fd::proto::iec61850::Server;
 use ferrofire::fd::proto::Module;
@@ -14,14 +15,6 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
-
-fn port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
 
 fn config(port: u16) -> String {
     let log = std::env::temp_dir()
@@ -44,7 +37,7 @@ fn config(port: u16) -> String {
 }
 
 async fn start() -> (u16, Store, CancellationToken) {
-    let port = port();
+    let port = free_port();
     let (srv, store) = common::load_as::<Server>(&config(port), "iec61850-server");
     let stop = CancellationToken::new();
     tokio::spawn(srv.run(store.clone(), stop.clone()));

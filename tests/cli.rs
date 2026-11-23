@@ -1,5 +1,9 @@
 //! The `ferrofire` binary as an operator runs it: `run` (REP + UDP RADIO until SIGTERM) and `check` (offline trace).
+
+#[path = "common/ports.rs"]
+mod ports;
 use ferrofire::bennu::{group_for, unframe};
+use ports::free_port;
 use std::io::Read;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::Duration;
@@ -12,13 +16,6 @@ fn ff(args: &[&str]) -> Output {
 }
 fn text(b: &[u8]) -> String {
     String::from_utf8_lossy(b).into_owned()
-}
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
 }
 fn req(ep: &str, m: &str) -> String {
     let s = zmq::Context::new().socket(zmq::REQ).unwrap();

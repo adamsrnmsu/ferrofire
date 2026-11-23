@@ -2,6 +2,7 @@
 //! (`conformance/iec104/STOCK.md`); `conformance/iec104` checks the same against the stock transcript.
 
 mod common;
+use common::ports::free_port;
 
 use ferrofire::fd::proto::iec104::Server;
 use ferrofire::fd::proto::Module;
@@ -12,14 +13,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::{timeout, Instant};
 use tokio_util::sync::CancellationToken;
-
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
 
 fn config(port: u16, rpoll: u32, log: &str) -> String {
     format!(
