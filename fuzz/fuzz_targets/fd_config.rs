@@ -6,6 +6,13 @@ use libfuzzer_sys::fuzz_target;
 fuzz_target!(|data: &[u8]| {
     if let Ok(xml) = std::str::from_utf8(data) {
         let _ = Config::parse(xml, &[], &Opts::default());
-        let _ = Config::parse(xml, &[], &Opts { strict: true });
+        let _ = Config::parse(
+            xml,
+            &[],
+            &Opts {
+                strict: true,
+                ..Opts::default()
+            },
+        );
     }
 });

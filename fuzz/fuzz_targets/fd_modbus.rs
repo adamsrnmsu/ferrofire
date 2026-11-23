@@ -16,6 +16,7 @@ fuzz_target!(|data: &[u8]| {
         discretes: [(0, "d0".to_string()), (10000, "d1".to_string())].into(),
         holding: [(0, reg("h0", 0.0, 1000.0)), (1, reg("h1", 100.0, 100.0)), (40000, reg("h2", -1000.0, 2000.0))].into(),
         input: [(0, reg("i0", 50.0, -50.0)), (30000, reg("i1", 0.0, 1.0))].into(),
+        ..Device::default()
     };
     let store = Store::new(Layout {
         points: vec![],

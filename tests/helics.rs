@@ -41,12 +41,26 @@ helics:
 /// the tests take turns.
 static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-fn lib() -> Option<Arc<Lib>> {
+/// Dropped last in a test (declare it before the broker): joins libhelics' threads, so that none is running when the test
+/// process exits. libhelics' static destructors race them and crash the process at exit about one run in forty (ww-20t).
+/// It finalizes any federate still left too: a test that abandons one whose peer never comes hangs here instead of crashing.
+struct Closing(Arc<Lib>);
+
+impl Drop for Closing {
+    fn drop(&mut self) {
+        // SAFETY: declared before the broker, so it drops after it; the federates were finalized and freed inside the test
+        // (controller, run_engine), and this binary opens libhelics nowhere else, so no Broker or Fed outlives the close.
+        unsafe { self.0.close() }
+    }
+}
+
+fn lib() -> Option<(Arc<Lib>, Closing)> {
     if std::env::var_os("FERROFIRE_HELICS_LIB").is_none() {
         eprintln!("SKIPPED: FERROFIRE_HELICS_LIB is not set (the ff-rust image sets it)");
         return None;
     }
-    Some(Lib::open(None).unwrap())
+    let lib = Lib::open(None).unwrap();
+    Some((lib.clone(), Closing(lib)))
 }
 
 fn free_port() -> u16 {
@@ -171,7 +185,7 @@ fn controller(lib: &Arc<Lib>, port: u16, grants: usize) -> (Vec<f64>, Vec<bool>)
 #[test]
 fn values_flow_both_ways_one_grant_late() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(lib) = lib() else { return };
+    let Some((lib, _closing)) = lib() else { return };
     let (_broker, port, dir) = federation(&lib, 2);
     let mut ff = spawn(&dir.model());
     let (level, pump) = controller(&lib, port, 8);
@@ -205,7 +219,7 @@ fn assert_exchange(level: &[f64], pump: &[bool], out: &str) {
 #[test]
 fn the_engine_runs_in_process_against_a_controller() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(lib) = lib() else { return };
+    let Some((lib, _closing)) = lib() else { return };
     let (_broker, port, dir) = federation(&lib, 2);
     let mut model = Model::load(&std::fs::read_to_string(dir.model()).unwrap()).unwrap();
     let sh = std::sync::Mutex::new(Shared::default());
@@ -223,7 +237,7 @@ fn the_engine_runs_in_process_against_a_controller() {
 #[test]
 fn sigterm_ends_a_run_still_waiting_for_its_peers() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(lib) = lib() else { return };
+    let Some((lib, _closing)) = lib() else { return };
     let (_broker, _, dir) = federation(&lib, 2); // the second federate never comes
     let mut ff = spawn(&dir.model());
     std::thread::sleep(Duration::from_millis(1500));

@@ -94,6 +94,7 @@ api! {
     broker_new: "helicsCreateBroker" unsafe extern "C" fn(*const c_char, *const c_char, *const c_char, *mut HErr) -> P,
     broker_disconnect: "helicsBrokerDisconnect" unsafe extern "C" fn(P, *mut HErr),
     broker_free: "helicsBrokerFree" unsafe extern "C" fn(P),
+    close_library: "helicsCloseLibrary" unsafe extern "C" fn(),
 }
 
 /// A call that takes a `HelicsError*` last: the error is checked, the result returned in `Ok`.
@@ -171,6 +172,20 @@ impl Lib {
         unsafe { CStr::from_ptr((self.api.version)()) }
             .to_string_lossy()
             .into_owned()
+    }
+
+    /// Join the threads libhelics started (cores, brokers, timers), as helics.h asks for before the process ends: libhelics' own
+    /// static destructors race those threads at `exit`, and a process that leaves with some running crashes about one run in
+    /// forty (ww-20t). The library stays usable for new objects.
+    ///
+    /// # Safety
+    ///
+    /// No `Broker` or `Fed` from any `Lib` (every `Lib::open` shares the one libhelics) may be alive or in use on any thread:
+    /// libhelics finalizes and frees every object it handed out, so a later `Drop` of one is a use after free. A federate left
+    /// mid-call (abandoned on STOP) is finalized here too, and if its peer never comes this call blocks.
+    pub unsafe fn close(&self) {
+        // SAFETY: helicsCloseLibrary takes no arguments; the caller guarantees no handle outlives it (see # Safety).
+        unsafe { (self.api.close_library)() }
     }
 
     /// Start a broker in this process (the integration tests' federation hub); `init` is HELICS's command line, e.g. `-f 2`.
