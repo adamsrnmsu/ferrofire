@@ -135,8 +135,8 @@ left out with a WARN (an error under `--strict`). In `fep` mode `<min-value>` eq
   setpoint from logic. A local change wins over a poll that arrives at the same time; the poll result for that
   point is ignored until the write is answered. The value a tag starts with (0 or false) counts as sent, so a FEP does not open by
   zeroing every output.
-- **A device that is away.** A request has 1000 ms (104: a command's ACT_CON, a GI's ACT_TERM; one that is late drops the
-  connection). A failed poll leaves the tags at their last values and turns `<status-tag>` false; the next attempts come 1, 2, 4 ... s
+- **A device that is away.** A request has 1000 ms (104: a command's ACT_CON, a GI's ACT_CON; a GI under way gets 1000 ms from each of its frames to the next, so a large
+  station may take longer than that in all; one that is late drops the connection). A failed poll leaves the tags at their last values and turns `<status-tag>` false; the next attempts come 1, 2, 4 ... s
   apart (Modbus up to 30 s, DNP3 up to 60 s as in `bennu` mode, 104 up to 60 s). Local changes made meanwhile are not
   queued one by one: when the device returns, the newest value of each changed tag is sent, before anything is read. A write the device
   answers but refuses (an exception, a DNP3 status other than success, a negative ACT_CON) is not repeated; a later poll puts the device's value back. The first poll after a write is not believed when it still shows

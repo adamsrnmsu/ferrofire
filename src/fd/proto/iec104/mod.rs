@@ -24,7 +24,7 @@ use server::{Point, Slave, Subtype};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_util::sync::CancellationToken;
 
@@ -156,6 +156,7 @@ impl Module for Server {
         });
         let on_conn = |s: TcpStream| {
             if let Some(session) = Session::open(&ctx) {
+                net::keepalive(&s);
                 tokio::spawn(serve(s, session, stop.clone()));
             }
         };
@@ -363,8 +364,11 @@ fn unix_ms() -> i64 {
 }
 
 /// Serve one master until it goes, the session closes it, a write stalls or the device stops.
-async fn serve(mut s: TcpStream, mut session: Session, stop: CancellationToken) {
-    net::keepalive(&s);
+async fn serve<S: AsyncRead + AsyncWrite + Unpin>(
+    mut s: S,
+    mut session: Session,
+    stop: CancellationToken,
+) {
     let mut buf = [0u8; 4096];
     let mut tick = tokio::time::interval(TICK);
     // the first report `rpoll-rate` s after the open: a connection is never started at once
@@ -664,6 +668,27 @@ mod tests {
         s.push(vec![0; asdu::MAX_ASDU]);
         s.push(vec![0; asdu::MAX_ASDU]);
         assert_eq!(lines("are waiting"), 2, "full again after a drain");
+    }
+
+    /// A master that stopped reading ends its connection after `WRITE_TIMEOUT` (T4-M4). Paused time: no real 10 s.
+    #[tokio::test(start_paused = true)]
+    async fn a_stalled_write_ends_the_server_connection() {
+        let ctx = ctx();
+        let session = Session::open(&ctx).unwrap();
+        let (ours, mut peer) = tokio::io::duplex(1);
+        // the pipe is 1 byte both ways: the master writes as the server reads, and never reads
+        let talk = tokio::spawn(async move {
+            peer.write_all(&STARTDT).await.unwrap();
+            std::future::pending::<()>().await;
+        });
+        let t = tokio::time::Instant::now();
+        serve(ours, session, CancellationToken::new()).await;
+        let took = t.elapsed();
+        assert!(
+            took >= WRITE_TIMEOUT && took < WRITE_TIMEOUT * 3 / 2,
+            "{took:?}"
+        );
+        talk.abort();
     }
 
     const STARTDT: [u8; 6] = [0x68, 4, 7, 0, 0, 0];

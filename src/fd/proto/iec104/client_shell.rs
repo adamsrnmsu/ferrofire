@@ -5,7 +5,7 @@
 use super::super::super::cmdif::{self, Points};
 use super::super::super::net;
 use super::super::super::store::Store;
-use super::super::client::{Mode, TagPoints};
+use super::super::client::{Mode, Redial, TagPoints};
 use super::apci::{Action, Link, Params, Role};
 use super::asdu;
 use super::client::{route, Master, Poller};
@@ -15,15 +15,13 @@ use crate::model::Value;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 const CLIENT: &str = "iec60870-5-104-client";
 /// lib60870's connect timeout t0 (`LIB/cs104/cs104_connection.c:44`).
 const T0: Duration = Duration::from_secs(10);
-const RETRY_MIN: Duration = Duration::from_secs(1);
-const RETRY_MAX: Duration = Duration::from_secs(60);
 
 pub(super) async fn run(client: Client, store: Store, stop: CancellationToken) {
     match client.mode {
@@ -118,7 +116,7 @@ fn take(link: &Shared, acts: Vec<Action>, endpoint: &str) -> Option<Vec<u8>> {
 }
 
 /// Write `out`; `false` when the peer has not taken it within `WRITE_TIMEOUT` or the socket failed.
-async fn write(s: &mut net::Conn, out: &[u8]) -> bool {
+async fn write(s: &mut (impl AsyncWrite + Unpin), out: &[u8]) -> bool {
     out.is_empty()
         || matches!(
             tokio::time::timeout(WRITE_TIMEOUT, s.write_all(out)).await,
@@ -147,19 +145,30 @@ async fn master(
     };
     s.nodelay();
     s.keepalive();
+    connected(&mut s, &link, rx, &stop, &endpoint).await;
+}
+
+/// The session on a connected socket, then the S-frame for what it received, unless a write stalled: a peer that stopped
+/// reading takes no S-frame either.
+async fn connected<S: AsyncRead + AsyncWrite + Unpin>(
+    s: &mut S,
+    link: &Shared,
+    rx: mpsc::Receiver<Vec<u8>>,
+    stop: &CancellationToken,
+    endpoint: &str,
+) {
     let mut apci = Link::new(Params::STANDARD, Role::Client);
-    // a peer that stopped reading takes no S-frame either
-    if session(&mut s, &mut apci, &link, rx, &stop, &endpoint).await {
+    if session(s, &mut apci, link, rx, stop, endpoint).await {
         if let Some(ack) = apci.confirm() {
-            write(&mut s, &ack).await;
+            write(s, &ack).await;
         }
     }
 }
 
 /// STARTDT and the GI back to back, then the server's data and our commands until the server goes, the link closes or the
 /// device stops. `false`: a write stalled.
-async fn session(
-    s: &mut net::Conn,
+async fn session<S: AsyncRead + AsyncWrite + Unpin>(
+    s: &mut S,
     apci: &mut Link,
     link: &Shared,
     mut rx: mpsc::Receiver<Vec<u8>>,
@@ -215,9 +224,8 @@ async fn fep(client: Client, store: Store, stop: CancellationToken) {
 /// Connect, poll until the connection is lost, and again: at once after a connection whose server ended a GI, else 1, 2, 4 ...
 /// 60 s apart (as the DNP3 FEP).
 async fn poller(mut p: Poller, stop: CancellationToken) {
-    let (mut wait, mut pause) = (Duration::ZERO, RETRY_MIN);
-    loop {
-        tokio::select! { _ = stop.cancelled() => return, _ = tokio::time::sleep(wait) => {} }
+    let mut redial = Redial::default();
+    while redial.wait(&stop).await {
         // a refused attempt after a good connection backs off too
         p.answered = false;
         if let Ok(Ok(mut s)) = tokio::time::timeout(T0, net::connect(&p.name)).await {
@@ -227,10 +235,7 @@ async fn poller(mut p: Poller, stop: CancellationToken) {
             tracing::warn!("{CLIENT}: {}: connection lost: {why}", p.name);
             p.lost();
         }
-        (wait, pause) = match p.answered {
-            true => (Duration::ZERO, RETRY_MIN),
-            false => (pause, (pause * 2).min(RETRY_MAX)),
-        };
+        redial.after(p.answered);
     }
 }
 
@@ -261,10 +266,7 @@ mod tests {
     use super::*;
     use crate::model::Kind;
 
-    /// What the link delivers: an ASDU updates the cache and the tag; one of a type stock does not handle is ignored; one too
-    /// short for its header, or the link closing, ends the session.
-    #[test]
-    fn take_applies_ignores_or_ends() {
+    fn shared() -> (Shared, mpsc::Receiver<Vec<u8>>) {
         let conn = Conn {
             endpoint: "tcp://127.0.0.1:1".into(),
             points: vec![Point {
@@ -275,13 +277,75 @@ mod tests {
             }],
             fep: None,
         };
-        let (tx, _rx) = mpsc::channel(1);
+        let (tx, rx) = mpsc::channel(QUEUE);
         let link = Shared {
             master: Mutex::new(Master::new(&conn, Mode::Bennu, false)),
             cache: Mutex::default(),
             store: Store::new(Default::default()),
             tx,
         };
+        (link, rx)
+    }
+
+    /// STARTDT act and the station GI, what a session sends first.
+    const OPENING: usize = 6 + 16;
+    const I_FRAME: [u8; 20] = [
+        0x68, 18, 0, 0, 0, 0, 13, 1, 1, 0, 1, 0, 2, 0, 0, 0, 0, 0x2a, 0x42, 0,
+    ];
+    const TESTFR_ACT: [u8; 6] = [0x68, 4, 0x43, 0, 0, 0];
+
+    /// A WRITE made while the connect was under way (still in the queue when the session begins) is not sent, though the
+    /// started link would take it at once (T5-M3). Paused time: the session runs a virtual second, not a real one.
+    #[tokio::test(start_paused = true)]
+    async fn a_command_queued_before_the_session_is_dropped() {
+        let (link, rx) = shared();
+        link.tx
+            .try_send(vec![45, 1, 6, 0, 1, 0, 9, 0, 0, 1])
+            .unwrap();
+        let (mut ours, mut peer) = tokio::io::duplex(4096);
+        let stop = CancellationToken::new();
+        let end = stop.clone();
+        let run = tokio::spawn(async move {
+            connected(&mut ours, &link, rx, &stop, "x").await;
+        });
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        end.cancel();
+        run.await.unwrap();
+        let mut got = vec![];
+        peer.read_to_end(&mut got).await.unwrap();
+        assert_eq!(got.len(), OPENING, "STARTDT and the GI only: {got:02x?}");
+    }
+
+    /// A write that stalls for `WRITE_TIMEOUT` ends the session without the closing S-frame: the peer that stopped reading
+    /// would stall that too (T5-M7). The pipe holds exactly the opening, so the TESTFR con stalls; a second wait for the
+    /// S-frame would make it 20 virtual seconds.
+    #[tokio::test(start_paused = true)]
+    async fn no_confirm_after_a_write_timeout() {
+        let (link, rx) = shared();
+        let (mut ours, mut peer) = tokio::io::duplex(OPENING);
+        // the pipe is small both ways, so the peer writes as the session reads, and never reads
+        let talk = tokio::spawn(async move {
+            peer.write_all(&[&I_FRAME[..], &TESTFR_ACT[..]].concat())
+                .await
+                .unwrap();
+            std::future::pending::<()>().await;
+        });
+        let t = tokio::time::Instant::now();
+        let stop = CancellationToken::new();
+        connected(&mut ours, &link, rx, &stop, "x").await;
+        let took = t.elapsed();
+        assert!(
+            took >= WRITE_TIMEOUT && took < WRITE_TIMEOUT * 3 / 2,
+            "{took:?}"
+        );
+        talk.abort();
+    }
+
+    /// What the link delivers: an ASDU updates the cache and the tag; one of a type stock does not handle is ignored; one too
+    /// short for its header, or the link closing, ends the session.
+    #[test]
+    fn take_applies_ignores_or_ends() {
+        let (link, _rx) = shared();
         let float = vec![13, 1, 1, 0, 1, 0, 2, 0, 0, 0, 0, 0x2a, 0x42, 0];
         let acts = vec![
             Action::Deliver(float),

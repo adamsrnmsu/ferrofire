@@ -348,8 +348,6 @@ const START_TIMEOUT: Duration = Duration::from_secs(10);
 /// for its link status. An answer is not awaited: opendnp3 only tells a listener bennu does not have.
 const KEEP_ALIVE: Duration = Duration::from_secs(60);
 const TASK_RETRY: Duration = Duration::from_secs(5);
-const RETRY_MIN: Duration = Duration::from_secs(1);
-const RETRY_MAX: Duration = Duration::from_secs(60);
 /// Stock's all-classes scan asks in this order.
 const ALL_CLASSES: [u8; 4] = [1, 2, 3, 0];
 
@@ -893,9 +891,8 @@ enum Task {
 impl Session {
     async fn run(mut self, stop: CancellationToken) {
         // stock: an attempt at once, then 1, 2, 4 ... 60 s apart; a session that was up is retried at once
-        let (mut wait, mut pause) = (Duration::ZERO, RETRY_MIN);
-        loop {
-            tokio::select! { _ = stop.cancelled() => return, _ = tokio::time::sleep(wait) => {} }
+        let mut redial = shared::Redial::default();
+        while redial.wait(&stop).await {
             self.answered = false;
             let stream = tokio::time::timeout(RESPONSE_TIMEOUT, net::connect(&self.endpoint)).await;
             if let Ok(Ok(stream)) = stream {
@@ -907,10 +904,7 @@ impl Session {
             }
             // ponytail: a connection that never brought a response (a relay in front of a dead outstation, a silent peer)
             // backs off like a refused one, where opendnp3 would reconnect at once, in a tight loop
-            (wait, pause) = match self.answered {
-                true => (Duration::ZERO, RETRY_MIN),
-                false => (pause, (pause * 2).min(RETRY_MAX)),
-            };
+            redial.after(self.answered);
         }
     }
 
@@ -1101,12 +1095,7 @@ impl Session {
 
     fn set_up(&mut self, up: bool) {
         let Some(fep) = &mut self.fep else { return };
-        if fep.up != up {
-            fep.up = up;
-            if let Some(tag) = &fep.status {
-                let _ = self.shared.store.write(tag, Value::Binary(up));
-            }
-        }
+        shared::set_status(&self.shared.store, &fep.status, &mut fep.up, up);
     }
 
     /// The connection is gone: the status says so, and a write that was waiting to leave is due again.
