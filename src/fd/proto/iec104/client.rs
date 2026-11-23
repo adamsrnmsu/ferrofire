@@ -11,9 +11,11 @@ use crate::model::{Kind, Value};
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-/// `fep` mode: a command's ACT_CON or a GI's ACT_TERM that has not come within this long means the server is gone (as the DNP3
-/// FEP's `FEP_TIMEOUT`).
+/// `fep` mode: a command's ACT_CON, a GI's ACT_CON, or the next frame of a GI under way that has not come within this long means
+/// the server is gone (as the DNP3 FEP's `FEP_TIMEOUT`). A GI as a whole may take longer.
 pub const ANSWER: Duration = Duration::from_millis(1000);
+/// The cause of transmission of a station interrogation's data ASDUs.
+const GI_COT: u8 = 20;
 /// The stock client's originator address (`MOD/ClientConnection.cpp:36`).
 const ORIGINATOR: u8 = 3;
 /// The common address of everything stock sends (`MOD/ClientConnection.cpp:49`, `:136`, `:190`).
@@ -206,7 +208,7 @@ pub struct Poller {
     waiting: BTreeMap<(u8, u32), (String, Value, Instant)>,
     /// Local changes a GI ran into: sent once the ASDUs at hand are taken.
     todo: Vec<(String, Value)>,
-    /// When the GI under way went.
+    /// When the GI under way went, or its last frame came.
     gi: Option<Instant>,
     next_gi: Instant,
     next_cycle: Instant,
@@ -266,7 +268,7 @@ impl Poller {
         let routed = route(self.link.on_bytes(b, now), |a| asdus.push(a.clone()));
         // the ASDUs before a close too: a confirmation among them must not leave its command due again
         for a in asdus {
-            self.take(&a);
+            self.take(&a, now);
         }
         let mut out = routed?;
         for (tag, v) in std::mem::take(&mut self.todo) {
@@ -304,12 +306,7 @@ impl Poller {
     }
 
     fn set_up(&mut self, up: bool) {
-        if self.up != up {
-            self.up = up;
-            if let Some(tag) = &self.status {
-                let _ = self.store.write(tag, Value::Binary(up));
-            }
-        }
+        super::super::client::set_status(&self.store, &self.status, &mut self.up, up);
     }
 
     /// Hand an ASDU to the link; `false` when the k window is full.
@@ -376,7 +373,8 @@ impl Poller {
 
     /// One ASDU from the server: the GI's end or refusal, a command's confirmation or refusal (a negative reply at any COT, as
     /// 44-47 from an RTU that is not stock), or data for the tags (any COT).
-    fn take(&mut self, a: &Asdu) {
+    fn take(&mut self, a: &Asdu, now: Instant) {
+        self.gi_progress(a, now);
         match (a.head.type_id, a.head.cot, a.head.negative) {
             (100, ACT_TERM, false) => {
                 self.gi = None;
@@ -401,6 +399,13 @@ impl Poller {
                     self.polled(tag, v);
                 }
             }
+        }
+    }
+
+    /// A GI frame (its ACT_CON, a COT 20 ASDU, its ACT_TERM) is progress: the next is due `ANSWER` after it.
+    fn gi_progress(&mut self, a: &Asdu, now: Instant) {
+        if self.gi.is_some() && (a.head.type_id == 100 || a.head.cot == GI_COT) {
+            self.gi = Some(now);
         }
     }
 
@@ -683,5 +688,58 @@ mod tests {
             types(&p.tick(t + Duration::from_millis(200)).unwrap()),
             [50]
         );
+    }
+
+    const GI_CON: &[u8] = &[100, 1, 7, 3, 1, 0, 0, 0, 0, 20];
+    const GI_DATA: &[u8] = &[1, 1, 20, 0, 1, 0, 0, 0, 0, 1];
+    const MS: fn(u64) -> Duration = Duration::from_millis;
+
+    /// A GI that streams for longer than `ANSWER` is not overdue while each frame comes within `ANSWER` of the one before.
+    #[test]
+    fn a_gi_that_streams_past_the_answer_timeout_stays_up() {
+        let t = Instant::now();
+        let mut p = poller(t);
+        p.connect(t);
+        p.on_bytes(&server(0, &[GI_CON]), t + MS(900)).unwrap();
+        for n in 1..4u64 {
+            let at = t + MS(900 * (n + 1));
+            assert!(p.tick(at - MS(1)).is_ok(), "frame {n} still in time");
+            p.on_bytes(&server(n as u16, &[GI_DATA]), at).unwrap();
+        }
+        assert!(p.tick(t + MS(3600) + MS(999)).is_ok());
+        p.on_bytes(&server(4, &[GI_END]), t + MS(4000)).unwrap();
+        assert!(p.answered);
+        assert!(p.tick(t + MS(4000) + ANSWER * 2).is_ok());
+    }
+
+    /// No ACT_CON within `ANSWER` of the send, or a stall after one, drops the connection.
+    #[test]
+    fn a_gi_that_never_confirms_or_stalls_is_overdue() {
+        let t = Instant::now();
+        let mut p = poller(t);
+        p.connect(t);
+        assert!(p.tick(t + ANSWER - MS(1)).is_ok());
+        assert!(p.tick(t + ANSWER).is_err(), "no ACT_CON");
+        let mut p = poller(t);
+        p.connect(t);
+        p.on_bytes(&server(0, &[GI_CON]), t + MS(500)).unwrap();
+        p.on_bytes(&server(1, &[GI_DATA]), t + MS(1200)).unwrap();
+        assert!(p.tick(t + MS(2199)).is_ok());
+        assert!(p.tick(t + MS(2200)).is_err(), "stalled after a data frame");
+    }
+
+    /// A command's ACT_CON keeps the plain `ANSWER` from its send, whatever the GI does.
+    #[test]
+    fn a_command_answer_is_still_due_within_the_answer_timeout() {
+        let t = Instant::now();
+        let mut p = poller(t);
+        p.connect(t);
+        p.on_bytes(&server(0, &[GI_CON, GI_END]), t).unwrap();
+        p.store.write("sp", Analog(7.0)).unwrap();
+        p.store.apply_internal();
+        let at = t + MS(200);
+        assert_eq!(types(&p.tick(at).unwrap()), [50]);
+        assert!(p.tick(at + ANSWER - MS(1)).is_ok());
+        assert!(p.tick(at + ANSWER).is_err());
     }
 }

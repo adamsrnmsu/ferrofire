@@ -101,10 +101,71 @@ impl EventLog {
     }
 }
 
+/// C's `%g` with six significant digits, which is what `std::ostream << float` prints.
+pub fn fmt_g(x: f64) -> String {
+    if !x.is_finite() {
+        return if x.is_nan() {
+            "nan".into()
+        } else if x > 0.0 {
+            "inf".into()
+        } else {
+            "-inf".into()
+        };
+    }
+    let sci = format!("{x:.5e}");
+    let (mant, exp) = sci.split_once('e').unwrap_or((&sci, "0"));
+    let exp: i32 = exp.parse().unwrap_or(0);
+    let trim = |s: &str| {
+        if s.contains('.') {
+            s.trim_end_matches('0').trim_end_matches('.').to_string()
+        } else {
+            s.to_string()
+        }
+    };
+    if (-4..6).contains(&exp) {
+        trim(&format!("{x:.*}", (5 - exp).max(0) as usize))
+    } else {
+        format!(
+            "{}e{}{:02}",
+            trim(mant),
+            if exp < 0 { '-' } else { '+' },
+            exp.abs()
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;
+
+    #[test]
+    fn fmt_g_prints_like_a_c_stream() {
+        for (x, want) in [
+            (1.5, "1.5"),
+            (55.5, "55.5"),
+            (0.0, "0"),
+            (-2.5, "-2.5"),
+            (100000.0, "100000"),
+            (999999.0, "999999"),
+            (1e6, "1e+06"),
+            (1234567.0, "1.23457e+06"),
+            (0.0001, "0.0001"),
+            (0.00001, "1e-05"),
+            (1e-10, "1e-10"),
+            (1e100, "1e+100"),
+            (123456.0, "123456"),
+            (0.1f32 as f64, "0.1"),
+            (std::f32::consts::PI as f64, "3.14159"),
+            (f64::INFINITY, "inf"),
+            (f64::NEG_INFINITY, "-inf"),
+            (f64::NAN, "nan"),
+            (3.0, "3"),
+            (100.0, "100"),
+        ] {
+            assert_eq!(fmt_g(x), want, "{x}");
+        }
+    }
 
     #[derive(Clone, Default)]
     struct Buf(Arc<Mutex<Vec<u8>>>);

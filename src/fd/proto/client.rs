@@ -224,6 +224,51 @@ impl Out {
     }
 }
 
+/// The FEP's status tag: written when the session goes up or down, not on every call.
+pub fn set_status(store: &Store, tag: &Option<String>, up: &mut bool, now: bool) {
+    if *up != now {
+        *up = now;
+        if let Some(tag) = tag {
+            let _ = store.write(tag, Value::Binary(now));
+        }
+    }
+}
+
+/// The reconnect pause of the connect-per-session FEPs (DNP3, IEC 104): an attempt at once, then 1, 2, 4 ... 60 s apart; a
+/// connection that was answered is retried at once. (The Modbus FEP polls on its own tick and caps at 30 s, `proto::backoff`.)
+#[derive(Debug)]
+pub struct Redial {
+    wait: Duration,
+    pause: Duration,
+}
+
+impl Default for Redial {
+    fn default() -> Redial {
+        Redial {
+            wait: Duration::ZERO,
+            pause: Self::MIN,
+        }
+    }
+}
+
+impl Redial {
+    const MIN: Duration = Duration::from_secs(1);
+    const MAX: Duration = Duration::from_secs(60);
+
+    /// Sleep until the next attempt; `false` when `stop` came first.
+    pub async fn wait(&self, stop: &tokio_util::sync::CancellationToken) -> bool {
+        tokio::select! { _ = stop.cancelled() => false, _ = tokio::time::sleep(self.wait) => true }
+    }
+
+    /// The attempt is over; `answered`: the server answered on it.
+    pub fn after(&mut self, answered: bool) {
+        (self.wait, self.pause) = match answered {
+            true => (Duration::ZERO, Self::MIN),
+            false => (self.pause, (self.pause * 2).min(Self::MAX)),
+        };
+    }
+}
+
 /// A poll read `v` for an input point: the device owns the value.
 pub fn input_polled(store: &Store, tag: &str, v: Value) {
     let settled = !store.is_queued(tag) && store.get(tag).is_some_and(|now| same(&now, &v));
@@ -274,6 +319,31 @@ impl Points for TagPoints {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn redial_doubles_to_60_and_an_answer_resets() {
+        let mut r = super::Redial::default();
+        assert_eq!(r.wait, Duration::ZERO);
+        let mut seen = vec![];
+        for _ in 0..8 {
+            r.after(false);
+            seen.push(r.wait.as_secs());
+        }
+        assert_eq!(seen, [1, 2, 4, 8, 16, 32, 60, 60]);
+        r.after(true);
+        assert_eq!((r.wait, r.pause), (Duration::ZERO, Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn status_is_written_on_change_only() {
+        let store = store(&[("up", Value::Binary(false))]);
+        let (tag, mut up) = (Some("up".to_string()), false);
+        super::set_status(&store, &tag, &mut up, false);
+        assert!(!store.is_queued("up"), "no change, no write");
+        super::set_status(&store, &tag, &mut up, true);
+        assert!(up);
+        assert_eq!(store.queued("up"), Some(Value::Binary(true)));
+    }
+
     use super::*;
     use crate::model::Value::{Analog, Binary};
 

@@ -5,6 +5,7 @@ use super::asdu::{
     cp56time2a, Asdu, Header, Item, Undecoded, ACT, ACT_CON, ACT_TERM, DEACT, DEACT_CON, PERIODIC,
     REQUEST, SPLIT_AT, SPONTANEOUS, STATION, UNKNOWN_COT, UNKNOWN_TYPE,
 };
+use crate::fd::eventlog::fmt_g;
 use crate::model::{Kind, Value};
 use std::collections::BTreeMap;
 
@@ -221,9 +222,12 @@ fn order(item: &Item) -> Option<(u32, bool, Value, String)> {
             select,
             ..
         } => (ioa, select, Value::Binary(dcs == 2), dcs.to_string()),
-        Item::SetFloat { ioa, v, select, .. } => {
-            (ioa, select, Value::Analog(f64::from(v)), v.to_string())
-        }
+        Item::SetFloat { ioa, v, select, .. } => (
+            ioa,
+            select,
+            Value::Analog(f64::from(v)),
+            fmt_g(f64::from(v)),
+        ),
         _ => return None,
     })
 }
@@ -587,6 +591,16 @@ mod tests {
             assert_eq!(sent(&r), answer(G, n));
             assert!(r.writes.is_empty() && r.log.is_empty());
         }
+    }
+
+    #[test]
+    fn setpoint_float_logs_like_an_ostream() {
+        // Stock prints the float with `%g`, six digits: 1e7 is `1e+07`, not `10000000`.
+        let r = ask(Subtype::Single, &a(50, 6, 2, &f32b(1.0e7, 0)));
+        assert_eq!(
+            r.log[0].2,
+            "Analog point command at address 2 with value 1e+07."
+        );
     }
 
     #[test]
