@@ -7,6 +7,7 @@
 
 mod common;
 
+use common::clients::free_port;
 use common::load_as;
 use ferrofire::fd::proto::mqtt::sparkplug::{self as sp, Payload};
 use ferrofire::fd::proto::mqtt::Client;
@@ -20,14 +21,6 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
-
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
 
 struct Broker {
     child: Child,
@@ -52,17 +45,24 @@ impl Broker {
             "allow_anonymous true\n"
         };
         std::fs::write(&conf, format!("{listener}{anon}{extra}\n")).unwrap();
+        let log = dir.join("mosquitto.log");
         let child = Command::new("mosquitto")
             .arg("-c")
             .arg(&conf)
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(std::fs::File::create(&log).unwrap())
             .spawn()
             .expect("mosquitto on PATH (it is in the ff-rust image)");
-        let broker = Broker { child, port, dir };
+        let mut broker = Broker { child, port, dir };
+        // "running" comes once its listener is open; a port someone else holds makes it exit instead. Not a connect: that
+        // succeeds against whoever holds the port, and the test went on against another test's server.
         for _ in 0..100 {
-            if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            let text = std::fs::read_to_string(&log).unwrap_or_default();
+            if text.contains(" running") {
                 return broker;
+            }
+            if let Some(st) = broker.child.try_wait().unwrap() {
+                panic!("mosquitto on {port} exited ({st}):\n{text}");
             }
             std::thread::sleep(Duration::from_millis(50));
         }

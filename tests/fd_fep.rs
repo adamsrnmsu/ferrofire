@@ -140,6 +140,14 @@ async fn gateway_a_value_on_the_rtu_appears_on_the_feps_own_server() {
     assert_eq!(requests(&r.tap, 5), Vec::<Vec<u8>>::new());
 }
 
+/// ww-20t: the kernel hands a port it has just been given back out again (about one burst of 60 in nine does), and a test's port
+/// is not bound until its device starts. Two tests given the same one end up talking to each other's servers.
+#[test]
+fn a_free_port_is_not_handed_out_twice() {
+    let ports: std::collections::HashSet<u16> = (0..400).map(|_| free_port()).collect();
+    assert_eq!(ports.len(), 400);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_write_to_the_feps_server_reaches_the_rtu_once_and_is_not_echoed() {
     let r = rig("").await;

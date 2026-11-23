@@ -11,13 +11,7 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
-pub fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
+pub use super::clients::free_port;
 
 pub fn config(port: u16, log: &str) -> String {
     format!(

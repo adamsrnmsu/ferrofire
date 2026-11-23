@@ -37,7 +37,12 @@ impl W {
             self.marker()
         );
     }
+    /// The pid of the first start (callers ask before any restart). The watcher logs it after the spawn returns, so the
+    /// firmware's marker can come first.
     fn pid(&self) -> i32 {
+        self.wait("started logged", 3, |w| {
+            w.err().contains("watch: started pid=")
+        });
         let e = self.err();
         let l = e
             .lines()
@@ -140,9 +145,9 @@ fn starts_firmware_with_config() {
     let w = spawn("start", Some((v(1).as_bytes(), 0o755)));
     let want = format!("v1 field-device --file {}", w.path("cfg.xml").display());
     w.wait("marker", 3, |w| w.marker().contains(&want));
+    w.pid(); // waits for the started line
     let e = w.err();
     assert!(e.contains("watch: firmware sha256="), "{e}");
-    assert!(e.contains("watch: started pid="), "{e}");
 }
 
 #[test]
@@ -228,19 +233,44 @@ fn config_change_restarts_and_bad_config_recovers() {
 
 #[test]
 fn never_runs_a_partial_push_while_retrying() {
-    // crash-looping firmware; a push lands as two writes less than one poll apart, timed around a backoff retry
+    // crash-looping firmware; a push is still being written when the backoff retry comes round. It changes every few ms,
+    // as a slow copy does, so no two polls hash it the same, however late this thread is to each sleep.
+    let poll = Duration::from_millis(200);
     let w = spawn_with(
         "partial",
         Some((script("exit 1\n").as_bytes(), 0o755)),
         "200",
     );
     w.wait("exited", 3, |w| w.err().contains("watch: exited"));
-    std::thread::sleep(Duration::from_millis(900));
-    put(&w.path("fw"), script("echo HALF >> \"$MARK\"\n"), 0o755);
-    std::thread::sleep(Duration::from_millis(150));
-    put(&w.path("fw"), v(2), 0o755);
+    // the retry is due 1 s (the first backoff) after the exit; every tick after a refused retry retries again
+    let end = Instant::now() + Duration::from_millis(1600);
+    let (mut last, mut held) = (Instant::now(), Duration::ZERO);
+    for i in 0.. {
+        let done = Instant::now() >= end;
+        let fw = if done {
+            v(2)
+        } else {
+            script(&format!("echo HALF >> \"$MARK\"\n# {i}\n"))
+        };
+        // stamped before the put: [start of put i, start of put i+1] holds all the time version i was on disk
+        let t = Instant::now();
+        put(&w.path("fw"), fw, 0o755);
+        held = held.max(t - last);
+        last = t;
+        if done {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
     w.wait("v2", 4, |w| w.marker().contains("v2 "));
-    assert!(!w.marker().contains("HALF"), "{}", w.marker());
+    // bytes that held still for a whole poll were stable on two polls: running them is right, so nothing to check
+    if held < poll {
+        assert!(!w.marker().contains("HALF"), "{}", w.marker());
+    } else {
+        eprintln!(
+            "a write gap of {held:?} let the partial push hold still for a poll; HALF not checked"
+        );
+    }
 }
 
 #[test]
