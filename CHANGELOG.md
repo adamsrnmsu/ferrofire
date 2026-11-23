@@ -1,3 +1,199 @@
+# [2026.11.23](https://github.com/adamsrnmsu/ferrofire/compare/v2026.11.15...v2026.11.23) - 2026-11-23
+
+### 🚀 Features
+
+- _(bacnet)_ follow ASHRAE 135 where it decides, stock where it is silent (ww-h5n, ww-awn, ww-5dy, ww-9tb, ww-o17, ww-4s8, ww-d7p, ww-ntp) [_(4ea56a9)_](https://github.com/adamsrnmsu/ferrofire/commit/4ea56a94a6813cce13a9fedf91548818301a3603) ([PR 9](https://github.com/adamsrnmsu/ferrofire/pull/9))
+
+- _(iec104)_ IEC 60870-5-104 server and client as a compiled module (ww-vck) [_(11f6d5a)_](https://github.com/adamsrnmsu/ferrofire/commit/11f6d5a921585c490bd5431d9ac6f5ba3968599c) ([PR 5](https://github.com/adamsrnmsu/ferrofire/pull/5))
+
+- _(modules)_ BACnet/IP server and client on bacpypes3 (ww-7mw.3) [_(39e4812)_](https://github.com/adamsrnmsu/ferrofire/commit/39e481240fca7deb854447c2bc4d5841360b5875)
+
+- _(external)_ bennu-channel transport, device-level command interface and change datagrams (ww-7mw.3) [_(bbe9e31)_](https://github.com/adamsrnmsu/ferrofire/commit/bbe9e31c98434c8bbf3993936a0a2ab690f778e1)
+
+- _(external)_ socket transport for ffmod/1 (ww-7mw.3) [_(671decf)_](https://github.com/adamsrnmsu/ferrofire/commit/671decfa865314558f9bb36a21cebb1b7f5b5148)
+
+- _(external)_ module manifests serve stock <comms> elements (ww-7mw.3) [_(0f01555)_](https://github.com/adamsrnmsu/ferrofire/commit/0f01555964bbfe733fcf5a6f219b8f43c6230f0f)
+
+- _(external)_ <external-module> over stdio with restart and stop (ww-7mw.3) [_(d200be7)_](https://github.com/adamsrnmsu/ferrofire/commit/d200be71fadf749dbc579979b0d14486973ad958)
+
+- _(external)_ ffmod/1 session loop (ww-7mw.3) [_(9933ea6)_](https://github.com/adamsrnmsu/ferrofire/commit/9933ea668c1004c8ec24c931ae2de36a67f7131e)
+
+- _(external)_ ffmod/1 message codec (ww-7mw.3) [_(6c97567)_](https://github.com/adamsrnmsu/ferrofire/commit/6c975678df7e5b2219d620ab75ce30ddcdd941b3)
+
+- _(conformance)_ BACnet server golden and bacpypes3 spike (GO) [_(f26dd6d)_](https://github.com/adamsrnmsu/ferrofire/commit/f26dd6da3e34a2fd9b68f7c46fa43a53cd0b60c8)
+
+- _(helics)_ ferrofire run as a HELICS federate (ww-7mw.4) [_(3ab55f0)_](https://github.com/adamsrnmsu/ferrofire/commit/3ab55f0c3f17de5f23ada1b274c3010a8c0b27db)
+
+- _(bench)_ physics scenario helics-opendss, a real OpenDSS HELICS federate (ww-dkf) [_(5cc9580)_](https://github.com/adamsrnmsu/ferrofire/commit/5cc9580ccf9c9d067016a4cf23aecffdf07954f1)
+
+- _(bench)_ bennu's OpenDSS and HELICS providers drive the field device (ww-82n) [_(32f5f18)_](https://github.com/adamsrnmsu/ferrofire/commit/32f5f1867ada3f2301814d870704930c015068c9)
+
+- _(fd)_ IEC 61850 GOOSE subscriber <iec61850-rtu> (ww-n29) [_(fc4d798)_](https://github.com/adamsrnmsu/ferrofire/commit/fc4d7985e5f9a902c7b5763897b52ff9e3eaa956)
+
+- _(fd)_ DNP3 over UDP for the outstation and the master (ww-8l7) [_(77e1c2f)_](https://github.com/adamsrnmsu/ferrofire/commit/77e1c2f2c6f3c0b7c3d8ae9486d9c55b8bc25309)
+
+- _(diff)_ probe diff findings carry reg=<kind>:<address> (ww-eit) [_(5346d6a)_](https://github.com/adamsrnmsu/ferrofire/commit/5346d6a2a5fed7161a084068b0889321a3cec8f1)
+
+- _(fd/modbus)_ --strict unit id and exception 1, --compat-wrap (ww-ik2) [_(7426604)_](https://github.com/adamsrnmsu/ferrofire/commit/742660467ce2e30338d9a3c15214af6cc0e03bf1)
+
+- _(fd)_ serial endpoints for <modbus-server> and <dnp3-server> (ww-z5w) [_(f2e8ad1)_](https://github.com/adamsrnmsu/ferrofire/commit/f2e8ad138298cc12f7eeaf5c3412f0b9b18e1725)
+
+- _(dnp3)_ config class/sgvar/egvar/deadband/event-buffer-size, four point tables, rejected-write and output-overflow parity (ww-ke0, ww-a7r) [_(c11feaf)_](https://github.com/adamsrnmsu/ferrofire/commit/c11feaf1e8356af257033cecce184cc030b32cf8)
+
+- _(fd)_ serial endpoints for the Modbus client and DNP3 master (ww-y5q) [_(fd3ba7b)_](https://github.com/adamsrnmsu/ferrofire/commit/fd3ba7b18a211a3790254493eb0552853cecb6e5)
+
+- _(fd)_ DNP3 outstation follows bennu v2026.11.03 (output status, class 0 default, ASSIGN_CLASS) [_(8714d4f)_](https://github.com/adamsrnmsu/ferrofire/commit/8714d4fdfe876e3448f63099571b35fc2e3caf4e)
+
+- _(fd)_ modbus fep mode writes contiguous outputs as one FC15/FC16; fep checks the write echo (ww-f05, ww-3oa) [_(0312e5a)_](https://github.com/adamsrnmsu/ferrofire/commit/0312e5ad1fa4c0a0989cf552490b501e9d4d5d8f)
+
+- _(fd)_ DNP3 master fep mode [_(2246854)_](https://github.com/adamsrnmsu/ferrofire/commit/2246854cf40b52073cd500f9f0546e76d23ec8d3)
+
+- _(fd)_ DNP3 master, bennu mode [_(b508873)_](https://github.com/adamsrnmsu/ferrofire/commit/b5088731eec4b696b2920bfbc2f3da14f6931262)
+
+- _(fd)_ DNP3 master request and response codec [_(d06cf38)_](https://github.com/adamsrnmsu/ferrofire/commit/d06cf38742676c97417aad6d855d03de9c4adbdb)
+
+- _(fd)_ Modbus client fep mode: polling, write-down, status [_(4fa7763)_](https://github.com/adamsrnmsu/ferrofire/commit/4fa7763ce6ab87c4c7a516d9f0fe956dc4dc78c5)
+
+- _(fd)_ Modbus client, bennu mode [_(fb68e96)_](https://github.com/adamsrnmsu/ferrofire/commit/fb68e969b9574986598af6ba3a5a472957ec5c71)
+
+- _(fd)_ client mode, fep keys and the echo rule [_(794c6e0)_](https://github.com/adamsrnmsu/ferrofire/commit/794c6e0eed9fd59d09bd4e7ee3605b81dffac038)
+
+- _(fd)_ bennu command interface (ZMTP REP) [_(1b217f8)_](https://github.com/adamsrnmsu/ferrofire/commit/1b217f8ad0e3b92e8f63dac7bdeca50c6c5c1be8)
+
+- _(conformance)_ follow scpi-parser's VXI-11 instrument too (ww-5w0) [_(8d7e132)_](https://github.com/adamsrnmsu/ferrofire/commit/8d7e132e9608548cf0c6cb62c082d7cb9d98d135)
+
+- _(scpi)_ <scpi-client> polls an instrument and sets it from <logic> (ww-otj.88) [_(18285b6)_](https://github.com/adamsrnmsu/ferrofire/commit/18285b6eb9cd1fec46a2cb5b22ec9b0086a04899)
+
+### 🐛 Bug Fixes
+
+- _(iec104)_ follow-ups: per-frame GI deadline, stock %g floats, stall tests, shared FEP redial (ww-kws, ww-hjd, ww-aph, ww-1kj) [_(33d63ca)_](https://github.com/adamsrnmsu/ferrofire/commit/33d63caeed2d80076f07c6ff22e58ba9808454ef) ([PR 8](https://github.com/adamsrnmsu/ferrofire/pull/8))
+
+- _(tests)_ one free_port for every test binary, no more bind(:0) port picks (ww-1mu) [_(4514304)_](https://github.com/adamsrnmsu/ferrofire/commit/45143044e0a40ddd6d68a275a78476bceb3e3efb) ([PR 7](https://github.com/adamsrnmsu/ferrofire/pull/7))
+
+- _(tests)_ make CI reliable: race-free test setup, helics exit, fuzz build (ww-5u5, ww-20t, ww-d0q) [_(dfffe7e)_](https://github.com/adamsrnmsu/ferrofire/commit/dfffe7ed83290c101967652c54285a7f73e98ed5) ([PR 6](https://github.com/adamsrnmsu/ferrofire/pull/6))
+
+- _(external)_ accept a large ready line; review fixes to docs and tag warnings (ww-7mw.3) [_(315af9f)_](https://github.com/adamsrnmsu/ferrofire/commit/315af9fae5ed0d3932ab6e6c39db53c1f22e6c33)
+
+- _(external)_ manifest-served clients declare their points; BACnet client matches stock scan (ww-7mw.3) [_(d64de6a)_](https://github.com/adamsrnmsu/ferrofire/commit/d64de6acdeac5fc83fb74a60b48f7748cb48fb36)
+
+- _(config)_ external tag wins over an internal one of the same name, as stock does (ww-7mw.3) [_(df2af89)_](https://github.com/adamsrnmsu/ferrofire/commit/df2af89895f2d938dc760d4422dfbd9cd53263ad)
+
+- _(config)_ accept a tag defined twice with the same kind, as stock does (ww-7mw.3) [_(2802b6f)_](https://github.com/adamsrnmsu/ferrofire/commit/2802b6fe74085bc34fcf307bcf75537083e63c1c)
+
+- _(external)_ socket transport backoff, stale-file and replacement handling (ww-7mw.3) [_(e72fbce)_](https://github.com/adamsrnmsu/ferrofire/commit/e72fbce89353ed7fa7e15b7080109ee135c6a045)
+
+- _(external)_ wait only for external modules on stop; reset the backoff on ready [_(ee68344)_](https://github.com/adamsrnmsu/ferrofire/commit/ee68344302ef6cbdbd16eeb6e2acf3562dedc185)
+
+- _(external)_ keep a client output write pending until the module's sent [_(38a5f58)_](https://github.com/adamsrnmsu/ferrofire/commit/38a5f5863e87f6286c9ee68a659553117059fe73)
+
+- _(datagram)_ accept a body without the trailing comma, as stock does (ww-9o1) [_(1ea5d66)_](https://github.com/adamsrnmsu/ferrofire/commit/1ea5d668b9f3d99369b36f19583f72ece314bda4)
+
+- _(test)_ listening() reads the socket table instead of connecting (ww-s34) [_(87ef04b)_](https://github.com/adamsrnmsu/ferrofire/commit/87ef04b30386f2e0b695ef6ee0db3664938aaea2)
+
+- _(probe)_ review fixes to the stale tick and the listener (ww-90b, ww-21o) [_(37e5c1e)_](https://github.com/adamsrnmsu/ferrofire/commit/37e5c1eecd885dd2055915b0bf58b643402aa207)
+
+- _(probe)_ READ has no trailing comma; read the stock provider's bare single-tag reply (ww-1df.25) [_(91be3e5)_](https://github.com/adamsrnmsu/ferrofire/commit/91be3e5fc5c06ba067025e6216353f121ba49bd0)
+
+- _(probe)_ bind the datagram listener with SO_REUSEADDR/SO_REUSEPORT (ww-21o) [_(96607c6)_](https://github.com/adamsrnmsu/ferrofire/commit/96607c64be19e46d32c4aea016330a8eff7fd335)
+
+- _(probe)_ watch ages tags on a timer so a silent stream goes STALE (ww-90b) [_(14c2ccb)_](https://github.com/adamsrnmsu/ferrofire/commit/14c2ccb694f35754aa0dc6f7cb2fa5c552f7a6b6)
+
+- _(conformance)_ move dnp3 smoke, elastic run and docs to ffc-stock image on Docker Desktop (ww-wn8) [_(7c8d492)_](https://github.com/adamsrnmsu/ferrofire/commit/7c8d492212219f134fedf537d999a8f9430280a6)
+
+- _(top)_ --stream --once fails in ~4 s when the provider cannot confirm --tags (ww-xzh) [_(994b151)_](https://github.com/adamsrnmsu/ferrofire/commit/994b15187ba60d25c83ba378d90f3faa27bb674a)
+
+- _(bench)_ skip cross-* result directories parse_dir cannot read, so make charts imports control_report again (ww-kjc) [_(a99cec1)_](https://github.com/adamsrnmsu/ferrofire/commit/a99cec19a533d00f294a8e20c67de71cb2de08e3)
+
+- _(test)_ until() allows 3x for the llvm-cov build; conformance peers follow CONF_NAME [_(9b48fb4)_](https://github.com/adamsrnmsu/ferrofire/commit/9b48fb44b418af6ac6776a592924a57a6030e966)
+
+- _(dnp3)_ output events, stock's read tables, and the master's link replies, sequence and overflow log [_(48576f5)_](https://github.com/adamsrnmsu/ferrofire/commit/48576f59cad9e55607d20771fbf7f3f5301d5512)
+
+- _(fd)_ modbus write fallback on exception 3, u16 overflow in group, echo after sent_ok (ww-a12) [_(c2fea73)_](https://github.com/adamsrnmsu/ferrofire/commit/c2fea73c9c24e79c8738b1102a7a42b3d0a025c0)
+
+- _(fd)_ DNP3 master: fep status read, bounded commands, link layer as opendnp3 [_(5d618e5)_](https://github.com/adamsrnmsu/ferrofire/commit/5d618e56024eb747c975eca73c4c7f4e35416bae)
+
+- _(test)_ gt page test took ports up front and raced the child's bind [_(b41d6b7)_](https://github.com/adamsrnmsu/ferrofire/commit/b41d6b7da5806aa85875440e9452d73ca649bb96)
+
+- _(fd)_ compare-and-queue so a poll cannot overwrite a protocol write (ww-3oa) [_(2773f47)_](https://github.com/adamsrnmsu/ferrofire/commit/2773f47fedb381dac47530565079e066112dcf08)
+
+- _(fd)_ review findings in the clients' command parser and echo path [_(7270160)_](https://github.com/adamsrnmsu/ferrofire/commit/72701604d5d7c86837c62b7f80bd887c79f787de)
+
+- _(make)_ conformance targets rebuild the linux DUT first (ww-tyc) [_(0d6e84f)_](https://github.com/adamsrnmsu/ferrofire/commit/0d6e84f998ab48efe3f9bb7fb3ac2ddf539e9879)
+
+- _(scpi)_ a query answer is written only when its tag holds something else (ww-2io) [_(8b30e98)_](https://github.com/adamsrnmsu/ferrofire/commit/8b30e985b8e19a7a072f7671da2d32c0d87bffa0)
+
+- _(scpi)_ a target host with a slash is refused, so tcp://h:5025 is an error (ww-otj.88) [_(38f7499)_](https://github.com/adamsrnmsu/ferrofire/commit/38f7499779fe5e9931a05c2191c133601ab47b8b)
+
+### 🚜 Refactor
+
+- _(fd/modbus)_ scale and scale_wrap share scaled(), the one-rounding slope*v+intercept (ww-ik2) [_(052be0b)_](https://github.com/adamsrnmsu/ferrofire/commit/052be0b5aa113828bd5e8447b4abd35fbbe2ab86)
+
+- _(fd)_ modbus client write runs within the CRAP gate (ww-f05) [_(f2ada0d)_](https://github.com/adamsrnmsu/ferrofire/commit/f2ada0d4d76633212637967c189547d3f5c76d54)
+
+- _(fd)_ client code within the CRAP and dryer gates [_(42969b3)_](https://github.com/adamsrnmsu/ferrofire/commit/42969b30429106b63bb8af76ef497b9789fc6af7)
+
+- _(fd)_ share the reconnect backoff and EventLog::say; Link from any Wire (ww-otj.88) [_(b44a89b)_](https://github.com/adamsrnmsu/ferrofire/commit/b44a89b3a92dbe4fc34968a5ba66c50de97dcddf)
+
+### 📚 Documentation
+
+- _(external)_ ffmod/1 reference, BACnet conformance (ww-7mw.3) [_(cd6b21e)_](https://github.com/adamsrnmsu/ferrofire/commit/cd6b21e978c7ce1cc5bc32ecbb076610dc826a25)
+
+- _(external)_ ffmod/1 gains a client-role sent message; unknown types are logged [_(fd638d0)_](https://github.com/adamsrnmsu/ferrofire/commit/fd638d0a0aecda8ade695518700fb912f9bf53ed)
+
+- external modules plan amended after the c104 spike (ww-7mw.3) [_(eb01a74)_](https://github.com/adamsrnmsu/ferrofire/commit/eb01a74edfaf59ba169437f124e860d7e7c22b92)
+
+- _(iec104)_ c104 spike finds no way to match stock GI with commandable outputs [_(6ea07e9)_](https://github.com/adamsrnmsu/ferrofire/commit/6ea07e94a125db12ce58942da15dffc4d4b7bebc)
+
+- design and plan for external protocol modules (ww-7mw.3) [_(41ffe7b)_](https://github.com/adamsrnmsu/ferrofire/commit/41ffe7b585a529146706d965a4427ed4f3f5aaf5)
+
+- design a HELICS federate for ferrofire run [_(e53e2c0)_](https://github.com/adamsrnmsu/ferrofire/commit/e53e2c08bc9fd0a3f2db303e114b82102f736189)
+
+- design for IEC 104 and BACnet clients (ww-sh4) [_(bd082bf)_](https://github.com/adamsrnmsu/ferrofire/commit/bd082bfe6ee1b279c269db3cd6c05a8a38e1ac79)
+
+- _(fd)_ clients page, fuzz targets, plan rows 7-9 built [_(643d77b)_](https://github.com/adamsrnmsu/ferrofire/commit/643d77ba367100fd38707398b2803e39d626c5c8)
+
+- implementation plan for the Modbus client and DNP3 master (ww-7mw.1) [_(267c3d1)_](https://github.com/adamsrnmsu/ferrofire/commit/267c3d11ff4ca1b0dfa7bf1cfed038c0a3c63175)
+
+- design for the Modbus client and DNP3 master, bennu and FEP modes (ww-7mw.1) [_(95609e2)_](https://github.com/adamsrnmsu/ferrofire/commit/95609e2ca93ef8f8b3cc5eecf296073c48322d8b)
+
+- _(testing)_ scoped mutation result of the SCPI controller (ww-pf4) [_(163febe)_](https://github.com/adamsrnmsu/ferrofire/commit/163febe29730f740530744014f0378061f0e23fd)
+
+- _(testing)_ one SCPI section again (ww-27o) [_(eca12de)_](https://github.com/adamsrnmsu/ferrofire/commit/eca12de604fd9dbbc4d91fd4028302515e6da4ec)
+
+- _(scpi)_ the <scpi-client> section, and the spec brought in line with what was built (ww-otj.88) [_(34dd008)_](https://github.com/adamsrnmsu/ferrofire/commit/34dd008bd373bdeb4738d83fa3380f8b53f87411)
+
+- _(scpi)_ <scpi-client> design spec (ww-otj.88) [_(e66f3df)_](https://github.com/adamsrnmsu/ferrofire/commit/e66f3dff67bf2dc56f02d36bd14636c660631d13)
+
+- _(bench)_ bennu field-device ACK hold results (ww-ieb) [_(eee1352)_](https://github.com/adamsrnmsu/ferrofire/commit/eee1352989fcf3f6ba79966ad06b8affde4e47bc)
+
+### 🧪 Testing
+
+- _(fd/modbus)_ pin that a negative scaled value reads 0 as on stock (ww-4d7) [_(c17127c)_](https://github.com/adamsrnmsu/ferrofire/commit/c17127ce3c2e2d1ffe7002846905f9b7382aded9)
+
+- _(conformance)_ serial line model in the pty relay: port settings, pacing at the line speed, mismatch, negative runs (ww-y51) [_(275564b)_](https://github.com/adamsrnmsu/ferrofire/commit/275564b782a1d6afb66d224aad24369daa32aa38)
+
+- _(conformance)_ stock-over-pty runs for the Modbus and DNP3 servers and clients (ww-8k4) [_(6e7e246)_](https://github.com/adamsrnmsu/ferrofire/commit/6e7e246bddd1aeea9c96d00c690babd5e9329901)
+
+- _(fuzz)_ command-interface target; docs: what the fep echo rule cannot see [_(4778a5c)_](https://github.com/adamsrnmsu/ferrofire/commit/4778a5cbcb8d2df8c3a375fffca361e1e1e59e06)
+
+- _(conformance)_ stock fd-client goldens for Modbus and DNP3 [_(fc51177)_](https://github.com/adamsrnmsu/ferrofire/commit/fc511776bed530793bd3954478c30f47c242b0fe)
+
+- _(scpi)_ a client logs each outage once, also the one after a connection (ww-pf4) [_(c9e1eb5)_](https://github.com/adamsrnmsu/ferrofire/commit/c9e1eb5dbe29a0d857766b44658b60275a51d609)
+
+- _(scpi)_ <scpi-client> follows an instrument we did not write, scpi-parser (ww-27o) [_(6b59c6f)_](https://github.com/adamsrnmsu/ferrofire/commit/6b59c6faeca6ac6e1e4bcd9e92b1a12ab00b2cfa)
+
+- _(scpi)_ a controller drives a ferrofire instrument over VXI-11 through its portmapper (ww-27o) [_(fed93d6)_](https://github.com/adamsrnmsu/ferrofire/commit/fed93d6835dbbd91c5891c58691c58aac26058a2)
+
+- _(scpi)_ the reconnect pause is 1 s again after a connection that worked (ww-pf4) [_(06e3da6)_](https://github.com/adamsrnmsu/ferrofire/commit/06e3da6428ae30a44ea82feb008ffb59ec5e42f5)
+
+- _(scpi)_ a client whose instrument stays away logs one line and stops promptly (ww-otj.88) [_(224ee1b)_](https://github.com/adamsrnmsu/ferrofire/commit/224ee1bf312ffa2e42c3cc6eaad2f43886121e9e)
+
+- _(scpi)_ a ferrofire controller drives a ferrofire instrument over raw socket and HiSLIP (ww-otj.88) [_(5a6f3c1)_](https://github.com/adamsrnmsu/ferrofire/commit/5a6f3c13c8c4d45ac39dad1d2af4c57e5510dac2)
+
+### ⚙️ Miscellaneous Tasks
+
+- _(conformance)_ ffc-stock-2026.11.03:22.04 on Docker Desktop is the stock oracle [_(cff7d33)_](https://github.com/adamsrnmsu/ferrofire/commit/cff7d33ef7094383c836bc2e4a996752e03e1bb9)
+
 # [2026.11.15](https://github.com/adamsrnmsu/ferrofire/compare/v0.1.1...v2026.11.15) - 2026-11-15
 
 ### 🚀 Features
