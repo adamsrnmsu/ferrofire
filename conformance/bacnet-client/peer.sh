@@ -4,25 +4,22 @@
 # then the server is stopped and started again. probe_cmdif.py --report ... bacnet prints the transcript: command-interface replies,
 # the client's frames to and from its own port (the scans listed once at the end).
 p() { PCAP=/out/bacnet-client.pcap python3 /conformance/stock/probe_cmdif.py "$@"; }
-# a write waits 3 s before the next command: stock sends its WriteProperty inside the WRITE, ours with the next scan cycle
-# (up to about 2 s later), so each one's frames fall under its own command either way
-w() { SETTLE=3 p "$@"; }
 p --ctl start 4
 p READ=load-power READ=brkr
 p --radio 'load-1_bus-1.mw:250.5,generator-1_bus-1.active:true,load-1_bus-1.active:true,bus-1.gen_mw:300.7,'
 sleep 7
 p --mark "inputs published"
 p QUERY= READ=load-power READ=bus-1.gen_mw READ=brkr READ=generator-1_bus-1.active READ=load-breaker-toggle READ=load-mw-setpoint
-w WRITE=load-breaker-toggle:true WRITE=load-mw-setpoint:42.5 WRITE=bus-1.gen_mw:7.25 WRITE=generator-1_bus-1.active:false
-sleep 6
+p WRITE=load-breaker-toggle:true WRITE=load-mw-setpoint:42.5 WRITE=bus-1.gen_mw:7.25 WRITE=generator-1_bus-1.active:false
+sleep 6                                  # one scan (5 s) and not two: the poll after a write counts, so these read what the server holds
 p READ=load-breaker-toggle READ=load-mw-setpoint READ=bus-1.gen_mw READ=generator-1_bus-1.active
 p --mark "errors"
 p READ=nope
-w WRITE=nope:1 WRITE=load-power:5 WRITE=brkr:true
+p WRITE=nope:1 WRITE=load-power:5 WRITE=brkr:true
 sleep 6                                  # a whole scan (5 s) sees what those writes left on the server
 p --ctl stop
-w WRITE=load-mw-setpoint:0             # 0: what the restarted server holds, so a write that lands after the restart changes no read
-p READ=load-power
+p WRITE=load-mw-setpoint:9             # ERR after the retries; 9 is not what the restarted server holds (0), so a write that still
+p READ=load-power                        # lands after the restart (a late re-send) shows in a read, and its frame in the transcript
 p --ctl start 3
 sleep 14                                 # two scans after the restart
 p READ=load-power READ=load-mw-setpoint

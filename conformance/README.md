@@ -246,8 +246,8 @@ UART hardware, cabling and RS-485 direction control are not covered.
 own: `OWN_NET=1` puts the DUT on a private network `ff-conf-net` that the peers join (capture on `eth0`). Beside the DUT runs
 `feed.py`, its provider: it publishes `FEED` (BI 0 and 1 active, AI 0 250.5, AI 1 300.7) to the `<input>` group twice a second and
 ACKs and logs the writes that reach the `<output>` REP. `peer.sh` waits until AI 0 reads 250.5, runs `stock/probe_bacnet.py` (bacpypes3,
-pip-installed by `prepare.sh`; 502 lines: Who-Is, the device and every configured object by RP and RPM, a sweep of property ids 0 to
-260 on nine objects, WP and WPM with their read-backs, errors, ReadRange, DCC with its 70 s duration), `nmap --script bacnet-info`,
+pip-installed by `prepare.sh`; about 560 lines: Who-Is, the device and every configured object by RP and RPM, a sweep of property ids 0 to
+260, 371 (Property_List) and 431 (Current_Command_Priority) on 21 objects, RPM all of 15, WP and WPM with their read-backs, errors, ReadRange (a trend-log Log_Buffer by position, sequence number and time, the edges, the requester's maximum APDU, unknown property and object), DCC with its 70 s duration), `nmap --script bacnet-info`,
 and appends the provider's log (`## provider`). `check.sh`: I-Am device 1234 vendor 260, the fed present values of each object (AO as
 stock's uint8: 250.5 reads 250, 300.7 reads 44), WP AO 2 42.5 then a read of 42, `object/unknown-object`; nmap equal to
 `stock/bacnet-server.nmap.golden`; the transcript equal to `stock/bacnet-server-feed.golden` (stock, three runs alike) or, for ours,
@@ -259,16 +259,47 @@ Where ours differs from stock (`bacnet/rust-feed.diff`, the same in three runs):
 
 | Area | Stock | Ours | Whose |
 |---|---|---|---|
-| AV 0, BV 0, MSI 0 detail properties (sweep) | bacnet-stack demo values | bacpypes3 defaults, some missing | module, open (known since Task 0b) |
-| ReadRange of a trend-log log-buffer | 66-76 synthetic records | `services/property-is-not-a-list` | module, open (known since Task 0b) |
-| A value written and ACKed by the provider, read within about 2 to 4 s (6 lines: AO 3 2.5 s after its write reads 9 where stock reads 44; AO 2 and 3 priority slot 16; AO 2 after its relinquish; AI 0 at the DCC step) | the provider's next datagram (0.5 s here) wins at once | the ACKed value is held 2 s against the stream (`ACK_HOLD`, ww-1df.32), then the stream wins | device, by design: a real provider applies the write at its next tick and then publishes it, so both converge; `feed.py` never applies a write |
-| AI present-value write with out-of-service set | accepted and enqueued (`ai.c`) | `write-access-denied`, as with out-of-service clear (not probed) | module, not probed |
-| Properties and services no probe touched (COV, Who-Has, BO priority 6) | per bacnet-stack | bacpypes3 behaviour, untested against stock | module, untested |
+| Current_Command_Priority on AO, BO, MSO and BV (RPM all, RP 431, Property_List; 6 lines) | absent on AO, BO, MSO (unknown-property); BV not probed | served, null when no slot is set | spec decides: 135-2012as, required (R) on every object type that requires command prioritization and present only if commandable on the others (`dl/add/Add-135-2012as.txt:130-145`). Module, by design |
+| AV COV_Increment (RPM all, RP 22, Property_List; 3 lines) | served (1.0) | absent | spec decides: 135-2012aw Table 12-4 footnote 2, required if, and present only if, the object supports COV reporting (`dl/add/Add-135-2012-an-at-au-av-aw-ax-az-Final.txt:3287`); this device offers no COV (SubscribeCOV is Rejected, as stock). Module, by design |
+| Object_Name of integer-value 1 (RP 77) | `ANALOG VALUE 1`, the same as analog-value 1 | `INTEGER VALUE 1` | spec decides: Object_Name is unique within the device (`dl/add/Add-135-2004f.txt:199`); bacpypes3 also refuses a duplicate. Module, by design |
+| Property_List of the device: order (RP 371) | stock's own order | bacpypes3's order, the same 24 properties; Property_List lists no property that is not served (the four stock answers unknown-property for are left out) | spec silent on order (135-2010ao, `dl/add/Add-135-2010ao.txt:536-538`: the four of Object_Identifier, Object_Name, Object_Type and Property_List are not included). Module |
+| Property sets of command, integer-value, life-safety-point, load-control, lighting-output, channel and octetstring-value (the sweep now reaches them: ~100 lines) | demo-device property sets and values | the object has only its name, type, status flags and what the module gives it | module, open (ww-h5n follow-up bead) |
+| ReadRange of a property that does not exist, or of an object that does not exist (4 lines: trend-log 0 high-limit, trend-log 8, analog-input 5000, analog-input 0 high-limit) | `services/property-is-not-a-list` (trend-log 8: `object/property-is-not-a-list`) | `property/unknown-property`; `object/unknown-object` | spec decides: 15.8.1.3.1, an absent property is PROPERTY/UNKNOWN_PROPERTY and `property-is-not-a-list` is only for a property that exists and is no list (`dl/add/Add-135-2016bu.txt:512-523`); 15.8.2 verifies the object and property before the range (`:531-536`), where the object error is the Clause 18 `object/unknown-object` (as for RP). Module, by design |
+| ReadRange of a Log_Buffer when the requester's maximum APDU is below 1476 (4 lines: probe at 480 and 1024; 66 or 76 records) | one 1476-byte APDU of records whatever the request's Max APDU says (1469 bytes to a requester that accepts 480, seen in a capture) | a reply that fits the requester's maximum: 21 or 24 records at 480, 45 or 53 at 1024, more-items set | spec decides: MORE_ITEMS is for matching items "not transmittable within the PDU" (15.8.1.2.4, `dl/add/Add-135-2016bu.txt:497`, 15.8.2 `:577`); a reply over what the requester accepts is not transmittable (this device has no segmentation). Module, by design |
+| A value written and ACKed by the provider, read within about 2 to 4 s (2 lines: AO 3 2.5 s after its write reads 9 where stock reads 44; AO 2 priority slot 16; the probe waits 8 s before the DCC step so AI 0 there agrees) | the provider's next datagram (0.5 s here) wins at once | the ACKed value is held 2 s against the stream (`ACK_HOLD`, ww-1df.32), then the stream wins | device, by design: a real provider applies the write at its next tick and then publishes it, so both converge; `feed.py` never applies a write |
+| Out_Of_Service, and an input's Present_Value written (probe: `## Out_Of_Service, priority 6 and other writes`) | Out_Of_Service writable on AI, BI, MSI, AV, BV, AO, BO (ACK). AI Present_Value: write-access-denied while it is clear, ACK while set; BI and MSI Present_Value: ACK either way | the same, except a BI or MSI Present_Value write while Out_Of_Service is clear is `write-access-denied` (BI 0 and MSI 0, twice each: 8 lines) | spec decides: Present_Value of an input is "required to be writable when Out_Of_Service is TRUE" and the object is out of service only then (135-2012aw Table 12-2 footnote, `dl/add/Add-135-2012-an-at-au-av-aw-ax-az-Final.txt:3213`; 135-2016bl 12.2.10, 12.6.10, 12.18.10, `Add-135-2016bl.txt:281-312`: while TRUE the value is decoupled from the physical input). Module |
+| The feed and an object that is out of service (2 lines per input: AI 0 and BI 0 read the written 77.0 and inactive after 2 s, with their WRITE batches; 2 provider lines: stock's `WRITE=bus-1.gen_mw:9.000000` and `WRITE=generator-1_bus-1.active:true` for AO 2 and BO 2 written while out of service) | the provider's next datagram restores the value within 800 ms while Out_Of_Service is still TRUE | the 1 Hz refresh skips an out-of-service AI, BI, AO or BO, so the written value stays until Out_Of_Service is cleared; an AO or BO Present_Value written while it is out of service is not sent to the provider (stock sends it). An input's written value still goes to the provider, as stock: the text decouples the input from tracking the physical input, it does not forbid the write | spec decides: "the Present_Value property is decoupled from the physical input and will not track changes to the physical input; when the value of Out_Of_Service is TRUE" and, for AO, BO and MSO, "changes to the Present_Value property are decoupled from the physical output" (135-2016bl, `Add-135-2016bl.txt:304-307` and `:332-335`; the same wording for Access Door in `Add-135-2004f.txt:310-312`). Module, by design |
+| Priority 6 on AO, BO, BV and MSO (write-access-denied; no provider write) | write-access-denied on all four; stock's AO and BO first enqueue the value to the provider, so the provider sees a write that was refused (3 lines in the provider log: a repeated `WRITE=bus-1.gen_mw:7.000000`, a repeated `load-1_bus-1.active:false` and a repeated `load-1_bus-1.active:true` in the batch) | write-access-denied, and nothing is sent to the provider | stock for the answer. The enqueue is not copied: a Result(-) means the write did not take effect (15.9.2). The ASHRAE text read gives no rule that a write at 6 must be refused (priority 6 is the one the minimum on/off algorithm writes: `dl/add/135-1995-Errata-9-7-1999.txt:450-482`, `Add-135-2012as.txt:320`), so this is stock's rule, not the spec's. Module |
+| Priority 0 or 17 on a commandable object (10 lines) | Abort other | `Error services/parameter-out-of-range` | spec decides: 15.9.1.3.1, "The Priority parameter is not within the defined range of 1..16" is SERVICES/PARAMETER_OUT_OF_RANGE (135-2008r-4, ``dl/add/Add-135-2008r.txt:476-478`, restated in 135-2016bu `Add-135-2016bu.txt:914-915`). Module |
+| ConfirmedCOVNotification (new probe) | `Reject unrecognized-service` (seen on the wire) | the same (bacpypes3's `error/unknown-subscription` is switched off) | as stock |
+| Writes to AO, BO, BV and MSO properties other than Present_Value and Out_Of_Service (probed: Relinquish_Default, Polarity, Units) | write-access-denied; Out_Of_Service writable on AO and BO | the same: Relinquish_Default of BV and MSO is now refused too | as stock (ww-5dy: the bead expected Relinquish_Default and Polarity to be writable; the capture shows they are not) |
+| COV subscription, Who-Has (SubscribeCOV, SubscribeCOVProperty) | Reject unrecognized-service, no I-Have | the same | as stock (checked with an independent client, ww-gnq) |
 | Config errors | logged when the device loads | `error` after `hello` (no `udp://`, a missing `endpoint`/`instance`/`address`/`tag`, a non-number) | module, by design |
-| The order of the points in one `WRITE=` batch to the provider | `generator-1_bus-1.active, load-1_bus-1.active, bus-1.gen_mw, load-1_bus-1.mw` | by tag name (`bus-1.gen_mw` first) | device; the same pairs, and a provider reads them as a set |
+| The UDP port is held by another process at start (probe: a second socket on the port, `modules/bacnet/test_module.py`) | `bip_init` fails and the device exits 1 | `error` after 5 s without a bind and no `ready` (bacpypes3 0.1.0 retries the bind every second and never raises, so the module waits on its transport-ready event); the rest of the device keeps running, and `--strict` catches the error | spec silent (16.10 lets a device send an I-Am at power-up, nothing covers a bind failure); ours differs from stock on purpose, as every module failure does (ww-9tb). Module, by design |
+| Who-Is to 255.255.255.255 (limited broadcast; `peer.sh`, `extra.txt`) | answered with an I-Am | answered: a socket is also bound to 255.255.255.255 (bacpypes3 binds the interface address and the directed broadcast, which Linux does not deliver a limited broadcast to) | as stock (spec silent on the limited broadcast; Annex J names the directed and global broadcast; ww-o17) |
+| The order of the points in one `WRITE=` batch to the provider | binary points, then analog, each by tag name | the same (`Store::pending`, ww-d7p); every protocol's provider log follows it | as stock (spec silent: WPM order, 15.10, concerns BACnet requests, not the provider datagram) |
+
+Log_Buffer itself now matches stock (trend-log 0 to 7, 1000 synthetic records each at sequence 9001 to 10000, every ReadRange form and its
+edges, from fresh stock captures; RP and RPM of it `property/read-access-denied`, 135-2010ad `dl/add/Add-135-2010ad.txt:401-404`). The two
+stock choices the spec leaves open are copied: Count 0 or Reference Index 0 is `services/other`, and the cut keeps the oldest records of
+the range.
 
 The no-provider golden of Task 0b (`stock/bacnet-server.golden`) stays as its record; the fed run supersedes it (Task 7 found ours
 different from it by the first two rows only).
+
+**BACnet4J peer lane** (`conformance/bacnet-peer/`, opt-in: not in `make check` or CI; ww-ntp). A second, independent client (BACnet4J) probes
+the server DUT and `check.sh` judges its transcript against `expect.txt`, spec-decided expectations (required properties by RP, Property_List
+equal to RPM all minus Object_Identifier, Object_Name, Object_Type and Property_List (135-2010ao 15.7.3.1.2, `dl/add/Add-135-2010ao.txt:551`),
+Log_Buffer RP `read-access-denied` and ReadRange ACK, Present_Value writable while Out_Of_Service is set, priority 0 and 17 out of range,
+priority 6 denied, SubscribeCOV, SubscribeCOVProperty and Who-Has unanswered). `xfail-stock.txt` and `xfail-rust.txt` list what each DUT is
+known to fail; an expectation that fails unlisted, or an xfail that now passes, fails the run. Stock fails seven (Current_Command_Priority
+on AO, BO and MSO; priority 0 and 17), ours none.
+
+    make bacnet-peer WHO=rust BACNET4J_IMAGE=ff-bacnet4j-peer:local     # WHO=stock for the oracle; RUST_DUT_IMAGE, CONF_NAME as above
+
+BACnet4J is GPL-3.0, so the harness (the probe and the image) is not in this tree. `BACNET4J_IMAGE` names an image whose entrypoint takes
+`DUT_IP BROADCAST_ADDR` and prints the probe transcript on stdout (`## ...` section lines, one result line per probe, `DONE` last: the
+lines `expect.txt` quotes). Unset, or an image that is absent, prints a skip message and exits 0.
 
 **Client** (`conformance/bacnet-client/`, row 11). bennu's sample `<bacnet-client>` (`stock/client-bacnet.xml`: device 1234 at
 127.0.0.1:47808, scan-rate 5, command interface 1330) with a BACnet server beside it in the same network namespace, under
@@ -282,21 +313,18 @@ against the stock server (`stock/client-bacnet.golden`, two runs alike).
 
 - **The stock client against our server** (`SERVER=rust`): the transcript equals the golden (PASS): same answers to every scan
   request, WriteProperty and error, through a stop and restart.
-- **Our client** (`DUT=rust`, the sample unchanged): PASS, the transcript differs from the golden by exactly
-  `bacnet-client/rust-client.diff` (the same in two runs). The device declares the client's point tags at load (as compiled
-  clients do; `docs/modules.md`), and the module reads the object types stock's type rule names (every binary point as a
-  binary-output, AI 1 as AO 1, `ClientConnection.cpp`) with stock's `00 05` request header, so every scan request and answer is the
-  stock client's. What the diff lists is the device's write semantics, open in ww-4s8:
-
-| Area | Stock client | Ours | Whose |
-|---|---|---|---|
-| `WRITE=` on the command interface | sends the WriteProperty inside the request and answers with its outcome (`ACK=Wrote tag ...`, or `ERR=...` after about 5 to 10 s with the server away) | answers `ACK=Wrote tag ...` at once; the WriteProperty goes out with the next scan cycle (`peer.sh` waits 3 s after each write so both fall under their command), and one not answered within 3 s is reported failed and sent again when due. With the server away: `ACK`, and the write lands after the restart (bacpypes3's own retry, then the device's) | device (client echo rule over ffmod/1) |
-| `WRITE=` of the value the tag already holds (`load-breaker-toggle:true` after a poll read true) | a WriteProperty all the same | nothing on the wire (the echo rule sends changes only) | device |
-| `WRITE=` to an input tag (`brkr`, `load-power`) | sent as a WriteProperty to the object its type rule names (BO 0 is ACKed and then reads active in the scans; AI 0 is `write-access-denied`, `ERR`) | `ERR=Failed writing tag ...` with nothing on the wire | device |
-
-The echo rule also skips the first poll after a write it sent (a device may answer and show the old value a moment longer), so a
-read right after a write can show the written value where stock's next poll already shows the server's; `peer.sh` reads after two
-scans, so the transcript does not show it.
+- **Our client** (`DUT=rust`, the sample unchanged): PASS, the transcript equals the golden (the same in two runs): no
+  divergence list. The device declares the client's point tags at load (as compiled clients do; `docs/modules.md`), the module
+  reads the object types stock's type rule names (every binary point as a binary-output, AI 1 as AO 1, `ClientConnection.cpp`)
+  with stock's `00 05` request header, and `WRITE=` is a synchronous ffmod/1 `put`/`done` (ww-4s8): the module sends the
+  WriteProperty at once for any tag, the command interface answers with its outcome (`ACK=Wrote tag ...`, or `ERR=` after the
+  APDU timeout (3 s) and 3 retries with the server away), a write of the value the tag already holds is sent all the same, and a
+  `WRITE=` to an input tag goes to the object its type rule names (BO 0 for a binary tag, ACKed and read back by the scans; AI 0
+  for an analog-input tag, `write-access-denied`, `ERR`). The spec is silent on a client's command interface (ASHRAE 135 binds the
+  server), so stock is the reference for all three; there is no spec-over-stock row. `peer.sh` checks what a synchronous write
+  can break: the writes are not spaced out (a late WriteProperty would fall under a later command), a write to the stopped server
+  is of a value (9) the restarted server does not hold, and the reads after a write come one scan (5 s) later, not two (a poll
+  skipped after a write would show the written value there).
 
 ## IEC 60870-5-104
 

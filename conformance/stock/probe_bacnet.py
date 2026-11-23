@@ -7,7 +7,7 @@ from bacpypes3.argparse import SimpleArgumentParser
 from bacpypes3.app import Application
 from bacpypes3.pdu import Address, GlobalBroadcast
 from bacpypes3.apdu import (DeviceCommunicationControlRequest, SimpleAckPDU, ErrorPDU, RejectPDU, AbortPDU, ErrorRejectAbortNack)
-from bacpypes3.primitivedata import Real, Enumerated, Unsigned, ObjectIdentifier, Integer
+from bacpypes3.primitivedata import Real, Enumerated, Unsigned, ObjectIdentifier, Integer, Boolean, Null
 from bacpypes3.basetypes import BinaryPV
 
 DUT = sys.argv[1]
@@ -231,15 +231,19 @@ async def main():
     for o in OBJS:
         await rpm(app, [(o, ["object-name", "present-value", "status-flags"])])
     await rpm(app, [(o, ["present-value", "status-flags"]) for o in OBJS])
-    for o in ["analog-input,0", "analog-input,1", "analog-input,500", "analog-output,2", "binary-input,0", "binary-output,2"]:
+    for o in ["analog-input,0", "analog-input,1", "analog-input,500", "analog-output,2", "binary-input,0", "binary-output,2",
+              "analog-value,0", "binary-value,0", "multi-state-input,0", "multi-state-output,0", "multi-state-value,0",
+              "positive-integer-value,0", "schedule,0", "trend-log,0", "characterstring-value,0"]:
         await rpm_all_raw(app, o)
     await rpm(app, [("analog-output,2", ["present-value"]), ("analog-value,5", ["present-value"]),
                     ("analog-output,3", ["high-limit"])])
 
     print("## Property sweep (every property id 0..260, tags as sent)")
     for o in ["device,1234", "analog-input,0", "analog-output,2", "binary-input,0", "binary-output,2", "analog-input,500",
-              "analog-value,0", "binary-value,0", "multi-state-input,0"]:
-        for pid in range(261):
+              "analog-value,0", "binary-value,0", "multi-state-input,0", "multi-state-output,0", "multi-state-value,0",
+              "positive-integer-value,0", "schedule,0", "trend-log,0", "characterstring-value,0", "command,0", "integer-value,1",
+              "life-safety-point,0", "load-control,0", "lighting-output,1", "channel,1", "octetstring-value,0"]:
+        for pid in [*range(261), 371, 431]:     # 371 property-list, 431 current-command-priority
             if o == "device,1234" and pid in (56, 57):      # local-date, local-time: move with the clock
                 continue
             await rpm_raw_one(app, o, pid, t=2, quiet_unknown=True)
@@ -292,6 +296,7 @@ async def main():
     await wp(app, "analog-output,2", "present-value", Real(5.0), 0)
     await wp(app, "analog-output,2", "present-value", Real(5.0), 17)
     await rp(app, "analog-output,2", "priority-array")
+    await asyncio.sleep(3.0)    # stock forwards writes to the provider in batches on its own clock: settle so each block is one batch
     print("-- AO range (stock keeps whole numbers):")
     for v, pr in [(300.7, 9), (-5.0, 10), (255.9, 11), (70000.0, 12)]:
         await wp(app, "analog-output,3", "present-value", Real(v), pr)
@@ -301,6 +306,7 @@ async def main():
     await wp(app, "analog-output,2", "present-value", Null(()), 8)
     await rp(app, "analog-output,2", "present-value")
 
+    await asyncio.sleep(3.0)    # stock forwards writes to the provider in batches on its own clock: settle so each block is one batch
     print("## Writes to the other object types")
     from bacpypes3.primitivedata import Unsigned as U
     for oid, val, prio in [("analog-value,1", Real(2.5), None), ("analog-value,2", Real(2.5), 8), ("binary-value,0", BinaryPV("active"), None),
@@ -330,18 +336,70 @@ async def main():
         await raw(app, label, WritePropertyMultipleRequest(listOfWriteAccessSpecifications=specs, destination=Address(DUT)))
     await rp(app, "analog-output,3", "priority-array")
     await wp(app, "analog-output,3", "present-value", Null(()), 9)
-    for label, oid, prop, ref in [("ReadRange device object-list 1..3", "device,1234", "object-list", RangeByPosition(referenceIndex=1, count=3)),
+    await asyncio.sleep(3.0)    # stock forwards writes to the provider in batches on its own clock: settle so each block is one batch
+    from bacpypes3.basetypes import RangeBySequenceNumber, RangeByTime, DateTime
+    from bacpypes3.primitivedata import Date, Time
+    import hashlib
+    P = lambda i, c: Range(byPosition=RangeByPosition(referenceIndex=i, count=c))
+    S = lambda i, c: Range(bySequenceNumber=RangeBySequenceNumber(referenceSequenceNumber=i, count=c))
+    T = lambda y, mo, d, h, mi, c: Range(byTime=RangeByTime(referenceTime=DateTime(date=Date((y - 1900, mo, d, 255)), time=Time((h, mi, 0, 0))), count=c))
+    TL, LB = "trend-log,0", "log-buffer"
+    app.device_object.maxApduLengthAccepted = 1476      # the requester's maximum: 15.8 cuts a reply at it, stock at 1476 whatever it is
+    # trend-log,0 holds 1000 records, sequence numbers 9001..10000, 15 minutes apart from 2009-02-01 00:00; log 1 has no status flags
+    for label, oid, prop, ref in [("ReadRange device object-list 1..3", "device,1234", "object-list", P(1, 3)),
                                   ("ReadRange analog-input,0 present-value", "analog-input,0", "present-value", None),
-                                  ("ReadRange trend-log,0 log-buffer 1..3", "trend-log,0", "log-buffer", RangeByPosition(referenceIndex=1, count=3)),
+                                  ("ReadRange trend-log,0 log-buffer 1..3", TL, LB, P(1, 3)),
+                                  ("ReadRange trend-log,1 log-buffer 1..3", "trend-log,1", LB, P(1, 3)),
+                                  ("ReadRange trend-log,7 log-buffer 1..3", "trend-log,7", LB, P(1, 3)),
+                                  ("ReadRange trend-log,0 log-buffer no range", TL, LB, None),
+                                  ("ReadRange trend-log,1 log-buffer no range", "trend-log,1", LB, None),
+                                  ("ReadRange trend-log,0 log-buffer position 1 count 66", TL, LB, P(1, 66)),
+                                  ("ReadRange trend-log,0 log-buffer position 1 count 67", TL, LB, P(1, 67)),
+                                  ("ReadRange trend-log,0 log-buffer position 500 count 5", TL, LB, P(500, 5)),
+                                  ("ReadRange trend-log,0 log-buffer position 10 count -3", TL, LB, P(10, -3)),
+                                  ("ReadRange trend-log,0 log-buffer position 1 count -5", TL, LB, P(1, -5)),
+                                  ("ReadRange trend-log,0 log-buffer position 999 count 5", TL, LB, P(999, 5)),
+                                  ("ReadRange trend-log,0 log-buffer position 1000 count -5", TL, LB, P(1000, -5)),
+                                  ("ReadRange trend-log,0 log-buffer position 1001 count 5", TL, LB, P(1001, 5)),
+                                  ("ReadRange trend-log,0 log-buffer position 0 count 3", TL, LB, P(0, 3)),
+                                  ("ReadRange trend-log,0 log-buffer position 1 count 0", TL, LB, P(1, 0)),
+                                  ("ReadRange trend-log,0 log-buffer sequence 9001 count 3", TL, LB, S(9001, 3)),
+                                  ("ReadRange trend-log,0 log-buffer sequence 9000 count 3", TL, LB, S(9000, 3)),
+                                  ("ReadRange trend-log,0 log-buffer sequence 9500 count -100", TL, LB, S(9500, -100)),
+                                  ("ReadRange trend-log,0 log-buffer sequence 9999 count 5", TL, LB, S(9999, 5)),
+                                  ("ReadRange trend-log,0 log-buffer sequence 10000 count -3", TL, LB, S(10000, -3)),
+                                  ("ReadRange trend-log,0 log-buffer sequence 1 count 3", TL, LB, S(1, 3)),
+                                  ("ReadRange trend-log,0 log-buffer sequence 9001 count 0", TL, LB, S(9001, 0)),
+                                  ("ReadRange trend-log,0 log-buffer time 2009-01-01 count 3", TL, LB, T(2009, 1, 1, 0, 0, 3)),
+                                  ("ReadRange trend-log,0 log-buffer time 2009-02-01 00:00 count 3", TL, LB, T(2009, 2, 1, 0, 0, 3)),
+                                  ("ReadRange trend-log,0 log-buffer time 2009-02-01 00:00 count -3", TL, LB, T(2009, 2, 1, 0, 0, -3)),
+                                  ("ReadRange trend-log,0 log-buffer time 2009-02-01 00:22 count 3", TL, LB, T(2009, 2, 1, 0, 22, 3)),
+                                  ("ReadRange trend-log,0 log-buffer time 2009-02-01 00:22 count -3", TL, LB, T(2009, 2, 1, 0, 22, -3)),
+                                  ("ReadRange trend-log,0 log-buffer time 2010-01-01 count -3", TL, LB, T(2010, 1, 1, 0, 0, -3)),
+                                  ("ReadRange trend-log,0 log-buffer time 2010-01-01 count 3", TL, LB, T(2010, 1, 1, 0, 0, 3)),
+                                  ("ReadRange trend-log,0 log-buffer time 2009-02-01 00:00 count 0", TL, LB, T(2009, 2, 1, 0, 0, 0)),
+                                  ("ReadRange trend-log,0 object-name", TL, "object-name", P(1, 3)),
+                                  ("ReadRange trend-log,0 high-limit", TL, "high-limit", P(1, 3)),
+                                  ("ReadRange trend-log,8 log-buffer", "trend-log,8", LB, P(1, 3)),
                                   ("ReadRange analog-input,5000 present-value", "analog-input,5000", "present-value", None),
                                   ("ReadRange analog-input,0 high-limit", "analog-input,0", "high-limit", None)]:
         req = ReadRangeRequest(objectIdentifier=ObjectIdentifier(oid), propertyIdentifier=prop, destination=Address(DUT))
         if ref is not None:
-            req.range = Range(byPosition=ref)
+            req.range = ref
         r = await raw(app, label, req)
         if r is not None and hasattr(r, "itemCount"):
+            data = " ".join(bytes(t.encode().pduData).hex() for t in r.itemData.tagList)
             print("%s    itemCount=%s first-seq=%s flags=%s data=%s" % (label, r.itemCount, r.firstSequenceNumber, list(r.resultFlags),
-                  " ".join(bytes(t.encode().pduData).hex() for t in r.itemData.tagList)))
+                  data if r.itemCount <= 5 else "%d bytes sha1 %s" % (len(data.split()), hashlib.sha1(data.encode()).hexdigest()[:12])))
+    await rp(app, TL, LB)
+    for apdu in (480, 1024):
+        app.device_object.maxApduLengthAccepted = apdu
+        for label, oid in [("trend-log,0", TL), ("trend-log,1", "trend-log,1")]:
+            r = await raw(app, "ReadRange %s log-buffer no range, requester accepts %d" % (label, apdu),
+                          ReadRangeRequest(objectIdentifier=ObjectIdentifier(oid), propertyIdentifier=LB, destination=Address(DUT)))
+            if r is not None and hasattr(r, "itemCount"):
+                print("    itemCount=%s flags=%s" % (r.itemCount, list(r.resultFlags)))
+    app.device_object.maxApduLengthAccepted = 1024
     print("## Vendor properties")
     for pid in (9997, 9998, 9999):
         await rpm_raw_one(app, "analog-input,0", pid)
@@ -351,7 +409,14 @@ async def main():
     for name, req in [("ReinitializeDevice", None)]:
         pass
     from bacpypes3.apdu import ReinitializeDeviceRequest, ReadRangeRequest, SubscribeCOVRequest
-    for label, req in [("ReinitializeDevice", ReinitializeDeviceRequest(reinitializedStateOfDevice="warmstart", destination=Address(DUT))),
+    from bacpypes3.apdu import ConfirmedCOVNotificationRequest
+    from bacpypes3.basetypes import PropertyValue as PV_
+    from bacpypes3.constructeddata import Any as Any_
+    for label, req in [("ConfirmedCOVNotification", ConfirmedCOVNotificationRequest(
+                           subscriberProcessIdentifier=1, initiatingDeviceIdentifier=ObjectIdentifier("device,599"),
+                           monitoredObjectIdentifier=ObjectIdentifier("analog-input,0"), timeRemaining=60,
+                           listOfValues=[PV_(propertyIdentifier="present-value", propertyValue=Any_(Real(1.0)))], destination=Address(DUT))),
+                       ("ReinitializeDevice", ReinitializeDeviceRequest(reinitializedStateOfDevice="warmstart", destination=Address(DUT))),
                        ("SubscribeCOV", SubscribeCOVRequest(subscriberProcessIdentifier=1, monitoredObjectIdentifier=ObjectIdentifier("analog-input,0"),
                                                             issueConfirmedNotifications=False, lifetime=60, destination=Address(DUT)))]:
         try:
@@ -367,6 +432,7 @@ async def main():
             print("%s -> EXC %s %s" % (label, type(e).__name__, e))
 
     print("## DeviceCommunicationControl")
+    await asyncio.sleep(8.0)    # past the 2 s a device may hold a value a provider ACKed (ww-1df.32): the read below is then the same everywhere
     await dcc(app, "enable")
     await dcc(app, "disable", password="wrong")
     await dcc(app, "enable", password="filister")
@@ -385,6 +451,63 @@ async def main():
     await asyncio.sleep(float(__import__("os").environ.get("DCC_WAIT", "70")))
     await rp(app, "analog-input,0", "present-value", t=2)
     await dcc(app, "enable", password="filister")
+    print("## Out_Of_Service, priority 6 and other writes (135-2016bl 12.x.10, 15.9.1.3.1; stock's answers are the reference where the spec is silent)")
+    T_, F_ = Boolean(True), Boolean(False)
+    for oid, pv in [("analog-input,0", Real(77.0)), ("binary-input,0", BinaryPV("inactive"))]:
+        await wp(app, oid, "present-value", pv)              # out of service clear
+        await asyncio.sleep(2.5)
+        await wp(app, oid, "out-of-service", T_)
+        await rp(app, oid, "out-of-service")
+        await wp(app, oid, "present-value", pv)
+        await rp(app, oid, "present-value")
+        await asyncio.sleep(2.0)                              # past two 1 Hz refreshes: does the feed overwrite the written value?
+        await rp(app, oid, "present-value")
+        await wp(app, oid, "out-of-service", F_)
+        await asyncio.sleep(2.5)
+    for oid, pv in [("analog-input,1", Real(5.0)), ("binary-input,1", BinaryPV("inactive"))]:
+        await wp(app, oid, "out-of-service", T_)
+        await wp(app, oid, "out-of-service", F_)
+    for oid in ["multi-state-input,0", "analog-value,0", "binary-value,0"]:
+        await wp(app, oid, "out-of-service", T_)
+        await rp(app, oid, "out-of-service")
+        await wp(app, oid, "out-of-service", F_)
+    await wp(app, "multi-state-input,0", "present-value", Unsigned(3))
+    await wp(app, "analog-input,0", "units", Enumerated(95))
+    await wp(app, "analog-input,0", "cov-increment", Real(2.0))
+    await wp(app, "binary-input,0", "polarity", Enumerated(1))
+    print("-- priority 6, relinquish-default, out-of-service, polarity on the commandable objects:")
+    for oid, pv in [("binary-output,3", BinaryPV("active")), ("analog-output,3", Real(7.0)), ("binary-value,0", BinaryPV("active")),
+                    ("multi-state-output,0", Unsigned(2))]:
+        await wp(app, oid, "present-value", pv, 6)
+        await asyncio.sleep(2.5)                              # stock batches what it forwards to the provider on its own clock: one write per batch
+        await rp(app, oid, "priority-array")
+        await wp(app, oid, "present-value", pv, 7)
+        await asyncio.sleep(2.5)
+        await wp(app, oid, "present-value", Null(()), 7)
+        await wp(app, oid, "present-value", pv, 0)
+        await wp(app, oid, "present-value", pv, 17)
+    for oid, rd in [("analog-output,3", Real(3.0)), ("binary-output,3", BinaryPV("active")), ("binary-value,0", BinaryPV("active")),
+                    ("multi-state-output,0", Unsigned(2))]:
+        await wp(app, oid, "relinquish-default", rd)
+        await rp(app, oid, "relinquish-default")
+    for oid in ["analog-output,3", "binary-output,3"]:
+        await wp(app, oid, "out-of-service", T_)
+        await rp(app, oid, "out-of-service")
+        await wp(app, oid, "present-value", Real(9.0) if oid.startswith("analog") else BinaryPV("active"), 9)
+        await asyncio.sleep(2.5)
+        await rp(app, oid, "present-value")
+        await wp(app, oid, "out-of-service", F_)
+    await wp(app, "binary-output,3", "polarity", Enumerated(1))
+    await rp(app, "binary-output,3", "polarity")
+    await wp(app, "binary-output,3", "polarity", Enumerated(0))
+    await wp(app, "analog-output,3", "units", Enumerated(95))
+    await wp(app, "analog-output,3", "present-value", Null(()), 9)
+    await wp(app, "binary-output,3", "present-value", Null(()), 9)
+    await wp(app, "analog-output,3", "relinquish-default", Real(0.0))
+    await wp(app, "binary-output,3", "relinquish-default", BinaryPV("inactive"))
+    await asyncio.sleep(2.0)
+    for o in ["analog-input,0", "binary-input,0", "analog-output,3", "binary-output,3"]:
+        await rp(app, o, "present-value")
     print("## done")
     app.close()
 

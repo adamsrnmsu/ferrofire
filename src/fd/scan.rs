@@ -222,7 +222,7 @@ mod tests {
         let s = store();
         queue_both(&s);
         assert!(o.process(&s, 0).is_empty());
-        assert_eq!(*sent.lock().unwrap(), ["WRITE=p.a:1.500000,p.b:true\0"]);
+        assert_eq!(*sent.lock().unwrap(), ["WRITE=p.b:true,p.a:1.500000\0"]);
         assert_eq!((s.get_f64("ta"), s.get_bool("tb")), (Some(1.5), Some(true)));
         assert!(!s.is_queued("ta") && !s.is_queued("tb"));
     }
@@ -244,9 +244,9 @@ mod tests {
         let s = store();
         queue_both(&s);
         let notes = o.process(&s, 0);
-        assert_eq!(notes, ["OutputModule: provider rejected p.b"]);
+        assert_eq!(notes, ["OutputModule: provider rejected p.a"]);
         assert_eq!(sent.lock().unwrap().len(), 3);
-        assert_eq!(sent.lock().unwrap()[1], "WRITE=p.a:1.500000\0");
+        assert_eq!(sent.lock().unwrap()[1], "WRITE=p.b:true\0");
         assert_eq!(
             (s.get_f64("ta"), s.get_bool("tb")),
             (Some(1.5), Some(true)),

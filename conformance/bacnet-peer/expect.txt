@@ -1,0 +1,52 @@
+# ID|text: check.sh requires a transcript line containing text (a fixed string). Spec-decided expectations (ASHRAE 135); see conformance/README.md.
+# An ID listed in xfail-stock.txt or xfail-rust.txt is a known failure of that DUT: it must still fail, and a pass is reported as a divergence that went away.
+iam-unicast|Who-Is unicast -> I-Am device 1234
+iam-broadcast|Who-Is global broadcast -> I-Am device 1234
+required-analog-input-0|RP-required analog-input 0 failures: (none)
+property-list-analog-input-0|PL analog-input 0 -> same as RPM all
+required-analog-input-1|RP-required analog-input 1 failures: (none)
+property-list-analog-input-1|PL analog-input 1 -> same as RPM all
+required-analog-output-2|RP-required analog-output 2 failures: (none)
+property-list-analog-output-2|PL analog-output 2 -> same as RPM all
+required-analog-output-3|RP-required analog-output 3 failures: (none)
+property-list-analog-output-3|PL analog-output 3 -> same as RPM all
+required-analog-value-0|RP-required analog-value 0 failures: (none)
+property-list-analog-value-0|PL analog-value 0 -> same as RPM all
+required-binary-input-0|RP-required binary-input 0 failures: (none)
+property-list-binary-input-0|PL binary-input 0 -> same as RPM all
+required-binary-output-2|RP-required binary-output 2 failures: (none)
+property-list-binary-output-2|PL binary-output 2 -> same as RPM all
+required-binary-output-3|RP-required binary-output 3 failures: (none)
+property-list-binary-output-3|PL binary-output 3 -> same as RPM all
+required-binary-value-0|RP-required binary-value 0 failures: (none)
+property-list-binary-value-0|PL binary-value 0 -> same as RPM all
+required-multi-state-input-0|RP-required multi-state-input 0 failures: (none)
+property-list-multi-state-input-0|PL multi-state-input 0 -> same as RPM all
+required-multi-state-output-0|RP-required multi-state-output 0 failures: (none)
+property-list-multi-state-output-0|PL multi-state-output 0 -> same as RPM all
+required-multi-state-value-0|RP-required multi-state-value 0 failures: (none)
+property-list-multi-state-value-0|PL multi-state-value 0 -> same as RPM all
+required-trend-log-0|RP-required trend-log 0 failures: log-buffer->ERROR property/read-access-denied;
+property-list-trend-log-0|PL trend-log 0 -> same as RPM all
+required-characterstring-value-0|RP-required characterstring-value 0 failures: (none)
+property-list-characterstring-value-0|PL characterstring-value 0 -> same as RPM all
+required-positive-integer-value-0|RP-required positive-integer-value 0 failures: (none)
+property-list-positive-integer-value-0|PL positive-integer-value 0 -> same as RPM all
+required-schedule-0|RP-required schedule 0 failures: (none)
+property-list-schedule-0|PL schedule 0 -> same as RPM all
+log-buffer-rp-denied|RP trend-log,0 log-buffer -> ERROR property/read-access-denied
+readrange-by-position|ReadRange trend-log,0 log-buffer position 1 count 3 -> ACK itemCount=3
+readrange-not-a-list|ReadRange analog-input,0 present-value (not a list) -> ERROR services/property-is-not-a-list
+pv-denied-in-service|WP AI0 present-value=77.0 (out-of-service FALSE) -> ERROR property/write-access-denied
+oos-pv-writable|WP AI0 present-value=77.0 (out-of-service TRUE) -> ACK
+oos-pv-reads-back|RP AI0 present-value (+100ms) -> 77.0
+oos-pv-writable-ai1|WP AI1 present-value=5.5 (OOS TRUE) -> ACK
+oos-pv-reads-back-ai1|RP AI1 present-value -> 5.5
+priority-17-out-of-range|WP BO2 present-value=active prio 17 -> ERROR services/parameter-out-of-range
+priority-0-out-of-range|WP BO2 present-value=active prio 0 -> ERROR services/parameter-out-of-range
+priority-6-write-denied|WP BO2 present-value=active prio 6 -> ERROR property/write-access-denied
+priority-5-accepted|WP BO2 present-value=inactive prio 5 -> ACK
+subscribe-cov-rejected|SubscribeCOV analog-input 0 unconfirmed lifetime 120 -> REJECT unrecognized-service
+subscribe-cov-property-rejected|SubscribeCOVProperty analog-input 0 present-value -> REJECT unrecognized-service
+who-has-unanswered|Who-Has unicast by object id analog-input,0 -> (no I-Have)
+probe-finished|DONE

@@ -23,3 +23,6 @@ diff /conformance/stock/bacnet-server.nmap.golden "$out/nmap.txt" > "$out/nmap.d
   || { fail "nmap bacnet-info differs from stock's:"; cat "$out/nmap.diff" >&2; }
 # stock's transcript with the same feed; ours must differ from it by exactly the listed divergences (conformance/bacnet/rust-feed.diff)
 want_transcript /conformance/stock/bacnet-server-feed.golden "$out/transcript.txt" "$([ "$DUT" = rust ] && echo /conformance/bacnet/rust-feed.diff)"
+# Who-Is to 255.255.255.255 is answered (ww-o17); a BO 2 inactive write at priority 5 reaches the provider (ww-s31): extra.txt, peer.sh
+grep -q -x 'Who-Is to 255.255.255.255 -> I-Am device 1234' "$out/extra.txt" && pass "Who-Is to 255.255.255.255 answered" || fail "Who-Is to 255.255.255.255 not answered"
+grep -q 'ACK; provider got: .*load-1_bus-1.active:false' "$out/extra.txt" && pass "BO 2 inactive at priority 5 reaches the provider" || fail "BO 2 inactive at priority 5 did not reach the provider"

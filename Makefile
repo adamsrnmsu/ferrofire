@@ -10,7 +10,7 @@ DRY_MIN := 0.8
 # ponytail: pid lock; a kill -9 of make leaves a stale file that src-free ignores because the pid is gone.
 MUTATE_LOCK := .mutate.lock
 
-.PHONY: helics physics dut netns differential diff-dnp3 diff-modbus diff-udp diff-serial diff-serial-mismatch testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report bench-control bench-fdmicro bench-maxrate bench-maxrate-control modbac-image modbac-test charts image rtu-image rtu-image-smoke fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
+.PHONY: helics physics dut netns differential diff-dnp3 diff-modbus diff-udp diff-serial diff-serial-mismatch testpeers conformance conformance-selftest src-free help wireshark zeek-iccp zeek-iccp-coexist bench bench-report bench-dg bench-dg-report bench-control bench-fdmicro bench-maxrate bench-maxrate-control modbac-image modbac-test bacnet-peer charts image rtu-image rtu-image-smoke fmt fmt-check lint test golden linux crap dry deny mutate fuzz fuzz-smoke check clean
 help:    # list targets
 	@grep -E '^[a-z-]+:.*#' $(MAKEFILE_LIST) | sed -E 's/^([a-z-]+):[^#]*#/\1\t/'
 src-free:   # fail fast while make mutate is rewriting src/
@@ -128,6 +128,9 @@ modbac-image:   # build ff-modbac:22.04, the BACnet module image (modules/bacnet
 	$(TP) docker build --platform $(PLATFORM) -t ff-modbac:22.04 modules/bacnet
 modbac-test: modbac-image   # the BACnet module's tests (pytest, a scripted device and a bacpypes3 peer) in ff-modbac
 	$(TP) docker run --rm --platform $(PLATFORM) -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/src -w /src/modules/bacnet ff-modbac:22.04 python3 -m pytest -q -p no:cacheprovider test_module.py
+
+bacnet-peer:   # opt-in BACnet4J peer lane (conformance/README.md): make bacnet-peer WHO=rust|stock BACNET4J_IMAGE=...; skips without the image
+	$(TP) conformance/bacnet-peer/peer.sh $(or $(WHO),rust)
 
 clean:   # remove build output and metrics
 	rm -rf target target-linux dist .metrics

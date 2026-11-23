@@ -151,11 +151,17 @@ impl Echo {
 
     /// The write under way was answered: `v` is what the device now has from us.
     pub fn sent_ok(&mut self, v: Value) {
+        self.put_ok(v);
+        self.fresh = true;
+    }
+
+    /// `v` was written to the device outside the echo rule (the command interface) and answered: it counts as sent. No poll is
+    /// skipped: the next one shows what the device holds now.
+    pub fn put_ok(&mut self, v: Value) {
         self.last_sent = Some(v);
         // what a poll showed before this write is stale: the tag going back to it must be sent
         self.last_polled = None;
         self.sent_failed();
-        self.fresh = true;
     }
 
     /// The write under way got no answer: nothing is under way any more, and the value is due again.
@@ -319,6 +325,18 @@ impl Points for TagPoints {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn put_ok_counts_as_sent_and_skips_no_poll() {
+        let mut e = Echo::new(Analog(0.0));
+        e.put_ok(Analog(6.0));
+        assert_eq!(e.due(Analog(6.0)), None);
+        // the very next poll counts, where after `sent_ok` it would not
+        assert!(e.polled(Analog(1.0)));
+        let mut e = Echo::new(Analog(0.0));
+        e.sent_ok(Analog(6.0));
+        assert!(!e.polled(Analog(1.0)));
+    }
+
     #[test]
     fn redial_doubles_to_60_and_an_answer_resets() {
         let mut r = super::Redial::default();

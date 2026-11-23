@@ -256,6 +256,104 @@ RPM-ALL binary-output,2 relinquish-default -> 4e 9100 4f
 RPM-ALL binary-output,2 description -> 4e 75100042494e415259204f55545055542032 4f
 RPM-ALL binary-output,2 active-text -> 4e 73006f6e 4f
 RPM-ALL binary-output,2 inactive-text -> 4e 74006f6666 4f
+RPM-ALL analog-value,0 object-identifier -> 4e c400800000 4f
+RPM-ALL analog-value,0 object-name -> 4e 750f00414e414c4f472056414c55452030 4f
+RPM-ALL analog-value,0 object-type -> 4e 9102 4f
+RPM-ALL analog-value,0 present-value -> 4e 4400000000 4f
+RPM-ALL analog-value,0 status-flags -> 4e 820400 4f
+RPM-ALL analog-value,0 event-state -> 4e 9100 4f
+RPM-ALL analog-value,0 out-of-service -> 4e 10 4f
+RPM-ALL analog-value,0 units -> 4e 915f 4f
+RPM-ALL analog-value,0 description -> 4e 750f00414e414c4f472056414c55452030 4f
+RPM-ALL analog-value,0 cov-increment -> 4e 443f800000 4f
+RPM-ALL binary-value,0 object-identifier -> 4e c401400000 4f
+RPM-ALL binary-value,0 object-name -> 4e 750f0042494e4152592056414c55452030 4f
+RPM-ALL binary-value,0 object-type -> 4e 9105 4f
+RPM-ALL binary-value,0 present-value -> 4e 9100 4f
+RPM-ALL binary-value,0 status-flags -> 4e 820400 4f
+RPM-ALL binary-value,0 event-state -> 4e 9100 4f
+RPM-ALL binary-value,0 out-of-service -> 4e 10 4f
+RPM-ALL binary-value,0 description -> 4e 750f0042494e4152592056414c55452030 4f
+RPM-ALL binary-value,0 priority-array -> 4e 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 4f
+RPM-ALL binary-value,0 relinquish-default -> 4e 9100 4f
+RPM-ALL multi-state-input,0 object-identifier -> 4e c403400000 4f
+RPM-ALL multi-state-input,0 object-name -> 4e 7513004d554c5449535441544520494e5055542030 4f
+RPM-ALL multi-state-input,0 object-type -> 4e 910d 4f
+RPM-ALL multi-state-input,0 present-value -> 4e 2101 4f
+RPM-ALL multi-state-input,0 status-flags -> 4e 820400 4f
+RPM-ALL multi-state-input,0 event-state -> 4e 9100 4f
+RPM-ALL multi-state-input,0 out-of-service -> 4e 10 4f
+RPM-ALL multi-state-input,0 number-of-states -> 4e 21fe 4f
+RPM-ALL multi-state-input,0 description -> 4e 7513004d554c5449535441544520494e5055542030 4f
+RPM-ALL multi-state-input,0 state-text -> 4e 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 4f
+RPM-ALL multi-state-output,0 object-identifier -> 4e c403800000 4f
+RPM-ALL multi-state-output,0 object-name -> 4e 7514004d554c54495354415445204f55545055542030 4f
+RPM-ALL multi-state-output,0 object-type -> 4e 910e 4f
+RPM-ALL multi-state-output,0 present-value -> 4e 2101 4f
+RPM-ALL multi-state-output,0 status-flags -> 4e 820400 4f
+RPM-ALL multi-state-output,0 event-state -> 4e 9100 4f
+RPM-ALL multi-state-output,0 out-of-service -> 4e 10 4f
+RPM-ALL multi-state-output,0 number-of-states -> 4e 21fe 4f
+RPM-ALL multi-state-output,0 priority-array -> 4e 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 4f
+RPM-ALL multi-state-output,0 relinquish-default -> 4e 2101 4f
+RPM-ALL multi-state-output,0 description -> 4e 7514004d554c54495354415445204f55545055542030 4f
+RPM-ALL multi-state-value,0 object-identifier -> 4e c404c00000 4f
+RPM-ALL multi-state-value,0 object-name -> 4e 7513004d554c544953544154452056414c55452030 4f
+RPM-ALL multi-state-value,0 object-type -> 4e 9113 4f
+RPM-ALL multi-state-value,0 present-value -> 4e 2101 4f
+RPM-ALL multi-state-value,0 status-flags -> 4e 820400 4f
+RPM-ALL multi-state-value,0 event-state -> 4e 9100 4f
+RPM-ALL multi-state-value,0 out-of-service -> 4e 10 4f
+RPM-ALL multi-state-value,0 number-of-states -> 4e 21fe 4f
+RPM-ALL multi-state-value,0 description -> 4e 7513004d554c544953544154452056414c55452030 4f
+RPM-ALL multi-state-value,0 state-text -> 4e 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 4f
+RPM-ALL positive-integer-value,0 object-identifier -> 4e c40c000000 4f
+RPM-ALL positive-integer-value,0 object-name -> 4e 751800504f534954495645494e54454745522056414c55452030 4f
+RPM-ALL positive-integer-value,0 object-type -> 4e 9130 4f
+RPM-ALL positive-integer-value,0 present-value -> 4e 2100 4f
+RPM-ALL positive-integer-value,0 status-flags -> 4e 820400 4f
+RPM-ALL positive-integer-value,0 units -> 4e 9100 4f
+RPM-ALL positive-integer-value,0 out-of-service -> 4e 10 4f
+RPM-ALL schedule,0 object-identifier -> 4e c404400000 4f
+RPM-ALL schedule,0 object-name -> 4e 750b005343484544554c452030 4f
+RPM-ALL schedule,0 object-type -> 4e 9111 4f
+RPM-ALL schedule,0 present-value -> 4e 4441a80000 4f
+RPM-ALL schedule,0 effective-period -> 4e a4ff0101ff a4ff0c1fff 4f
+RPM-ALL schedule,0 schedule-default -> 4e 4441a80000 4f
+RPM-ALL schedule,0 list-of-object-property-references -> 4e 4f
+RPM-ALL schedule,0 priority-for-writing -> 4e 2110 4f
+RPM-ALL schedule,0 status-flags -> 4e 820400 4f
+RPM-ALL schedule,0 reliability -> 4e 9100 4f
+RPM-ALL schedule,0 out-of-service -> 4e 10 4f
+RPM-ALL schedule,0 weekly-schedule -> 4e 0e 0f 0e 0f 0e 0f 0e 0f 0e 0f 0e 0f 0e 0f 4f
+RPM-ALL trend-log,0 object-identifier -> 4e c405000000 4f
+RPM-ALL trend-log,0 object-name -> 4e 750c005472656e64204c6f672030 4f
+RPM-ALL trend-log,0 object-type -> 4e 9114 4f
+RPM-ALL trend-log,0 enable -> 4e 11 4f
+RPM-ALL trend-log,0 stop-when-full -> 4e 10 4f
+RPM-ALL trend-log,0 buffer-size -> 4e 2203e8 4f
+RPM-ALL trend-log,0 log-buffer -> ERROR class=property code=read-access-denied
+RPM-ALL trend-log,0 record-count -> 4e 2203e8 4f
+RPM-ALL trend-log,0 total-record-count -> 4e 222710 4f
+RPM-ALL trend-log,0 event-state -> 4e 9100 4f
+RPM-ALL trend-log,0 logging-type -> 4e 9100 4f
+RPM-ALL trend-log,0 status-flags -> 4e 820400 4f
+RPM-ALL trend-log,0 description -> 4e 750c005472656e64204c6f672030 4f
+RPM-ALL trend-log,0 start-time -> 4e a46d010104 b400000000 4f
+RPM-ALL trend-log,0 stop-time -> 4e a4780c1602 b4173b3b63 4f
+RPM-ALL trend-log,0 log-device-object-property -> 4e 0c00000000 1955 3c020004d2 4f
+RPM-ALL trend-log,0 log-interval -> 4e 23015f90 4f
+RPM-ALL trend-log,0 align-intervals -> 4e 11 4f
+RPM-ALL trend-log,0 interval-offset -> 4e 2100 4f
+RPM-ALL trend-log,0 trigger -> 4e 10 4f
+RPM-ALL characterstring-value,0 object-identifier -> 4e c40a000000 4f
+RPM-ALL characterstring-value,0 object-name -> 4e 75190043484152414354455220535452494e472056414c55452031 4f
+RPM-ALL characterstring-value,0 object-type -> 4e 9128 4f
+RPM-ALL characterstring-value,0 present-value -> 4e 7100 4f
+RPM-ALL characterstring-value,0 status-flags -> 4e 820400 4f
+RPM-ALL characterstring-value,0 event-state -> 4e 9100 4f
+RPM-ALL characterstring-value,0 out-of-service -> 4e 10 4f
+RPM-ALL characterstring-value,0 description -> 4e 752100412043686172616374657220537472696e672056616c7565204578616d706c65 4f
 RPM [('analog-output,2', ['present-value']), ('analog-value,5', ['present-value']), ('analog-output,3', ['high-limit'])] -> [[[analog-output, 2], present-value, None, 250.0000], [[analog-value, 5], present-value, None, ERROR class=object code=unknown-object], [[analog-output, 3], high-limit, None, ERROR class=property code=unknown-property]]
 ## Property sweep (every property id 0..260, tags as sent)
 RP-RAW device,1234 11 -> 3e 220bb8 3f
@@ -283,6 +381,7 @@ RP-RAW device,1234 121 -> 3e 751c004241436e657420537461636b20617420536f757263654
 RP-RAW device,1234 139 -> 3e 2113 3f
 RP-RAW device,1234 152 -> 3e 3f
 RP-RAW device,1234 155 -> 3e 2101 3f
+RP-RAW device,1234 371 -> 3e 9170 9179 9178 9146 912c 910c 9162 918b 9161 9160 914c 913e 916b 910b 9149 911e 919b 911c 9139 9177 9138 9118 913a 9198 3f
 RP-RAW analog-input,0 22 -> 3e 443f800000 3f
 RP-RAW analog-input,0 28 -> 3e 750f00414e414c4f4720494e5055542030 3f
 RP-RAW analog-input,0 36 -> 3e 9100 3f
@@ -294,6 +393,7 @@ RP-RAW analog-input,0 85 -> 3e 44437a8000 3f
 RP-RAW analog-input,0 103 -> 3e 9100 3f
 RP-RAW analog-input,0 111 -> 3e 820400 3f
 RP-RAW analog-input,0 117 -> 3e 9162 3f
+RP-RAW analog-input,0 371 -> 3e 9155 916f 9124 9151 9175 911c 9167 9116 92270d 92270e 92270f 3f
 RP-RAW analog-output,2 36 -> 3e 9100 3f
 RP-RAW analog-output,2 75 -> 3e c400400002 3f
 RP-RAW analog-output,2 77 -> 3e 751000414e414c4f47204f55545055542032 3f
@@ -304,6 +404,7 @@ RP-RAW analog-output,2 87 -> 3e 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 444
 RP-RAW analog-output,2 104 -> 3e 4400000000 3f
 RP-RAW analog-output,2 111 -> 3e 820400 3f
 RP-RAW analog-output,2 117 -> 3e 9162 3f
+RP-RAW analog-output,2 371 -> 3e 9155 916f 9124 9151 9175 9157 9168 3f
 RP-RAW binary-input,0 28 -> 3e 750f0042494e41525920494e5055542030 3f
 RP-RAW binary-input,0 36 -> 3e 9100 3f
 RP-RAW binary-input,0 75 -> 3e c400c00000 3f
@@ -313,6 +414,7 @@ RP-RAW binary-input,0 81 -> 3e 10 3f
 RP-RAW binary-input,0 84 -> 3e 9100 3f
 RP-RAW binary-input,0 85 -> 3e 9101 3f
 RP-RAW binary-input,0 111 -> 3e 820400 3f
+RP-RAW binary-input,0 371 -> 3e 9155 916f 9124 9151 9154 911c 3f
 RP-RAW binary-output,2 4 -> 3e 73006f6e 3f
 RP-RAW binary-output,2 28 -> 3e 75100042494e415259204f55545055542032 3f
 RP-RAW binary-output,2 36 -> 3e 9100 3f
@@ -326,6 +428,7 @@ RP-RAW binary-output,2 85 -> 3e 9101 3f
 RP-RAW binary-output,2 87 -> 3e 9101 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 3f
 RP-RAW binary-output,2 104 -> 3e 9100 3f
 RP-RAW binary-output,2 111 -> 3e 820400 3f
+RP-RAW binary-output,2 371 -> 3e 9155 916f 9124 9151 9154 9157 9168 911c 9104 912e 3f
 RP-RAW analog-input,500 22 -> 3e 443f800000 3f
 RP-RAW analog-input,500 28 -> 3e 751100414e414c4f4720494e50555420353030 3f
 RP-RAW analog-input,500 36 -> 3e 9100 3f
@@ -337,6 +440,7 @@ RP-RAW analog-input,500 85 -> 3e 4400000000 3f
 RP-RAW analog-input,500 103 -> 3e 9100 3f
 RP-RAW analog-input,500 111 -> 3e 820400 3f
 RP-RAW analog-input,500 117 -> 3e 9162 3f
+RP-RAW analog-input,500 371 -> 3e 9155 916f 9124 9151 9175 911c 9167 9116 92270d 92270e 92270f 3f
 RP-RAW analog-value,0 22 -> 3e 443f800000 3f
 RP-RAW analog-value,0 28 -> 3e 750f00414e414c4f472056414c55452030 3f
 RP-RAW analog-value,0 36 -> 3e 9100 3f
@@ -347,6 +451,7 @@ RP-RAW analog-value,0 81 -> 3e 10 3f
 RP-RAW analog-value,0 85 -> 3e 4400000000 3f
 RP-RAW analog-value,0 111 -> 3e 820400 3f
 RP-RAW analog-value,0 117 -> 3e 915f 3f
+RP-RAW analog-value,0 371 -> 3e 9155 916f 9124 9151 9175 911c 9116 3f
 RP-RAW binary-value,0 28 -> 3e 750f0042494e4152592056414c55452030 3f
 RP-RAW binary-value,0 36 -> 3e 9100 3f
 RP-RAW binary-value,0 75 -> 3e c401400000 3f
@@ -357,6 +462,7 @@ RP-RAW binary-value,0 85 -> 3e 9100 3f
 RP-RAW binary-value,0 87 -> 3e 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 3f
 RP-RAW binary-value,0 104 -> 3e 9100 3f
 RP-RAW binary-value,0 111 -> 3e 820400 3f
+RP-RAW binary-value,0 371 -> 3e 9155 916f 9124 9151 911c 9157 9168 3f
 RP-RAW multi-state-input,0 28 -> 3e 7513004d554c5449535441544520494e5055542030 3f
 RP-RAW multi-state-input,0 36 -> 3e 9100 3f
 RP-RAW multi-state-input,0 74 -> 3e 21fe 3f
@@ -367,6 +473,158 @@ RP-RAW multi-state-input,0 81 -> 3e 10 3f
 RP-RAW multi-state-input,0 85 -> 3e 2101 3f
 RP-RAW multi-state-input,0 110 -> 3e 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 3f
 RP-RAW multi-state-input,0 111 -> 3e 820400 3f
+RP-RAW multi-state-input,0 371 -> 3e 9155 916f 9124 9151 914a 911c 916e 3f
+RP-RAW multi-state-output,0 28 -> 3e 7514004d554c54495354415445204f55545055542030 3f
+RP-RAW multi-state-output,0 36 -> 3e 9100 3f
+RP-RAW multi-state-output,0 74 -> 3e 21fe 3f
+RP-RAW multi-state-output,0 75 -> 3e c403800000 3f
+RP-RAW multi-state-output,0 77 -> 3e 7514004d554c54495354415445204f55545055542030 3f
+RP-RAW multi-state-output,0 79 -> 3e 910e 3f
+RP-RAW multi-state-output,0 81 -> 3e 10 3f
+RP-RAW multi-state-output,0 85 -> 3e 2101 3f
+RP-RAW multi-state-output,0 87 -> 3e 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 3f
+RP-RAW multi-state-output,0 104 -> 3e 2101 3f
+RP-RAW multi-state-output,0 111 -> 3e 820400 3f
+RP-RAW multi-state-output,0 371 -> 3e 9155 916f 9124 9151 914a 9157 9168 911c 3f
+RP-RAW multi-state-value,0 28 -> 3e 7513004d554c544953544154452056414c55452030 3f
+RP-RAW multi-state-value,0 36 -> 3e 9100 3f
+RP-RAW multi-state-value,0 74 -> 3e 21fe 3f
+RP-RAW multi-state-value,0 75 -> 3e c404c00000 3f
+RP-RAW multi-state-value,0 77 -> 3e 7513004d554c544953544154452056414c55452030 3f
+RP-RAW multi-state-value,0 79 -> 3e 9113 3f
+RP-RAW multi-state-value,0 81 -> 3e 10 3f
+RP-RAW multi-state-value,0 85 -> 3e 2101 3f
+RP-RAW multi-state-value,0 110 -> 3e 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 3f
+RP-RAW multi-state-value,0 111 -> 3e 820400 3f
+RP-RAW multi-state-value,0 371 -> 3e 9155 916f 9124 9151 914a 911c 916e 3f
+RP-RAW positive-integer-value,0 75 -> 3e c40c000000 3f
+RP-RAW positive-integer-value,0 77 -> 3e 751800504f534954495645494e54454745522056414c55452030 3f
+RP-RAW positive-integer-value,0 79 -> 3e 9130 3f
+RP-RAW positive-integer-value,0 81 -> 3e 10 3f
+RP-RAW positive-integer-value,0 85 -> 3e 2100 3f
+RP-RAW positive-integer-value,0 111 -> 3e 820400 3f
+RP-RAW positive-integer-value,0 117 -> 3e 9100 3f
+RP-RAW positive-integer-value,0 371 -> 3e 9155 916f 9175 9151 3f
+RP-RAW schedule,0 32 -> 3e a4ff0101ff a4ff0c1fff 3f
+RP-RAW schedule,0 54 -> 3e 3f
+RP-RAW schedule,0 75 -> 3e c404400000 3f
+RP-RAW schedule,0 77 -> 3e 750b005343484544554c452030 3f
+RP-RAW schedule,0 79 -> 3e 9111 3f
+RP-RAW schedule,0 81 -> 3e 10 3f
+RP-RAW schedule,0 85 -> 3e 4441a80000 3f
+RP-RAW schedule,0 88 -> 3e 2110 3f
+RP-RAW schedule,0 103 -> 3e 9100 3f
+RP-RAW schedule,0 111 -> 3e 820400 3f
+RP-RAW schedule,0 123 -> 3e 0e 0f 0e 0f 0e 0f 0e 0f 0e 0f 0e 0f 0e 0f 3f
+RP-RAW schedule,0 174 -> 3e 4441a80000 3f
+RP-RAW schedule,0 371 -> 3e 9155 9120 91ae 9136 9158 916f 9167 9151 917b 3f
+RP-RAW trend-log,0 28 -> 3e 750c005472656e64204c6f672030 3f
+RP-RAW trend-log,0 36 -> 3e 9100 3f
+RP-RAW trend-log,0 75 -> 3e c405000000 3f
+RP-RAW trend-log,0 77 -> 3e 750c005472656e64204c6f672030 3f
+RP-RAW trend-log,0 79 -> 3e 9114 3f
+RP-RAW trend-log,0 111 -> 3e 820400 3f
+RP-RAW trend-log,0 126 -> 3e 2203e8 3f
+RP-RAW trend-log,0 131 -> ERROR class=property code=read-access-denied
+RP-RAW trend-log,0 132 -> 3e 0c00000000 1955 3c020004d2 3f
+RP-RAW trend-log,0 133 -> 3e 11 3f
+RP-RAW trend-log,0 134 -> 3e 23015f90 3f
+RP-RAW trend-log,0 141 -> 3e 2203e8 3f
+RP-RAW trend-log,0 142 -> 3e a46d010104 b400000000 3f
+RP-RAW trend-log,0 143 -> 3e a4780c1602 b4173b3b63 3f
+RP-RAW trend-log,0 144 -> 3e 10 3f
+RP-RAW trend-log,0 145 -> 3e 222710 3f
+RP-RAW trend-log,0 193 -> 3e 11 3f
+RP-RAW trend-log,0 195 -> 3e 2100 3f
+RP-RAW trend-log,0 197 -> 3e 9100 3f
+RP-RAW trend-log,0 205 -> 3e 10 3f
+RP-RAW trend-log,0 371 -> 3e 9185 9190 917e 9183 918d 9191 9124 91c5 916f 911c 918e 918f 9184 9186 91c1 91c3 91cd 3f
+RP-RAW characterstring-value,0 28 -> 3e 752100412043686172616374657220537472696e672056616c7565204578616d706c65 3f
+RP-RAW characterstring-value,0 36 -> 3e 9100 3f
+RP-RAW characterstring-value,0 75 -> 3e c40a000000 3f
+RP-RAW characterstring-value,0 77 -> 3e 75190043484152414354455220535452494e472056414c55452031 3f
+RP-RAW characterstring-value,0 79 -> 3e 9128 3f
+RP-RAW characterstring-value,0 81 -> 3e 10 3f
+RP-RAW characterstring-value,0 85 -> 3e 7100 3f
+RP-RAW characterstring-value,0 111 -> 3e 820400 3f
+RP-RAW characterstring-value,0 371 -> 3e 9155 916f 9124 9151 911c 3f
+RP-RAW command,0 2 -> 3e 0c00000000 1c00000000 2900 3900 4e 00 4f 6900 7900 8900 0c00000000 1c00000000 2900 3900 4e 00 4f 6900 7900 8900 0c00000000 1c00000000 2900 3900 4e 00 4f 6900 7900 8900 0c00000000 1c00000000 2900 3900 4e 00 4f 6900 7900 8900 0c00000000 1c00000000 2900 3900 4e 00 4f 6900 7900 8900 0c00000000 1c00000000 2900 3900 4e 00 4f 6900 7900 8900 0c00000000 1c00000000 2900 3900 4e 00 4f 6900 7900 8900 0c00000000 1c00000000 2900 3900 4e 00 4f 6900 7900 8900 3f
+RP-RAW command,0 9 -> 3e 11 3f
+RP-RAW command,0 28 -> 3e 750a00434f4d4d414e442030 3f
+RP-RAW command,0 47 -> 3e 10 3f
+RP-RAW command,0 75 -> 3e c401c00000 3f
+RP-RAW command,0 77 -> 3e 750a00434f4d4d414e442030 3f
+RP-RAW command,0 79 -> 3e 9107 3f
+RP-RAW command,0 85 -> 3e 2100 3f
+RP-RAW command,0 371 -> 3e 9155 912f 9109 9102 911c 3f
+RP-RAW integer-value,1 75 -> 3e c40b400001 3f
+RP-RAW integer-value,1 77 -> 3e 750f00414e414c4f472056414c55452031 3f
+RP-RAW integer-value,1 79 -> 3e 912d 3f
+RP-RAW integer-value,1 81 -> 3e 10 3f
+RP-RAW integer-value,1 85 -> 3e 3100 3f
+RP-RAW integer-value,1 111 -> 3e 820400 3f
+RP-RAW integer-value,1 117 -> 3e 915f 3f
+RP-RAW integer-value,1 371 -> 3e 9155 916f 9175 9151 3f
+RP-RAW life-safety-point,0 28 -> 3e 750b004c5320504f494e542030 3f
+RP-RAW life-safety-point,0 36 -> 3e 9100 3f
+RP-RAW life-safety-point,0 75 -> 3e c405400000 3f
+RP-RAW life-safety-point,0 77 -> 3e 750b004c5320504f494e542030 3f
+RP-RAW life-safety-point,0 79 -> 3e 9115 3f
+RP-RAW life-safety-point,0 81 -> 3e 10 3f
+RP-RAW life-safety-point,0 85 -> 3e 9100 3f
+RP-RAW life-safety-point,0 103 -> 3e 9100 3f
+RP-RAW life-safety-point,0 111 -> 3e 820400 3f
+RP-RAW life-safety-point,0 160 -> 3e 910e 3f
+RP-RAW life-safety-point,0 161 -> 3e 9100 3f
+RP-RAW life-safety-point,0 163 -> 3e 9100 3f
+RP-RAW life-safety-point,0 164 -> 3e 9100 3f
+RP-RAW life-safety-point,0 175 -> 3e 9100 9101 9102 9103 9104 9105 9106 9107 9108 9109 910a 910b 910c 910d 910e 3f
+RP-RAW life-safety-point,0 371 -> 3e 9155 91a4 916f 9124 9151 9167 91a0 91af 91a3 91a1 911c 3f
+RP-RAW load-control,0 28 -> 3e 750f004c4f414420434f4e54524f4c2030 3f
+RP-RAW load-control,0 36 -> 3e 9100 3f
+RP-RAW load-control,0 75 -> 3e c407000000 3f
+RP-RAW load-control,0 77 -> 3e 750f004c4f414420434f4e54524f4c2030 3f
+RP-RAW load-control,0 79 -> 3e 911c 3f
+RP-RAW load-control,0 85 -> 3e 9100 3f
+RP-RAW load-control,0 111 -> 3e 820400 3f
+RP-RAW load-control,0 133 -> 3e 11 3f
+RP-RAW load-control,0 142 -> 3e a4ffffffff b4ffffffff 3f
+RP-RAW load-control,0 212 -> 3e 1900 3f
+RP-RAW load-control,0 213 -> 3e 2100 3f
+RP-RAW load-control,0 214 -> 3e 1900 3f
+RP-RAW load-control,0 215 -> 3e 443fc00000 3f
+RP-RAW load-control,0 218 -> 3e 1900 3f
+RP-RAW load-control,0 219 -> 3e 2100 3f
+RP-RAW load-control,0 220 -> 3e 750f0064696d206c696768747320313025 750f0064696d206c696768747320323025 750f0064696d206c696768747320333025 3f
+RP-RAW load-control,0 221 -> 3e 2101 2102 2103 3f
+RP-RAW load-control,0 371 -> 3e 9155 916f 9124 91da 918e 91db 91d5 9185 91d6 91d4 91dd 91dc 911c 91d7 3f
+RP-RAW lighting-output,1 75 -> 3e c40d800001 3f
+RP-RAW lighting-output,1 77 -> 3e 7512004c49474854494e47204f55545055542031 3f
+RP-RAW lighting-output,1 79 -> 3e 9136 3f
+RP-RAW lighting-output,1 81 -> 3e 10 3f
+RP-RAW lighting-output,1 85 -> 3e 4400000000 3f
+RP-RAW lighting-output,1 87 -> 3e 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 3f
+RP-RAW lighting-output,1 104 -> 3e 4400000000 3f
+RP-RAW lighting-output,1 111 -> 3e 820400 3f
+RP-RAW lighting-output,1 164 -> 3e 4400000000 3f
+RP-RAW lighting-output,1 371 -> 3e 9155 91a4 92017c 92017a 916f 9151 920175 920179 920182 920176 920177 920178 9157 9168 92017d 3f
+RP-RAW channel,1 54 -> 3e 0c0d800001 1a017c 3c02000000 0c0d800001 1a017c 3c02000000 0c0d800001 1a017c 3c02000000 0c0d800001 1a017c 3c02000000 0c0d800001 1a017c 3c02000000 0c0d800001 1a017c 3c02000000 0c0d800001 1a017c 3c02000000 0c0d800001 1a017c 3c02000000 3f
+RP-RAW channel,1 75 -> 3e c40d400001 3f
+RP-RAW channel,1 77 -> 3e 750a004348414e4e454c2031 3f
+RP-RAW channel,1 79 -> 3e 9135 3f
+RP-RAW channel,1 81 -> 3e 10 3f
+RP-RAW channel,1 85 -> 3e 00 3f
+RP-RAW channel,1 111 -> 3e 820400 3f
+RP-RAW channel,1 371 -> 3e 9155 920171 920172 916f 9151 9136 92016e 92016f 3f
+RP-RAW octetstring-value,0 28 -> 3e 7514004f43544554535452494e472056414c55452030 3f
+RP-RAW octetstring-value,0 36 -> 3e 9100 3f
+RP-RAW octetstring-value,0 75 -> 3e c40bc00000 3f
+RP-RAW octetstring-value,0 77 -> 3e 7514004f43544554535452494e472056414c55452030 3f
+RP-RAW octetstring-value,0 79 -> 3e 912f 3f
+RP-RAW octetstring-value,0 81 -> 3e 10 3f
+RP-RAW octetstring-value,0 85 -> 3e 60 3f
+RP-RAW octetstring-value,0 111 -> 3e 820400 3f
+RP-RAW octetstring-value,0 371 -> 3e 9155 916f 9124 9151 911c 3f
 ## Unknown objects and properties
 RP  analog-input,500 present-value -> 0.0000
 RP  analog-input,999 present-value -> 0.0000
@@ -468,14 +726,81 @@ ReadRange device object-list 1..3 -> ERROR class=services code=property-is-not-a
 ReadRange analog-input,0 present-value -> ERROR class=services code=property-is-not-a-list
 ReadRange trend-log,0 log-buffer 1..3 -> ReadRangeACK
 ReadRange trend-log,0 log-buffer 1..3    itemCount=3 first-seq=None flags=[1, 0, 0] data=5e 0e a46d020107 b400000000 0f 1e 2c00000000 1f 2a0400 0e a46d020107 b4000f0000 0f 1e 2c3f800000 1f 2a0400 0e a46d020107 b4001e0000 0f 1e 2c40000000 1f 2a0400 5f
+ReadRange trend-log,1 log-buffer 1..3 -> ReadRangeACK
+ReadRange trend-log,1 log-buffer 1..3    itemCount=3 first-seq=None flags=[1, 0, 0] data=5e 0e a46d030107 b400000000 0f 1e 2c447a0000 1f 0e a46d030107 b4000f0000 0f 1e 2c447a4000 1f 0e a46d030107 b4001e0000 0f 1e 2c447a8000 1f 5f
+ReadRange trend-log,7 log-buffer 1..3 -> ReadRangeACK
+ReadRange trend-log,7 log-buffer 1..3    itemCount=3 first-seq=None flags=[1, 0, 0] data=5e 0e a46d090102 b400000000 0f 1e 2c45dac000 1f 0e a46d090102 b4000f0000 0f 1e 2c45dac800 1f 0e a46d090102 b4001e0000 0f 1e 2c45dad000 1f 5f
+ReadRange trend-log,0 log-buffer no range -> ReadRangeACK
+ReadRange trend-log,0 log-buffer no range    itemCount=66 first-seq=None flags=[1, 0, 1] data=530 bytes sha1 ca96b3aebb53
+ReadRange trend-log,1 log-buffer no range -> ReadRangeACK
+ReadRange trend-log,1 log-buffer no range    itemCount=76 first-seq=None flags=[1, 0, 1] data=534 bytes sha1 44712943f144
+ReadRange trend-log,0 log-buffer position 1 count 66 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer position 1 count 66    itemCount=66 first-seq=None flags=[1, 0, 0] data=530 bytes sha1 ca96b3aebb53
+ReadRange trend-log,0 log-buffer position 1 count 67 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer position 1 count 67    itemCount=66 first-seq=None flags=[1, 0, 1] data=530 bytes sha1 ca96b3aebb53
+ReadRange trend-log,0 log-buffer position 500 count 5 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer position 500 count 5    itemCount=5 first-seq=None flags=[0, 0, 0] data=5e 0e a46d020605 b4042d0000 0f 1e 2c43f98000 1f 2a0400 0e a46d020605 b405000000 0f 1e 2c43fa0000 1f 2a0400 0e a46d020605 b4050f0000 0f 1e 2c43fa8000 1f 2a0400 0e a46d020605 b4051e0000 0f 1e 2c43fb0000 1f 2a0400 0e a46d020605 b4052d0000 0f 1e 2c43fb8000 1f 2a0400 5f
+ReadRange trend-log,0 log-buffer position 10 count -3 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer position 10 count -3    itemCount=3 first-seq=None flags=[0, 0, 0] data=5e 0e a46d020107 b4012d0000 0f 1e 2c40e00000 1f 2a0400 0e a46d020107 b402000000 0f 1e 2c41000000 1f 2a0400 0e a46d020107 b4020f0000 0f 1e 2c41100000 1f 2a0400 5f
+ReadRange trend-log,0 log-buffer position 1 count -5 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer position 1 count -5    itemCount=1 first-seq=None flags=[1, 0, 0] data=5e 0e a46d020107 b400000000 0f 1e 2c00000000 1f 2a0400 5f
+ReadRange trend-log,0 log-buffer position 999 count 5 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer position 999 count 5    itemCount=2 first-seq=None flags=[0, 1, 0] data=5e 0e a46d020b03 b4091e0000 0f 1e 2c44798000 1f 2a0400 0e a46d020b03 b4092d0000 0f 1e 2c4479c000 1f 2a0400 5f
+ReadRange trend-log,0 log-buffer position 1000 count -5 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer position 1000 count -5    itemCount=5 first-seq=None flags=[0, 1, 0] data=5e 0e a46d020b03 b4082d0000 0f 1e 2c4478c000 1f 2a0400 0e a46d020b03 b409000000 0f 1e 2c44790000 1f 2a0400 0e a46d020b03 b4090f0000 0f 1e 2c44794000 1f 2a0400 0e a46d020b03 b4091e0000 0f 1e 2c44798000 1f 2a0400 0e a46d020b03 b4092d0000 0f 1e 2c4479c000 1f 2a0400 5f
+ReadRange trend-log,0 log-buffer position 1001 count 5 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer position 1001 count 5    itemCount=0 first-seq=None flags=[0, 0, 0] data=5e 5f
+ReadRange trend-log,0 log-buffer position 0 count 3 -> ERROR class=services code=other
+ReadRange trend-log,0 log-buffer position 1 count 0 -> ERROR class=services code=other
+ReadRange trend-log,0 log-buffer sequence 9001 count 3 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer sequence 9001 count 3    itemCount=3 first-seq=9001 flags=[1, 0, 0] data=5e 0e a46d020107 b400000000 0f 1e 2c00000000 1f 2a0400 0e a46d020107 b4000f0000 0f 1e 2c3f800000 1f 2a0400 0e a46d020107 b4001e0000 0f 1e 2c40000000 1f 2a0400 5f
+ReadRange trend-log,0 log-buffer sequence 9000 count 3 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer sequence 9000 count 3    itemCount=2 first-seq=9001 flags=[1, 0, 0] data=5e 0e a46d020107 b400000000 0f 1e 2c00000000 1f 2a0400 0e a46d020107 b4000f0000 0f 1e 2c3f800000 1f 2a0400 5f
+ReadRange trend-log,0 log-buffer sequence 9500 count -100 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer sequence 9500 count -100    itemCount=66 first-seq=9401 flags=[0, 0, 1] data=530 bytes sha1 bfe06a5f40f3
+ReadRange trend-log,0 log-buffer sequence 9999 count 5 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer sequence 9999 count 5    itemCount=2 first-seq=9999 flags=[0, 1, 0] data=5e 0e a46d020b03 b4091e0000 0f 1e 2c44798000 1f 2a0400 0e a46d020b03 b4092d0000 0f 1e 2c4479c000 1f 2a0400 5f
+ReadRange trend-log,0 log-buffer sequence 10000 count -3 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer sequence 10000 count -3    itemCount=3 first-seq=9998 flags=[0, 1, 0] data=5e 0e a46d020b03 b4090f0000 0f 1e 2c44794000 1f 2a0400 0e a46d020b03 b4091e0000 0f 1e 2c44798000 1f 2a0400 0e a46d020b03 b4092d0000 0f 1e 2c4479c000 1f 2a0400 5f
+ReadRange trend-log,0 log-buffer sequence 1 count 3 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer sequence 1 count 3    itemCount=0 first-seq=None flags=[0, 0, 0] data=5e 5f
+ReadRange trend-log,0 log-buffer sequence 9001 count 0 -> ERROR class=services code=other
+ReadRange trend-log,0 log-buffer time 2009-01-01 count 3 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer time 2009-01-01 count 3    itemCount=3 first-seq=9001 flags=[1, 0, 0] data=5e 0e a46d020107 b400000000 0f 1e 2c00000000 1f 2a0400 0e a46d020107 b4000f0000 0f 1e 2c3f800000 1f 2a0400 0e a46d020107 b4001e0000 0f 1e 2c40000000 1f 2a0400 5f
+ReadRange trend-log,0 log-buffer time 2009-02-01 00:00 count 3 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer time 2009-02-01 00:00 count 3    itemCount=3 first-seq=9002 flags=[0, 0, 0] data=5e 0e a46d020107 b4000f0000 0f 1e 2c3f800000 1f 2a0400 0e a46d020107 b4001e0000 0f 1e 2c40000000 1f 2a0400 0e a46d020107 b4002d0000 0f 1e 2c40400000 1f 2a0400 5f
+ReadRange trend-log,0 log-buffer time 2009-02-01 00:00 count -3 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer time 2009-02-01 00:00 count -3    itemCount=0 first-seq=None flags=[0, 0, 0] data=5e 5f
+ReadRange trend-log,0 log-buffer time 2009-02-01 00:22 count 3 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer time 2009-02-01 00:22 count 3    itemCount=3 first-seq=9003 flags=[0, 0, 0] data=5e 0e a46d020107 b4001e0000 0f 1e 2c40000000 1f 2a0400 0e a46d020107 b4002d0000 0f 1e 2c40400000 1f 2a0400 0e a46d020107 b401000000 0f 1e 2c40800000 1f 2a0400 5f
+ReadRange trend-log,0 log-buffer time 2009-02-01 00:22 count -3 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer time 2009-02-01 00:22 count -3    itemCount=2 first-seq=9001 flags=[1, 0, 0] data=5e 0e a46d020107 b400000000 0f 1e 2c00000000 1f 2a0400 0e a46d020107 b4000f0000 0f 1e 2c3f800000 1f 2a0400 5f
+ReadRange trend-log,0 log-buffer time 2010-01-01 count -3 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer time 2010-01-01 count -3    itemCount=3 first-seq=9998 flags=[0, 1, 0] data=5e 0e a46d020b03 b4090f0000 0f 1e 2c44794000 1f 2a0400 0e a46d020b03 b4091e0000 0f 1e 2c44798000 1f 2a0400 0e a46d020b03 b4092d0000 0f 1e 2c4479c000 1f 2a0400 5f
+ReadRange trend-log,0 log-buffer time 2010-01-01 count 3 -> ReadRangeACK
+ReadRange trend-log,0 log-buffer time 2010-01-01 count 3    itemCount=0 first-seq=None flags=[0, 0, 0] data=5e 5f
+ReadRange trend-log,0 log-buffer time 2009-02-01 00:00 count 0 -> ERROR class=services code=other
+ReadRange trend-log,0 object-name -> ERROR class=services code=property-is-not-a-list
+ReadRange trend-log,0 high-limit -> ERROR class=services code=property-is-not-a-list
+ReadRange trend-log,8 log-buffer -> ERROR class=object code=property-is-not-a-list
 ReadRange analog-input,5000 present-value -> ERROR class=services code=property-is-not-a-list
 ReadRange analog-input,0 high-limit -> ERROR class=services code=property-is-not-a-list
+RP  trend-log,0 log-buffer -> ERROR class=property code=read-access-denied
+ReadRange trend-log,0 log-buffer no range, requester accepts 480 -> ReadRangeACK
+    itemCount=66 flags=[1, 0, 1]
+ReadRange trend-log,1 log-buffer no range, requester accepts 480 -> ReadRangeACK
+    itemCount=76 flags=[1, 0, 1]
+ReadRange trend-log,0 log-buffer no range, requester accepts 1024 -> ReadRangeACK
+    itemCount=66 flags=[1, 0, 1]
+ReadRange trend-log,1 log-buffer no range, requester accepts 1024 -> ReadRangeACK
+    itemCount=76 flags=[1, 0, 1]
 ## Vendor properties
 RP-RAW analog-input,0 9997 -> 3e 4442b5051f 3f
 RP-RAW analog-input,0 9998 -> 3e 215a 3f
 RP-RAW analog-input,0 9999 -> 3e 32ff38 3f
 RP-RAW analog-output,2 9997 -> ERROR class=property code=unknown-property
 ## Unsupported services
+ConfirmedCOVNotification -> REJECT reason=unrecognized-service
 ReinitializeDevice -> REJECT reason=unrecognized-service
 SubscribeCOV -> REJECT reason=unrecognized-service
 ## DeviceCommunicationControl
@@ -496,7 +821,104 @@ DCC disable duration=1 pw=filister -> ACK
 RP  analog-input,0 present-value -> TIMEOUT
 RP  analog-input,0 present-value -> TIMEOUT
 DCC enable duration=None pw=filister -> ACK
+## Out_Of_Service, priority 6 and other writes (135-2016bl 12.x.10, 15.9.1.3.1; stock's answers are the reference where the spec is silent)
+WP  analog-input,0 present-value=77.0 prio=None -> ERROR class=property code=write-access-denied
+WP  analog-input,0 out-of-service=1 prio=None -> ACK
+RP  analog-input,0 out-of-service -> 1
+WP  analog-input,0 present-value=77.0 prio=None -> ACK
+RP  analog-input,0 present-value -> 77.0000
+RP  analog-input,0 present-value -> 250.5000
+WP  analog-input,0 out-of-service=0 prio=None -> ACK
+WP  binary-input,0 present-value=inactive prio=None -> ACK
+WP  binary-input,0 out-of-service=1 prio=None -> ACK
+RP  binary-input,0 out-of-service -> 1
+WP  binary-input,0 present-value=inactive prio=None -> ACK
+RP  binary-input,0 present-value -> inactive
+RP  binary-input,0 present-value -> active
+WP  binary-input,0 out-of-service=0 prio=None -> ACK
+WP  analog-input,1 out-of-service=1 prio=None -> ACK
+WP  analog-input,1 out-of-service=0 prio=None -> ACK
+WP  binary-input,1 out-of-service=1 prio=None -> ACK
+WP  binary-input,1 out-of-service=0 prio=None -> ACK
+WP  multi-state-input,0 out-of-service=1 prio=None -> ACK
+RP  multi-state-input,0 out-of-service -> 1
+WP  multi-state-input,0 out-of-service=0 prio=None -> ACK
+WP  analog-value,0 out-of-service=1 prio=None -> ACK
+RP  analog-value,0 out-of-service -> 1
+WP  analog-value,0 out-of-service=0 prio=None -> ACK
+WP  binary-value,0 out-of-service=1 prio=None -> ACK
+RP  binary-value,0 out-of-service -> 1
+WP  binary-value,0 out-of-service=0 prio=None -> ACK
+WP  multi-state-input,0 present-value=3 prio=None -> ACK
+WP  analog-input,0 units=95 prio=None -> ACK
+WP  analog-input,0 cov-increment=2.0 prio=None -> ACK
+WP  binary-input,0 polarity=1 prio=None -> ACK
+-- priority 6, relinquish-default, out-of-service, polarity on the commandable objects:
+WP  binary-output,3 present-value=active prio=6 -> ERROR class=property code=write-access-denied
+RP  binary-output,3 priority-array -> [active, -, -, -, -, -, -, -, -, -, -, -, -, -, -, active]
+WP  binary-output,3 present-value=active prio=7 -> ACK
+WP  binary-output,3 present-value=() prio=7 -> ACK
+WP  binary-output,3 present-value=active prio=0 -> ABORT reason=other
+WP  binary-output,3 present-value=active prio=17 -> ABORT reason=other
+WP  analog-output,3 present-value=7.0 prio=6 -> ERROR class=property code=write-access-denied
+RP  analog-output,3 priority-array -> [-, -, -, -, -, -, -, -, -, -, -, 112.0, -, -, -, 44.0]
+WP  analog-output,3 present-value=7.0 prio=7 -> ACK
+WP  analog-output,3 present-value=() prio=7 -> ACK
+WP  analog-output,3 present-value=7.0 prio=0 -> ABORT reason=other
+WP  analog-output,3 present-value=7.0 prio=17 -> ABORT reason=other
+WP  binary-value,0 present-value=active prio=6 -> ERROR class=property code=write-access-denied
+RP  binary-value,0 priority-array -> [-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, active]
+WP  binary-value,0 present-value=active prio=7 -> ACK
+WP  binary-value,0 present-value=() prio=7 -> ACK
+WP  binary-value,0 present-value=active prio=0 -> ABORT reason=other
+WP  binary-value,0 present-value=active prio=17 -> ABORT reason=other
+WP  multi-state-output,0 present-value=2 prio=6 -> ERROR class=property code=write-access-denied
+RP  multi-state-output,0 priority-array -> [-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -]
+WP  multi-state-output,0 present-value=2 prio=7 -> ACK
+WP  multi-state-output,0 present-value=() prio=7 -> ACK
+WP  multi-state-output,0 present-value=2 prio=0 -> ABORT reason=other
+WP  multi-state-output,0 present-value=2 prio=17 -> ABORT reason=other
+WP  analog-output,3 relinquish-default=3.0 prio=None -> ERROR class=property code=write-access-denied
+RP  analog-output,3 relinquish-default -> 0.0000
+WP  binary-output,3 relinquish-default=active prio=None -> ERROR class=property code=write-access-denied
+RP  binary-output,3 relinquish-default -> inactive
+WP  binary-value,0 relinquish-default=active prio=None -> ERROR class=property code=write-access-denied
+RP  binary-value,0 relinquish-default -> inactive
+WP  multi-state-output,0 relinquish-default=2 prio=None -> ERROR class=property code=write-access-denied
+RP  multi-state-output,0 relinquish-default -> 1
+WP  analog-output,3 out-of-service=1 prio=None -> ACK
+RP  analog-output,3 out-of-service -> 1
+WP  analog-output,3 present-value=9.0 prio=9 -> ACK
+RP  analog-output,3 present-value -> 9.0000
+WP  analog-output,3 out-of-service=0 prio=None -> ACK
+WP  binary-output,3 out-of-service=1 prio=None -> ACK
+RP  binary-output,3 out-of-service -> 1
+WP  binary-output,3 present-value=active prio=9 -> ACK
+RP  binary-output,3 present-value -> active
+WP  binary-output,3 out-of-service=0 prio=None -> ACK
+WP  binary-output,3 polarity=1 prio=None -> ERROR class=property code=write-access-denied
+RP  binary-output,3 polarity -> normal
+WP  binary-output,3 polarity=0 prio=None -> ERROR class=property code=write-access-denied
+WP  analog-output,3 units=95 prio=None -> ERROR class=property code=write-access-denied
+WP  analog-output,3 present-value=() prio=9 -> ACK
+WP  binary-output,3 present-value=() prio=9 -> ACK
+WP  analog-output,3 relinquish-default=0.0 prio=None -> ERROR class=property code=write-access-denied
+WP  binary-output,3 relinquish-default=inactive prio=None -> ERROR class=property code=write-access-denied
+RP  analog-input,0 present-value -> 250.5000
+RP  binary-input,0 present-value -> active
+RP  analog-output,3 present-value -> 112.0000
+RP  binary-output,3 present-value -> active
 ## done
 ## provider
 WRITE=generator-1_bus-1.active:true,load-1_bus-1.active:true,bus-1.gen_mw:9.500000,load-1_bus-1.mw:42.500000
-WRITE=load-1_bus-1.active:true,load-1_bus-1.active:true,bus-1.gen_mw:1.000000,load-1_bus-1.mw:1.000000
+WRITE=load-1_bus-1.active:true,load-1_bus-1.active:true,load-1_bus-1.mw:1.000000
+WRITE=bus-1.gen_mw:70000.000000
+WRITE=bus-1.gen_mw:1.000000
+WRITE=load-1_bus-1.mw:77.000000
+WRITE=load-1_bus-1.active:false
+WRITE=load-1_bus-1.active:false
+WRITE=generator-1_bus-1.active:true
+WRITE=bus-1.gen_mw:7.000000
+WRITE=bus-1.gen_mw:7.000000
+WRITE=bus-1.gen_mw:9.000000
+WRITE=generator-1_bus-1.active:true
