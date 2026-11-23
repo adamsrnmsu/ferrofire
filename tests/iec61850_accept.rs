@@ -3,6 +3,7 @@
 #![cfg(feature = "proto-iec61850")]
 
 mod common;
+use common::ports::free_port;
 
 use ferrofire::fd::proto::iec61850::Server;
 use ferrofire::fd::proto::Module;
@@ -20,11 +21,7 @@ fn set_limit(n: u64) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_listener_survives_running_out_of_descriptors() {
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
+    let port = free_port();
     let log = std::env::temp_dir()
         .join(format!("iec61850-accept-{port}.log"))
         .display()

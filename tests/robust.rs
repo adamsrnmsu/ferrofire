@@ -1,8 +1,12 @@
 //! Nothing falls over: hostile requests, a panicking handler, lost replies, failing UDP sends, garbage datagrams.
+
+#[path = "common/ports.rs"]
+mod ports;
 use ferrofire::bennu::{frame, group_for, handle, Meta, Shared};
 use ferrofire::datagram::{Receiver, Reject};
 use ferrofire::model::Model;
 use ferrofire::transport::{self, Publisher};
+use ports::free_port;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -18,14 +22,6 @@ fn setup() -> (Meta, Mutex<Shared>) {
         queue: vec![],
     };
     (Meta::of(&m), Mutex::new(sh))
-}
-
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
 }
 
 /// xorshift64*: a seeded generator, so a failure repeats.

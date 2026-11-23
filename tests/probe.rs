@@ -1,7 +1,11 @@
 //! `ferrofire probe`: reply parsing, write requests, the audit line, the watcher on hand-made datagrams, and the real
 //! binary against a running `ferrofire run` (query, read, write, watch).
+
+#[path = "common/ports.rs"]
+mod ports;
 use ferrofire::bennu::{datagrams_msg, group_for};
 use ferrofire::probe::*;
+use ports::free_port;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 
@@ -153,14 +157,6 @@ fn a_zero_gap_or_a_burst_does_not_turn_the_tags_stale() {
     );
     let rows = w.tick(t0 + ms(7100)); // 4.1 periods late: age 3, stale
     assert_eq!(rows[0].live.map(|l| l.1), Some(true));
-}
-
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
 }
 
 struct Server(Child);

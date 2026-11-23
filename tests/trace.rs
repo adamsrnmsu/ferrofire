@@ -1,5 +1,9 @@
 //! Process logging: the default line shape, and level / destination changes while running.
+
+#[path = "common/ports.rs"]
+mod ports;
 use ferrofire::trace;
+use ports::free_port;
 use tracing::level_filters::LevelFilter;
 
 #[test]
@@ -38,11 +42,7 @@ fn level_and_output_change_at_run_time() {
 fn run_logs_a_refused_write_on_stderr() {
     use std::io::Read;
     use std::process::{Command, Stdio};
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
+    let port = free_port();
     let ep = format!("tcp://127.0.0.1:{port}");
     let model = concat!(env!("CARGO_MANIFEST_DIR"), "/models/waterway.yaml");
     let mut p = Command::new(env!("CARGO_BIN_EXE_ferrofire"))

@@ -1,4 +1,8 @@
 //! `ferrofire log` against a real `ferrofire run`: toggle, idempotency, the printed destination and discovery.
+
+#[path = "common/ports.rs"]
+mod ports;
+use ports::free_port;
 use std::io::{BufRead, BufReader, Read};
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Child, Command, Output, Stdio};
@@ -14,11 +18,7 @@ struct Run {
 }
 
 fn spawn(tag: &str) -> Run {
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
+    let port = free_port();
     let server = format!("tcp://127.0.0.1:{port}");
     let dir = std::env::temp_dir().join(format!("ff-logit-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

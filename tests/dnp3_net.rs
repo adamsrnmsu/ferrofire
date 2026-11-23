@@ -2,6 +2,7 @@
 //! error handling (the bennu #79 / #81 shapes: closed sockets must really close, a failed accept must be retried).
 
 mod common;
+use common::ports::free_port;
 
 use ferrofire::fd::proto::dnp3::link::{self, Parse};
 use ferrofire::fd::proto::dnp3::transport::{self, Reassembler};
@@ -12,14 +13,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
-
-pub fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
 
 pub fn config(port: u16, log: &str) -> String {
     format!(

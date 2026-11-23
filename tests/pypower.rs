@@ -1,9 +1,13 @@
 //! pybennu-power-solver drop-in (spec 5(b), 6.5): request/reply forms, noise rules, and the daemon verbs end to end.
 //! Uses target/golden/case9.py (from `make golden`); the daemon test writes /var/run + /var/log, so run it in the container.
+
+#[path = "common/ports.rs"]
+mod ports;
 use ferrofire::bennu::{group_for, unframe};
 use ferrofire::model::Kind;
 use ferrofire::power::{case, Islands, Power};
 use ferrofire::pypower::*;
+use ports::free_port;
 use std::process::Command;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -158,14 +162,6 @@ fn published_message_has_pybennu_noise() {
         }
     }
     assert!(moved > 500);
-}
-
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
 }
 
 fn run(bin: &std::path::Path, args: &[&str]) -> String {

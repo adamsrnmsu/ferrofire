@@ -4,6 +4,7 @@
 #![cfg(feature = "external")]
 
 mod common;
+use common::ports::free_port;
 
 use common::clients::device;
 use ferrofire::model::Value;
@@ -43,14 +44,6 @@ impl Drop for Dir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
-}
-
-fn free_tcp() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
 }
 
 /// A provider REP that ACKs everything and reports each request, until `stop`.
@@ -155,7 +148,7 @@ fn stop_time(mut dev: common::clients::Device) -> Duration {
 
 #[test]
 fn stdio_module_round_trip() {
-    let (dir, port, stop) = (Dir::new("round"), free_tcp(), CancellationToken::new());
+    let (dir, port, stop) = (Dir::new("round"), free_port(), CancellationToken::new());
     let reqs = provider(port, stop.clone());
     let cmd = format!("{} {}", dir.script("m.sh", WRITER), dir.path("pid"));
     let dev = device(&xml(port, 20, "tick", &module("m", &cmd)));
@@ -174,7 +167,7 @@ fn stdio_module_round_trip() {
 /// a loop, and the device's other module keeps working.
 #[test]
 fn a_crashing_module_backs_off() {
-    let (dir, port, stop) = (Dir::new("crash"), free_tcp(), CancellationToken::new());
+    let (dir, port, stop) = (Dir::new("crash"), free_port(), CancellationToken::new());
     let reqs = provider(port, stop.clone());
     // its write comes once the others have crashed and been restarted
     let good = format!("{} {} 2.5", dir.script("m.sh", WRITER), dir.path("pid"));
@@ -209,7 +202,7 @@ fn a_module_that_was_ready_restarts_after_the_first_pause() {
     let dir = Dir::new("ready-exit");
     let body = "echo start >> \"$1\"\nread hello\necho '{\"t\":\"ready\",\"role\":\"server\",\"uses\":[]}'\n";
     let cmd = format!("{} {}", dir.script("m.sh", body), dir.path("starts"));
-    let dev = device(&xml(free_tcp(), 20, "tick", &module("brief", &cmd)));
+    let dev = device(&xml(free_port(), 20, "tick", &module("brief", &cmd)));
     std::thread::sleep(Duration::from_millis(4500));
     let starts = std::fs::read_to_string(dir.path("starts"))
         .unwrap_or_default()
@@ -225,7 +218,7 @@ fn stop_escalates_to_sigkill() {
     let dir = Dir::new("kill");
     let body = "echo $$ > \"$1\"\ntrap \"\" TERM\nread x\nsleep 60\n";
     let cmd = format!("{} {}", dir.script("m.sh", body), dir.path("pid"));
-    let dev = device(&xml(free_tcp(), 20, "tick", &module("stubborn", &cmd)));
+    let dev = device(&xml(free_port(), 20, "tick", &module("stubborn", &cmd)));
     let pid = pid_in(&dir.path("pid"));
     std::thread::sleep(Duration::from_millis(300)); // past `trap`
     let took = stop_time(dev);
@@ -246,7 +239,7 @@ fn a_module_that_never_reads_does_not_block_stop() {
         "echo $$ > \"$1\"\necho '{\"t\":\"ready\",\"role\":\"server\",\"uses\":[]}'\nsleep 60\n";
     let cmd = format!("{} {}", dir.script("m.sh", body), dir.path("pid"));
     let tick = "t".repeat(2000);
-    let dev = device(&xml(free_tcp(), 5, &tick, &module("deaf", &cmd)));
+    let dev = device(&xml(free_port(), 5, &tick, &module("deaf", &cmd)));
     let pid = pid_in(&dir.path("pid"));
     let t = Instant::now();
     let mut n = 0.0;
@@ -331,7 +324,7 @@ fn strict_error_exits_nonzero() {
     let body = "read x\necho '{\"t\":\"error\",\"msg\":\"no rpoll-rate\"}'\ncat > /dev/null\n";
     let cfg = dir.path("fd.xml");
     let mods = module("picky", &dir.script("m.sh", body));
-    std::fs::write(&cfg, xml(free_tcp(), 20, "tick", &mods)).unwrap();
+    std::fs::write(&cfg, xml(free_port(), 20, "tick", &mods)).unwrap();
 
     let (ok, log) = exited(&mut binary(&cfg, &["--strict"]), 15);
     assert!(!ok, "{log}");
@@ -362,7 +355,7 @@ fn docs_example() -> &'static str {
 #[test]
 fn the_docs_example_runs_from_a_manifest() {
     use std::os::unix::fs::PermissionsExt;
-    let (dir, port, stop) = (Dir::new("docs"), free_tcp(), CancellationToken::new());
+    let (dir, port, stop) = (Dir::new("docs"), free_port(), CancellationToken::new());
     let reqs = provider(port, stop.clone());
     let home = dir.0.join("echo");
     std::fs::create_dir_all(&home).unwrap();

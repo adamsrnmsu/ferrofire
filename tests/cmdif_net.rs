@@ -1,6 +1,10 @@
 //! The command interface over a real ZMTP socket: a REQ client (what bennu-probe is) gets one NUL-terminated reply per request,
 //! a request is read up to its NUL, and the socket stops with the device.
 
+#[path = "common/ports.rs"]
+mod ports;
+use ports::free_port;
+
 use ferrofire::fd::cmdif::{serve, Points};
 use ferrofire::model::Value;
 use std::time::Duration;
@@ -20,11 +24,6 @@ impl Points for One {
     async fn write(&self, _tag: &str, _v: Value) -> Result<(), String> {
         Ok(())
     }
-}
-
-fn free_port() -> u16 {
-    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    l.local_addr().unwrap().port()
 }
 
 async fn ask(req: &mut zeromq::ReqSocket, text: &[u8]) -> Vec<u8> {

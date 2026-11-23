@@ -5,6 +5,7 @@ pub mod clients;
 #[cfg(feature = "elastic")]
 pub mod es;
 pub mod modbus;
+pub mod ports;
 pub mod scpi;
 
 use ferrofire::fd::config::{Opts, Tags};
