@@ -5,27 +5,29 @@ goes to stderr.
 Transport as stock (bacnet-stack dlenv): interface BACNET_IFACE (eth0), port BACNET_IP_PORT (47808), BACNET_BBMD_ADDRESS/_PORT/
 _TIMETOLIVE register as a foreign device; the <endpoint> ip and port are parsed and discarded, as stock does.
 """
-import asyncio, fcntl, ipaddress, itertools, json, logging, os, socket, struct, sys, threading
+import asyncio, datetime, fcntl, ipaddress, itertools, json, logging, os, socket, struct, sys, threading
 import xml.etree.ElementTree as ET
 
 from bacpypes3.argparse import SimpleArgumentParser
 from bacpypes3.app import Application
 from bacpypes3.basetypes import PropertyIdentifier, BinaryPV, PriorityValue
-from bacpypes3.apdu import AbortPDU, ErrorRejectAbortNack, ReadPropertyACK, ReadRangeACK, SimpleAckPDU, WritePropertyMultipleError
-from bacpypes3.errors import AbortOther, ExecutionError, PropertyError
-from bacpypes3.pdu import Address
+from bacpypes3.apdu import decode_max_apdu_length_accepted, AbortPDU, ErrorRejectAbortNack, ReadPropertyACK, ReadRangeACK, SimpleAckPDU, WritePropertyMultipleError
+from bacpypes3.errors import ExecutionError, PropertyError
+from bacpypes3.pdu import Address, LocalBroadcast
 from bacpypes3.service.device import DeviceCommunicationControlServices
 from bacpypes3.local.analog import AnalogInputObject, AnalogOutputObject, AnalogValueObject
-from bacpypes3.local.binary import BinaryInputObject, BinaryOutputObject, BinaryValueObject
+from bacpypes3.local.binary import BinaryInputObject, BinaryOutputObject, BinaryValueObjectCmd
+from bacpypes3.local.multistate import MultiStateOutputObject
 from bacpypes3.local.object import Object as LocalObject
 from bacpypes3.object import (CharacterStringValueObject, CommandObject, IntegerValueObject, LifeSafetyPointObject,
-                              LoadControlObject, MultiStateInputObject, MultiStateOutputObject, MultiStateValueObject,
+                              LoadControlObject, MultiStateInputObject, MultiStateValueObject,
                               TrendLogObject, LightingOutputObject, ChannelObject, OctetStringValueObject,
                               PositiveIntegerValueObject, ScheduleObject)
 import bacpypes3.service.object as svc_object
-from bacpypes3.basetypes import ErrorType, ResultFlags, ObjectPropertyReference, PropertyReference
-from bacpypes3.constructeddata import Any
-from bacpypes3.primitivedata import BitString, Integer, Null, ObjectIdentifier, Real, Unsigned
+from bacpypes3.basetypes import LogRecord, LogRecordLogDatum, StatusFlags, DailySchedule, DateRange, DeviceObjectPropertyReference, ErrorType, ResultFlags, ObjectPropertyReference, PropertyReference
+from bacpypes3.constructeddata import Any, ArrayOf, SequenceOf
+from bacpypes3.basetypes import DateTime
+from bacpypes3.primitivedata import BitString, Date, Integer, Null, ObjectIdentifier, Real, Unsigned
 
 FFMOD = sys.stdout
 sys.stdout = sys.stderr                          # a stray print from a library must not land in the ffmod/1 stream
@@ -118,9 +120,23 @@ BINARY, ANALOG = {}, {}                         # stock's point maps: instance -
 COMMON = ["objectIdentifier", "objectName", "objectType", "presentValue", "statusFlags", "eventState", "outOfService"]
 STOCK_ALL = {
     "analog-input": COMMON + ["units", "description", "reliability", "covIncrement", 9997, 9998, 9999],
-    "analog-output": COMMON + ["units", "priorityArray", "relinquishDefault"],
+    "analog-output": COMMON + ["units", "priorityArray", "relinquishDefault", "currentCommandPriority"],
     "binary-input": COMMON + ["polarity", "description"],
-    "binary-output": COMMON + ["polarity", "priorityArray", "relinquishDefault", "description", "activeText", "inactiveText"],
+    "binary-output": COMMON + ["polarity", "priorityArray", "relinquishDefault", "description", "activeText", "inactiveText", "currentCommandPriority"],
+    # the types stock serves in other orders (golden: RPM-ALL blocks); Current_Command_Priority is ours: 135-2012as, required on a
+    # commandable object. Log_Buffer is listed but RP gives read-access-denied (135-2010ad); ReadRange serves it.
+    "analog-value": COMMON + ["units", "description"],
+    "binary-value": COMMON + ["description", "priorityArray", "relinquishDefault", "currentCommandPriority"],
+    "multi-state-input": COMMON + ["numberOfStates", "description", "stateText"],
+    "multi-state-output": COMMON + ["numberOfStates", "priorityArray", "relinquishDefault", "description", "currentCommandPriority"],
+    "multi-state-value": COMMON + ["numberOfStates", "description", "stateText"],
+    "positive-integer-value": ["objectIdentifier", "objectName", "objectType", "presentValue", "statusFlags", "units", "outOfService"],
+    "characterstring-value": COMMON + ["description"],
+    "schedule": ["objectIdentifier", "objectName", "objectType", "presentValue", "effectivePeriod", "scheduleDefault",
+                 "listOfObjectPropertyReferences", "priorityForWriting", "statusFlags", "reliability", "outOfService", "weeklySchedule"],
+    "trend-log": ["objectIdentifier", "objectName", "objectType", "enable", "stopWhenFull", "bufferSize", "logBuffer", "recordCount", "totalRecordCount",
+                  "eventState", "loggingType", "statusFlags", "description", "startTime", "stopTime", "logDeviceObjectProperty",
+                  "logInterval", "alignIntervals", "intervalOffset", "trigger"],
 }
 VENDOR_AI = {9997: lambda: Real(90.51), 9998: lambda: Unsigned(90), 9999: lambda: Integer(-200)}   # constants, tags 44/21/32 in the golden
 HIDDEN_DEVICE = {"apduSegmentTimeout", "statusFlags", "maxSegmentsAccepted"}   # bacpypes3 serves them, stock answers unknown-property
@@ -133,6 +149,8 @@ _read_property_to_any = svc_object.read_property_to_any
 
 async def read_property_to_any(obj, propertyIdentifier, propertyArrayIndex=None):
     name = getattr(propertyIdentifier, "attr", None) or str(propertyIdentifier)
+    if str(obj.objectIdentifier[0]) == "trend-log" and name == "logBuffer":
+        raise PropertyError("readAccessDenied")          # 135-2010ad / 135-2016bu 12.25: a Log_Buffer is read by ReadRange only
     if str(obj.objectIdentifier[0]) == "device" and name in HIDDEN_DEVICE:
         raise PropertyError("unknownProperty")
     if str(obj.objectIdentifier[0]) == "device" and name in BITSTRINGS:
@@ -143,6 +161,18 @@ async def read_property_to_any(obj, propertyIdentifier, propertyArrayIndex=None)
 
 
 svc_object.read_property_to_any = read_property_to_any      # RPM looks the function up in its module at call time
+
+
+def stock_property_list(self, _orig=LocalObject.propertyList):
+    """Property_List (135-2010ao): the properties the object serves, without Object_Identifier, Object_Name, Object_Type and Property_List
+    (15.7.3.1.2 keeps them out), and without the device properties stock answers unknown-property for. Order: RPM all's, as stock's."""
+    t = str(self.objectIdentifier[0])
+    names = STOCK_ALL.get(t) or [pname(p) for p in _orig.fget(self)]
+    skip = {"objectIdentifier", "objectName", "objectType", "propertyList"} | (HIDDEN_DEVICE if t == "device" else set())
+    return ArrayOf(PropertyIdentifier)([PropertyIdentifier(n) for n in names if n not in skip])
+
+
+LocalObject.propertyList = property(stock_property_list, LocalObject.propertyList.fset)
 
 
 def pname(attr):                                # attr arrives as str or PropertyIdentifier
@@ -175,37 +205,75 @@ def network_write(points, obj, value):
         write(hit[0], value)
 
 
+def check_priority(priority):
+    """15.9.1.3.1 (135-2008r-4): a Priority outside 1..16 is SERVICES/PARAMETER_OUT_OF_RANGE (stock Aborts). Priority 6 is refused as
+    stock does on every commandable type (the minimum on/off priority); stock's AO enqueues the value to the provider first, ours does not."""
+    if priority is not None and not 1 <= priority <= 16:
+        raise ExecutionError(errorClass="services", errorCode="parameterOutOfRange")
+    if priority == 6:
+        raise PropertyError("writeAccessDenied")
+
+
+class Commanded:
+    """Mixin for a commandable BV or MSO: stock refuses Relinquish_Default and the priority rules apply to Present_Value."""
+    async def write_property(self, attr, value, index=None, priority=None):
+        if pname(attr) == "relinquishDefault":
+            raise PropertyError("writeAccessDenied")
+        if is_pv(attr):
+            check_priority(priority)
+        await super().write_property(attr, value, index, priority)
+
+
+async def input_write(obj, attr, value, index, priority, writable, send):
+    """An input object: `writable` properties as stock; Present_Value only while Out_Of_Service is TRUE (135-2012aw Table 12-2,
+    135-2016bl 12.x.10): it is stored, as stock reads it back, and `send` enqueues it as stock does."""
+    if pname(attr) in writable:
+        await super(type(obj), obj).write_property(attr, value, index, priority)
+    elif not is_pv(attr):
+        raise unwritable(obj, attr)
+    elif not obj.outOfService:
+        raise PropertyError("writeAccessDenied")
+    else:
+        obj.presentValue = value
+        send(value)
+
+
 class StockBI(BinaryInputObject):
     async def write_property(self, attr, value, index=None, priority=None):
-        if not is_pv(attr):
-            raise unwritable(self, attr)
-        network_write(BINARY, self, str(value) == "active")   # bi.c ACKs and enqueues the tag; the 1 Hz refresh resets the value
+        await input_write(self, attr, value, index, priority, ("outOfService", "polarity"),
+                          lambda v: network_write(BINARY, self, str(v) == "active"))     # bi.c ACKs and enqueues the tag
 
 
 class StockAI(AnalogInputObject):
     async def write_property(self, attr, value, index=None, priority=None):
-        raise unwritable(self, attr)
+        await input_write(self, attr, value, index, priority, ("outOfService", "units", "covIncrement"),
+                          lambda v: network_write(ANALOG, self, float(v)))
 
 
 class StockBO(BinaryOutputObject):
     async def write_property(self, attr, value, index=None, priority=None):
+        if pname(attr) == "outOfService":
+            await super().write_property(attr, value, index, priority)
+            return
         if not is_pv(attr):
             raise unwritable(self, attr)
-        if priority is not None and not 1 <= priority <= 16:
-            raise AbortOther()
+        check_priority(priority)
         await super().write_property(attr, value, index, priority)
-        if not isinstance(value, Null):
+        if not isinstance(value, Null) and not self.outOfService:      # out of service: decoupled from the output (135-2016bl)
             network_write(BINARY, self, str(value) == "active")
 
 
 class StockAO(AnalogOutputObject):
     async def write_property(self, attr, value, index=None, priority=None):
+        if pname(attr) == "outOfService":
+            await super().write_property(attr, value, index, priority)
+            return
         if not is_pv(attr):
             raise unwritable(self, attr)
-        if priority is not None and not 1 <= priority <= 16:
-            raise AbortOther()
+        check_priority(priority)
         if hasattr(value, "real") or isinstance(value, float):
-            network_write(ANALOG, self, float(value))        # ao.c enqueues the value as written, before its range check
+            if not self.outOfService:                        # out of service: decoupled from the output (135-2016bl)
+                network_write(ANALOG, self, float(value))    # ao.c enqueues the value as written, before its range check
             value = stock_ao_value(float(value))
             value = Null(()) if value is None else value
         await super().write_property(attr, value, index, priority)
@@ -220,6 +288,29 @@ def sink(base):
     return type("Stock" + base.__name__, (LocalObject, base), quiet)
 
 
+def commanded(base):
+    return type("Commanded" + base.__name__, (Commanded, sink(base)), {})
+
+
+class StockMSI(sink(MultiStateInputObject)):
+    async def write_property(self, attr, value, index=None, priority=None):
+        if is_pv(attr) and not self.outOfService:
+            raise PropertyError("writeAccessDenied")         # 135-2016bl 12.18.10, as an AI's
+        await super().write_property(attr, value, index, priority)
+
+
+# Trend Log and Schedule property values as stock serves them (golden: RPM-ALL trend-log,0 and schedule,0).
+TREND_LOG = {"description": "Trend Log {}", "enable": True, "stopWhenFull": False, "bufferSize": 1000, "recordCount": 1000,
+             "totalRecordCount": 10000, "eventState": "normal", "loggingType": "polled", "logInterval": 90000, "alignIntervals": True,
+             "intervalOffset": 0, "trigger": False,
+             "startTime": DateTime(date=(109, 1, 1, 4), time=(0, 0, 0, 0)), "stopTime": DateTime(date=(120, 12, 22, 2), time=(23, 59, 59, 99)),
+             "logDeviceObjectProperty": DeviceObjectPropertyReference(objectIdentifier=("analog-input", 0), propertyIdentifier="present-value",
+                                                                       deviceIdentifier=("device", 1234))}
+SCHEDULE = {"presentValue": Real(21.0), "scheduleDefault": Real(21.0), "reliability": "no-fault-detected", "outOfService": False,
+            "effectivePeriod": DateRange(startDate=Date((255, 1, 1, 255)), endDate=Date((255, 12, 31, 255))),
+            "listOfObjectPropertyReferences": [], "priorityForWriting": 16, "weeklySchedule": [DailySchedule(daySchedule=[]) for _ in range(7)]}
+
+
 def build_objects():
     """The stock object set, in stock's object-list order (device and network-port come from from_args)."""
     N = {"outOfService": False, "eventState": "normal"}
@@ -230,8 +321,9 @@ def build_objects():
     for i in range(1000):
         objs.append(StockAO(objectIdentifier=("analog-output", i), objectName=f"ANALOG OUTPUT {i}", presentValue=0.0,
                             units="percent", relinquishDefault=0.0, **N))
-    for i in range(4):
-        objs.append(sink(AnalogValueObject)(objectIdentifier=("analog-value", i), objectName=f"ANALOG VALUE {i}", presentValue=0.0, **N))
+    for i in range(4):     # units no-units; stock's COV_Increment is left out: this device offers no COV (135-2012aw, Table 12-4)
+        objs.append(sink(AnalogValueObject)(objectIdentifier=("analog-value", i), objectName=f"ANALOG VALUE {i}", description=f"ANALOG VALUE {i}",
+                                            presentValue=0.0, units="no-units", **N))
     for i in range(1000):
         objs.append(StockBI(objectIdentifier=("binary-input", i), objectName=f"BINARY INPUT {i}", description=f"BINARY INPUT {i}",
                             polarity="normal", **N))
@@ -240,29 +332,39 @@ def build_objects():
                     activeText="on", inactiveText="off", relinquishDefault="inactive", polarity="normal", **N)
         o.recalculating()                         # present value from an empty array: the relinquish default
         objs.append(o)
-    for i in range(10):
-        objs.append(sink(BinaryValueObject)(objectIdentifier=("binary-value", i), objectName=f"BINARY VALUE {i}",
-                                            presentValue="inactive", **N))
-    # the rest of stock's list: instance ranges as the golden shows them
-    for cls, name, rng, pv in [(CharacterStringValueObject, "characterstring-value", range(0, 1), ""),
-                               (CommandObject, "command", range(0, 4), None),
-                               (IntegerValueObject, "integer-value", range(1, 2), 0),
-                               (LifeSafetyPointObject, "life-safety-point", range(0, 7), None),
-                               (LoadControlObject, "load-control", range(0, 4), None),
-                               (MultiStateInputObject, "multi-state-input", range(0, 4), 1),
-                               (MultiStateOutputObject, "multi-state-output", range(0, 4), 1),
-                               (MultiStateValueObject, "multi-state-value", range(0, 4), 1),
-                               (TrendLogObject, "trend-log", range(0, 8), None),
-                               (LightingOutputObject, "lighting-output", range(1, 9), None),
-                               (ChannelObject, "channel", range(1, 2), None),
-                               (OctetStringValueObject, "octetstring-value", range(0, 4), b""),
-                               (PositiveIntegerValueObject, "positive-integer-value", range(0, 4), 0),
-                               (ScheduleObject, "schedule", range(0, 4), None)]:
+    for i in range(10):                           # stock's BV is commandable (priority-array, relinquish-default)
+        o = commanded(BinaryValueObjectCmd)(objectIdentifier=("binary-value", i), objectName=f"BINARY VALUE {i}", description=f"BINARY VALUE {i}",
+                                       relinquishDefault="inactive", **N)
+        o.recalculating()
+        objs.append(o)
+    states = {"numberOfStates": 254, "stateText": [""] * 254}
+    # the rest of stock's list: instance ranges, names and property values as the golden's sweep shows them
+    for cls, name, label, rng, kw in [
+            (CharacterStringValueObject, "characterstring-value", "CHARACTER STRING VALUE 1", range(0, 1),
+             {"presentValue": "", "description": "A Character String Value Example", **N}),
+            (CommandObject, "command", "COMMAND {}", range(0, 4), {}),
+            (IntegerValueObject, "integer-value", "INTEGER VALUE {}", range(1, 2), {"presentValue": 0}),
+            (LifeSafetyPointObject, "life-safety-point", "LS POINT {}", range(0, 7), {}),
+            (LoadControlObject, "load-control", "LOAD CONTROL {}", range(0, 4), {}),
+            (StockMSI, "multi-state-input", "MULTISTATE INPUT {}", range(0, 4),
+             {"presentValue": 1, "description": "MULTISTATE INPUT {}", **states, **N}),
+            (commanded(MultiStateOutputObject), "multi-state-output", "MULTISTATE OUTPUT {}", range(0, 4),
+             {"description": "MULTISTATE OUTPUT {}", "numberOfStates": 254, "relinquishDefault": 1, **N}),
+            (MultiStateValueObject, "multi-state-value", "MULTISTATE VALUE {}", range(0, 4),
+             {"presentValue": 1, "description": "MULTISTATE VALUE {}", **states, **N}),
+            (TrendLogObject, "trend-log", "Trend Log {}", range(0, 8), TREND_LOG),
+            (LightingOutputObject, "lighting-output", "LIGHTING OUTPUT {}", range(1, 9), {}),
+            (ChannelObject, "channel", "CHANNEL {}", range(1, 2), {}),
+            (OctetStringValueObject, "octetstring-value", "OCTETSTRING VALUE {}", range(0, 4), {"presentValue": b""}),
+            (PositiveIntegerValueObject, "positive-integer-value", "POSITIVEINTEGER VALUE {}", range(0, 4),
+             {"presentValue": 0, "units": "square-meters", "outOfService": False}),
+            (ScheduleObject, "schedule", "SCHEDULE {}", range(0, 4), SCHEDULE)]:
         for i in rng:
-            kw = {} if pv is None else {"presentValue": pv}
-            if cls in (MultiStateInputObject, MultiStateOutputObject, MultiStateValueObject):
-                kw["numberOfStates"] = 3
-            objs.append(sink(cls)(objectIdentifier=(name, i), objectName=f"{name.upper()} {i}", **kw))
+            o = sink(cls)(objectIdentifier=(name, i), objectName=label.format(i),
+                          **{k: v.format(i) if isinstance(v, str) else v for k, v in kw.items()})
+            if "multi-state-output" == name:
+                o.recalculating()
+            objs.append(o)
     return objs
 
 
@@ -275,7 +377,7 @@ def refresh_once(app):
             if v is None:
                 continue
             obj = app.get_object_id(ObjectIdentifier((outp if out else inp, inst)))
-            if obj is None:                       # an instance of 1000 or more: stock has no such object either
+            if obj is None or obj.outOfService:   # an instance of 1000 or more: stock has no such object either; out of service: decoupled from the feed (135-2016bl 12.x.10)
                 continue
             if points is BINARY:
                 pv = BinaryPV('active' if v else 'inactive')
@@ -294,6 +396,59 @@ async def refresher(app):
     while True:
         refresh_once(app)
         await asyncio.sleep(1.0)
+
+
+# Trend Log Log_Buffer: no stored records; log N holds `size` synthetic ones (bennu's demo logger, from captures of the stock wire):
+# record P (1-based) is stamped 2009-(2+N)-01 00:00 + 15 min * (P-1), real value 1000*N + P-1, status flags (all clear) on even N.
+# Sequence numbers run base+1 .. base+size (Total_Record_Count - Record_Count + 1 ..).
+APDU = 1476                                      # stock fills one 1476-byte APDU whatever the requester accepts; 15.8.2 and 5.4 cut at its maximum
+READ_RANGE_HEADER = 17                           # the ACK without items: type, id, service, [0] to [4], opening and closing [5]
+
+
+def log_time(n, pos):
+    t = datetime.datetime(2009, 2 + n, 1) + datetime.timedelta(minutes=15 * (pos - 1))
+    return (t.year - 1900, t.month, t.day, t.isoweekday(), t.hour, t.minute, 0, 0)
+
+
+def log_record(n, pos):
+    y, mo, d, wd, h, mi, s, hs = log_time(n, pos)
+    return LogRecord(timestamp=DateTime(date=(y, mo, d, wd), time=(h, mi, s, hs)), logDatum=LogRecordLogDatum(realValue=1000.0 * n + pos - 1),
+                     **({"statusFlags": StatusFlags([0, 0, 0, 0])} if n % 2 == 0 else {}))
+
+
+def log_range(n, rng, size, base, limit=APDU):
+    """ReadRange of log n's Log_Buffer (15.8.2): (records, [first, last, more] flags, first sequence number or None). Positions are
+    clipped to 1..size; By Time compares strictly, y/m/d/h/m/s only (255 is just a large number); more-items cuts at the APDU size (`limit`),
+    keeping the oldest records. Count 0 and Reference Index 0 are services/other, as stock gives them."""
+    if rng is None:
+        lo, hi, by = 1, size, None
+    else:
+        by = "time" if rng.byTime else "seq" if rng.bySequenceNumber else "pos"
+        r = rng.byTime or rng.bySequenceNumber or rng.byPosition
+        c = r.count
+        if c == 0:
+            raise ExecutionError(errorClass="services", errorCode="other")
+        if by == "time":
+            ref = tuple(r.referenceTime.date)[:3] + tuple(r.referenceTime.time)[:3]
+            hits = [p for p in range(1, size + 1) for t in [log_time(n, p)] if (t[:3] + t[4:7] > ref if c > 0 else t[:3] + t[4:7] < ref)]
+            if not hits:
+                return [], [False, False, False], None
+            pos = hits[0] if c > 0 else hits[-1]
+        else:
+            pos = r.referenceIndex if by == "pos" else r.referenceSequenceNumber - base
+            if pos == 0 and by == "pos":
+                raise ExecutionError(errorClass="services", errorCode="other")
+        lo, hi = (pos, pos + c - 1) if c > 0 else (pos + c + 1, pos)
+    lo, hi = max(lo, 1), min(hi, size)
+    items, used = [], READ_RANGE_HEADER + (1 + max(1, (base + lo).bit_length() + 7 >> 3) if by in ("seq", "time") else 0)
+    for p in range(lo, hi + 1):
+        rec = log_record(n, p)
+        used += sum(len(t.encode().pduData) for t in Any(rec).tagList)
+        if used > limit:
+            break
+        items.append(rec)
+    last = lo + len(items) - 1
+    return items, [bool(items) and lo == 1, bool(items) and last == size, last < hi], base + lo if items and by in ("seq", "time") else None
 
 
 class StockApp(DeviceCommunicationControlServices, Application):
@@ -348,13 +503,24 @@ class StockApp(DeviceCommunicationControlServices, Application):
         return self.device_object.objectIdentifier if (str(oid[0]), oid[1]) == ("device", 4194303) else oid
 
     async def do_ReadRangeRequest(self, apdu):
-        # 0.1.0 raises NotImplementedError. Stock: device-address-binding is an empty list; everything else, unknown objects
-        # included, is services/property-is-not-a-list; the trend-log log-buffers (synthetic demo records) are NOT reproduced here.
-        if str(apdu.objectIdentifier[0]) == "device" and getattr(apdu.propertyIdentifier, "attr", "") == "deviceAddressBinding":
-            await self.response(ReadRangeACK(objectIdentifier=self.wild(apdu.objectIdentifier), propertyIdentifier=apdu.propertyIdentifier,
-                                             resultFlags=ResultFlags([0, 0, 0]), itemCount=0, itemData=Any(), context=apdu))
-            return
-        raise ExecutionError(errorClass="services", errorCode="propertyIsNotAList")
+        # 0.1.0 raises NotImplementedError. Stock: device-address-binding is an empty list, a trend-log's Log_Buffer is its synthetic
+        # records (log_range); 15.8.1.3.1 for the rest: unknown object, unknown property, then property-is-not-a-list.
+        oid = self.wild(apdu.objectIdentifier)
+        obj = self.get_object_id(oid)
+        if obj is None:
+            raise ExecutionError(errorClass="object", errorCode="unknownObject")
+        kind, name = str(oid[0]), getattr(apdu.propertyIdentifier, "attr", "")
+        ack = dict(objectIdentifier=oid, propertyIdentifier=apdu.propertyIdentifier, context=apdu)
+        if kind == "device" and name == "deviceAddressBinding":
+            await self.response(ReadRangeACK(resultFlags=ResultFlags([0, 0, 0]), itemCount=0, itemData=Any(), **ack))
+        elif kind == "trend-log" and name == "logBuffer":
+            items, flags, first = log_range(oid[1], apdu.range, obj.recordCount, obj.totalRecordCount - obj.recordCount,
+                                          min(APDU, decode_max_apdu_length_accepted(apdu.apduMaxResp)))
+            await self.response(ReadRangeACK(resultFlags=ResultFlags(flags), itemCount=len(items), itemData=Any(SequenceOf(LogRecord)(items)),
+                                             firstSequenceNumber=first, **ack))
+        else:
+            await read_property_to_any(obj, apdu.propertyIdentifier)       # unknown-property as RP gives it
+            raise ExecutionError(errorClass="services", errorCode="propertyIsNotAList")
 
     async def do_WritePropertyMultipleRequest(self, apdu):
         # 0.1.0: no wildcard device id, and the error for a missing object carries no property; stock names the first one it tried
@@ -385,6 +551,8 @@ class StockApp(DeviceCommunicationControlServices, Application):
         name = getattr(apdu.propertyIdentifier, "attr", None)
         if str(apdu.objectIdentifier[0]) == "device" and name in HIDDEN_DEVICE:
             raise PropertyError("unknownProperty")
+        if str(apdu.objectIdentifier[0]) == "trend-log" and name == "logBuffer" and self.get_object_id(apdu.objectIdentifier) is not None:
+            raise PropertyError("readAccessDenied")
         if str(apdu.objectIdentifier[0]) == "device" and name in BITSTRINGS and apdu.propertyArrayIndex is None:
             await self.response(ReadPropertyACK(objectIdentifier=apdu.objectIdentifier, propertyIdentifier=apdu.propertyIdentifier,
                                                 propertyValue=Any(BITSTRINGS[name]), context=apdu))
@@ -401,6 +569,7 @@ class StockApp(DeviceCommunicationControlServices, Application):
         apdu.pduSource = None                    # stock answers every Who-Is with a global-broadcast I-Am, bacpypes3 unicasts to the asker
         await super().do_WhoIsRequest(apdu)
 
+    do_ConfirmedCOVNotificationRequest = None   # bacpypes3 answers error/unknown-subscription; stock rejects (wire capture)
     do_SubscribeCOVRequest = None               # stock rejects what it does not serve (unrecognized-service)
     do_SubscribeCOVPropertyRequest = None
     do_WhoHasRequest = None
@@ -438,9 +607,12 @@ class Server:
         BITSTRINGS["protocolObjectTypesSupported"] = BitString([1 if i in STOCK_OBJECT_TYPES else 0 for i in range(60)])
         for o in build_objects():
             app.add_object(o)
-        self.refresh = asyncio.create_task(refresher(app))
-        log(f"BACnet server up: instance {self.instance}, {len(app.objectIdentifier)} objects, {self.args.address}")
-        app.i_am()
+
+    def begin(self):
+        self.refresh = asyncio.create_task(refresher(self.app))
+        self.limited = asyncio.create_task(limited_broadcast(self.app))      # closed with the process
+        log(f"BACnet server up: instance {self.instance}, {len(self.app.objectIdentifier)} objects, {self.args.address}")
+        self.app.i_am()
 
     def close(self):
         self.app.close()
@@ -474,12 +646,14 @@ class Client:
     """Stock binds each connection to the device at its endpoint from an address_cache entry it writes itself, so no Who-Is goes
     out; here the endpoint is the peer's address. Every scan-rate seconds: ReadProperty present-value of each point, binaries then
     analogs by instance, one at a time, each result a `write`. A `values` change of an output: WriteProperty present-value without
-    priority (ENUMERATED or REAL), answered with `sent`."""
+    priority (ENUMERATED or REAL), answered with `sent`. A `put` (the command interface's WRITE=, any tag): the same WriteProperty,
+    answered with `done`. Neither waits less than bacpypes3's own transaction (APDU timeout 3 s, 3 retries), so a write reported
+    failed is not sent again later."""
     role = "client"
 
     def __init__(self, el, hello):
         self.scan = number(el, "scan-rate")
-        self.polls, self.outs, self.uses = [], {}, []
+        self.polls, self.outs, self.tags, self.uses = [], {}, {}, []
         for c in el.findall("bacnet-connection"):
             endpoint, _ = need(c, "endpoint"), number(c, "instance")
             pts = points(c)
@@ -489,6 +663,7 @@ class Client:
             for kind, inst, tag in pts:
                 obj = f"{stock_type(kind, last[tag])},{inst}"
                 (binary if kind.startswith("binary") else analog)[inst] = (obj, tag, kind.startswith("binary"))
+                self.tags[tag] = (peer, obj, kind.startswith("binary"))     # every tag, the last declaration winning
                 if kind.endswith("output"):
                     self.outs[tag] = (peer, obj, kind.startswith("binary"))
                 self.uses.append(use(kind, tag, not kind.endswith("output")))
@@ -501,6 +676,8 @@ class Client:
         # unspecified, max APDU 1476 (bacpypes3 reads these off the device object for every request)
         dev = self.app.device_object
         dev.segmentationSupported, dev.maxApduLengthAccepted, dev.maxSegmentsAccepted = "no-segmentation", 1476, 0
+
+    def begin(self):
         self.tasks = [asyncio.create_task(self.poll(peer, pts)) for peer, pts in self.polls]
         log(f"BACnet client up: {len(self.polls)} connection(s), scan-rate {self.scan} s, {self.args.address}")
 
@@ -520,19 +697,62 @@ class Client:
             if tag in self.outs and v is not None:
                 asyncio.create_task(self.send(tag, v))
 
-    async def send(self, tag, v):
-        peer, obj, binary = self.outs[tag]
+    async def write_property(self, table, tag, v):
+        """WriteProperty present-value of `tag` per `table`; None when the peer acked, else why not. No `wait_for`: cancelling the
+        request would leave bacpypes3 retransmitting it, so a write reported failed could still land seconds later."""
+        peer, obj, binary = table[tag]
         value = BinaryPV("active" if v else "inactive") if binary else Real(v)
         try:
-            r = await asyncio.wait_for(self.app.write_property(peer, obj, "present-value", value), TIMEOUT)
+            r = await self.app.write_property(peer, obj, "present-value", value)
         except (Exception, ErrorRejectAbortNack) as e:     # not an Exception in 0.1.0
             r = f"{type(e).__name__} {e}"
         if r is not None:
             log(f"WriteProperty {obj} at {peer}: {r}")
+        return r
+
+    async def send(self, tag, v):
+        r = await self.write_property(self.outs, tag, v)
         say(t="sent", tag=tag, value=v, ok=r is None)
+
+    def put(self, m):
+        asyncio.create_task(self.put_one(m["id"], m["tag"], m["value"]))
+
+    async def put_one(self, id, tag, v):
+        """The command interface's WRITE=: stock sends any tag to the object its type rule names (WRITE= to a binary tag commands
+        binary-output n, the object the tag reads from; to an analog-input tag, analog-input n, which the peer refuses)."""
+        r = await self.write_property(self.tags, tag, v) if tag in self.tags else "no such tag"
+        say(t="done", id=id, ok=r is None, err="" if r is None else str(r))
 
     def close(self):
         self.app.close()
+
+
+# ---- the endpoint
+
+BIND_WAIT = 5.0         # the device waits 10 s for `ready`
+
+
+def link_server(app):
+    return next(iter(app.link_layers.values())).server
+
+
+async def bound(app):
+    """bacpypes3 0.1.0 binds in a background task that retries every OSError (a boot race), so a held port never raises: wait for
+    the transport-ready event, a bounded time. Stock exits 1 on a bind failure; here the module says `error` and the device runs on."""
+    try:
+        await asyncio.wait_for(link_server(app)._local_transport_ready.wait(), BIND_WAIT)
+        return True
+    except asyncio.TimeoutError:
+        return False
+
+
+async def limited_broadcast(app):
+    """A Who-Is to 255.255.255.255: Linux hands that to a socket bound to the limited broadcast address (or the wildcard), not to the
+    ones bacpypes3 binds (the interface address and the directed broadcast). Stock answers it (bacnet-stack binds the wildcard)."""
+    srv = link_server(app)
+    if srv.broadcast_address:
+        _, protocol = await srv.retrying_create_datagram_endpoint(asyncio.get_running_loop(), ("255.255.255.255", srv.local_address[1]))
+        protocol.destination = LocalBroadcast()
 
 
 # ---- ffmod/1
@@ -560,8 +780,13 @@ async def main():
     except (ConfigError, ET.ParseError, ValueError, RuntimeError) as e:     # bacpypes3 refuses an endpoint address with these
         say(t="error", msg=str(e))
         return
-    say(t="ready", role=role.role, uses=role.uses)
     await role.start()
+    if not await bound(role.app):
+        say(t="error", msg=f"BACnet endpoint {role.args.address} did not bind in {BIND_WAIT:g} s (held by another process?)")
+        role.app.close()
+        return
+    say(t="ready", role=role.role, uses=role.uses)
+    role.begin()
     while (line := await lines.get()) is not None:
         try:
             m = json.loads(line)
@@ -570,6 +795,8 @@ async def main():
             continue
         if m.get("t") == "values":
             role.values(m.get("changes", []))
+        elif m.get("t") == "put" and hasattr(role, "put"):
+            role.put(m)
         elif m.get("t") == "reject":
             log(f"write {m.get('id')} rejected: {m.get('err')}")
         elif m.get("t") == "stop":

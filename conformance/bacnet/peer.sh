@@ -32,5 +32,47 @@ import sys, zmq
 s = zmq.Context.instance().socket(zmq.REQ); s.setsockopt(zmq.RCVTIMEO, 5000); s.connect("tcp://%s:5555" % sys.argv[1])
 s.send(b"LOG=\0"); sys.stdout.write(s.recv().decode())
 PY
+# Beyond the probe above (its transcript is stock's golden): a Who-Is sent to 255.255.255.255 (ww-o17), then a BO 2 write of inactive at
+# priority 5, and the WRITE= line it adds to the provider's log (ww-s31). Each prints one line to /out/extra.txt, which check.sh reads.
+python3 - "$DUT_IP" > /out/extra.txt <<'PY'
+import socket, sys, time
+dut = sys.argv[1]
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1); s.bind(("0.0.0.0", 47808)); s.settimeout(0.5)
+s.sendto(bytes.fromhex("810b000c0120ffff00ff1008"), ("255.255.255.255", 47808))     # BVLC original-broadcast, NPDU global, Who-Is
+iam, end = False, time.time() + 4
+while time.time() < end and not iam:
+    try:
+        data, addr = s.recvfrom(1500)
+    except socket.timeout:
+        continue
+    iam = addr[0] == dut and bytes.fromhex("1000c4020004d2") in data
+print("Who-Is to 255.255.255.255 -> " + ("I-Am device 1234" if iam else "(no I-Am)"))
+PY
+plog() { python3 - "$DUT_IP" <<'PY'
+import sys, zmq
+s = zmq.Context.instance().socket(zmq.REQ); s.setsockopt(zmq.RCVTIMEO, 5000); s.connect("tcp://%s:5555" % sys.argv[1])
+s.send(b"LOG=\0"); sys.stdout.write(s.recv().decode())
+PY
+}
+plog > /tmp/log.before
+r=$(/opt/v/bin/python - "$DUT_IP" "$me" <<'PY'
+import asyncio, sys
+from bacpypes3.app import Application
+from bacpypes3.argparse import SimpleArgumentParser
+from bacpypes3.basetypes import BinaryPV
+from bacpypes3.pdu import Address
+async def main():
+    app = Application.from_args(SimpleArgumentParser().parse_args(["--name", "bo5", "--instance", "597", "--address", sys.argv[2] + ":47810"]))
+    r = await asyncio.wait_for(app.write_property(Address(sys.argv[1]), "binary-output,2", "present-value", BinaryPV("inactive"), priority=5), 5)
+    print("ACK" if r is None else r)
+    app.close()
+asyncio.run(main())
+PY
+)
+sleep 3
+echo "WP binary-output,2 inactive prio 5 -> $r; provider got: $(plog | tail -n +"$(($(wc -l < /tmp/log.before) + 1))" | tr '\n' ' ')" >> /out/extra.txt
+cat /out/extra.txt
 cat /out/transcript.txt
 echo "BACNET PEERS DONE"

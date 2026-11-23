@@ -1,0 +1,10 @@
+# bennu's known failures of expect.txt, each spec-decided (conformance/README.md "Where ours differs from stock")
+# Current_Command_Priority is required on AO, BO and MSO (135-2012as, dl/add/Add-135-2012as.txt:130-145); stock answers unknown-property
+required-analog-output-2
+required-analog-output-3
+required-binary-output-2
+required-binary-output-3
+required-multi-state-output-0
+# priority outside 1..16 is services/parameter-out-of-range (15.9.1.3.1, 135-2008r-4, dl/add/Add-135-2008r.txt:476-478); stock aborts
+priority-17-out-of-range
+priority-0-out-of-range

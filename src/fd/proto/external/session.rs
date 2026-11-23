@@ -3,6 +3,7 @@
 
 use super::msg::{decode, encode, Dir, FromModule, Role, ToModule, Use, MAX_LINE, MAX_READY_LINE};
 use crate::fd::cmdif;
+use crate::fd::cmdif::Points;
 use crate::fd::proto::client::{input_polled, Out, TagPoints};
 use crate::fd::store::{kind_of, same, zero, Store, WriteError};
 use crate::hint::show;
@@ -10,7 +11,7 @@ use crate::model::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, MissedTickBehavior};
 use tokio_util::sync::{CancellationToken, DropGuard};
 
@@ -20,8 +21,53 @@ pub const READY_TIMEOUT: Duration = Duration::from_secs(10);
 const ANSWERS: usize = 64;
 /// How long the writer has to put `stop` on the wire once the session is over, before it is cut off.
 const STOP_GRACE: Duration = Duration::from_secs(1);
-/// How long a client's output write stays under way without the module's `sent` before it counts as failed.
-const SENT_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a client's output write (a `values` change awaiting `sent`, or a command interface `put` awaiting `done`) stays under
+/// way before it counts as failed: longer than the module's whole APDU transaction (one send and 3 retries, 3 s apart).
+const SENT_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// A command interface write on its way to the module: the tag, the value, and where the module's `done` is reported.
+type PutReq = (String, Value, oneshot::Sender<Result<(), String>>);
+
+/// The command interface of an external client: a READ answers from the tag; a WRITE is a `put` to the module, answered with the
+/// outcome of the peer's reply, for any tag the module maps (an input too: the peer decides).
+struct ExtPoints {
+    tags: TagPoints,
+    store: Store,
+    puts: mpsc::Sender<PutReq>,
+}
+
+impl Points for ExtPoints {
+    fn names(&self) -> Vec<String> {
+        self.tags.names()
+    }
+
+    async fn read(&self, tag: &str) -> Result<Value, String> {
+        self.tags.read(tag).await
+    }
+
+    async fn write(&self, tag: &str, v: Value) -> Result<(), String> {
+        let kind = self
+            .store
+            .kind(tag)
+            .filter(|_| self.names().iter().any(|n| n == tag));
+        let Some(kind) = kind else {
+            return Err("no such tag".into());
+        };
+        if kind != kind_of(v) {
+            return Err(format!("the tag is {}", format!("{kind:?}").to_lowercase()));
+        }
+        let (tx, rx) = oneshot::channel();
+        let gone = || "the module is gone".to_string();
+        self.puts
+            .send((tag.into(), v, tx))
+            .await
+            .map_err(|_| gone())?;
+        match tokio::time::timeout(SENT_TIMEOUT, rx).await {
+            Ok(done) => done.map_err(|_| gone())?,
+            Err(_) => Err("the module did not answer".into()),
+        }
+    }
+}
 
 /// What a session needs to know about its module and the device.
 #[derive(Clone, Debug)]
@@ -58,6 +104,20 @@ pub async fn session<R: AsyncBufRead + Unpin, W: AsyncWrite + Unpin + Send + 'st
     store: Store,
     stop: CancellationToken,
 ) -> End {
+    let (puts, put_rx) = mpsc::channel(ANSWERS);
+    session_with(r, w, spec, store, stop, puts, put_rx).await
+}
+
+/// `session` with the channel the command interface's writes arrive on (a test feeds it directly).
+async fn session_with<R: AsyncBufRead + Unpin, W: AsyncWrite + Unpin + Send + 'static>(
+    r: R,
+    w: W,
+    spec: &Spec,
+    store: Store,
+    stop: CancellationToken,
+    puts: mpsc::Sender<PutReq>,
+    put_rx: mpsc::Receiver<PutReq>,
+) -> End {
     let points = store.snapshot();
     let hello = ToModule::Hello {
         device: spec.device.clone(),
@@ -84,9 +144,12 @@ pub async fn session<R: AsyncBufRead + Unpin, W: AsyncWrite + Unpin + Send + 'st
         ins: BTreeSet::new(),
         outs: BTreeMap::new(),
         inflight: BTreeMap::new(),
+        puts,
+        waiting: BTreeMap::new(),
+        next_put: 1,
         stalled: false,
     };
-    let end = s.run(&stop).await;
+    let end = s.run(&stop, put_rx).await;
     drop(s); // closes the writer's channels: it sends `stop` and ends
     if tokio::time::timeout(STOP_GRACE, &mut writing)
         .await
@@ -242,12 +305,17 @@ struct Session<'a, R> {
     outs: BTreeMap<String, Out>,
     /// Outputs whose write went out in `values` and waits for the module's `sent`, until when.
     inflight: BTreeMap<String, Instant>,
+    /// Where the command interface hands its writes in (`ExtPoints`).
+    puts: mpsc::Sender<PutReq>,
+    /// `put`s sent and waiting for the module's `done`, by id.
+    waiting: BTreeMap<u64, PutReq>,
+    next_put: u64,
     /// The last answer was dropped: the module is not reading (warned once per stall).
     stalled: bool,
 }
 
 impl<R: AsyncBufRead + Unpin> Session<'_, R> {
-    async fn run(&mut self, stop: &CancellationToken) -> End {
+    async fn run(&mut self, stop: &CancellationToken, puts: mpsc::Receiver<PutReq>) -> End {
         // closed once the writer has ended: the module's input is gone
         let gone = self.answers.clone();
         let ready = tokio::select! {
@@ -267,11 +335,16 @@ impl<R: AsyncBufRead + Unpin> Session<'_, R> {
         };
         self.take(role, &uses);
         let _cmdif = self.command_interface(role, &uses, stop);
-        self.serve(stop, &gone).await
+        self.serve(stop, &gone, puts).await
     }
 
     /// After `ready`: scan cycles and module messages until something ends the session.
-    async fn serve(&mut self, stop: &CancellationToken, gone: &mpsc::Sender<ToModule>) -> End {
+    async fn serve(
+        &mut self,
+        stop: &CancellationToken,
+        gone: &mpsc::Sender<ToModule>,
+        mut puts: mpsc::Receiver<PutReq>,
+    ) -> End {
         let mut tick = tokio::time::interval(self.spec.cycle.max(Duration::from_millis(1)));
         tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
@@ -280,6 +353,10 @@ impl<R: AsyncBufRead + Unpin> Session<'_, R> {
                 _ = gone.closed() => Some(End::Broken { was_ready: true }),
                 _ = tick.tick() => {
                     self.on_tick();
+                    None
+                }
+                Some(req) = puts.recv() => {
+                    self.on_put(req);
                     None
                 }
                 m = self.next() => self.on_msg(m),
@@ -385,7 +462,11 @@ impl<R: AsyncBufRead + Unpin> Session<'_, R> {
     ) -> Option<DropGuard> {
         let ep = self.spec.cmdif.clone().filter(|_| role == Role::Client)?;
         let token = stop.child_token();
-        let points = TagPoints::new(self.store.clone(), out_tags(uses));
+        let points = ExtPoints {
+            tags: TagPoints::new(self.store.clone(), out_tags(uses)),
+            store: self.store.clone(),
+            puts: self.puts.clone(),
+        };
         let serving = token.clone();
         tokio::spawn(async move { cmdif::serve(&ep, points, serving).await });
         Some(token.drop_guard())
@@ -437,6 +518,52 @@ impl<R: AsyncBufRead + Unpin> Session<'_, R> {
         }
     }
 
+    /// A command interface write: the module is told to send it, and the command interface waits for its `done`.
+    fn on_put(&mut self, (tag, v, tx): PutReq) {
+        self.waiting.retain(|_, (_, _, tx)| !tx.is_closed());
+        let id = self.next_put;
+        self.next_put += 1;
+        if self
+            .answers
+            .try_send(ToModule::Put {
+                id,
+                tag: tag.clone(),
+                value: v,
+            })
+            .is_ok()
+        {
+            self.waiting.insert(id, (tag, v, tx));
+        } else {
+            let _ = tx.send(Err("the module is not reading".into()));
+        }
+    }
+
+    /// The peer answered a `put`. What the peer took is the tag's value (an output's echo rule is told so, and sends nothing
+    /// for it); an input's tag is left to the next poll.
+    fn on_done(&mut self, id: u64, ok: bool, err: String) {
+        // a write the command interface gave up on was answered already: a late `done` changes nothing
+        let live = self
+            .waiting
+            .remove(&id)
+            .filter(|(_, _, tx)| !tx.is_closed());
+        let Some((tag, v, tx)) = live else {
+            tracing::warn!(
+                "module {}: done for {id}, which is not waiting, ignored",
+                self.spec.name
+            );
+            return;
+        };
+        let done = match (ok, self.outs.get_mut(&tag)) {
+            (false, _) => Err(err),
+            (true, Some(out)) => {
+                out.echo.put_ok(v);
+                self.store.write(&tag, v).map_err(|e| refusal(e).into())
+            }
+            (true, None) => Ok(()),
+        };
+        let _ = tx.send(done);
+    }
+
     fn queue(&self, ch: Vec<(String, Value)>) {
         self.pending.send_if_modified(|p| {
             for (t, v) in &ch {
@@ -456,6 +583,10 @@ impl<R: AsyncBufRead + Unpin> Session<'_, R> {
             }
             Some(FromModule::Sent { tag, value, ok }) => {
                 self.on_sent(&tag, value, ok);
+                None
+            }
+            Some(FromModule::Done { id, ok, err }) => {
+                self.on_done(id, ok, err);
                 None
             }
             Some(m) => self.aside(m),
@@ -545,6 +676,8 @@ mod tests {
         w: DuplexStream,
         stop: CancellationToken,
         end: JoinHandle<End>,
+        /// Where the command interface's writes go in.
+        puts: mpsc::Sender<PutReq>,
     }
 
     fn start(spec: Spec, store: Store) -> Module {
@@ -552,14 +685,26 @@ mod tests {
         let (mod_r, dev_w) = duplex(1 << 20);
         let stop = CancellationToken::new();
         let token = stop.clone();
+        let (puts, put_rx) = mpsc::channel(8);
+        let tx = puts.clone();
         let end = tokio::spawn(async move {
-            session(BufReader::new(dev_r), dev_w, &spec, store, token).await
+            session_with(
+                BufReader::new(dev_r),
+                dev_w,
+                &spec,
+                store,
+                token,
+                tx,
+                put_rx,
+            )
+            .await
         });
         Module {
             lines: BufReader::new(mod_r).lines(),
             w: mod_w,
             stop,
             end,
+            puts,
         }
     }
 
@@ -771,6 +916,111 @@ mod tests {
         assert_eq!(m.recv().await, json!({"t":"values","changes":[["b",3.0]]}));
         m.sent(true).await;
         m.quiet().await;
+    }
+
+    /// The command interface writes `v` to `tag`: the reply once the module has answered.
+    fn command(m: &Module, s: &Store, tag: &str, v: Value) -> JoinHandle<Result<(), String>> {
+        let points = ExtPoints {
+            tags: TagPoints::new(
+                s.clone(),
+                [("a".to_string(), false), ("b".to_string(), true)],
+            ),
+            store: s.clone(),
+            puts: m.puts.clone(),
+        };
+        let tag = tag.to_string();
+        tokio::spawn(async move { points.write(&tag, v).await })
+    }
+
+    /// A command interface write is a `put`, answered with the peer's outcome; an output taken as sent is not sent again, and
+    /// the poll after it is not skipped.
+    #[tokio::test]
+    async fn a_put_is_answered_with_the_peers_outcome() {
+        let s = store();
+        let mut m = client(&s).await;
+        let w = command(&m, &s, "b", Value::Analog(4.5));
+        assert_eq!(
+            m.recv().await,
+            json!({"t":"put","id":1,"tag":"b","value":4.5})
+        );
+        assert!(!w.is_finished());
+        m.send(r#"{"t":"done","id":1,"ok":true}"#).await;
+        assert_eq!(w.await.unwrap(), Ok(()));
+        // the mirror, once, and nothing for the echo rule to send
+        assert_eq!(s.queued("b"), Some(Value::Analog(4.5)));
+        s.ack("b", Value::Analog(4.5));
+        m.quiet().await;
+        // the next poll counts: the server held on to its own value
+        assert_eq!(m.write(1, "b", json!(1.0)).await, json!({"t":"ack","id":1}));
+        assert_eq!(s.queued("b"), Some(Value::Analog(1.0)));
+        // refused: the error text is the reply and the tag is untouched
+        let w = command(&m, &s, "a", Value::Binary(true));
+        assert_eq!(
+            m.recv().await,
+            json!({"t":"put","id":2,"tag":"a","value":true})
+        );
+        m.send(r#"{"t":"done","id":2,"ok":false,"err":"denied"}"#)
+            .await;
+        assert_eq!(w.await.unwrap(), Err("denied".into()));
+        assert!(!s.is_queued("a"));
+        m.quiet().await;
+    }
+
+    /// Nothing is due later after a failed put, and a module that goes away answers the waiting write.
+    #[tokio::test]
+    async fn a_failed_put_leaves_nothing_due_and_a_gone_module_answers() {
+        let s = store();
+        let mut m = client(&s).await;
+        let w = command(&m, &s, "b", Value::Analog(4.5));
+        m.recv().await;
+        m.send(r#"{"t":"done","id":1,"ok":false,"err":"timeout"}"#)
+            .await;
+        assert_eq!(w.await.unwrap(), Err("timeout".into()));
+        m.quiet().await;
+        let w = command(&m, &s, "b", Value::Analog(5.5));
+        m.recv().await;
+        m.stop.cancel();
+        assert_eq!(m.recv().await, json!({"t":"stop"}));
+        assert_eq!(m.end.await.unwrap(), End::Stopped);
+        assert_eq!(w.await.unwrap(), Err("the module is gone".into()));
+    }
+
+    /// A module that never answers `put` ends the write with an error, and a late `done` is ignored.
+    #[tokio::test(start_paused = true)]
+    async fn an_unanswered_put_times_out() {
+        let s = store();
+        let mut m = client(&s).await;
+        let t0 = tokio::time::Instant::now();
+        let w = command(&m, &s, "b", Value::Analog(4.5));
+        m.recv().await;
+        assert_eq!(w.await.unwrap(), Err("the module did not answer".into()));
+        assert!(t0.elapsed() >= SENT_TIMEOUT);
+        m.send(r#"{"t":"done","id":1,"ok":true}"#).await;
+        m.quiet().await;
+        assert!(!s.is_queued("b"));
+    }
+
+    /// The command interface refuses a tag the module does not map, and a value of the wrong kind, without a `put`.
+    #[tokio::test]
+    async fn ext_points_checks_the_tag_and_its_kind() {
+        let s = store();
+        let m = client(&s).await;
+        let p = ExtPoints {
+            tags: TagPoints::new(
+                s.clone(),
+                [("a".to_string(), false), ("b".to_string(), true)],
+            ),
+            store: s.clone(),
+            puts: m.puts.clone(),
+        };
+        assert_eq!(
+            p.write("zz", Value::Analog(1.0)).await,
+            Err("no such tag".into())
+        );
+        assert_eq!(
+            p.write("b", Value::Binary(true)).await,
+            Err("the tag is analog".into())
+        );
     }
 
     /// A module whose input is gone (the writer cannot write) ends the session.

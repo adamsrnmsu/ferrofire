@@ -250,16 +250,20 @@ impl Store {
     }
 
     /// Queued external writes for output `owner`: `(tag, point, value)` for the points it lists and the points no output lists.
+    /// Binary points first, then analog, each in tag order (stock's `OutputModule` batch order; ww-d7p).
     pub fn pending(&self, owner: usize) -> Vec<(String, String, Value)> {
         let s = lock(&self.0);
-        s.queue
+        let mut out: Vec<_> = s
+            .queue
             .iter()
             .filter_map(|(tag, v)| {
                 let point = s.alias.get(tag)?;
                 let mine = s.owner.get(point).is_none_or(|&o| o == owner);
                 mine.then(|| (tag.clone(), point.clone(), *v))
             })
-            .collect()
+            .collect();
+        out.sort_by_key(|(_, _, v)| matches!(v, Value::Analog(_))); // stable
+        out
     }
 
     /// The provider accepted `v` for `tag`: set the point, and clear the queue entry unless a newer write replaced it.
@@ -478,6 +482,16 @@ mod tests {
         assert_eq!(names(0), ["ta=in.a", "to=out.a"]);
         assert_eq!(names(1), ["ta=in.a", "to2=out2.a"]);
         assert_eq!(s.pending(0)[1].2, Value::Analog(1.0));
+    }
+
+    #[test]
+    fn pending_lists_binaries_before_analogs() {
+        let s = store();
+        s.write("ta", Value::Analog(1.0)).unwrap();
+        s.write("tb", Value::Binary(true)).unwrap();
+        s.write("to", Value::Analog(1.0)).unwrap();
+        let tags: Vec<_> = s.pending(0).into_iter().map(|(t, _, _)| t).collect();
+        assert_eq!(tags, ["tb", "ta", "to"]);
     }
 
     #[test]

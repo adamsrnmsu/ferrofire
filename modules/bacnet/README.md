@@ -31,6 +31,7 @@ The Task 0b spike's server (`spike/NOTES.md`) with the device feed in place of i
   - An AO write goes out with the value as written (7.5, not the stored 7), even when stock then answers value-out-of-range.
   - A BI present-value write is ACKed and goes out too (`bi.c`).
   - A relinquish (null) does not go out.
+  - Nothing goes out for an AO or BO written while Out_Of_Service is TRUE (135-2016bl: decoupled from the output; stock sends it).
 - One I-Am at start. Who-Is gets a global-broadcast I-Am. RP, RPM, WP, WPM, ReadRange and DCC are answered as stock answers them.
   Anything else is rejected with `unrecognized-service`.
 
@@ -47,11 +48,14 @@ Differences from stock:
 
 | Area | Stock | Here |
 |---|---|---|
-| AV 0, BV 0, MSI 0 detail properties (property sweep) | bacnet-stack demo values | bacpypes3 defaults, some missing (the other decoy types are not swept) |
-| ReadRange of a trend-log log-buffer | 66-76 synthetic records | `services/property-is-not-a-list` |
-| AI present-value write with out-of-service set | accepted and enqueued (`ai.c`) | `write-access-denied`, as with out-of-service clear (not probed) |
-| Properties and services no probe touched (COV, Who-Has, BO priority 6) | per bacnet-stack | bacpypes3 behaviour, untested against stock |
+| Current_Command_Priority on AO, BO, MSO, BV; AV COV_Increment; integer-value 1's name | absent / served / `ANALOG VALUE 1` (a duplicate name) | served / absent / `INTEGER VALUE 1`: the spec decides (135-2012as, 135-2012aw, Object_Name unique); see `conformance/README.md` |
+| command, integer-value, life-safety-point, load-control, lighting-output, channel, octetstring-value property sets | demo-device sets | name, type, status flags only (open) |
+| ReadRange of an absent property or object; of a Log_Buffer for a requester that accepts under 1476 bytes | `services/property-is-not-a-list`; a 1476-byte reply whatever the request says | `property/unknown-property`, `object/unknown-object`; a reply cut to the requester's maximum with more-items: the spec decides (15.8); see `conformance/README.md` |
+| Out_Of_Service, input Present_Value while out of service, the feed, priority 6, priority 0 or 17 | see the rows in `conformance/README.md` (spec over stock: decoupling, BI and MSI Present_Value denied while in service, parameter-out-of-range) | |
+| COV subscription, Who-Has, ConfirmedCOVNotification | Reject unrecognized-service | the same |
 | Config errors | logged when the device loads | `error` after `hello` (no `udp://`, a missing `endpoint`/`instance`/`address`/`tag`, a non-number) |
+| The UDP port is held by another process at start (probe: a second socket on the port, `modules/bacnet/test_module.py`) | `bip_init` fails and the device exits 1 | `error` after 5 s without a bind and no `ready` (bacpypes3 0.1.0 retries the bind every second and never raises, so the module waits on its transport-ready event); the rest of the device keeps running, and `--strict` catches the error |
+| Who-Is to 255.255.255.255 (limited broadcast; `peer.sh`, `extra.txt`) | answered with an I-Am | answered: a socket is also bound to 255.255.255.255 (bacpypes3 binds the interface address and the directed broadcast, which Linux does not deliver a limited broadcast to) |
 
 0.1.0 defects the server works around are listed in `spike/NOTES.md`: DCC, Abort without the server flag, the device wildcard,
 RPM `all`, ReadRange, WPM errors, vendor properties, bit-string lengths. To those this module adds the `notificationClass`
@@ -61,11 +65,16 @@ exception that OctetStringValue objects logged at start.
 
 The device declares the client's point tags at load (`docs/modules.md`, Manifests), so bennu's sample `<bacnet-client>` runs
 unchanged. Against the stock server the scan and the requests are the stock client's byte for byte
-(`DUT=rust make conformance PROTO=bacnet-client`); what differs is the device's write semantics, listed in
-`conformance/bacnet-client/rust-client.diff`.
+(`DUT=rust make conformance PROTO=bacnet-client`), and so is the command interface's `WRITE=`: a `put` over ffmod/1, answered
+with the peer's outcome (ww-4s8).
 
 - `ready` lists inputs as `in` and outputs as `out`. The device serves the element's `<command-interface>` (port 1332) itself and
   runs the client echo rules. It sends the module `values` for output tags when they are due.
+- `put` (the command interface's `WRITE=`, any tag) sends the WriteProperty at once and answers `done` when bacpypes3's own
+  transaction ends (APDU timeout 3 s, 3 retries: about 12 s with the server away), never earlier. The request is not wrapped in a
+  timeout, because cancelling it leaves bacpypes3 retransmitting: a write reported failed does not land later. A tag's object is
+  the one stock's type rule names, input tags included (`stock_type`): a binary tag is a binary-output 0 (read and write), an
+  analog-input tag is an analog-input 0, which the server refuses.
 - Binding:
   - Stock writes the endpoint into its own `address_cache` and binds from it: "Found address in cache", and no Who-Is on the wire
     (captured from ffc-stock, `bacnet.c:398-420`, `BacnetBindToDevice`).

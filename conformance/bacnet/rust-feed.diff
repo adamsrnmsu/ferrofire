@@ -1,58 +1,219 @@
-340,341d339
+236a237
+> RPM-ALL analog-output,2 current-command-priority -> 4e 2110 4f
+258a260
+> RPM-ALL binary-output,2 current-command-priority -> 4e 2101 4f
+268d269
+< RPM-ALL analog-value,0 cov-increment -> 4e 443f800000 4f
+278a280
+> RPM-ALL binary-value,0 current-command-priority -> 4e 00 4f
+299a302
+> RPM-ALL multi-state-output,0 current-command-priority -> 4e 00 4f
+384c387
+< RP-RAW device,1234 371 -> 3e 9170 9179 9178 9146 912c 910c 9162 918b 9161 9160 914c 913e 916b 910b 9149 911e 919b 911c 9139 9177 9138 9118 913a 9198 3f
+---
+> RP-RAW device,1234 371 -> 3e 911c 9170 9179 9178 9146 912c 910c 913a 9162 918b 9161 9160 914c 913e 916b 9139 9138 9177 9118 910b 9149 911e 919b 9198 3f
+407c410,411
+< RP-RAW analog-output,2 371 -> 3e 9155 916f 9124 9151 9175 9157 9168 3f
+---
+> RP-RAW analog-output,2 371 -> 3e 9155 916f 9124 9151 9175 9157 9168 9201af 3f
+> RP-RAW analog-output,2 431 -> 3e 2110 3f
+431c435,436
+< RP-RAW binary-output,2 371 -> 3e 9155 916f 9124 9151 9154 9157 9168 911c 9104 912e 3f
+---
+> RP-RAW binary-output,2 371 -> 3e 9155 916f 9124 9151 9154 9157 9168 911c 9104 912e 9201af 3f
+> RP-RAW binary-output,2 431 -> 3e 2101 3f
+444d448
 < RP-RAW analog-value,0 22 -> 3e 443f800000 3f
-< RP-RAW analog-value,0 28 -> 3e 750f00414e414c4f472056414c55452030 3f
-349,350d346
-< RP-RAW analog-value,0 117 -> 3e 915f 3f
-< RP-RAW binary-value,0 28 -> 3e 750f0042494e4152592056414c55452030 3f
-357,358d352
-< RP-RAW binary-value,0 87 -> 3e 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 3f
-< RP-RAW binary-value,0 104 -> 3e 9100 3f
-360,362c354
-< RP-RAW multi-state-input,0 28 -> 3e 7513004d554c5449535441544520494e5055542030 3f
-< RP-RAW multi-state-input,0 36 -> 3e 9100 3f
-< RP-RAW multi-state-input,0 74 -> 3e 21fe 3f
+454c458
+< RP-RAW analog-value,0 371 -> 3e 9155 916f 9124 9151 9175 911c 9116 3f
 ---
-> RP-RAW multi-state-input,0 74 -> 3e 2103 3f
-364c356
-< RP-RAW multi-state-input,0 77 -> 3e 7513004d554c5449535441544520494e5055542030 3f
+> RP-RAW analog-value,0 371 -> 3e 9155 916f 9124 9151 9175 911c 3f
+465c469,470
+< RP-RAW binary-value,0 371 -> 3e 9155 916f 9124 9151 911c 9157 9168 3f
 ---
-> RP-RAW multi-state-input,0 77 -> 3e 7514004d554c54492d53544154452d494e5055542030 3f
-366d357
-< RP-RAW multi-state-input,0 81 -> 3e 10 3f
-368d358
-< RP-RAW multi-state-input,0 110 -> 3e 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 7100 3f
-413c403
+> RP-RAW binary-value,0 371 -> 3e 9155 916f 9124 9151 911c 9157 9168 9201af 3f
+> RP-RAW binary-value,0 431 -> 3e 00 3f
+488c493,494
+< RP-RAW multi-state-output,0 371 -> 3e 9155 916f 9124 9151 914a 9157 9168 911c 3f
+---
+> RP-RAW multi-state-output,0 371 -> 3e 9155 916f 9124 9151 914a 9157 9168 911c 9201af 3f
+> RP-RAW multi-state-output,0 431 -> 3e 00 3f
+551,554d556
+< RP-RAW command,0 2 -> 3e 0c00000000 1c00000000 2900 3900 4e 00 4f 6900 7900 8900 0c00000000 1c00000000 2900 3900 4e 00 4f 6900 7900 8900 0c00000000 1c00000000 2900 3900 4e 00 4f 6900 7900 8900 0c00000000 1c00000000 2900 3900 4e 00 4f 6900 7900 8900 0c00000000 1c00000000 2900 3900 4e 00 4f 6900 7900 8900 0c00000000 1c00000000 2900 3900 4e 00 4f 6900 7900 8900 0c00000000 1c00000000 2900 3900 4e 00 4f 6900 7900 8900 0c00000000 1c00000000 2900 3900 4e 00 4f 6900 7900 8900 3f
+< RP-RAW command,0 9 -> 3e 11 3f
+< RP-RAW command,0 28 -> 3e 750a00434f4d4d414e442030 3f
+< RP-RAW command,0 47 -> 3e 10 3f
+558,559c560,561
+< RP-RAW command,0 85 -> 3e 2100 3f
+< RP-RAW command,0 371 -> 3e 9155 912f 9109 9102 911c 3f
+---
+> RP-RAW command,0 111 -> 3e 820400 3f
+> RP-RAW command,0 371 -> 3e 916f 3f
+561c563
+< RP-RAW integer-value,1 77 -> 3e 750f00414e414c4f472056414c55452031 3f
+---
+> RP-RAW integer-value,1 77 -> 3e 751000494e54454745522056414c55452031 3f
+563d564
+< RP-RAW integer-value,1 81 -> 3e 10 3f
+566,569c567
+< RP-RAW integer-value,1 117 -> 3e 915f 3f
+< RP-RAW integer-value,1 371 -> 3e 9155 916f 9175 9151 3f
+< RP-RAW life-safety-point,0 28 -> 3e 750b004c5320504f494e542030 3f
+< RP-RAW life-safety-point,0 36 -> 3e 9100 3f
+---
+> RP-RAW integer-value,1 371 -> 3e 9155 916f 3f
+573,575d570
+< RP-RAW life-safety-point,0 81 -> 3e 10 3f
+< RP-RAW life-safety-point,0 85 -> 3e 9100 3f
+< RP-RAW life-safety-point,0 103 -> 3e 9100 3f
+577,584c572
+< RP-RAW life-safety-point,0 160 -> 3e 910e 3f
+< RP-RAW life-safety-point,0 161 -> 3e 9100 3f
+< RP-RAW life-safety-point,0 163 -> 3e 9100 3f
+< RP-RAW life-safety-point,0 164 -> 3e 9100 3f
+< RP-RAW life-safety-point,0 175 -> 3e 9100 9101 9102 9103 9104 9105 9106 9107 9108 9109 910a 910b 910c 910d 910e 3f
+< RP-RAW life-safety-point,0 371 -> 3e 9155 91a4 916f 9124 9151 9167 91a0 91af 91a3 91a1 911c 3f
+< RP-RAW load-control,0 28 -> 3e 750f004c4f414420434f4e54524f4c2030 3f
+< RP-RAW load-control,0 36 -> 3e 9100 3f
+---
+> RP-RAW life-safety-point,0 371 -> 3e 916f 3f
+588d575
+< RP-RAW load-control,0 85 -> 3e 9100 3f
+590,600c577
+< RP-RAW load-control,0 133 -> 3e 11 3f
+< RP-RAW load-control,0 142 -> 3e a4ffffffff b4ffffffff 3f
+< RP-RAW load-control,0 212 -> 3e 1900 3f
+< RP-RAW load-control,0 213 -> 3e 2100 3f
+< RP-RAW load-control,0 214 -> 3e 1900 3f
+< RP-RAW load-control,0 215 -> 3e 443fc00000 3f
+< RP-RAW load-control,0 218 -> 3e 1900 3f
+< RP-RAW load-control,0 219 -> 3e 2100 3f
+< RP-RAW load-control,0 220 -> 3e 750f0064696d206c696768747320313025 750f0064696d206c696768747320323025 750f0064696d206c696768747320333025 3f
+< RP-RAW load-control,0 221 -> 3e 2101 2102 2103 3f
+< RP-RAW load-control,0 371 -> 3e 9155 916f 9124 91da 918e 91db 91d5 9185 91d6 91d4 91dd 91dc 911c 91d7 3f
+---
+> RP-RAW load-control,0 371 -> 3e 916f 3f
+604,607d580
+< RP-RAW lighting-output,1 81 -> 3e 10 3f
+< RP-RAW lighting-output,1 85 -> 3e 4400000000 3f
+< RP-RAW lighting-output,1 87 -> 3e 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 3f
+< RP-RAW lighting-output,1 104 -> 3e 4400000000 3f
+609,611c582
+< RP-RAW lighting-output,1 164 -> 3e 4400000000 3f
+< RP-RAW lighting-output,1 371 -> 3e 9155 91a4 92017c 92017a 916f 9151 920175 920179 920182 920176 920177 920178 9157 9168 92017d 3f
+< RP-RAW channel,1 54 -> 3e 0c0d800001 1a017c 3c02000000 0c0d800001 1a017c 3c02000000 0c0d800001 1a017c 3c02000000 0c0d800001 1a017c 3c02000000 0c0d800001 1a017c 3c02000000 0c0d800001 1a017c 3c02000000 0c0d800001 1a017c 3c02000000 0c0d800001 1a017c 3c02000000 3f
+---
+> RP-RAW lighting-output,1 371 -> 3e 916f 3f
+615,616d585
+< RP-RAW channel,1 81 -> 3e 10 3f
+< RP-RAW channel,1 85 -> 3e 00 3f
+618,620c587
+< RP-RAW channel,1 371 -> 3e 9155 920171 920172 916f 9151 9136 92016e 92016f 3f
+< RP-RAW octetstring-value,0 28 -> 3e 7514004f43544554535452494e472056414c55452030 3f
+< RP-RAW octetstring-value,0 36 -> 3e 9100 3f
+---
+> RP-RAW channel,1 371 -> 3e 916f 3f
+624d590
+< RP-RAW octetstring-value,0 81 -> 3e 10 3f
+627c593
+< RP-RAW octetstring-value,0 371 -> 3e 9155 916f 9124 9151 911c 3f
+---
+> RP-RAW octetstring-value,0 371 -> 3e 9155 916f 3f
+671c637
 < RP  analog-output,3 present-value -> 44.0000
 ---
 > RP  analog-output,3 present-value -> 9.0000
-427c417
+674c640
+< WP  binary-input,0 present-value=active prio=None -> ACK
+---
+> WP  binary-input,0 present-value=active prio=None -> ERROR class=property code=write-access-denied
+683,685c649,651
+< WP  analog-output,2 present-value=5.0 prio=0 -> ABORT reason=other
+< WP  analog-output,2 present-value=5.0 prio=17 -> ABORT reason=other
 < RP  analog-output,2 priority-array -> [-, -, -, -, -, -, -, 1.0, -, -, -, -, -, -, -, 250.0]
 ---
+> WP  analog-output,2 present-value=5.0 prio=0 -> ERROR class=services code=parameter-out-of-range
+> WP  analog-output,2 present-value=5.0 prio=17 -> ERROR class=services code=parameter-out-of-range
 > RP  analog-output,2 priority-array -> [-, -, -, -, -, -, -, 1.0, -, -, -, -, -, -, -, 42.0]
-433c423
-< RP  analog-output,3 priority-array -> [-, -, -, -, -, -, -, -, 44.0, -, -, 112.0, -, -, -, 44.0]
+706,707c672,673
+< WP  multi-state-input,0 present-value=3 prio=None -> ACK
+< RP  multi-state-input,0 present-value -> 3
 ---
-> RP  analog-output,3 priority-array -> [-, -, -, -, -, -, -, -, 44.0, -, -, 112.0, -, -, -, 9.0]
-436c426
-< RP  analog-output,2 present-value -> 250.0000
+> WP  multi-state-input,0 present-value=3 prio=None -> ERROR class=property code=write-access-denied
+> RP  multi-state-input,0 present-value -> 1
+784,787c750,753
+< ReadRange trend-log,0 high-limit -> ERROR class=services code=property-is-not-a-list
+< ReadRange trend-log,8 log-buffer -> ERROR class=object code=property-is-not-a-list
+< ReadRange analog-input,5000 present-value -> ERROR class=services code=property-is-not-a-list
+< ReadRange analog-input,0 high-limit -> ERROR class=services code=property-is-not-a-list
 ---
-> RP  analog-output,2 present-value -> 42.0000
-465c455
-< RP  analog-output,3 priority-array -> [-, -, -, -, -, -, -, -, 1.0, -, -, 112.0, -, -, -, 44.0]
+> ReadRange trend-log,0 high-limit -> ERROR class=property code=unknown-property
+> ReadRange trend-log,8 log-buffer -> ERROR class=object code=unknown-object
+> ReadRange analog-input,5000 present-value -> ERROR class=object code=unknown-object
+> ReadRange analog-input,0 high-limit -> ERROR class=property code=unknown-property
+790c756
+<     itemCount=66 flags=[1, 0, 1]
 ---
-> RP  analog-output,3 priority-array -> [-, -, -, -, -, -, -, -, 1.0, -, -, 112.0, -, -, -, 9.0]
-469,470c459
-< ReadRange trend-log,0 log-buffer 1..3 -> ReadRangeACK
-< ReadRange trend-log,0 log-buffer 1..3    itemCount=3 first-seq=None flags=[1, 0, 0] data=5e 0e a46d020107 b400000000 0f 1e 2c00000000 1f 2a0400 0e a46d020107 b4000f0000 0f 1e 2c3f800000 1f 2a0400 0e a46d020107 b4001e0000 0f 1e 2c40000000 1f 2a0400 5f
+>     itemCount=21 flags=[1, 0, 1]
+792c758
+<     itemCount=76 flags=[1, 0, 1]
 ---
-> ReadRange trend-log,0 log-buffer 1..3 -> ERROR class=services code=property-is-not-a-list
-485c474
+>     itemCount=24 flags=[1, 0, 1]
+794c760
+<     itemCount=66 flags=[1, 0, 1]
+---
+>     itemCount=45 flags=[1, 0, 1]
+796c762
+<     itemCount=76 flags=[1, 0, 1]
+---
+>     itemCount=53 flags=[1, 0, 1]
+830c796
 < RP  analog-input,0 present-value -> 250.5000
 ---
-> RP  analog-input,0 present-value -> 42.5000
-501,502c490,491
-< WRITE=generator-1_bus-1.active:true,load-1_bus-1.active:true,bus-1.gen_mw:9.500000,load-1_bus-1.mw:42.500000
-< WRITE=load-1_bus-1.active:true,load-1_bus-1.active:true,bus-1.gen_mw:1.000000,load-1_bus-1.mw:1.000000
+> RP  analog-input,0 present-value -> 77.0000
+832c798
+< WP  binary-input,0 present-value=inactive prio=None -> ACK
 ---
-> WRITE=bus-1.gen_mw:9.500000,generator-1_bus-1.active:true,load-1_bus-1.active:true,load-1_bus-1.mw:42.500000
-> WRITE=load-1_bus-1.active:true,bus-1.gen_mw:1.000000,load-1_bus-1.active:true,load-1_bus-1.mw:1.000000
+> WP  binary-input,0 present-value=inactive prio=None -> ERROR class=property code=write-access-denied
+837c803
+< RP  binary-input,0 present-value -> active
+---
+> RP  binary-input,0 present-value -> inactive
+852c818
+< WP  multi-state-input,0 present-value=3 prio=None -> ACK
+---
+> WP  multi-state-input,0 present-value=3 prio=None -> ERROR class=property code=write-access-denied
+861,862c827,828
+< WP  binary-output,3 present-value=active prio=0 -> ABORT reason=other
+< WP  binary-output,3 present-value=active prio=17 -> ABORT reason=other
+---
+> WP  binary-output,3 present-value=active prio=0 -> ERROR class=services code=parameter-out-of-range
+> WP  binary-output,3 present-value=active prio=17 -> ERROR class=services code=parameter-out-of-range
+867,868c833,834
+< WP  analog-output,3 present-value=7.0 prio=0 -> ABORT reason=other
+< WP  analog-output,3 present-value=7.0 prio=17 -> ABORT reason=other
+---
+> WP  analog-output,3 present-value=7.0 prio=0 -> ERROR class=services code=parameter-out-of-range
+> WP  analog-output,3 present-value=7.0 prio=17 -> ERROR class=services code=parameter-out-of-range
+873,874c839,840
+< WP  binary-value,0 present-value=active prio=0 -> ABORT reason=other
+< WP  binary-value,0 present-value=active prio=17 -> ABORT reason=other
+---
+> WP  binary-value,0 present-value=active prio=0 -> ERROR class=services code=parameter-out-of-range
+> WP  binary-value,0 present-value=active prio=17 -> ERROR class=services code=parameter-out-of-range
+879,880c845,846
+< WP  multi-state-output,0 present-value=2 prio=0 -> ABORT reason=other
+< WP  multi-state-output,0 present-value=2 prio=17 -> ABORT reason=other
+---
+> WP  multi-state-output,0 present-value=2 prio=0 -> ERROR class=services code=parameter-out-of-range
+> WP  multi-state-output,0 present-value=2 prio=17 -> ERROR class=services code=parameter-out-of-range
+914c880
+< WRITE=load-1_bus-1.active:true,load-1_bus-1.active:true,load-1_bus-1.mw:1.000000
+---
+> WRITE=load-1_bus-1.active:true,load-1_bus-1.mw:1.000000
+919d884
+< WRITE=load-1_bus-1.active:false
+922,924d886
+< WRITE=bus-1.gen_mw:7.000000
+< WRITE=bus-1.gen_mw:9.000000
+< WRITE=generator-1_bus-1.active:true

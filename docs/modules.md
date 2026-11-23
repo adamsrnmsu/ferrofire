@@ -76,6 +76,7 @@ JSON form: it is sent as `null`, and a module keeps its previous value.
 | `values` | `{"t":"values","changes":[["load-power",2.6],["brkr",true]]}` | The tags that changed since the last `values`, checked once per scan cycle (`<cycle-time>`, default 1000 ms). No timestamps: use wall time. A module slow to read gets the newest value of each tag that changed, nothing in between. |
 | `ack` | `{"t":"ack","id":7}` | `write` 7 was queued (`Store::write`). |
 | `reject` | `{"t":"reject","id":7,"err":"unknown tag"}` | `write` 7 was refused: `unknown tag` or `wrong kind`. A module answers its own peer at once and only logs a reject. Up to 64 answers wait for a module that does not read; more are dropped (logged once). |
+| `put` | `{"t":"put","id":3,"tag":"load-mw-setpoint","value":42.5}` | Client role only: the client's `<command-interface>` got `WRITE=tag:value` for a tag the module lists (`in` or `out`) and waits. The module sends the value to its peer and answers with `done` (same `id`). |
 | `stop` | `{"t":"stop"}` | Shut down. The device then closes the stream (see Lifecycle). |
 
 ### Module to device
@@ -84,14 +85,15 @@ JSON form: it is sent as `null`, and a module keeps its previous value.
 |---|---|---|
 | `ready` | `{"t":"ready","role":"server","uses":[{"tag":"brkr","kind":"binary","dir":"out"},{"tag":"load-breaker-toggle","kind":"binary","dir":"in"}]}` | After `hello`, within 10 s. `role` is `server` or `client`. `uses` lists the tags the module maps: `dir` `in` when the module's peer supplies the value (a server's command, a client's polled input), `out` when the device does. An unknown tag or a wrong kind is a warning and the entry is skipped; under `--strict` it ends the module (and the device exits non-zero). |
 | `write` | `{"t":"write","id":7,"tag":"load-breaker-toggle","value":true}` | A value from the module's peer. Server role: `Store::write`, as a compiled server's write. Client role: an `in` tag is a polled input; an `out` tag goes through the client echo rule (below). Answered with `ack` or `reject`. A `write` whose value is `null` or a string is malformed: dropped and logged, no answer. |
-| `sent` | `{"t":"sent","tag":"load-mw-setpoint","value":3.0,"ok":true}` | Client role only. The module's peer answered (`ok`) or refused the write of `out` tag `load-mw-setpoint` that the device sent in `values`. **A client module must send `sent` for every `out` value it is given**: until it does, the device keeps that write pending (polls of the tag do not overwrite the local change), and after 10 s without it the write counts as failed and is due again. |
+| `sent` | `{"t":"sent","tag":"load-mw-setpoint","value":3.0,"ok":true}` | Client role only. The module's peer answered (`ok`) or refused the write of `out` tag `load-mw-setpoint` that the device sent in `values`. **A client module must send `sent` for every `out` value it is given**: until it does, the device keeps that write pending (polls of the tag do not overwrite the local change), and after 20 s without it the write counts as failed and is due again. |
+| `done` | `{"t":"done","id":3,"ok":false,"err":"AbortPDU no-response"}` | Client role only: the peer answered (`ok`) or refused the `put` with that `id`, and `err` says why (the text after `ERR=Failed writing tag 't': `). **A client module must answer every `put`**, and only once the peer's own transaction is over (a request the module gives up on must not be left to retransmit: a write reported failed must not land later); the device answers the command interface `ERR` after 20 s without it. On `ok` an `out` tag takes the value (its echo rule sends nothing for it, and the next poll counts); an `in` tag is left to the next poll. |
 | `log` | `{"t":"log","level":"info","msg":"bound 0.0.0.0:47808"}` | Optional. `error`, `warn`, `info`, `debug`, `trace`; anything else is `info`. Lines on stderr are logged at `info` too. |
 | `error` | `{"t":"error","msg":"Unknown endpoint protocol (tcp://1.2.3.4)"}` | The module cannot run (a bad config, a bind failure). Logged, and the module is not restarted; under `--strict` the device exits non-zero, as for a load error. |
 
 A server module answers its peers from its own copy of the values (`hello`, then `values`). A client module polls its peer and
 reports with `write`. For `role: client` the device runs the compiled clients' rules (`src/fd/proto/client.rs`): an `in` tag is
 written as a polled input; an `out` tag starts from its `hello` value, and when the device changes it locally, the change goes down in
-`values` and waits for `sent` before polls of that tag count again.
+`values` and waits for `sent` before polls of that tag count again. A `WRITE=` on the command interface is not a local change: it is a `put`, sent at once for any listed tag, whatever the tag holds, and answered with the peer's outcome.
 
 ## Transports
 
@@ -158,8 +160,8 @@ The module binds the address of `BACNET_IFACE` (default `eth0`) at `BACNET_IP_PO
     DUT=rust make conformance PROTO=bacnet-client      # our client against the stock server
     SERVER=rust make conformance PROTO=bacnet-client   # the stock client against our server
 
-Both run bennu's sample `<bacnet-client>` unchanged. Our client's scan and requests are stock's byte for byte; what differs is the
-device's write semantics (a `WRITE=` is answered at once and goes down with the next scan cycle). See
+Both run bennu's sample `<bacnet-client>` unchanged. Our client's scan and requests are stock's byte for byte; the command
+interface's `WRITE=` is a synchronous ffmod/1 `put`/`done` (answered with the WriteProperty's outcome, as stock answers it). See
 [conformance/README.md](../conformance/README.md#bacnetip) for what the runs compare and the divergences.
 
 ## Write your own

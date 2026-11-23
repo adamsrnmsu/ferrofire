@@ -25,6 +25,8 @@ pub enum ToModule {
     Ack(u64),
     /// `Store::write` refused the write with this id, and why.
     Reject(u64, String),
+    /// Client role: the command interface wrote `tag`; the module sends it on and answers with `done` (same `id`).
+    Put { id: u64, tag: String, value: Value },
     /// Shut down.
     Stop,
 }
@@ -48,6 +50,12 @@ pub enum FromModule {
         tag: String,
         value: Value,
         ok: bool,
+    },
+    /// Client role: the peer answered (`ok`) or refused the `put` with this `id`; `err` says why.
+    Done {
+        id: u64,
+        ok: bool,
+        err: String,
     },
     Log {
         level: String,
@@ -114,6 +122,9 @@ pub fn encode(m: &ToModule) -> String {
         }
         ToModule::Ack(id) => json!({"t": "ack", "id": id}),
         ToModule::Reject(id, err) => json!({"t": "reject", "id": id, "err": err}),
+        ToModule::Put { id, tag, value } => {
+            json!({"t": "put", "id": id, "tag": tag, "value": value_json(value)})
+        }
         ToModule::Stop => json!({"t": "stop"}),
     };
     format!("{j}\n")
@@ -202,6 +213,16 @@ fn sent(o: &Map<String, J>) -> Result<FromModule, String> {
     })
 }
 
+fn done(o: &Map<String, J>) -> Result<FromModule, String> {
+    Ok(FromModule::Done {
+        id: id(o)?,
+        ok: field(o, "ok")?
+            .as_bool()
+            .ok_or("field `ok` is not a boolean")?,
+        err: o.get("err").and_then(J::as_str).unwrap_or("").to_owned(),
+    })
+}
+
 fn log(o: &Map<String, J>) -> Result<FromModule, String> {
     Ok(FromModule::Log {
         level: text(o, "level")?,
@@ -220,10 +241,11 @@ pub fn decode(line: &str) -> Result<FromModule, String> {
 type Parse = fn(&Map<String, J>) -> Result<FromModule, String>;
 
 /// Each module message type and its parser.
-const PARSERS: [(&str, Parse); 5] = [
+const PARSERS: [(&str, Parse); 6] = [
     ("ready", ready),
     ("write", write),
     ("sent", sent),
+    ("done", done),
     ("log", log),
     ("error", error),
 ];
@@ -358,6 +380,36 @@ mod tests {
         ] {
             assert!(decode(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn put_and_done() {
+        let put = ToModule::Put {
+            id: 3,
+            tag: "x".into(),
+            value: Value::Binary(true),
+        };
+        assert_eq!(
+            parse(&put),
+            json!({"t":"put","id":3,"tag":"x","value":true})
+        );
+        assert_eq!(
+            decode(r#"{"t":"done","id":3,"ok":false,"err":"denied"}"#),
+            Ok(FromModule::Done {
+                id: 3,
+                ok: false,
+                err: "denied".into()
+            })
+        );
+        assert_eq!(
+            decode(r#"{"t":"done","id":4,"ok":true}"#),
+            Ok(FromModule::Done {
+                id: 4,
+                ok: true,
+                err: "".into()
+            })
+        );
+        assert!(decode(r#"{"t":"done","id":4}"#).is_err());
     }
 
     #[test]
