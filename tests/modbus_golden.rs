@@ -131,6 +131,20 @@ fn q4(dev: &Device, request: &[u8], store: &Store, ours: &[u8], stock: &[u8]) ->
     })
 }
 
+/// ww-v2tt: a function we do not serve is exception 1 (Modbus spec 7); stock sends the header-only frame, or `80 04` when the body is
+/// short. Only that row may differ: the same transaction and unit id, length 3, `fc | 0x80` and 1.
+fn q2(request: &[u8], ours: &[u8], stock: &[u8]) -> bool {
+    request.len() > 7
+        && !matches!(request[7], 1..=6 | 15 | 16)
+        && (stock.len() == 7 || stock[7..] == [0x80, 4])
+        && ours
+            == [
+                &request[..2],
+                &[0, 0, 0, 3, request[6], request[7] | 0x80, 1],
+            ]
+            .concat()
+}
+
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
@@ -197,7 +211,8 @@ fn replay(config: &str, set: &str, compat_wrap: bool) {
                 let eof = it[2].as_bool().unwrap();
                 if r.out != stock {
                     assert!(
-                        !compat_wrap && q4(&r.dev, &r.request, &r.store, &r.out, &stock),
+                        q2(&r.request, &r.out, &stock)
+                            || (!compat_wrap && q4(&r.dev, &r.request, &r.store, &r.out, &stock)),
                         "{set}: reply to `{label}`\n ours : {}\n stock: {}",
                         hex(&r.out),
                         hex(&stock)
