@@ -67,7 +67,7 @@ pub struct Device {
     pub discretes: BTreeMap<u16, String>,
     pub holding: BTreeMap<u16, Reg>,
     pub input: BTreeMap<u16, Reg>,
-    /// `--strict`: an unserved function is exception 1, and a unit id other than `unit` is not answered (SPEC Q1, Q2).
+    /// `--strict`: a unit id other than `unit` is not answered (SPEC Q1).
     pub strict: bool,
     /// The `<unit-id>` of the server, kept only under `--strict`; `None` serves every unit id, as stock does.
     pub unit: Option<u8>,
@@ -141,14 +141,13 @@ fn first_gap<V>(table: &BTreeMap<u16, V>, addr: u16, n: u16) -> Option<u16> {
 }
 
 impl Device {
-    /// One request PDU (function code first, never empty) to its reply PDU. An empty reply is the header-only frame of a function
-    /// that is not served.
+    /// One request PDU (function code first, never empty) to its reply PDU.
     pub fn handle(&self, store: &Store, log: &EventLog, pdu: &[u8]) -> Vec<u8> {
         let Some((&fc, body)) = pdu.split_first() else {
             return vec![]; // the framing never hands over an empty PDU
         };
-        if self.strict && !matches!(fc, 1..=6 | 15 | 16) {
-            return exception(fc, 1); // SPEC Q2, checked first: stock's `80 04` for a short body is a quirk of the same kind
+        if !matches!(fc, 1..=6 | 15 | 16) {
+            return exception(fc, 1); // Modbus spec 7: illegal function, checked first (ww-v2tt; stock's header-only frame and `80 04` are not kept)
         }
         if body.len() < 4 {
             return vec![0x80, 4]; // stock reads address and quantity first, whatever the function
@@ -571,9 +570,9 @@ mod tests {
     }
 
     #[test]
-    fn a_short_body_is_exception_4_under_function_byte_0x80_for_any_function() {
+    fn a_short_body_is_exception_4_under_function_byte_0x80_for_any_served_function() {
         let rig = rig(4);
-        for fc in [1u8, 2, 3, 4, 5, 6, 7, 15, 16, 43, 255] {
+        for fc in [1u8, 2, 3, 4, 5, 6, 15, 16] {
             for n in 0..4 {
                 assert_eq!(
                     rig.ask(&[&[fc][..], &vec![0; n]].concat()),
@@ -584,10 +583,9 @@ mod tests {
         }
         assert_eq!(
             rig.ask(&[7, 0, 0, 0, 1]),
-            Vec::<u8>::new(),
-            "four bytes is enough: the function is just not served"
+            [0x87, 1],
+            "not served: exception 1"
         );
-        assert_eq!(rig.ask(&[0, 0, 0, 0, 0]), Vec::<u8>::new());
         assert_eq!(rig.ask(&[]), Vec::<u8>::new());
     }
 
@@ -873,15 +871,18 @@ mod tests {
     }
 
     #[test]
-    fn strict_answers_an_unserved_function_with_exception_1_and_stock_with_the_empty_frame() {
+    fn an_unserved_function_is_exception_1_whatever_the_body_strict_or_not() {
         let mut rig = rig(4);
-        for fc in [0u8, 7, 8, 23, 43, 255] {
-            assert_eq!(rig.aq(fc, 0, 1), Vec::<u8>::new(), "stock, FC{fc}");
-        }
-        rig.dev.strict = true;
-        for fc in [0u8, 7, 8, 23, 43, 255] {
-            assert_eq!(rig.aq(fc, 0, 1), [fc | 0x80, 1], "strict, FC{fc}");
-            assert_eq!(rig.ask(&[fc]), [fc | 0x80, 1], "strict, FC{fc}, no body");
+        for strict in [false, true] {
+            rig.dev.strict = strict;
+            for fc in [0u8, 7, 8, 23, 43, 255] {
+                assert_eq!(rig.aq(fc, 0, 1), [fc | 0x80, 1], "strict {strict}, FC{fc}");
+                assert_eq!(
+                    rig.ask(&[fc]),
+                    [fc | 0x80, 1],
+                    "strict {strict}, FC{fc}, no body"
+                );
+            }
         }
         assert_eq!(
             rig.aq(3, 0, 1),
@@ -889,6 +890,19 @@ mod tests {
             "a served function is as before"
         );
         assert_eq!(rig.ask(&[3, 0]), [0x80, 4], "so is its short body");
+    }
+
+    #[test]
+    fn an_unassigned_function_code_is_answered_with_exception_1_on_the_wire() {
+        // ww-v2tt: the Modbus spec (6.1) wants fc|0x80 and exception 1; stock's header-only frame is not kept, strict or not
+        let rig = rig(4);
+        for fc in [0x00u8, 0x2B, 0x5A, 0x7F, 0x41] {
+            let req = [0, 0x0a, 0, 0, 0, 6, 1, fc, 0, 0, 0, 1];
+            let out = Conn::new()
+                .feed(&rig.dev, &rig.store, &rig.log, &req)
+                .unwrap();
+            assert_eq!(out, [0, 0x0a, 0, 0, 0, 3, 1, fc | 0x80, 1], "FC{fc:#04x}");
+        }
     }
 
     #[test]

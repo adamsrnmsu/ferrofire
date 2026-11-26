@@ -95,13 +95,14 @@ Judged three ways, all against the same server: byte for byte against stock, by 
 | `divergent` | the `diff` config | frames that we refuse and stock does not (below); a record, not a golden | `stock-divergent.golden` |
 
 `make diff-modbus` runs `diff`, `waterway` and `edges`; `q4` and `divergent` are asserted in `tests/modbus_golden.rs` instead. `q4` is asserted twice: the clamp by default, and with `--compat-wrap` byte-equal to the stock transcript.
-`--strict` (Q1 and Q2) is not recorded against stock, which has no such mode: `src/fd/proto/modbus/device.rs` unit-tests it. A strict server answers an unserved function (stock: the header-only frame, `80 04` for a short body) with exception 1, and a unit id other than its `<unit-id>` (stock ignores the key and serves every id) with silence.
+`--strict` (Q1) is not recorded against stock, which has no such mode: `src/fd/proto/modbus/device.rs` unit-tests it. A strict server answers a unit id other than its `<unit-id>` (stock ignores the key and serves every id) with silence.
 Runs of `differential.sh` must not overlap, for the reason given under DNP3. Stock applies a write the provider never acknowledged about
 15 s after the REQ client gives up, which changes what a read returns: the provider-down probes read before they write and finish within 15 s.
 
 **What stock does (recorded, and in places not what SPEC 4.1 said):**
 - Any function reads address and quantity first: a body under 4 bytes is exception code 4 under function byte 0x80 (`80 04`), whatever the function. With 4
   bytes or more an unserved function gets the header-only frame (SPEC Q2); FC43 `0e 01 00` is `80 04` for the same reason, not because FC43 is special.
+  Ours answers every unserved function, whatever the body, with exception 1 (see the table below).
 - Limits: quantity 0 or over 2000 (FC1/2) or 125 (FC3/4) is exception 3, checked before addresses. A read whose `addr + qty` ends past 65535 is exception 2,
   for coils too (unmapped coil: 3). FC15/16 have no quantity limit beyond the byte count (which must be `ceil(qty/8)` / `2 * qty`: else 3); a frame is at most 254 long anyway.
 - FC5: ON is any value whose high byte is 0xFF (0xFF00, 0xFFFF, 0xFF80 ...), everything else is OFF. FC5 and FC6 echo the whole request PDU, extra bytes included.
@@ -117,6 +118,7 @@ Runs of `differential.sh` must not overlap, for the reason given under DNP3. Sto
 | MBAP length over 254: `80 04` up to ~1018 bytes, dies on a 3 KB frame (Q9) | close the connection | a PDU is at most 253 bytes; never a buffer overflow |
 | length under 2: `80 04` and garbage from the leftover bytes | close | not Modbus |
 | protocol id other than 0 is echoed and served | close | not Modbus/TCP |
+| a function we do not serve (0, 7, 8, 23, 43 MEI, unassigned): the header-only frame `tid 0000 0001 uid`, or `80 04` for a body under 4 bytes (SPEC Q2) | `fc \| 0x80`, exception 1, MBAP length 3, whatever the body (Modbus Application Protocol 1.1b3, 7) | the spec decides; asserted as `q2` in `tests/modbus_golden.rs` and in `device.rs` (ww-v2tt) |
 | a frame cut short and the client half-closes: answered `80 04` from the previous request's buffer (bennu #81) | no answer, close | a frame is answered only when whole |
 | FC15/16 whose data is shorter than the byte count says: writes what its buffer holds | exception 3 | never act on bytes the client did not send |
 | value outside the range: `(u32)(slope*v + intercept)`, low 16 bits kept on arm64 (1000.5 over `[0,1000]` reads 31, 1e10 reads 0xFFFF) | clamp to 0 / 65535, NaN reads 0 (SPEC Q4); `--compat-wrap` wraps like stock | a wrapped reading is noise; the rule is tested against stock's words. A negative value reads 0 in both: -1 reaches a register only through a range whose `<min-value>` is below it (ww-4d7) |

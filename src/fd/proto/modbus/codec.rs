@@ -46,7 +46,7 @@ pub fn parse(buf: &[u8]) -> Parse<'_> {
     }
 }
 
-/// A reply frame. An empty `pdu` is the header-only frame stock sends for a function it does not serve (SPEC Q2).
+/// A reply frame. The server never sends an empty `pdu`; an unserved function is exception 1 (ww-v2tt).
 pub fn frame(tid: u16, uid: u8, pdu: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(HEADER + pdu.len());
     out.extend_from_slice(&tid.to_be_bytes());
